@@ -68,7 +68,7 @@
 - [ ] Không còn `console.log`, code debug, hoặc code thừa
 - [ ] Không commit file nhạy cảm (`.env`, key, mật khẩu, credentials)
 - [ ] Đã cập nhật tài liệu/README nếu có thay đổi liên quan
-- [ ] Đã rebase nhánh mới nhất (`master`) vào nhánh này và xử lý conflict
+- [ ] Đã rebase nhánh mới nhất (`main`) vào nhánh này và xử lý conflict
 - [ ] PR chỉ tập trung vào **một** mục đích (không gộp nhiều tính năng không liên quan)
 
 

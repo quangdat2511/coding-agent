@@ -7,10 +7,10 @@ Tài liệu này quy định quy tắc làm việc chung cho nhóm của chúng 
 
 Nhóm áp dụng **Trunk-Based Development**: thành viên làm việc trên các **short-lived branch** tách từ trunk, merge lại ngay sau khi hoàn thành.
 
-- **Trunk** của repo là nhánh `master`.
+- **Trunk** của repo là nhánh `main`.
 - Trunk luôn ở trạng thái **sẵn sàng release** tại mọi thời điểm.
 - Nhóm có thể **demo trực tiếp từ trunk** tại bất kỳ thời điểm nào (cuối mỗi sprint/milestone) mà không cần branch riêng để "ổn định hóa" trước demo.
-- Không commit trực tiếp lên trunk (`master`).
+- Không commit trực tiếp lên trunk (`main`).
 
 ---
 
@@ -74,14 +74,14 @@ Reviewer chỉ bắt đầu review khi PR ở trạng thái **Ready for review**
 
 - Commit message viết bằng **tiếng Anh**.
 - Trên **nhánh riêng**, có thể commit bao nhiêu tùy thích.
-- Khi merge vào `master`, phải **Squash and merge** — gộp nhiều commit nhỏ thành **một commit** cho thống nhất và gọn gàng.
+- Khi merge vào `main`, phải **Squash and merge** — gộp nhiều commit nhỏ thành **một commit** cho thống nhất và gọn gàng.
 - Commit message sau squash = tiêu đề PR 
 
 ### Điều kiện merge
 
 - **Tất cả** thành viên cùng phụ trách task phải approve. Nếu có thành viên khác (không trực tiếp phụ trách task) chủ động yêu cầu được review, cũng phải đợi người đó approve mới được merge.
-- CI pass toàn bộ: lint, test, build, PR title.
-- Nhánh phải được **đồng bộ với `master` mới nhất** trước khi merge, bằng cách **merge hoặc rebase** `master` vào nhánh (ưu tiên **rebase** để giữ lịch sử sạch trong quá trình review). Nếu phát sinh conflict, liên hệ với người có phần code conflict để cùng xử lý, hoặc tự xử lý rồi nhờ người đó review lại, để tránh làm sai logic có sẵn của người đó.
+- CI pass toàn bộ. Hiện tại repo mới có check **PR title**; các check **lint, test, build** sẽ được bổ sung khi có source code.
+- Nhánh phải được **đồng bộ với `main` mới nhất** trước khi merge, bằng cách **merge hoặc rebase** `main` vào nhánh (ưu tiên **rebase** để giữ lịch sử sạch trong quá trình review). Nếu phát sinh conflict, liên hệ với người có phần code conflict để cùng xử lý, hoặc tự xử lý rồi nhờ người đó review lại, để tránh làm sai logic có sẵn của người đó.
 
 ---
 
