@@ -17,7 +17,6 @@ Mọi thành viên đều phải tuân thủ quy trình này.
 - [Bước 7 — Review](#bước-7--review)
 - [Bước 8 — Merge](#bước-8--merge)
 - [Bước 9 — Dọn dẹp và đóng ticket](#bước-9--dọn-dẹp-và-đóng-ticket)
-- [Tham khảo thêm](#tham-khảo-thêm)
 
 ---
 
