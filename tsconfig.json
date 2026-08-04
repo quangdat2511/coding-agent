@@ -23,7 +23,6 @@
     "skipLibCheck": true,
 
     "resolveJsonModule": true,
-    "allowJs": true,
     "noEmit": true,
 
     "jsx": "react-jsx"

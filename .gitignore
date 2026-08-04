@@ -8,9 +8,8 @@ dist/
 *.tsbuildinfo
 
 # Environment variables
-.env
-.env.local
-.env.*.local
+.env*
+!.env.example
 
 # Logs
 *.log
@@ -26,9 +25,6 @@ yarn-error.log*
 
 # Test / coverage
 coverage/
-
-# OpenSpec (Danh use it in local)
-# openspec/
 
 # Agent configs
 *.agents
