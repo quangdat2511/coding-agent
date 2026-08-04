@@ -3,7 +3,7 @@ min_version: 2.1.10
 pre-commit:
   parallel: false
   commands:
-    format:
+    check:
       glob: "**/*.{ts,tsx,js,json}"
       run: bunx biome check --write {staged_files}
       stage_fixed: true
