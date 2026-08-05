@@ -30,3 +30,6 @@ coverage/
 *.agents
 *.agent
 *.claude
+
+# Private folder / skills
+presentation/
