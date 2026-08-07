@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: Lint, typecheck, test, and build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: .bun-version
+
+      - name: Install dependencies
+        run: bun ci --ignore-scripts
+
+      - name: Check formatting and lint rules
+        run: bun run ci:check
+
+      - name: Enforce import aliases
+        shell: bash
+        run: |
+          if relative_imports=$(git grep -nE "from[[:space:]]+[\"']\\.{1,2}/" -- '*.ts' '*.tsx'); then
+            echo "Relative imports are not allowed; use the @/ alias instead:"
+            echo "$relative_imports"
+            exit 1
+          fi
+
+      - name: Typecheck
+        run: bun run typecheck
+
+      - name: Run tests
+        run: bun run test
+
+      - name: Build production bundle
+        run: bun run build
