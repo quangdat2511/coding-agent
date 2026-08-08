@@ -11,6 +11,7 @@
     "postinstall": "lefthook install",
     "test": "bun test",
     "typecheck": "bun --filter '*' typecheck",
+    "build": "bun run --filter '@coding-agent/*' build",
     "check": "biome check .",
     "ci:check": "biome ci .",
     "check:fix": "biome check --write .",

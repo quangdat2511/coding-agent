@@ -209,7 +209,7 @@ Ticket ở lại `In Review` trong suốt quá trình review, kể cả khi đan
 ### Điều kiện merge
 
 - **Tất cả** thành viên cùng phụ trách task phải approve. Nếu có thành viên khác (không trực tiếp phụ trách task) chủ động yêu cầu được review, cũng phải đợi người đó approve mới được merge.
-- CI pass toàn bộ. Repo hiện có các check **PR title, Biome, import alias, typecheck và test**.
+- CI pass toàn bộ. Repo hiện có các check **PR title, Biome, import alias, typecheck, test và build**.
 - Nhánh phải được **rebase lên `main` mới nhất** trước khi merge (xem [Bước 5](#bước-5--đồng-bộ-với-main)).
 
 ### Cách merge
