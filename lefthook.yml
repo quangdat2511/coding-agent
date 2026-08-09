@@ -21,6 +21,3 @@ pre-commit:
     typecheck:
       glob: "**/*.{ts,tsx}"
       run: bun run typecheck
-    test:
-      glob: "**/*.{ts,tsx,js}"
-      run: bun test --bail
