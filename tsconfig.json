@@ -1,5 +1,4 @@
 {
-<<<<<<< HEAD
   "extends": "./tsconfig.base.json",
   "include": [
     "*.ts",
