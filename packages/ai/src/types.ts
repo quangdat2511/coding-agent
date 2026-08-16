@@ -34,7 +34,8 @@ export interface Context {
 export interface StreamOptions {
   temperature?: number;
   maxTokens?: number;
-  apiKey?: string;
+  apiKey?: string | Promise<string | undefined>;
+  baseURL?: string;
 }
 
 export type AssistantMessageEvent =

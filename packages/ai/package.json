@@ -11,8 +11,10 @@
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit"
   },
-
   "devDependencies": {
     "@types/bun": "latest"
+  },
+  "dependencies": {
+    "openai": "^7.4.0"
   }
 }

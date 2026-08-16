@@ -5,9 +5,43 @@ import type { AssistantMessageEventStream } from "@/utils/event-stream";
 export interface Provider {
   id: string;
   name: string;
+  baseUrl?: string;
   auth: ProviderAuth;
   getModels(): readonly Model[];
   stream(model: Model, context: Context, options?: StreamOptions): AssistantMessageEventStream;
+}
+
+export interface ProviderStreams {
+  stream(model: Model, context: Context, options?: StreamOptions): AssistantMessageEventStream;
+}
+
+export interface CreateProviderOptions {
+  id: string;
+  name?: string;
+  baseUrl?: string;
+  auth: ProviderAuth;
+  models: readonly Model[];
+  api: ProviderStreams;
+}
+
+export function createProvider(input: CreateProviderOptions): Provider {
+  return {
+    id: input.id,
+    name: input.name ?? input.id,
+    baseUrl: input.baseUrl,
+    auth: input.auth,
+    getModels: () => input.models,
+    stream: (model, context, options) => {
+      const apiKey = options?.apiKey ?? input.auth.apiKey?.resolve();
+      const mergedOptions = {
+        ...options,
+        apiKey,
+        baseURL: options?.baseURL ?? input.baseUrl,
+      };
+
+      return input.api.stream(model, context, mergedOptions);
+    },
+  };
 }
 
 export class ModelsImpl {

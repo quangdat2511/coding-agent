@@ -1,0 +1,12 @@
+[
+  {
+    "id": "grok-2",
+    "name": "Grok 2",
+    "provider": "xai"
+  },
+  {
+    "id": "grok-2-mini",
+    "name": "Grok 2 Mini",
+    "provider": "xai"
+  }
+]
