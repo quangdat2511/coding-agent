@@ -8,23 +8,22 @@ async function main() {
 
   // 2. Get the model
   console.log("Using Gemini via Google Provider...");
-  const model = models.getModel("google", "gemini-3.5-flash");
+  const model = models.getModel("google", "gemini-3.6-flash");
   if (!model) {
-    throw new Error("Model gemini-3.5-flash not found in Google provider");
+    throw new Error("Model gemini-3.6-flash not found in Google provider");
   }
 
   // 3. Create context
   const context: Context = {
     messages: [
       { role: "user", content: "Hãy viết đoạn văn mô tả trường đại học Khoa học tự nhiên (HCMUS)" },
-      { role: "user", content: "Hãy viết đoạn văn mô tả khoa công nghệ thông tin của trường" },
       { role: "user", content: "Ghi nội dung trên vào file markdown" },
     ],
   };
 
   console.log("Calling the stream API...");
   // 4. Call stream, no need to manually pass baseURL or apiKey since googleProvider handles it automatically
-  const eventStream = models.stream(model, context);
+  const eventStream = models.stream(model, context, { maxTokens: 2000 });
 
   // Listen to chunks
   for await (const event of eventStream) {

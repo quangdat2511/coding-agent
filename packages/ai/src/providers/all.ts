@@ -1,10 +1,18 @@
 import { ModelsImpl, type Provider } from "@/models";
+import { anthropicProvider } from "@/providers/anthropic";
 import { googleProvider } from "@/providers/google";
 import { openaiProvider } from "@/providers/openai";
+import { openrouterProvider } from "@/providers/openrouter";
 import { xaiProvider } from "@/providers/xai";
 
 export function builtinProviders(): Provider[] {
-  return [googleProvider(), openaiProvider(), xaiProvider()];
+  return [
+    anthropicProvider(),
+    googleProvider(),
+    openaiProvider(),
+    openrouterProvider(),
+    xaiProvider(),
+  ];
 }
 
 export function builtinModels(): ModelsImpl {

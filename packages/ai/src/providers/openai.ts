@@ -9,7 +9,7 @@ export function openaiProvider(): Provider {
     id: "openai",
     name: "OpenAI",
     baseUrl: "https://api.openai.com/v1",
-    auth: { apiKey: envApiKeyAuth("OpenAI_API_KEY", ["OPENAI_API_KEY"]) },
+    auth: { apiKey: envApiKeyAuth("OpenAI API key", ["OPENAI_API_KEY"]) },
     models: OPENAI_MODELS as unknown as Model[],
     api: { stream },
   });
