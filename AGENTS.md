@@ -67,8 +67,8 @@ There is no build step defined yet.
   are allowed (`noDefaultExport: off`). Double quotes, semicolons, trailing commas, 100-char line
   width, 2-space indent.
 - **Git hooks (lefthook)**: pre-commit runs, in order: Biome check --write on staged files, the
-  `@/` import-alias check described above, `bun run typecheck`, and `bun test --bail` — all
-  scoped to staged files where applicable. Expect commits to fail if any of these fail.
+  `@/` import-alias check described above, and `bun run typecheck` — all scoped to staged files
+  where applicable. Expect commits to fail if any of these fail.
 - **Env vars**: see `.env.example` for LLM provider config (`OPENAI_API_KEY` /
   `OPENCODE_API_KEY` / `OPENROUTER_API_KEY`, `AGENT_PROVIDER`). Never commit `.env`.
 
