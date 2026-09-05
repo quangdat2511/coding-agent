@@ -59,6 +59,17 @@ describe("mapAnthropicStopReason", () => {
   });
 });
 
+async function collectDoneEvent(
+  eventStream: AsyncIterable<AssistantMessageEvent>,
+): Promise<Extract<AssistantMessageEvent, { type: "done" }>> {
+  for await (const event of eventStream) {
+    if (event.type === "done") {
+      return event;
+    }
+  }
+  throw new Error("Stream completed without a 'done' event");
+}
+
 describe("Anthropic stream stopReason handling", () => {
   const model: Model = {
     id: "claude-3-5-sonnet",
@@ -74,20 +85,10 @@ describe("Anthropic stream stopReason handling", () => {
       { type: "message_stop" },
     ];
 
-    const eventStream = stream(model, context, { apiKey: "test-key" });
-    const events: AssistantMessageEvent[] = [];
-
-    for await (const event of eventStream) {
-      events.push(event);
-    }
-
-    const doneEvent = events.find((e) => e.type === "done");
-    expect(doneEvent).toBeDefined();
-    if (doneEvent && doneEvent.type === "done") {
-      expect(doneEvent.reason).toBe("length");
-      expect(doneEvent.message.stopReason).toBe("length");
-      expect(doneEvent.message.content).toEqual([{ type: "text", text: "Tokens exceeded" }]);
-    }
+    const doneEvent = await collectDoneEvent(stream(model, context, { apiKey: "test-key" }));
+    expect(doneEvent.reason).toBe("length");
+    expect(doneEvent.message.stopReason).toBe("length");
+    expect(doneEvent.message.content).toEqual([{ type: "text", text: "Tokens exceeded" }]);
   });
 
   it("maps message_delta stop_reason tool_use to toolUse on done event and message", async () => {
@@ -97,19 +98,9 @@ describe("Anthropic stream stopReason handling", () => {
       { type: "message_stop" },
     ];
 
-    const eventStream = stream(model, context, { apiKey: "test-key" });
-    const events: AssistantMessageEvent[] = [];
-
-    for await (const event of eventStream) {
-      events.push(event);
-    }
-
-    const doneEvent = events.find((e) => e.type === "done");
-    expect(doneEvent).toBeDefined();
-    if (doneEvent && doneEvent.type === "done") {
-      expect(doneEvent.reason).toBe("toolUse");
-      expect(doneEvent.message.stopReason).toBe("toolUse");
-    }
+    const doneEvent = await collectDoneEvent(stream(model, context, { apiKey: "test-key" }));
+    expect(doneEvent.reason).toBe("toolUse");
+    expect(doneEvent.message.stopReason).toBe("toolUse");
   });
 
   it("maps message_delta stop_reason refusal to error on done event and message", async () => {
@@ -119,19 +110,9 @@ describe("Anthropic stream stopReason handling", () => {
       { type: "message_stop" },
     ];
 
-    const eventStream = stream(model, context, { apiKey: "test-key" });
-    const events: AssistantMessageEvent[] = [];
-
-    for await (const event of eventStream) {
-      events.push(event);
-    }
-
-    const doneEvent = events.find((e) => e.type === "done");
-    expect(doneEvent).toBeDefined();
-    if (doneEvent && doneEvent.type === "done") {
-      expect(doneEvent.reason).toBe("error");
-      expect(doneEvent.message.stopReason).toBe("error");
-    }
+    const doneEvent = await collectDoneEvent(stream(model, context, { apiKey: "test-key" }));
+    expect(doneEvent.reason).toBe("error");
+    expect(doneEvent.message.stopReason).toBe("error");
   });
 
   it("maps message_delta stop_reason end_turn to stop on done event and message", async () => {
@@ -141,18 +122,8 @@ describe("Anthropic stream stopReason handling", () => {
       { type: "message_stop" },
     ];
 
-    const eventStream = stream(model, context, { apiKey: "test-key" });
-    const events: AssistantMessageEvent[] = [];
-
-    for await (const event of eventStream) {
-      events.push(event);
-    }
-
-    const doneEvent = events.find((e) => e.type === "done");
-    expect(doneEvent).toBeDefined();
-    if (doneEvent && doneEvent.type === "done") {
-      expect(doneEvent.reason).toBe("stop");
-      expect(doneEvent.message.stopReason).toBe("stop");
-    }
+    const doneEvent = await collectDoneEvent(stream(model, context, { apiKey: "test-key" }));
+    expect(doneEvent.reason).toBe("stop");
+    expect(doneEvent.message.stopReason).toBe("stop");
   });
 });

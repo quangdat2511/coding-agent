@@ -52,6 +52,17 @@ describe("mapOpenAIFinishReason", () => {
   });
 });
 
+async function collectDoneEvent(
+  eventStream: AsyncIterable<AssistantMessageEvent>,
+): Promise<Extract<AssistantMessageEvent, { type: "done" }>> {
+  for await (const event of eventStream) {
+    if (event.type === "done") {
+      return event;
+    }
+  }
+  throw new Error("Stream completed without a 'done' event");
+}
+
 describe("OpenAI stream finishReason handling", () => {
   const model: Model = { id: "gpt-4o", name: "GPT-4o", provider: "openai" };
   const context: Context = { messages: [{ role: "user", content: "Hello" }] };
@@ -62,20 +73,10 @@ describe("OpenAI stream finishReason handling", () => {
       { choices: [{ delta: {}, finish_reason: "length" }] },
     ];
 
-    const eventStream = stream(model, context, { apiKey: "test-key" });
-    const events: AssistantMessageEvent[] = [];
-
-    for await (const event of eventStream) {
-      events.push(event);
-    }
-
-    const doneEvent = events.find((e) => e.type === "done");
-    expect(doneEvent).toBeDefined();
-    if (doneEvent && doneEvent.type === "done") {
-      expect(doneEvent.reason).toBe("length");
-      expect(doneEvent.message.stopReason).toBe("length");
-      expect(doneEvent.message.content).toEqual([{ type: "text", text: "Truncated" }]);
-    }
+    const doneEvent = await collectDoneEvent(stream(model, context, { apiKey: "test-key" }));
+    expect(doneEvent.reason).toBe("length");
+    expect(doneEvent.message.stopReason).toBe("length");
+    expect(doneEvent.message.content).toEqual([{ type: "text", text: "Truncated" }]);
   });
 
   it("maps finish_reason tool_calls to toolUse on done event and message", async () => {
@@ -84,37 +85,17 @@ describe("OpenAI stream finishReason handling", () => {
       { choices: [{ delta: {}, finish_reason: "tool_calls" }] },
     ];
 
-    const eventStream = stream(model, context, { apiKey: "test-key" });
-    const events: AssistantMessageEvent[] = [];
-
-    for await (const event of eventStream) {
-      events.push(event);
-    }
-
-    const doneEvent = events.find((e) => e.type === "done");
-    expect(doneEvent).toBeDefined();
-    if (doneEvent && doneEvent.type === "done") {
-      expect(doneEvent.reason).toBe("toolUse");
-      expect(doneEvent.message.stopReason).toBe("toolUse");
-    }
+    const doneEvent = await collectDoneEvent(stream(model, context, { apiKey: "test-key" }));
+    expect(doneEvent.reason).toBe("toolUse");
+    expect(doneEvent.message.stopReason).toBe("toolUse");
   });
 
   it("maps finish_reason content_filter to error on done event and message", async () => {
     mockChunks = [{ choices: [{ delta: {}, finish_reason: "content_filter" }] }];
 
-    const eventStream = stream(model, context, { apiKey: "test-key" });
-    const events: AssistantMessageEvent[] = [];
-
-    for await (const event of eventStream) {
-      events.push(event);
-    }
-
-    const doneEvent = events.find((e) => e.type === "done");
-    expect(doneEvent).toBeDefined();
-    if (doneEvent && doneEvent.type === "done") {
-      expect(doneEvent.reason).toBe("error");
-      expect(doneEvent.message.stopReason).toBe("error");
-    }
+    const doneEvent = await collectDoneEvent(stream(model, context, { apiKey: "test-key" }));
+    expect(doneEvent.reason).toBe("error");
+    expect(doneEvent.message.stopReason).toBe("error");
   });
 
   it("maps finish_reason stop to stop on done event and message", async () => {
@@ -123,19 +104,9 @@ describe("OpenAI stream finishReason handling", () => {
       { choices: [{ delta: {}, finish_reason: "stop" }] },
     ];
 
-    const eventStream = stream(model, context, { apiKey: "test-key" });
-    const events: AssistantMessageEvent[] = [];
-
-    for await (const event of eventStream) {
-      events.push(event);
-    }
-
-    const doneEvent = events.find((e) => e.type === "done");
-    expect(doneEvent).toBeDefined();
-    if (doneEvent && doneEvent.type === "done") {
-      expect(doneEvent.reason).toBe("stop");
-      expect(doneEvent.message.stopReason).toBe("stop");
-      expect(doneEvent.message.content).toEqual([{ type: "text", text: "Done" }]);
-    }
+    const doneEvent = await collectDoneEvent(stream(model, context, { apiKey: "test-key" }));
+    expect(doneEvent.reason).toBe("stop");
+    expect(doneEvent.message.stopReason).toBe("stop");
+    expect(doneEvent.message.content).toEqual([{ type: "text", text: "Done" }]);
   });
 });
