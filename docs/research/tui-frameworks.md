@@ -14,8 +14,8 @@ The project requires a full-screen terminal UI (`@coding-agent/tui`) for an AI c
 While Pi provides `@earendil-works/pi-tui`, directly consuming it reduces `@coding-agent/tui` to a trivial wrapper, undermining the engineering ownership and academic depth expected of a capstone project.
 
 This evaluation resolves the core architectural dilemma:
-- **Build In-House (Micro-TUI)**: Develop a lean, zero-dependency terminal engine on Bun implementing Pi's core rendering principles.
-- **Adopt Ink + Custom Viewport**: Use the React component model (`ink@7.1.1`) and engineer a custom virtualized, scrollable viewport.
+- **Approach A (Re-Engineered In-House TUI)**: Re-implement Pi's battle-tested TUI architecture natively in `@coding-agent/tui`, adapting and customizing it directly to our project's needs on Bun without an external npm dependency.
+- **Approach B (Ink + Custom Viewport)**: Adopt the React component model (`ink@7.1.1`) and engineer a custom virtualized, scrollable viewport.
 
 ---
 
@@ -35,19 +35,22 @@ To evaluate all candidates objectively, seven core criteria were defined around 
 
 ## 3. Comprehensive Candidate & Approach Analysis
 
-### Approach A: In-House Micro-TUI Engine (Pi Principles)
-*Build an independent, minimalist terminal engine in `@coding-agent/tui` implementing Pi's core rendering principles.*
+### Approach A: Re-Engineered In-House TUI (Pi Architecture Tailored for Bun)
+*Re-implement Pi's battle-tested TUI design natively in `@coding-agent/tui` and customize it to our project's specific needs.*
 
 - **Technical Concept**:
-  Develop a lean terminal engine from scratch using Bun/Node standard TTY primitives (`process.stdin`, `process.stdout`), ANSI escape sequences (`\x1b[?1049h` for alternate screen), differential line diffing, a dedicated `ScrollView` buffer, and an input editor.
+  Treat Pi's TUI as an architectural reference point rather than a black-box dependency. Re-implement its core mechanics (alternate-screen double buffering, `ScrollView`, differential line diffing, and text editor) directly within `@coding-agent/tui`, while customizing and tailoring it:
+  - Optimize natively for Bun's standard TTY stream primitives (`process.stdin`, `process.stdout`).
+  - Strip out unnecessary Node legacy shims and dynamic Windows native helpers from upstream.
+  - Tailor the component hierarchy, theme, and event-coalescing model specifically to our agent runtime (`@coding-agent/agent-core`).
 - **Strengths**:
-  - **Highest Academic & System Engineering Value**: The team demonstrates full mastery of low-level terminal protocols, buffer management, differential frame rendering, and cursor synchronization.
-  - **Zero External Dependencies & Bun-Native**: 100% written in TypeScript for Bun. No reliance on Node-specific native binaries or legacy compatibility layers.
-  - **Optimal Token Streaming Performance**: Direct string-array line rendering (`render(width) -> string[]`) avoids virtual DOM diffing and Yoga layout recalculation, providing minimal CPU/memory overhead during rapid LLM token generation.
-  - **Deterministic Headless Testing**: Directly testable via `@xterm/headless`, enabling automated visual regression tests in CI.
+  - **Full Code Ownership & Customization Freedom**: Eliminates external upstream coupling and version churn. The team has 100% control to customize UI layout, keyboard bindings, and agent status indicators.
+  - **De-risked Terminal Foundation**: Instead of building a raw terminal engine in a vacuum, reusing Pi's proven architectural patterns eliminates guesswork around terminal protocols, resize reflow, and raw mode handling.
+  - **Optimal Token Streaming Performance**: Retains Pi's direct string-array line rendering (`render(width) -> string[]`), avoiding Virtual DOM diffing overhead during rapid LLM token bursts.
+  - **Academic & Engineering Value**: Demonstrates deep understanding and re-engineering of low-level systems programming on Bun for the capstone dissertation.
 - **Weaknesses & Risks**:
-  - **High Implementation Effort**: Requires manual handling of tricky terminal edge cases: multi-byte UTF-8 / CJK character width calculation, ANSI escape strip/wrap arithmetic, terminal resize reflow, and raw-mode teardown on abnormal process termination.
-  - **Schedule Risk**: Deep low-level bug fixing could consume bandwidth needed for core agent runtime and evaluation logic.
+  - **Porting & Maintenance Effort**: The team is responsible for adapting, maintaining, and testing low-level terminal routines (Unicode width, ANSI parsing, signal teardown).
+  - **Moderate Schedule Risk**: Demands more initial engineering effort than consuming a high-level UI library like Ink.
 
 ---
 
@@ -86,16 +89,16 @@ To evaluate all candidates objectively, seven core criteria were defined around 
 
 ## 4. Multi-Criteria Trade-Off Matrix
 
-| Evaluation Criteria | Approach A: In-House Micro-TUI | Approach B: Ink + Custom Viewport | Approach D: Direct `@earendil-works/pi-tui` |
+| Evaluation Criteria | Approach A: Re-Engineered In-House TUI | Approach B: Ink + Custom Viewport | Approach D: Direct `@earendil-works/pi-tui` |
 | :--- | :---: | :---: | :---: |
-| **1. Academic Contribution** | 🟢 **High**<br>Full ownership of low-level rendering engine | 🟢 **High**<br>Solves community-wide Ink scrolling problem | 🔴 **Low**<br>Trivial wrapper; zero code written |
-| **2. Architectural Differentiation** | 🟡 **Moderate**<br>Original code, but architecture mirrors Pi | 🟢 **High**<br>Distinct paradigm (Declarative React vs Pi) | 🔴 **None**<br>Direct clone / upstream dependency |
-| **3. Bun Native Compatibility** | 🟢 **High**<br>Native TS/Bun, zero dependencies | 🟢 **High**<br>Standard ESM, runs cleanly on Bun | 🟡 **Limited**<br>Declares `node >=22`, external binary helper |
-| **4. Viewport & Scrolling UX** | 🟢 **High**<br>Designed specifically for agent transcript | 🟡 **Trade-off**<br>Requires custom windowing math on Ink | 🟢 **High**<br>Ready out of the box |
+| **1. Academic Contribution** | 🟢 **High**<br>Full code ownership; tailored re-implementation for Bun | 🟢 **High**<br>Solves community-wide Ink scrolling problem | 🔴 **Low**<br>Trivial wrapper; zero code written |
+| **2. Architectural Differentiation** | 🟡 **Moderate**<br>Independent codebase, but structurally modeled on Pi | 🟢 **High**<br>Distinct paradigm (Declarative React vs Pi) | 🔴 **None**<br>Direct clone / upstream dependency |
+| **3. Bun Native Compatibility** | 🟢 **High**<br>Tailored directly for Bun, zero native binary baggage | 🟢 **High**<br>Standard ESM, runs cleanly on Bun | 🟡 **Limited**<br>Declares `node >=22`, external binary helper |
+| **4. Viewport & Scrolling UX** | 🟢 **High**<br>Proven design customized for agent transcript | 🟡 **Trade-off**<br>Requires custom windowing math on Ink | 🟢 **High**<br>Ready out of the box |
 | **5. Streaming Performance** | 🟢 **High**<br>Lightweight string arrays, instant diffing | 🟡 **Trade-off**<br>React/Yoga overhead; requires throttling | 🟢 **High**<br>Highly optimized differential rendering |
-| **6. Schedule & Implementation Risk** | 🔴 **High Risk**<br>Heavy terminal edge-case burden | 🟢 **Low Risk**<br>Layout handled by Ink, focused scope | 🟢 **Zero Risk**<br>Zero development time |
+| **6. Schedule & Implementation Risk** | 🟡 **Moderate Risk**<br>De-risked by Pi's architecture; needs adaptation | 🟢 **Low Risk**<br>Layout handled by Ink, focused scope | 🟢 **Zero Risk**<br>Zero development time |
 | **7. Headless Testability** | 🟢 **Strong**<br>`@xterm/headless` integration | 🟢 **Strong**<br>`ink-testing-library` | 🟢 **Strong**<br>Existing test harness |
-| **VERDICT / DISPOSITION** | **Shortlisted (Contender 1)**<br>Best for raw performance & systems engineering | **Shortlisted (Contender 2)**<br>Best for architectural identity & rapid UI velocity | **REJECTED FOR PRODUCTION**<br>Reference Baseline only for CDA-17 |
+| **VERDICT / DISPOSITION** | **Shortlisted (Contender 1)**<br>Best for streaming performance & full tailored ownership | **Shortlisted (Contender 2)**<br>Best for architectural identity & rapid UI velocity | **REJECTED FOR PRODUCTION**<br>Reference Baseline only for CDA-17 |
 
 ---
 
@@ -105,7 +108,7 @@ To evaluate all candidates objectively, seven core criteria were defined around 
    The final `@coding-agent/tui` workspace package will be independently implemented by the team, securing academic integrity and technical contribution for the HCMUS capstone defense.
 2. **Shortlist the Top Two Contenders**:
    - **Contender 1 (Ink + Custom Scrollable Viewport)**: Offers the highest technological differentiation from Pi, a clean declarative component model, and a clearly defined engineering contribution (building the virtualized scroll viewport).
-   - **Contender 2 (In-House Micro-TUI)**: Offers unmatched streaming throughput, zero dependencies, and complete low-level control.
+   - **Contender 2 (Re-Engineered In-House TUI)**: Offers unmatched streaming throughput, zero external dependencies, and complete source code ownership by re-implementing and tailoring Pi's proven design natively for Bun.
 3. **Bridge to Prototype Ticket [CDA-17](https://datn-fit-hcmus.atlassian.net/browse/CDA-17)**:
    The ultimate framework selection will be decided empirically through a **Dual-Spike Prototype** in CDA-17.
 
