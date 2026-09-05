@@ -101,7 +101,7 @@ Issues and specs live in Jira project `CDA`; use keys such as `CDA-12`. See `doc
 
 ### Triage labels
 
-Use the default labels: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, and `wontfix`. See `docs/agents/triage-labels.md`.
+Use the tracker labels documented in `docs/agents/triage-labels.md` for issue triage.
 
 ### Domain docs
 
