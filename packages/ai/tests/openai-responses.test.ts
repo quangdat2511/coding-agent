@@ -116,4 +116,26 @@ describe("OpenAI stream finishReason handling", () => {
       expect(doneEvent.message.stopReason).toBe("error");
     }
   });
+
+  it("maps finish_reason stop to stop on done event and message", async () => {
+    mockChunks = [
+      { choices: [{ delta: { content: "Done" }, finish_reason: null }] },
+      { choices: [{ delta: {}, finish_reason: "stop" }] },
+    ];
+
+    const eventStream = stream(model, context, { apiKey: "test-key" });
+    const events: AssistantMessageEvent[] = [];
+
+    for await (const event of eventStream) {
+      events.push(event);
+    }
+
+    const doneEvent = events.find((e) => e.type === "done");
+    expect(doneEvent).toBeDefined();
+    if (doneEvent && doneEvent.type === "done") {
+      expect(doneEvent.reason).toBe("stop");
+      expect(doneEvent.message.stopReason).toBe("stop");
+      expect(doneEvent.message.content).toEqual([{ type: "text", text: "Done" }]);
+    }
+  });
 });

@@ -2,7 +2,13 @@ import OpenAI from "openai";
 import type { AssistantMessage, Context, Model, StopReason, StreamOptions } from "@/types";
 import { AssistantMessageEventStream } from "@/utils/event-stream";
 
-export function mapOpenAIFinishReason(reason: string | null | undefined): StopReason {
+export type OpenAIRawFinishReason =
+  | OpenAI.Chat.Completions.ChatCompletionChunk.Choice["finish_reason"]
+  | (string & {});
+
+export function mapOpenAIFinishReason(
+  reason: OpenAIRawFinishReason | null | undefined,
+): StopReason {
   switch (reason) {
     case "length":
       return "length";

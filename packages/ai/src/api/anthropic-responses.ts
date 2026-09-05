@@ -2,7 +2,13 @@ import Anthropic from "@anthropic-ai/sdk";
 import type { AssistantMessage, Context, Model, StopReason, StreamOptions } from "@/types";
 import { AssistantMessageEventStream } from "@/utils/event-stream";
 
-export function mapAnthropicStopReason(reason: string | null | undefined): StopReason {
+export type AnthropicRawStopReason =
+  | Anthropic.RawMessageDeltaEvent.Delta["stop_reason"]
+  | (string & {});
+
+export function mapAnthropicStopReason(
+  reason: AnthropicRawStopReason | null | undefined,
+): StopReason {
   switch (reason) {
     case "max_tokens":
       return "length";
