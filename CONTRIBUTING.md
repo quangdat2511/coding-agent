@@ -105,6 +105,7 @@ git commit -m "add login form"  # commit message viết bằng tiếng Anh
 - Trên **nhánh riêng**, có thể commit bao nhiêu tùy thích — các commit sẽ được gộp lại khi squash merge.
 - Commit theo từng phần việc nhỏ, tránh dồn toàn bộ thay đổi vào một commit khổng lồ (khuyến khích).
 - **Không commit file nhạy cảm** (`.env`, key, mật khẩu, credentials) và file build/artifact.
+- **Không để lại dấu vết AI trong commit/PR**: dù dùng AI hỗ trợ viết code, commit message và PR description không được có trailer đồng tác giả kiểu `Co-Authored-By: Claude ...` hay footer "Generated with ..." — tác giả commit/PR luôn là người.
 
 ---
 
