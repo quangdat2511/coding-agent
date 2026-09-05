@@ -1,3 +1,8 @@
+## Synchronization
+
+`AGENTS.md` is the source of truth for repository guidance, and `CLAUDE.md` is a symlink to it.
+Edit `AGENTS.md` and preserve the symlink so both entry points always expose identical guidance.
+
 ## Project
 
 Coding Agent — a CLI-based AI coding agent that takes natural-language requests and performs
@@ -87,3 +92,17 @@ There is no build step defined yet.
 - **Merging**: squash and merge only, requires approval from all members assigned to the task and
   passing CI, and the branch must be rebased onto latest `main` first.
 - Work is tracked in Jira; ticket IDs (`CDA-*`) correspond to branch/PR prefixes.
+
+## Agent skills
+
+### Issue tracker
+
+Issues and specs live in Jira project `CDA`; use keys such as `CDA-12`. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Use the default labels: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, and `wontfix`. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+This is a multi-context layout using root `CONTEXT-MAP.md`, package-level `CONTEXT.md` files, and system/package ADR directories. See `docs/agents/domain.md`.
