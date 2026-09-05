@@ -68,13 +68,14 @@ assume is the interactive CLI's only execution path.
 
 ### Dependency direction
 
-The package metadata gives the core direction:
+The package metadata gives the core direction. The diagram uses arrows from consumer to
+dependency: if `B ──► A`, then B depends on A.
 
 ```text
-pi-ai  ───────────────► pi-agent-core  ───────────────► pi-coding-agent
-  ▲                         ▲       ▲                        │
-  │                         │       │                        │
-  └─────────────────────────┴───────┴──────────── pi-tui ◄───┘
+pi-agent-core   ─────────────► pi-ai
+pi-coding-agent ────────┬────► pi-ai
+                        ├────► pi-agent-core
+                        └────► pi-tui
 ```
 
 More precisely, `pi-agent-core` depends on `pi-ai`; `pi-coding-agent` depends on `pi-ai`,
@@ -345,4 +346,3 @@ schema-validated tools, cancellation/progress, stateful turns, and typed events.
 control points Pi leaves to application policy—especially Approval, Safety boundaries, Verification,
 and the final result/exit contract—and keep the first implementation below the durable/remote
 harness scale.
-
