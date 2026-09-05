@@ -1,0 +1,17 @@
+[
+  {
+    "id": "grok-4.3",
+    "name": "Grok 4.3",
+    "provider": "xai"
+  },
+  {
+    "id": "grok-build-0.1",
+    "name": "Grok Build 0.1",
+    "provider": "xai"
+  },
+  {
+    "id": "grok-4.5",
+    "name": "Grok 4.5",
+    "provider": "xai"
+  }
+]
