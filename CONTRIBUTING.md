@@ -193,14 +193,16 @@ Ticket ở lại `In Review` trong suốt quá trình review, kể cả khi đan
 
 ### Với chủ PR
 
+- Chủ động **request reviewer** ngay khi PR chuyển sang **Ready for review**, không chờ người khác tự vào xem.
 - Trả lời mọi comment của reviewer; sửa xong thì push commit mới lên cùng branch (không cần tạo PR mới).
 - Không tự resolve comment của reviewer khi chưa thống nhất.
 - Nếu không đồng ý với góp ý, trao đổi trực tiếp trong PR thay vì im lặng bỏ qua.
 
 ### Với reviewer
 
-- Review sớm nhất có thể để branch không bị giữ lâu, đúng tinh thần short-lived branch.
+- Chủ động **sắp xếp thời gian review sớm nhất có thể** ngay khi được request, để branch không bị giữ lâu, đúng tinh thần short-lived branch và giúp PR được merge sớm.
 - Góp ý cụ thể vào dòng code.
+- Chỉ được **comment và approve**, **không tự ý merge** PR — merge là việc của chủ PR (xem [Bước 8](#bước-8--merge)).
 
 ---
 
@@ -212,10 +214,15 @@ Ticket ở lại `In Review` trong suốt quá trình review, kể cả khi đan
 - CI pass toàn bộ. Repo hiện có các check **PR title, Biome, import alias, typecheck, test và build**.
 - Nhánh phải được **rebase lên `main` mới nhất** trước khi merge (xem [Bước 5](#bước-5--đồng-bộ-với-main)).
 
+### Ai được merge
+
+- **Chỉ chủ PR** mới được nhấn nút merge trên GitHub.
+- Reviewer chỉ **comment và approve**, không tự ý merge PR của người khác, kể cả khi đã đủ điều kiện merge ở trên.
+
 ### Cách merge
 
 - Bắt buộc dùng **Squash and merge** — gộp nhiều commit nhỏ thành **một commit** cho thống nhất và gọn gàng.
-- Commit message sau squash = tiêu đề PR.
+- Commit message sau squash = **đúng tiêu đề PR**, không giữ lại phần liệt kê danh sách các commit lẻ mà GitHub tự động điền vào ô message. Trước khi bấm **Confirm squash and merge**, xoá hết phần nội dung (body) đó, chỉ để lại dòng tiêu đề.
 
 ---
 
@@ -227,6 +234,17 @@ git pull origin main
 git branch -d CDA-12-add-user-login                # xoá branch ở local
 ```
 
+Sau khi merge, xoá luôn branch trên remote (GitHub cho nút **Delete branch** ngay trên PR đã merge) để repo gọn gàng:
+
+```bash
+git push origin --delete CDA-12-add-user-login     # xoá branch ở remote
+```
+
 Cuối cùng, chuyển ticket trên Jira từ `In Review` → `Done`.
+
+Nếu ticket vừa xong đang **block** ticket khác:
+
+- Chuyển các ticket bị block đó từ `Blocked` → `To Do`.
+- Báo ngay cho người đảm nhận (assignee) của ticket đó biết để họ có thể bắt tay vào làm.
 
 ---
