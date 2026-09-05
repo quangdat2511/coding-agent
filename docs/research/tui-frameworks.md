@@ -23,13 +23,13 @@ This evaluation resolves the core architectural dilemma:
 
 To evaluate all candidates objectively, seven core criteria were defined around the requirements of an AI coding agent CLI running on Bun:
 
-1. **Academic Contribution & Technology Ownership (Weight: 25%)**: Does the approach demonstrate substantial engineering depth and algorithmic problem-solving for the capstone dissertation, rather than merely consuming a pre-packaged dependency?
-2. **Architectural Differentiation & Independence (Weight: 20%)**: Does the design maintain a clear technological identity distinct from Pi, avoiding 1:1 code copying or heavy upstream lock-in?
-3. **Bun Runtime Compatibility & Packaging (Weight: 15%)**: Native ESM resolution, strict TypeScript compliance (`verbatimModuleSyntax`, `noUncheckedIndexedAccess`), and clean operation on Bun (`node:tty`, `process.stdin` raw mode, `Bun.spawn` PTY support).
-4. **Viewport, Scrolling & Transcript Management (Weight: 15%)**: Ability to handle unbounded agent logs and code diffs with automatic follow-to-bottom streaming, mouse/keyboard navigation, and a fixed bottom editor/status footer.
-5. **Streaming Rendering Performance (Weight: 10%)**: Differential line diffing and synchronized output (CSI 2026) to prevent flicker during high-frequency token bursts (50–100+ tokens/s).
-6. **Implementation Complexity & MVP Schedule Risk (Weight: 10%)**: Does the UI workload remain bounded so it does not derail the core agent deliverables (Planning, Verification, Safety, TerminalBench)?
-7. **Automated Headless Testability (Weight: 5%)**: Ability to write deterministic virtual-terminal or component snapshot tests in CI without requiring an interactive physical terminal.
+1. **Academic Contribution & Technology Ownership**: Demonstrates substantial engineering depth and algorithmic problem-solving for the capstone dissertation, rather than merely consuming a pre-packaged dependency.
+2. **Architectural Differentiation & Independence**: Maintains a clear technological identity distinct from Pi, avoiding 1:1 code copying or heavy upstream lock-in.
+3. **Bun Runtime Compatibility & Packaging**: Native ESM resolution, strict TypeScript compliance (`verbatimModuleSyntax`, `noUncheckedIndexedAccess`), and clean operation on Bun (`node:tty`, `process.stdin` raw mode, `Bun.spawn` PTY support).
+4. **Viewport, Scrolling & Transcript Management**: Ability to handle unbounded agent logs and code diffs with automatic follow-to-bottom streaming, mouse/keyboard navigation, and a fixed bottom editor/status footer.
+5. **Streaming Rendering Performance**: Differential line diffing and synchronized output (CSI 2026) to prevent flicker during high-frequency token bursts (50–100+ tokens/s).
+6. **Implementation Complexity & MVP Schedule Risk**: Does the UI workload remain bounded so it does not derail the core agent deliverables (Planning, Verification, Safety, TerminalBench)?
+7. **Automated Headless Testability**: Ability to write deterministic virtual-terminal or component snapshot tests in CI without requiring an interactive physical terminal.
 
 ---
 
@@ -84,18 +84,18 @@ To evaluate all candidates objectively, seven core criteria were defined around 
 
 ---
 
-## 4. Multi-Criteria Decision Matrix
+## 4. Multi-Criteria Trade-Off Matrix
 
-| Evaluation Criteria | Weight | Approach A: In-House Micro-TUI | Approach B: Ink + Custom Viewport | Approach D: Direct `@earendil-works/pi-tui` |
-| :--- | :---: | :---: | :---: | :---: |
-| **1. Academic Contribution** | 25% | **5.0 / 5.0**<br>Full ownership of low-level rendering engine | **4.5 / 5.0**<br>Solves community-wide Ink scrolling problem | **1.0 / 5.0**<br>Trivial wrapper; zero code written |
-| **2. Architectural Differentiation** | 20% | **4.0 / 5.0**<br>Original code, but architecture mirrors Pi | **5.0 / 5.0**<br>Completely distinct paradigm (React vs Pi) | **1.5 / 5.0**<br>Direct clone / upstream dependency |
-| **3. Bun Native Compatibility** | 15% | **5.0 / 5.0**<br>Native TS/Bun, zero dependencies | **4.5 / 5.0**<br>Standard ESM, runs cleanly on Bun | **3.0 / 5.0**<br>Declares `node >=22`, external binary helper |
-| **4. Viewport & Scrolling UX** | 15% | **5.0 / 5.0**<br>Designed specifically for agent transcript | **3.5 / 5.0**<br>Requires custom windowing math on Ink | **5.0 / 5.0**<br>Ready out of the box |
-| **5. Streaming Performance** | 10% | **5.0 / 5.0**<br>Lightweight string arrays, instant diffing | **3.5 / 5.0**<br>React/Yoga overhead; requires throttling | **5.0 / 5.0**<br>Highly optimized differential rendering |
-| **6. Schedule & Implementation Risk** | 10% | **2.5 / 5.0**<br>Heavy terminal edge-case burden | **4.5 / 5.0**<br>Layout handled by Ink, focused scope | **5.0 / 5.0**<br>Zero development time |
-| **7. Headless Testability** | 5% | **4.5 / 5.0**<br>`@xterm/headless` integration | **5.0 / 5.0**<br>`ink-testing-library` | **4.5 / 5.0**<br>Existing test harness |
-| **WEIGHTED TOTAL SCORE** | **100%** | **4.25 / 5.0** 🥈 | **4.33 / 5.0** 🏆 | **2.65 / 5.0** ❌ |
+| Evaluation Criteria | Approach A: In-House Micro-TUI | Approach B: Ink + Custom Viewport | Approach D: Direct `@earendil-works/pi-tui` |
+| :--- | :---: | :---: | :---: |
+| **1. Academic Contribution** | 🟢 **High**<br>Full ownership of low-level rendering engine | 🟢 **High**<br>Solves community-wide Ink scrolling problem | 🔴 **Low**<br>Trivial wrapper; zero code written |
+| **2. Architectural Differentiation** | 🟡 **Moderate**<br>Original code, but architecture mirrors Pi | 🟢 **High**<br>Distinct paradigm (Declarative React vs Pi) | 🔴 **None**<br>Direct clone / upstream dependency |
+| **3. Bun Native Compatibility** | 🟢 **High**<br>Native TS/Bun, zero dependencies | 🟢 **High**<br>Standard ESM, runs cleanly on Bun | 🟡 **Limited**<br>Declares `node >=22`, external binary helper |
+| **4. Viewport & Scrolling UX** | 🟢 **High**<br>Designed specifically for agent transcript | 🟡 **Trade-off**<br>Requires custom windowing math on Ink | 🟢 **High**<br>Ready out of the box |
+| **5. Streaming Performance** | 🟢 **High**<br>Lightweight string arrays, instant diffing | 🟡 **Trade-off**<br>React/Yoga overhead; requires throttling | 🟢 **High**<br>Highly optimized differential rendering |
+| **6. Schedule & Implementation Risk** | 🔴 **High Risk**<br>Heavy terminal edge-case burden | 🟢 **Low Risk**<br>Layout handled by Ink, focused scope | 🟢 **Zero Risk**<br>Zero development time |
+| **7. Headless Testability** | 🟢 **Strong**<br>`@xterm/headless` integration | 🟢 **Strong**<br>`ink-testing-library` | 🟢 **Strong**<br>Existing test harness |
+| **VERDICT / DISPOSITION** | **Shortlisted (Contender 1)**<br>Best for raw performance & systems engineering | **Shortlisted (Contender 2)**<br>Best for architectural identity & rapid UI velocity | **REJECTED FOR PRODUCTION**<br>Reference Baseline only for CDA-17 |
 
 ---
 
