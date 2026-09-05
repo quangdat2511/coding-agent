@@ -8,25 +8,25 @@ Mọi thành viên đều phải tuân thủ quy trình này.
 
 - [Mô hình phát triển: Trunk-Based Development (TBD)](#mô-hình-phát-triển-trunk-based-development-tbd)
 - [Tổng quan quy trình](#tổng-quan-quy-trình)
-- [Bước 1 — Nhận ticket trên Jira](#bước-1--nhận-ticket-trên-jira)
-- [Bước 2 — Tạo branch từ `main`](#bước-2--tạo-branch-từ-main)
-- [Bước 3 — Code và commit](#bước-3--code-và-commit)
-- [Bước 4 — Đẩy branch lên remote](#bước-4--đẩy-branch-lên-remote)
-- [Bước 5 — Đồng bộ với `main`](#bước-5--đồng-bộ-với-main)
-- [Bước 6 — Mở Pull Request](#bước-6--mở-pull-request)
-- [Bước 7 — Review](#bước-7--review)
-- [Bước 8 — Merge](#bước-8--merge)
-- [Bước 9 — Dọn dẹp và đóng ticket](#bước-9--dọn-dẹp-và-đóng-ticket)
+- [Bước 1: Nhận ticket trên Jira](#bước-1-nhận-ticket-trên-jira)
+- [Bước 2: Tạo branch từ `main`](#bước-2-tạo-branch-từ-main)
+- [Bước 3: Code và commit](#bước-3-code-và-commit)
+- [Bước 4: Đẩy branch lên remote](#bước-4-đẩy-branch-lên-remote)
+- [Bước 5: Đồng bộ với `main`](#bước-5-đồng-bộ-với-main)
+- [Bước 6: Mở Pull Request](#bước-6-mở-pull-request)
+- [Bước 7: Review](#bước-7-review)
+- [Bước 8: Merge](#bước-8-merge)
+- [Bước 9: Dọn dẹp và đóng ticket](#bước-9-dọn-dẹp-và-đóng-ticket)
 
 ---
 
 ## Mô hình phát triển: Trunk-Based Development (TBD)
 
-Nhóm áp dụng **Trunk-Based Development**: **trunk của repo là nhánh `main`** — thành viên làm việc trên các **short-lived branch** tách từ `main`, merge lại ngay sau khi hoàn thành.
+Nhóm áp dụng **Trunk-Based Development**: **trunk của repo là nhánh `main`** - thành viên làm việc trên các **short-lived branch** tách từ `main`, merge lại ngay sau khi hoàn thành.
 
 - `main` luôn ở trạng thái **sẵn sàng release** tại mọi thời điểm.
 - Nhóm có thể **demo trực tiếp từ `main`** tại bất kỳ thời điểm nào (cuối mỗi sprint/milestone) mà không cần branch riêng để "ổn định hóa" trước demo.
-- Không commit trực tiếp lên `main` — mọi thay đổi đều đi qua Pull Request.
+- Không commit trực tiếp lên `main` - mọi thay đổi đều đi qua Pull Request.
 
 ---
 
@@ -46,7 +46,7 @@ Nhóm áp dụng **Trunk-Based Development**: **trunk của repo là nhánh `mai
 
 ---
 
-## Bước 1 — Nhận ticket trên Jira
+## Bước 1: Nhận ticket trên Jira
 
 Vòng đời status của một ticket:
 
@@ -56,12 +56,12 @@ TO DO → In Progress → In Review → Done
 
 - Mỗi phần công việc đều phải có **ticket trên Jira** trước khi bắt đầu code.
 - Khi bắt đầu làm, tự assign ticket cho mình và chuyển status từ `TO DO` → `In Progress`.
-- Khi request review, chuyển sang `In Review` ([Bước 7](#bước-7--review)); khi PR đã merge, chuyển sang `Done` ([Bước 9](#bước-9--dọn-dẹp-và-đóng-ticket)).
+- Khi request review, chuyển sang `In Review` ([Bước 7](#bước-7-review)); khi PR đã merge, chuyển sang `Done` ([Bước 9](#bước-9-dọn-dẹp-và-đóng-ticket)).
 - Nếu ticket có khối lượng công việc lớn, chủ động **tách thành nhiều ticket/branch nhỏ**. PR nhỏ giúp review nhanh và chính xác hơn, đồng thời hạn chế conflict.
 
 ---
 
-## Bước 2 — Tạo branch từ `main`
+## Bước 2: Tạo branch từ `main`
 
 Luôn tách branch từ `main` **mới nhất**, không tách từ branch của người khác:
 
@@ -87,11 +87,11 @@ git checkout -b CDA-12-add-user-login
 - Viết chữ thường, không dùng khoảng trắng.
 - **Tên branch phải viết bằng tiếng Anh** (không dùng tiếng Việt có dấu hoặc không dấu).
 - Mỗi branch gắn với **một ticket** và chỉ giải quyết **một mục tiêu**.
-- Branch phải **ngắn hạn** — merge vào `main` ngay khi xong, không giữ lâu.
+- Branch phải **ngắn hạn** - merge vào `main` ngay khi xong, không giữ lâu.
 
 ---
 
-## Bước 3 — Code và commit
+## Bước 3: Code và commit
 
 ```bash
 git add <file>                  # stage từng file
@@ -102,14 +102,14 @@ git commit -m "add login form"  # commit message viết bằng tiếng Anh
 ### Quy tắc commit
 
 - Commit message viết bằng **tiếng Anh**.
-- Trên **nhánh riêng**, có thể commit bao nhiêu tùy thích — các commit sẽ được gộp lại khi squash merge.
+- Trên **nhánh riêng**, có thể commit bao nhiêu tùy thích - các commit sẽ được gộp lại khi squash merge.
 - Commit theo từng phần việc nhỏ, tránh dồn toàn bộ thay đổi vào một commit khổng lồ (khuyến khích).
 - **Không commit file nhạy cảm** (`.env`, key, mật khẩu, credentials) và file build/artifact.
-- **Không để lại dấu vết AI trong commit/PR**: dù dùng AI hỗ trợ viết code, commit message và PR description không được có trailer đồng tác giả kiểu `Co-Authored-By: Claude ...` hay footer "Generated with ..." — tác giả commit/PR luôn là người.
+- **Không để lại dấu vết AI trong commit/PR**: dù dùng AI hỗ trợ viết code, commit message và PR description không được có trailer đồng tác giả kiểu `Co-Authored-By: Claude ...` hay footer "Generated with ..." - tác giả commit/PR luôn là người.
 
 ---
 
-## Bước 4 — Đẩy branch lên remote
+## Bước 4: Đẩy branch lên remote
 
 ```bash
 git push -u origin CDA-12-add-user-login   # lần đầu tiên
@@ -120,9 +120,9 @@ Nên push sớm và push thường xuyên để công việc không nằm hết 
 
 ---
 
-## Bước 5 — Đồng bộ với `main`
+## Bước 5: Đồng bộ với `main`
 
-Trước khi mở PR (và trước khi merge), branch phải được đồng bộ với `main` mới nhất. Nhóm **chỉ dùng `rebase`**, **không dùng `git merge`** để đồng bộ — mục đích là giữ lịch sử tuyến tính, sạch sẽ, không có commit merge rác trong branch:
+Trước khi mở PR (và trước khi merge), branch phải được đồng bộ với `main` mới nhất. Nhóm **chỉ dùng `rebase`**, **không dùng `git merge`** để đồng bộ - mục đích là giữ lịch sử tuyến tính, sạch sẽ, không có commit merge rác trong branch:
 
 Đứng ngay tại branch của mình và chạy:
 
@@ -138,7 +138,7 @@ git push --force-with-lease
 
 > Dùng `--force-with-lease` thay vì `--force`: nếu có người khác vừa push lên cùng branch, lệnh sẽ dừng lại thay vì ghi đè mất commit của họ.
 
-> **Lưu ý:** `git merge main` bị cấm trong quy trình của nhóm. Nếu lỡ tay merge, hãy gỡ commit merge ra rồi rebase lại. Riêng nút **Squash and merge** trên GitHub ở [Bước 8](#bước-8--merge) là cách merge PR duy nhất được dùng.
+> **Lưu ý:** `git merge main` bị cấm trong quy trình của nhóm. Nếu lỡ tay merge, hãy gỡ commit merge ra rồi rebase lại. Riêng nút **Squash and merge** trên GitHub ở [Bước 8](#bước-8-merge) là cách merge PR duy nhất được dùng.
 
 ### Khi có conflict
 
@@ -146,7 +146,7 @@ Quy ước của nhóm: nếu conflict nằm ở phần code của người khá
 
 ---
 
-## Bước 6 — Mở Pull Request
+## Bước 6: Mở Pull Request
 
 ### Tiêu đề PR
 
@@ -178,13 +178,13 @@ Quy ước của nhóm: nếu conflict nằm ở phần code của người khá
 
 Để đảm bảo chất lượng review và hạn chế tối đa xung đột code, nên **tách nhỏ PR** nhất có thể để reviewer dễ đọc, dễ hiểu.
 
-Reviewer chỉ bắt đầu review khi PR ở trạng thái **Ready for review** — nghĩa là chủ PR đã **tự review lại toàn bộ diff** của mình trước:
+Reviewer chỉ bắt đầu review khi PR ở trạng thái **Ready for review** - nghĩa là chủ PR đã **tự review lại toàn bộ diff** của mình trước:
 
 Trong lúc chưa tự review xong, để PR ở trạng thái **Draft** để tránh reviewer vào xem nhầm lúc chưa sẵn sàng.
 
 ---
 
-## Bước 7 — Review
+## Bước 7: Review
 
 ### Khi request review
 
@@ -203,17 +203,17 @@ Ticket ở lại `In Review` trong suốt quá trình review, kể cả khi đan
 
 - Chủ động **sắp xếp thời gian review sớm nhất có thể** ngay khi được request, để branch không bị giữ lâu, đúng tinh thần short-lived branch và giúp PR được merge sớm.
 - Góp ý cụ thể vào dòng code.
-- Chỉ được **comment và approve**, **không tự ý merge** PR — merge là việc của chủ PR (xem [Bước 8](#bước-8--merge)).
+- Chỉ được **comment và approve**, **không tự ý merge** PR - merge là việc của chủ PR (xem [Bước 8](#bước-8-merge)).
 
 ---
 
-## Bước 8 — Merge
+## Bước 8: Merge
 
 ### Điều kiện merge
 
 - **Tất cả** thành viên cùng phụ trách task phải approve. Nếu có thành viên khác (không trực tiếp phụ trách task) chủ động yêu cầu được review, cũng phải đợi người đó approve mới được merge.
 - CI pass toàn bộ. Repo hiện có các check **PR title, Biome, import alias, typecheck, test và build**.
-- Nhánh phải được **rebase lên `main` mới nhất** trước khi merge (xem [Bước 5](#bước-5--đồng-bộ-với-main)).
+- Nhánh phải được **rebase lên `main` mới nhất** trước khi merge (xem [Bước 5](#bước-5-đồng-bộ-với-main)).
 
 ### Ai được merge
 
@@ -222,12 +222,12 @@ Ticket ở lại `In Review` trong suốt quá trình review, kể cả khi đan
 
 ### Cách merge
 
-- Bắt buộc dùng **Squash and merge** — gộp nhiều commit nhỏ thành **một commit** cho thống nhất và gọn gàng.
+- Bắt buộc dùng **Squash and merge** - gộp nhiều commit nhỏ thành **một commit** cho thống nhất và gọn gàng.
 - Commit message sau squash = **đúng tiêu đề PR**, không giữ lại phần liệt kê danh sách các commit lẻ mà GitHub tự động điền vào ô message. Trước khi bấm **Confirm squash and merge**, xoá hết phần nội dung (body) đó, chỉ để lại dòng tiêu đề.
 
 ---
 
-## Bước 9 — Dọn dẹp và đóng ticket
+## Bước 9: Dọn dẹp và đóng ticket
 
 ```bash
 git checkout main
@@ -235,11 +235,7 @@ git pull origin main
 git branch -d CDA-12-add-user-login                # xoá branch ở local
 ```
 
-Sau khi merge, xoá luôn branch trên remote (GitHub cho nút **Delete branch** ngay trên PR đã merge) để repo gọn gàng:
-
-```bash
-git push origin --delete CDA-12-add-user-login     # xoá branch ở remote
-```
+Sau khi merge, nhấn nút **Delete branch** ngay trên PR đã merge để xoá luôn branch ở remote cho gọn.
 
 Cuối cùng, chuyển ticket trên Jira từ `In Review` → `Done`.
 
