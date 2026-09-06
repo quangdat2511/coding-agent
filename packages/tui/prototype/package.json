@@ -1,0 +1,16 @@
+{
+  "name": "@coding-agent/tui-prototype",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "THROWAWAY spike for CDA-17. Not part of the workspace, not shipped.",
+  "dependencies": {
+    "@earendil-works/pi-tui": "0.85.1",
+    "ink": "7.1.1",
+    "react": "19.2.8"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.0",
+    "@xterm/headless": "^6.0.0"
+  }
+}
