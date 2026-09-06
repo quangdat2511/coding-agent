@@ -1,55 +1,6 @@
-import { existsSync, readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
-import type { Context, Model, ModelsImpl } from "@/index";
+import { loadRootEnv } from "@examples/utils/env";
+import type { AssistantMessage, Context, Model, ModelsImpl } from "@/index";
 import { builtinModels } from "@/providers/all";
-
-export function parseEnv(content: string): Record<string, string> {
-  const result: Record<string, string> = {};
-  for (const rawLine of content.split("\n")) {
-    const line = rawLine.trim();
-    if (!line || line.startsWith("#")) continue;
-    const eqIndex = line.indexOf("=");
-    if (eqIndex <= 0) continue;
-
-    const key = line.slice(0, eqIndex).trim();
-    let val = line.slice(eqIndex + 1).trim();
-    if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
-      val = val.slice(1, -1);
-    }
-
-    if (key) {
-      result[key] = val;
-    }
-  }
-  return result;
-}
-
-export function loadRootEnv(startDir = import.meta.dir): string | undefined {
-  let currentDir = startDir;
-  while (currentDir !== dirname(currentDir)) {
-    const envPath = resolve(currentDir, ".env");
-    if (existsSync(envPath)) {
-      try {
-        const content = readFileSync(envPath, "utf-8");
-        const parsed = parseEnv(content);
-        for (const [key, val] of Object.entries(parsed)) {
-          if (!process.env[key]) {
-            process.env[key] = val;
-          }
-        }
-        return envPath;
-      } catch {
-        // Ignore read errors
-        return undefined;
-      }
-    }
-    currentDir = dirname(currentDir);
-  }
-  return undefined;
-}
-
-// Load root .env before resolving providers
-loadRootEnv();
 
 export const DEFAULT_MODELS: Record<string, string> = {
   google: "gemini-3.6-flash",
@@ -59,7 +10,7 @@ export const DEFAULT_MODELS: Record<string, string> = {
   xai: "grok-beta",
 };
 
-const DEFAULT_PROMPT =
+export const DEFAULT_PROMPT =
   "Hãy viết đoạn văn ngắn giới thiệu về trường Đại học Khoa học Tự nhiên (HCMUS).";
 
 function printHelp(): void {
@@ -80,6 +31,60 @@ Examples:
 `);
 }
 
+export interface StreamRunOptions {
+  maxTokens?: number;
+  systemPrompt?: string;
+  onDelta?: (delta: string) => void;
+  onError?: (errorMessage: string) => void;
+}
+
+/**
+ * Executes a streaming prompt against the given model and models registry.
+ * Encapsulates the core library stream API workflow.
+ */
+export async function runStream(
+  models: ModelsImpl,
+  model: Model,
+  prompt: string,
+  options: StreamRunOptions = {},
+): Promise<AssistantMessage> {
+  const context: Context = {
+    systemPrompt: options.systemPrompt ?? "You are a helpful and concise coding assistant.",
+    messages: [
+      {
+        role: "user",
+        content: prompt,
+      },
+    ],
+  };
+
+  const eventStream = models.stream(model, context, { maxTokens: options.maxTokens ?? 2000 });
+
+  for await (const event of eventStream) {
+    switch (event.type) {
+      case "text_delta":
+        if (options.onDelta) {
+          options.onDelta(event.delta);
+        } else {
+          process.stdout.write(event.delta);
+        }
+        break;
+      case "error":
+        if (options.onError) {
+          options.onError(event.error.errorMessage ?? "Unknown error");
+        } else {
+          console.error(`\n❌ [Stream Error]: ${event.error.errorMessage}`);
+        }
+        break;
+    }
+  }
+
+  return await eventStream.result();
+}
+
+/**
+ * Resolves the provider and model based on user arguments or defaults.
+ */
 export async function resolveProviderAndModel(
   models: ModelsImpl,
   argProvider?: string,
@@ -134,6 +139,9 @@ export async function resolveProviderAndModel(
 }
 
 export async function main(args: string[] = process.argv.slice(2)): Promise<void> {
+  // Load root .env before resolving providers
+  loadRootEnv();
+
   if (args.includes("--help") || args.includes("-h")) {
     printHelp();
     return;
@@ -146,7 +154,7 @@ export async function main(args: string[] = process.argv.slice(2)): Promise<void
   const { model, providerId } = await resolveProviderAndModel(models, argProvider, argModel);
   const provider = models.getProvider(providerId);
 
-  // Check credentials
+  // Check credentials warning
   const apiKey = await provider?.auth.apiKey?.resolve();
   if (!apiKey) {
     console.warn(
@@ -155,40 +163,22 @@ export async function main(args: string[] = process.argv.slice(2)): Promise<void
     console.warn(`   Please ensure required environment variables are configured in .env.\n`);
   }
 
-  const context: Context = {
-    systemPrompt: "You are a helpful and concise coding assistant.",
-    messages: [
-      {
-        role: "user",
-        content: prompt,
-      },
-    ],
-  };
-
   console.log("==================================================");
   console.log(`🤖 Provider : ${providerId}`);
   console.log(`📦 Model    : ${model.id} (${model.name})`);
   console.log(`💬 Prompt   : "${prompt}"`);
   console.log("==================================================\n");
 
-  const startTime = Date.now();
-  const eventStream = models.stream(model, context, { maxTokens: 2000 });
-
   let textReceived = false;
+  const startTime = Date.now();
 
-  for await (const event of eventStream) {
-    switch (event.type) {
-      case "text_delta":
-        process.stdout.write(event.delta);
-        textReceived = true;
-        break;
-      case "error":
-        console.error(`\n❌ [Stream Error]: ${event.error.errorMessage}`);
-        break;
-    }
-  }
+  const finalMessage = await runStream(models, model, prompt, {
+    onDelta: (delta) => {
+      process.stdout.write(delta);
+      textReceived = true;
+    },
+  });
 
-  const finalMessage = await eventStream.result();
   const elapsedSeconds = ((Date.now() - startTime) / 1000).toFixed(2);
 
   if (finalMessage.stopReason === "error") {
