@@ -203,6 +203,7 @@ Ticket ở lại `In Review` trong suốt quá trình review, kể cả khi đan
 
 - Chủ động **sắp xếp thời gian review sớm nhất có thể** ngay khi được request, để branch không bị giữ lâu, đúng tinh thần short-lived branch và giúp PR được merge sớm.
 - Góp ý cụ thể vào dòng code.
+- Chỉ approve khi đã hiểu rõ chủ PR đang làm gì và đồng ý với thay đổi cũng như hướng triển khai đó.
 - Chỉ được **comment và approve**, **không tự ý merge** PR - merge là việc của chủ PR (xem [Bước 8](#bước-8-merge)).
 
 ---
