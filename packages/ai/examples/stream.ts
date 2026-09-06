@@ -3,49 +3,58 @@ import { dirname, resolve } from "node:path";
 import type { Context, Model, ModelsImpl } from "@/index";
 import { builtinModels } from "@/providers/all";
 
-function loadRootEnv(): void {
-  let currentDir = import.meta.dir;
+export function parseEnv(content: string): Record<string, string> {
+  const result: Record<string, string> = {};
+  for (const rawLine of content.split("\n")) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith("#")) continue;
+    const eqIndex = line.indexOf("=");
+    if (eqIndex <= 0) continue;
+
+    const key = line.slice(0, eqIndex).trim();
+    let val = line.slice(eqIndex + 1).trim();
+    if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
+      val = val.slice(1, -1);
+    }
+
+    if (key) {
+      result[key] = val;
+    }
+  }
+  return result;
+}
+
+export function loadRootEnv(startDir = import.meta.dir): string | undefined {
+  let currentDir = startDir;
   while (currentDir !== dirname(currentDir)) {
     const envPath = resolve(currentDir, ".env");
     if (existsSync(envPath)) {
       try {
         const content = readFileSync(envPath, "utf-8");
-        for (const rawLine of content.split("\n")) {
-          const line = rawLine.trim();
-          if (!line || line.startsWith("#")) continue;
-          const eqIndex = line.indexOf("=");
-          if (eqIndex <= 0) continue;
-
-          const key = line.slice(0, eqIndex).trim();
-          let val = line.slice(eqIndex + 1).trim();
-          if (
-            (val.startsWith('"') && val.endsWith('"')) ||
-            (val.startsWith("'") && val.endsWith("'"))
-          ) {
-            val = val.slice(1, -1);
-          }
-
-          if (key && !process.env[key]) {
+        const parsed = parseEnv(content);
+        for (const [key, val] of Object.entries(parsed)) {
+          if (!process.env[key]) {
             process.env[key] = val;
           }
         }
+        return envPath;
       } catch {
         // Ignore read errors
+        return undefined;
       }
-      return;
     }
     currentDir = dirname(currentDir);
   }
+  return undefined;
 }
 
 // Load root .env before resolving providers
 loadRootEnv();
 
-const DEFAULT_MODELS: Record<string, string> = {
+export const DEFAULT_MODELS: Record<string, string> = {
   google: "gemini-3.6-flash",
   openai: "gpt-4o",
   anthropic: "claude-sonnet-4-5",
-  opencode: "claude-sonnet-4-5",
   openrouter: "openai/gpt-4o",
   xai: "grok-beta",
 };
@@ -54,12 +63,13 @@ const DEFAULT_PROMPT =
   "Hãy viết đoạn văn ngắn giới thiệu về trường Đại học Khoa học Tự nhiên (HCMUS).";
 
 function printHelp(): void {
+  const providerList = Object.keys(DEFAULT_MODELS).join(", ");
   console.log(`
 Usage:
   bun run example [provider] [model] [prompt]
 
 Arguments:
-  provider    LLM provider (google, openai, anthropic, opencode, openrouter, xai)
+  provider    LLM provider (${providerList})
   model       Model identifier (e.g. gemini-3.6-flash, gpt-4o, claude-sonnet-4-5)
   prompt      Prompt text sent to the model
 
@@ -70,7 +80,7 @@ Examples:
 `);
 }
 
-async function resolveProviderAndModel(
+export async function resolveProviderAndModel(
   models: ModelsImpl,
   argProvider?: string,
   argModel?: string,
@@ -78,7 +88,15 @@ async function resolveProviderAndModel(
   let providerId = argProvider;
   let modelId = argModel;
 
-  if (!providerId) {
+  if (providerId) {
+    const provider = models.getProvider(providerId);
+    if (!provider) {
+      const validProviders = Object.keys(DEFAULT_MODELS).join(", ");
+      throw new Error(
+        `Provider '${providerId}' is not registered. Available providers: ${validProviders}.`,
+      );
+    }
+  } else {
     // Auto-detect first provider with an active API key
     for (const candidateId of Object.keys(DEFAULT_MODELS)) {
       const p = models.getProvider(candidateId);
@@ -99,7 +117,7 @@ async function resolveProviderAndModel(
     }
   }
 
-  if (!modelId) {
+  if (!modelId && providerId) {
     modelId = DEFAULT_MODELS[providerId] ?? models.getProvider(providerId)?.getModels()[0]?.id;
   }
 
@@ -173,8 +191,14 @@ export async function main(args: string[] = process.argv.slice(2)): Promise<void
   const finalMessage = await eventStream.result();
   const elapsedSeconds = ((Date.now() - startTime) / 1000).toFixed(2);
 
-  if (!textReceived && finalMessage.stopReason === "error") {
-    console.error(`\nFailed with error: ${finalMessage.errorMessage ?? "Unknown error"}`);
+  if (finalMessage.stopReason === "error") {
+    if (!textReceived) {
+      console.error(`\n❌ Failed with error: ${finalMessage.errorMessage ?? "Unknown error"}`);
+    } else {
+      console.error(
+        `\n\n❌ Stream interrupted with error: ${finalMessage.errorMessage ?? "Unknown error"}`,
+      );
+    }
     process.exitCode = 1;
     return;
   }
