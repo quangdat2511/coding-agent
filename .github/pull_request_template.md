@@ -14,7 +14,7 @@
 
 ## Ticket liên quan
 
-<!-- Link tới ticket -->
+<!-- Dán link đầy đủ tới ticket Jira, ví dụ: https://datn-fit-hcmus.atlassian.net/browse/CDA-28. Không chỉ ghi mã ticket (CDA-28). -->
 
 
 ## Loại thay đổi / Type of change
