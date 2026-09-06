@@ -241,7 +241,7 @@ Cuối cùng, chuyển ticket trên Jira từ `In Review` → `Done`.
 
 Nếu ticket vừa xong đang **block** ticket khác:
 
-- Chuyển các ticket bị block đó từ `Blocked` → `To Do`.
-- Báo ngay cho người đảm nhận (assignee) của ticket đó biết để họ có thể bắt tay vào làm.
+- Chỉ chuyển ticket đó từ `Blocked` → `To Do` khi không còn blocker nào khác.
+- Khi ticket chuyển được sang `To Do`, báo ngay cho người đảm nhận (assignee) để họ có thể bắt tay vào làm.
 
 ---
