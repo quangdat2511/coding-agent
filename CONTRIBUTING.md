@@ -57,7 +57,7 @@ Blocked:      Blocked → To Do                    (khi đã hết blocker)
 Cancelled:    mọi status trừ Done → Cancelled    (khi ticket bị huỷ)
 ```
 
-- Luồng chính là `To Do` → `In Progress` → `In Review` → `Done`. Phần lớn ticket đi thẳng luồng này, bắt đầu từ `To Do`.
+- Phần lớn ticket đi thẳng luồng chính, bắt đầu từ `To Do`.
 - `Blocked`: dành cho ticket chưa làm được vì còn phụ thuộc ticket khác. Khi không còn blocker nào thì chuyển về `To Do` ([Bước 9](#bước-9-dọn-dẹp-và-đóng-ticket)).
 - `Cancelled`: ticket bị huỷ, không làm nữa. Có thể chuyển sang `Cancelled` từ bất kỳ status nào **trừ** `Done`. PR tương ứng (nếu có) cũng đóng lại mà không merge.
 
@@ -212,7 +212,7 @@ PR cũng cần được chuyển **về lại Draft** trong quá trình review n
 Chỉ được request review khi PR đã thoả **cả hai** điều kiện sau:
 
 - **CI pass toàn bộ.** Không request review khi còn check đỏ - reviewer không phải người đi sửa lint hay test hộ.
-- **Branch đã up to date với `main`.** Rebase `main` mới nhất vào branch và xử lý hết conflict trước ([Bước 5](#bước-5-đồng-bộ-với-main)), để reviewer đọc đúng phần diff thuộc về PR này chứ không lẫn thay đổi của người khác.
+- **Branch đã up to date với `main`.** Rebase `main` mới nhất vào branch và xử lý hết conflict trước ([Bước 5](#bước-5-đồng-bộ-với-main)).
 
 Nếu trong lúc chờ review mà `main` đã tiến lên hoặc CI chuyển sang đỏ, chủ PR chủ động rebase và sửa cho xanh lại, không để reviewer phải chờ.
 
@@ -226,15 +226,12 @@ Ticket ở lại `In Review` trong suốt quá trình review, kể cả khi đan
 
 - Chủ động **request reviewer** ngay khi PR chuyển sang **Ready for review**, không chờ người khác tự vào xem.
 - Trả lời **mọi** comment của reviewer; sửa xong thì push commit mới lên cùng branch (không cần tạo PR mới).
-- Nếu không đồng ý với góp ý, trao đổi trực tiếp trong PR thay vì im lặng bỏ qua.
-- Tuân thủ quy ước về [resolve conversation](#resolve-conversation) và [push commit mới](#push-commit-mới-lên-pr-đang-chờ-review) ở dưới.
 
 ### Với reviewer
 
 - Chủ động **sắp xếp thời gian review sớm nhất có thể** ngay khi được request, để branch không bị giữ lâu, đúng tinh thần short-lived branch và giúp PR được merge sớm.
 - Để lại comment cụ thể, gắn với dòng code cần góp ý.
 - Chỉ approve khi đã hiểu rõ chủ PR đang làm gì và đồng ý với thay đổi cũng như hướng triển khai đó.
-- Chỉ được **comment và approve**, **không tự ý merge** PR - merge là việc của chủ PR (xem [Bước 8](#bước-8-merge)).
 
 ### Resolve conversation
 
@@ -249,9 +246,7 @@ Mỗi comment chưa resolve đều phải ở một trong hai trạng thái rõ 
 
 ### Push commit mới lên PR đang chờ review
 
-Trước khi push commit mới lên PR đang ở trạng thái **Ready for review**, chủ PR phải chắc chắn **mọi comment chưa resolve đều đã được xử lý** - tức là đã có commit sửa tương ứng, hoặc đã có reply nêu lý do không sửa.
-
-Trước khi push, nên tranh thủ rebase với `main` nếu branch đã bị outdated, để các commit mới được cập nhật trên nền `main` mới nhất.
+Trước khi push commit mới lên PR đang ở trạng thái **Ready for review**, chủ PR phải chắc chắn **mọi comment chưa resolve đều đã được xử lý** theo quy ước ở trên.
 
 Nếu chưa xử lý xong mà vẫn cần push (lưu tạm công việc dở dang, còn đang sửa tiếp nhiều chỗ), hãy **chuyển PR về Draft trước khi push**. Xong hết thì chuyển lại **Ready for review** và **request review lại** bằng nút 🔄 cạnh tên reviewer hoặc nhắn trực tiếp cho reviewer để nhờ review lại.
 
@@ -270,8 +265,7 @@ Mục đích: mỗi lần reviewer được gọi vào là một lần PR thực
 
 ### Ai được merge
 
-- **Chỉ chủ PR** mới được nhấn nút merge trên GitHub.
-- Reviewer chỉ **comment và approve**, không tự ý merge PR của người khác, kể cả khi đã đủ điều kiện merge ở trên.
+- **Chỉ chủ PR** mới được nhấn nút merge trên GitHub. Reviewer chỉ **comment và approve**, không tự ý merge PR của người khác, kể cả khi PR đã đủ điều kiện merge ở trên.
 
 ### Cách merge
 
