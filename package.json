@@ -12,6 +12,7 @@
     "test": "bun test",
     "typecheck": "bun --filter '*' typecheck",
     "build": "bun run --filter '@coding-agent/*' build",
+    "example:ai": "bun run packages/ai/examples/stream.ts",
     "check": "biome check .",
     "ci:check": "biome ci .",
     "check:fix": "biome check --write .",

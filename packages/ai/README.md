@@ -143,3 +143,17 @@ export interface StreamOptions {
 // Usage:
 models.stream(model, context, { temperature: 0.7, maxTokens: 1000 });
 ```
+
+## Running Examples
+
+A runnable streaming example is available under `examples/stream.ts`. It demonstrates real-time completions across supported providers:
+
+```bash
+# Run with auto-detected provider or default
+bun run example
+
+# Or specify provider, model, and custom prompt
+bun run example google gemini-3.6-flash "Explain TypeScript advantages"
+bun run example openai gpt-4o "Explain monorepo architecture"
+```
+
