@@ -1,6 +1,26 @@
 import OpenAI from "openai";
-import type { AssistantMessage, Context, Model, StreamOptions } from "@/types";
+import type { AssistantMessage, Context, Model, StopReason, StreamOptions } from "@/types";
 import { AssistantMessageEventStream } from "@/utils/event-stream";
+
+export type OpenAIRawFinishReason =
+  | OpenAI.Chat.Completions.ChatCompletionChunk.Choice["finish_reason"]
+  | (string & {});
+
+export function mapOpenAIFinishReason(
+  reason: OpenAIRawFinishReason | null | undefined,
+): StopReason {
+  switch (reason) {
+    case "length":
+      return "length";
+    case "tool_calls":
+    case "function_call":
+      return "toolUse";
+    case "content_filter":
+      return "error";
+    default:
+      return "stop";
+  }
+}
 
 export function buildParams(
   context: Context,
@@ -55,6 +75,7 @@ export function stream(
       const client = new OpenAI({
         apiKey,
         baseURL: options?.baseURL,
+        defaultHeaders: options?.headers,
       });
       const messages = buildParams(context);
 
@@ -67,6 +88,7 @@ export function stream(
       });
 
       let currentText = "";
+      let stopReason: StopReason = "stop";
       const partialMsg: AssistantMessage = {
         role: "assistant",
         content: [],
@@ -77,7 +99,11 @@ export function stream(
       eventStream.push({ type: "start", partial: partialMsg });
 
       for await (const chunk of response) {
-        const delta = chunk.choices[0]?.delta?.content || "";
+        const choice = chunk.choices[0];
+        if (choice?.finish_reason != null) {
+          stopReason = mapOpenAIFinishReason(choice.finish_reason);
+        }
+        const delta = choice?.delta?.content || "";
         if (delta) {
           currentText += delta;
           partialMsg.content = [{ type: "text", text: currentText }];
@@ -85,7 +111,8 @@ export function stream(
         }
       }
 
-      eventStream.push({ type: "done", reason: "stop", message: partialMsg });
+      partialMsg.stopReason = stopReason;
+      eventStream.push({ type: "done", reason: stopReason, message: partialMsg });
       eventStream.end();
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : String(error);

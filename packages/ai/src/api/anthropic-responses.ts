@@ -1,6 +1,25 @@
 import Anthropic from "@anthropic-ai/sdk";
-import type { AssistantMessage, Context, Model, StreamOptions } from "@/types";
+import type { AssistantMessage, Context, Model, StopReason, StreamOptions } from "@/types";
 import { AssistantMessageEventStream } from "@/utils/event-stream";
+
+export type AnthropicRawStopReason =
+  | Anthropic.RawMessageDeltaEvent.Delta["stop_reason"]
+  | (string & {});
+
+export function mapAnthropicStopReason(
+  reason: AnthropicRawStopReason | null | undefined,
+): StopReason {
+  switch (reason) {
+    case "max_tokens":
+      return "length";
+    case "tool_use":
+      return "toolUse";
+    case "refusal":
+      return "error";
+    default:
+      return "stop";
+  }
+}
 
 export function buildParams(context: Context): Anthropic.MessageParam[] {
   const messages: Anthropic.MessageParam[] = [];
@@ -49,6 +68,7 @@ export function stream(
       const client = new Anthropic({
         apiKey,
         baseURL: options?.baseURL,
+        defaultHeaders: options?.headers,
       });
       const messages = buildParams(context);
 
@@ -62,6 +82,7 @@ export function stream(
       });
 
       let currentText = "";
+      let stopReason: StopReason = "stop";
       const partialMsg: AssistantMessage = {
         role: "assistant",
         content: [],
@@ -77,8 +98,13 @@ export function stream(
           currentText += delta;
           partialMsg.content = [{ type: "text", text: currentText }];
           eventStream.push({ type: "text_delta", delta, partial: partialMsg });
+        } else if (chunk.type === "message_delta") {
+          if (chunk.delta.stop_reason != null) {
+            stopReason = mapAnthropicStopReason(chunk.delta.stop_reason);
+          }
         } else if (chunk.type === "message_stop") {
-          eventStream.push({ type: "done", reason: "stop", message: partialMsg });
+          partialMsg.stopReason = stopReason;
+          eventStream.push({ type: "done", reason: stopReason, message: partialMsg });
         }
       }
 

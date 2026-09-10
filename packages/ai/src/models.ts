@@ -7,6 +7,7 @@ export interface Provider {
   name: string;
   baseUrl?: string;
   auth: ProviderAuth;
+  headers?: Record<string, string> | (() => Record<string, string>);
   getModels(): readonly Model[];
   stream(model: Model, context: Context, options?: StreamOptions): AssistantMessageEventStream;
 }
@@ -22,6 +23,7 @@ export interface CreateProviderOptions {
   auth: ProviderAuth;
   models: readonly Model[];
   api: ProviderStreams;
+  headers?: Record<string, string> | (() => Record<string, string>);
 }
 
 export function createProvider(input: CreateProviderOptions): Provider {
@@ -30,13 +32,24 @@ export function createProvider(input: CreateProviderOptions): Provider {
     name: input.name ?? input.id,
     baseUrl: input.baseUrl,
     auth: input.auth,
+    headers: input.headers,
     getModels: () => input.models,
     stream: (model, context, options) => {
       const apiKey = options?.apiKey ?? input.auth.apiKey?.resolve();
-      const mergedOptions = {
+      const providerHeaders = typeof input.headers === "function" ? input.headers() : input.headers;
+      const mergedHeaders =
+        providerHeaders || options?.headers
+          ? {
+              ...providerHeaders,
+              ...options?.headers,
+            }
+          : undefined;
+
+      const mergedOptions: StreamOptions = {
         ...options,
         apiKey,
         baseURL: options?.baseURL ?? input.baseUrl,
+        headers: mergedHeaders,
       };
 
       return input.api.stream(model, context, mergedOptions);

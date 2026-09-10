@@ -7,7 +7,7 @@ system to one provider.
 
 **Model Provider**:
 A service that fulfills model requests. The MVP providers are Anthropic, OpenRouter, OpenAI,
-Google, and xAI.
+Google, xAI, and OpenCode (OpenCode Zen).
 _Avoid_: LLM vendor, backend
 
 **Model Interaction**:

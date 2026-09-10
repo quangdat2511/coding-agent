@@ -10,6 +10,10 @@ export function openrouterProvider(): Provider {
     name: "OpenRouter",
     baseUrl: "https://openrouter.ai/api/v1",
     auth: { apiKey: envApiKeyAuth("OpenRouter API key", ["OPENROUTER_API_KEY"]) },
+    headers: {
+      "HTTP-Referer": "https://github.com/quangdat2511/coding-agent",
+      "X-Title": "Coding Agent",
+    },
     models: OPENROUTER_MODELS as unknown as Model[],
     api: { stream },
   });
