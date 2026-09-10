@@ -1,4 +1,3 @@
-import tty from "node:tty";
 import { Box, render, Text, useApp, useInput, useStdout } from "ink";
 import { useEffect, useRef, useState } from "react";
 import type { SpikeController, SpikeKey } from "@/controller";
@@ -11,8 +10,6 @@ import {
 } from "@/view/document";
 import { A, paint, truncate } from "@/view/theme";
 
-const ALT_SCREEN_ON = "\x1b[?1049h\x1b[2J\x1b[H";
-const ALT_SCREEN_OFF = "\x1b[?1049l";
 const FRAME_INTERVAL_MS = 16;
 
 interface AppProps {
@@ -97,7 +94,6 @@ function App({ controller, finish }: AppProps) {
   const { exit } = useApp();
   const { stdout } = useStdout();
   const [, bump] = useState(0);
-  const frameStart = useRef(0);
   const lastSize = useRef("");
 
   const width = stdout.columns ?? 80;
@@ -134,12 +130,6 @@ function App({ controller, finish }: AppProps) {
     }
   });
 
-  frameStart.current = performance.now();
-  useEffect(() => {
-    controller.metrics.frames += 1;
-    controller.metrics.frameMs.push(performance.now() - frameStart.current);
-  });
-
   const layout = controller.config.layout;
   const railWidth = layout === "split" ? Math.min(34, Math.max(24, Math.floor(width * 0.3))) : 0;
   const transcriptWidth = layout === "split" ? Math.max(20, width - railWidth - 1) : width;
@@ -156,41 +146,51 @@ function App({ controller, finish }: AppProps) {
     : layout === "overlay" && panel.length > 0
       ? panel
       : null;
+  const overlayWidth = Math.min(width - 6, 68);
+  const overlayHeight = (overlayLines?.length ?? 0) + 3;
+  const overlayTop = Math.max(0, Math.floor((bodyHeight - overlayHeight) / 2));
+  const overlayLeft = Math.max(0, Math.floor((width - overlayWidth) / 2));
+
+  const body =
+    layout === "split" ? (
+      <Box flexDirection="row" height={bodyHeight}>
+        <Box width={transcriptWidth}>
+          <ScrollViewport lines={document} top={controller.scrollTop} height={bodyHeight} />
+        </Box>
+        <Box
+          width={railWidth}
+          borderStyle="single"
+          borderTop={false}
+          borderRight={false}
+          borderBottom={false}
+          borderColor="gray"
+        >
+          <ScrollViewport
+            lines={railDocument(controller.view, railWidth)}
+            top={0}
+            height={bodyHeight}
+          />
+        </Box>
+      </Box>
+    ) : (
+      <ScrollViewport lines={document} top={controller.scrollTop} height={bodyHeight} />
+    );
 
   return (
     <Box flexDirection="column" width={width} height={height}>
       <Header controller={controller} width={width} />
-      {overlayLines ? (
-        <Box height={bodyHeight} justifyContent="center" alignItems="center">
-          <Panel
-            lines={overlayLines}
-            title={controller.showHelp ? "help" : "approval"}
-            width={Math.min(width - 6, 68)}
-          />
-        </Box>
-      ) : layout === "split" ? (
-        <Box flexDirection="row" height={bodyHeight}>
-          <Box width={transcriptWidth}>
-            <ScrollViewport lines={document} top={controller.scrollTop} height={bodyHeight} />
-          </Box>
-          <Box
-            width={railWidth}
-            borderStyle="single"
-            borderTop={false}
-            borderRight={false}
-            borderBottom={false}
-            borderColor="gray"
-          >
-            <ScrollViewport
-              lines={railDocument(controller.view, railWidth)}
-              top={0}
-              height={bodyHeight}
+      <Box position="relative" height={bodyHeight} flexShrink={0}>
+        {body}
+        {overlayLines ? (
+          <Box position="absolute" top={overlayTop} left={overlayLeft}>
+            <Panel
+              lines={overlayLines}
+              title={controller.showHelp ? "help" : "approval"}
+              width={overlayWidth}
             />
           </Box>
-        </Box>
-      ) : (
-        <ScrollViewport lines={document} top={controller.scrollTop} height={bodyHeight} />
-      )}
+        ) : null}
+      </Box>
       {inlinePanelHeight > 0 ? (
         <Panel lines={panel.slice(1)} title={truncate(panel[0] ?? "", width - 4)} width={width} />
       ) : null}
@@ -221,23 +221,11 @@ function toSpikeKey(input: string, key: InkKey): SpikeKey {
 }
 
 export async function runInk(controller: SpikeController): Promise<void> {
-  controller.metrics.note("alternate screen entered manually; Ink has no alt-screen mode");
+  controller.metrics.note("alternate screen and terminal suspension are provided by Ink 7.1.1");
   controller.metrics.note("scroll viewport is project-owned; Ink ships none (ink#773)");
-  controller.metrics.note("needs a fresh tty.ReadStream(0); Ink cannot revive a paused stdin");
   if (controller.config.layout === "overlay") {
-    controller.metrics.note("overlay is a centered flex panel; Ink cannot composite over content");
+    controller.metrics.note("approval uses Ink absolute positioning over the transcript");
   }
-
-  // Ink reads stdin through a 'readable' listener and never resumes the stream. On Bun a
-  // stdin that a previous owner paused stays dead for that path, so Ink gets its own handle.
-  let input: tty.ReadStream | null = null;
-  try {
-    input = new tty.ReadStream(0);
-  } catch {
-    controller.metrics.note("tty.ReadStream(0) unavailable; fell back to process.stdin");
-  }
-
-  process.stdout.write(ALT_SCREEN_ON);
   let finished = false;
   const finish = (): void => {
     if (finished) return;
@@ -246,14 +234,18 @@ export async function runInk(controller: SpikeController): Promise<void> {
   };
 
   const instance = render(<App controller={controller} finish={finish} />, {
+    alternateScreen: true,
     exitOnCtrlC: false,
+    incrementalRendering: true,
+    maxFps: 60,
+    onRender: ({ renderTime }) => {
+      controller.metrics.frames += 1;
+      controller.metrics.frameMs.push(renderTime);
+    },
     patchConsole: false,
-    ...(input ? { stdin: input as unknown as NodeJS.ReadStream } : {}),
   });
 
   await instance.waitUntilExit();
   finish();
-  instance.clear();
-  input?.unref();
-  process.stdout.write(ALT_SCREEN_OFF);
+  instance.cleanup();
 }
