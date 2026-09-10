@@ -3,7 +3,8 @@
   "compilerOptions": {
     "paths": {
       "@/*": ["./src/*"],
-      "@examples/*": ["./examples/*"]
+      "@examples/*": ["./examples/*"],
+      "@tests/*": ["./tests/*"]
     }
   },
   "include": ["src/**/*", "tests/**/*", "examples/**/*"]

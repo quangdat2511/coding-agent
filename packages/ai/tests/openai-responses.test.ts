@@ -1,5 +1,6 @@
 import { describe, expect, it, mock } from "bun:test";
-import type { AssistantMessageEvent, Context, Model } from "@/types";
+import { collectDoneEvent } from "@tests/test-utils";
+import type { Context, Model } from "@/types";
 
 type OpenAIStreamChunk = {
   choices: Array<{
@@ -51,17 +52,6 @@ describe("mapOpenAIFinishReason", () => {
     expect(mapOpenAIFinishReason("unknown")).toBe("stop");
   });
 });
-
-async function collectDoneEvent(
-  eventStream: AsyncIterable<AssistantMessageEvent>,
-): Promise<Extract<AssistantMessageEvent, { type: "done" }>> {
-  for await (const event of eventStream) {
-    if (event.type === "done") {
-      return event;
-    }
-  }
-  throw new Error("Stream completed without a 'done' event");
-}
 
 describe("OpenAI stream finishReason handling", () => {
   const model: Model = { id: "gpt-4o", name: "GPT-4o", provider: "openai" };

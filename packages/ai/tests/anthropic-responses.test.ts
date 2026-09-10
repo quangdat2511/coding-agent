@@ -1,5 +1,6 @@
 import { describe, expect, it, mock } from "bun:test";
-import type { AssistantMessageEvent, Context, Model } from "@/types";
+import { collectDoneEvent } from "@tests/test-utils";
+import type { Context, Model } from "@/types";
 
 type AnthropicStreamChunk =
   | {
@@ -58,17 +59,6 @@ describe("mapAnthropicStopReason", () => {
     expect(mapAnthropicStopReason("other_reason")).toBe("stop");
   });
 });
-
-async function collectDoneEvent(
-  eventStream: AsyncIterable<AssistantMessageEvent>,
-): Promise<Extract<AssistantMessageEvent, { type: "done" }>> {
-  for await (const event of eventStream) {
-    if (event.type === "done") {
-      return event;
-    }
-  }
-  throw new Error("Stream completed without a 'done' event");
-}
 
 describe("Anthropic stream stopReason handling", () => {
   const model: Model = {
