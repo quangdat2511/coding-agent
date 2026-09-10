@@ -118,7 +118,7 @@ When calling `models.stream()`, the returned object is an `AssistantMessageEvent
 - **`ModelsImpl`**: Acts as a registry holding all available providers.
 
 ```typescript
-// Built-in providers include: openai, google, anthropic, openrouter, xai
+// Built-in providers include: openai, google, anthropic, openrouter, xai, opencode
 const models = builtinModels(); 
 
 // Registering a custom provider

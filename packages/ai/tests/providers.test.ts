@@ -53,11 +53,11 @@ describe("Built-in Providers & Registry", () => {
       }
     });
 
-    it("should contain 45 models adhering to Model interface", () => {
+    it("should contain 35 models adhering to Model interface", () => {
       const provider = opencodeProvider();
       const models = provider.getModels();
 
-      expect(models.length).toBe(45);
+      expect(models.length).toBe(35);
       for (const model of models) {
         expect(model.id).toBeTruthy();
         expect(model.name).toBeTruthy();
@@ -65,7 +65,6 @@ describe("Built-in Providers & Registry", () => {
       }
 
       const modelIds = new Set(models.map((m) => m.id));
-      expect(modelIds.has("claude-sonnet-4-5")).toBe(true);
       expect(modelIds.has("deepseek-v4-flash")).toBe(true);
       expect(modelIds.has("gpt-5")).toBe(true);
       expect(modelIds.has("qwen3.6-plus")).toBe(true);
@@ -116,9 +115,9 @@ describe("Built-in Providers & Registry", () => {
     it("should find models across providers", () => {
       const models = builtinModels();
 
-      const opencodeModel = models.getModel("opencode", "claude-sonnet-4-5");
+      const opencodeModel = models.getModel("opencode", "gpt-5");
       expect(opencodeModel).toBeDefined();
-      expect(opencodeModel?.name).toBe("Claude Sonnet 4.5");
+      expect(opencodeModel?.name).toBe("GPT-5");
 
       const openaiModel = models.getModel("openai", "gpt-4o");
       expect(openaiModel).toBeDefined();
