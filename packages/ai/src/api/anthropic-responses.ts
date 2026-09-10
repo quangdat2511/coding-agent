@@ -68,6 +68,7 @@ export function stream(
       const client = new Anthropic({
         apiKey,
         baseURL: options?.baseURL,
+        defaultHeaders: options?.headers,
       });
       const messages = buildParams(context);
 

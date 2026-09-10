@@ -161,4 +161,69 @@ describe("createProvider", () => {
     expect(capturedOptions?.baseURL).toBe("https://override.example.com");
     expect(await capturedOptions?.apiKey).toBe("custom-override-key");
   });
+
+  it("should merge static provider headers with caller headers during stream", () => {
+    let capturedOptions: StreamOptions | undefined;
+
+    const provider = createProvider({
+      id: "header-provider",
+      auth: {},
+      headers: {
+        "X-Provider-Header": "provider-default",
+        "X-Shared-Header": "from-provider",
+      },
+      models: [],
+      api: {
+        stream: (_model, _context, options) => {
+          capturedOptions = options;
+          return createAssistantMessageEventStream();
+        },
+      },
+    });
+
+    const dummyModel: Model = { id: "m", name: "m", provider: "header-provider" };
+    const dummyContext: Context = { messages: [] };
+
+    provider.stream(dummyModel, dummyContext, {
+      headers: {
+        "X-Caller-Header": "caller-value",
+        "X-Shared-Header": "from-caller",
+      },
+    });
+
+    expect(capturedOptions?.headers).toEqual({
+      "X-Provider-Header": "provider-default",
+      "X-Caller-Header": "caller-value",
+      "X-Shared-Header": "from-caller",
+    });
+  });
+
+  it("should resolve dynamic header functions per stream call", () => {
+    let callCount = 0;
+    let capturedOptions: StreamOptions | undefined;
+
+    const provider = createProvider({
+      id: "dynamic-header-provider",
+      auth: {},
+      headers: () => ({
+        "X-Request-Id": `req-${++callCount}`,
+      }),
+      models: [],
+      api: {
+        stream: (_model, _context, options) => {
+          capturedOptions = options;
+          return createAssistantMessageEventStream();
+        },
+      },
+    });
+
+    const dummyModel: Model = { id: "m", name: "m", provider: "dynamic-header-provider" };
+    const dummyContext: Context = { messages: [] };
+
+    provider.stream(dummyModel, dummyContext);
+    expect(capturedOptions?.headers?.["X-Request-Id"]).toBe("req-1");
+
+    provider.stream(dummyModel, dummyContext);
+    expect(capturedOptions?.headers?.["X-Request-Id"]).toBe("req-2");
+  });
 });

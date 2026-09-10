@@ -71,6 +71,45 @@ describe("Built-in Providers & Registry", () => {
       expect(modelIds.has("qwen3.6-plus")).toBe(true);
       expect(modelIds.has("big-pickle")).toBe(true);
     });
+
+    it("should configure dynamic x-session-id in headers", () => {
+      const provider = opencodeProvider();
+      expect(typeof provider.headers).toBe("function");
+
+      const headersFn = provider.headers as () => Record<string, string>;
+      const h1 = headersFn();
+      const h2 = headersFn();
+
+      expect(h1["x-session-id"]).toBeDefined();
+      expect(h2["x-session-id"]).toBeDefined();
+      expect(h1["x-session-id"]).not.toBe(h2["x-session-id"]);
+    });
+
+    it("should respect OPENCODE_SESSION_ID when set", () => {
+      const originalSession = process.env.OPENCODE_SESSION_ID;
+      try {
+        process.env.OPENCODE_SESSION_ID = "custom-session-123";
+        const provider = opencodeProvider();
+        const headersFn = provider.headers as () => Record<string, string>;
+        expect(headersFn()["x-session-id"]).toBe("custom-session-123");
+      } finally {
+        if (originalSession === undefined) {
+          delete process.env.OPENCODE_SESSION_ID;
+        } else {
+          process.env.OPENCODE_SESSION_ID = originalSession;
+        }
+      }
+    });
+  });
+
+  describe("openrouterProvider", () => {
+    it("should configure default HTTP-Referer and X-Title headers", () => {
+      const provider = openrouterProvider();
+      expect(provider.headers).toEqual({
+        "HTTP-Referer": "https://github.com/quangdat2511/coding-agent",
+        "X-Title": "Coding Agent",
+      });
+    });
   });
 
   describe("builtinModels registry", () => {

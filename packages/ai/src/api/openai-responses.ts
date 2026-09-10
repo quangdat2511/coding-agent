@@ -75,6 +75,7 @@ export function stream(
       const client = new OpenAI({
         apiKey,
         baseURL: options?.baseURL,
+        defaultHeaders: options?.headers,
       });
       const messages = buildParams(context);
 

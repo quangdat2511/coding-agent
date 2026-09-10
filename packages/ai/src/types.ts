@@ -36,6 +36,7 @@ export interface StreamOptions {
   maxTokens?: number;
   apiKey?: string | Promise<string | undefined>;
   baseURL?: string;
+  headers?: Record<string, string>;
 }
 
 export type AssistantMessageEvent =

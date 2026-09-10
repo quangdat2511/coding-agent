@@ -6,6 +6,7 @@ export const DEFAULT_MODELS: Record<string, string> = {
   google: "gemini-3.6-flash",
   openai: "gpt-4o",
   anthropic: "claude-sonnet-4-5",
+  opencode: "big-pickle",
   openrouter: "openai/gpt-4o",
   xai: "grok-beta",
 };

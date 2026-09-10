@@ -10,6 +10,9 @@ export function opencodeProvider(): Provider {
     name: "OpenCode Zen",
     baseUrl: "https://opencode.ai/zen/v1",
     auth: { apiKey: envApiKeyAuth("OpenCode API key", ["OPENCODE_API_KEY"]) },
+    headers: () => ({
+      "x-session-id": process.env.OPENCODE_SESSION_ID || crypto.randomUUID(),
+    }),
     models: OPENCODE_MODELS as unknown as Model[],
     api: { stream },
   });
