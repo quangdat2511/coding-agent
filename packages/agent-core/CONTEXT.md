@@ -21,6 +21,14 @@ _Avoid_: Function call, command
 An explicit human decision that allows or rejects a proposed action before it executes.
 _Avoid_: Confirmation, permission flag
 
+**Approval Policy**:
+The rule set determining whether a proposed mutating action requires human review or executes automatically.
+_Avoid_: Permission mode, security level, bypass flag
+
+**Tool Result**:
+The normalized outcome returned to the model and runtime after a Tool Call executes, is rejected, or fails.
+_Avoid_: Command output, execution response
+
 **Verification**:
 Evidence gathered after a change to determine whether the Coding Task's result is valid.
 _Avoid_: Testing, validation
