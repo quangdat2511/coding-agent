@@ -144,17 +144,19 @@ ready
 streaming_model
   -> awaiting_approval       valid mutating Tool Call under the interactive policy
   -> executing_tool          valid automatically allowed Tool Call
+  -> streaming_model         all queued calls resolve during preflight
   -> verifying               Candidate Completion
   -> failed                  fatal model/protocol/internal failure or exhausted limit
 
 awaiting_approval
-  -> executing_tool          allow
-  -> next queued Tool Call   deny becomes a Tool Result
-  -> streaming_model         deny completes the final queued Tool Call
+  -> awaiting_approval       deny, then the next queued call requires Approval
+  -> executing_tool          allow, or deny followed by an automatically allowed call
+  -> streaming_model         deny, then no queued call remains
 
 executing_tool
-  -> next queued Tool Call   current Tool Call completes
-  -> streaming_model         final queued Tool Call completes
+  -> awaiting_approval       current call completes, then the next call requires Approval
+  -> executing_tool          current call completes, then the next call is automatically allowed
+  -> streaming_model         current call completes, then no queued call remains
 
 verifying
   -> succeeded               Verification policy returns succeed
@@ -169,6 +171,11 @@ cancelling
   -> cancelled               active effect and queued work quiesce
   -> failed                  cancellation grace expires
 ```
+
+Each queued call repeats preflight and Approval Policy evaluation before either transition. A
+mutating call can reach `executing_tool` only after an interactive allow decision or policy
+auto-approval. The `awaiting_approval` and `executing_tool` self-transitions replace the active
+phase data with the next Tool Call; they never reuse the previous call's Approval.
 
 Terminal states have no outgoing transitions. Schema Validation, repository-bound preflight,
 Approval Policy evaluation, Tool Result recording, and selection of the next queued Tool Call are
@@ -394,18 +401,18 @@ Payloads contain the minimum immutable semantic data:
 | `model_turn_started` | Model Turn ID/index and model identity |
 | `assistant_message_started` | Model Turn and Assistant Message IDs |
 | `assistant_content_delta` | Message/block IDs, displayable content kind, and delta |
-| `assistant_message_completed` | Message ID, `completed | failed | cancelled`, final or partial message, optional failure |
+| `assistant_message_completed` | Message ID, `completed \| failed \| cancelled`, final or partial message, optional failure |
 | `tool_call_queued` | Model Turn ID, queue index, normalized Tool Call |
 | `approval_requested` | Approval ID, Tool Call ID, mutation summary, policy |
-| `approval_resolved` | IDs, `allowed | denied | auto_approved | cancelled`, `decidedBy: "user" | "policy"`, optional reason |
+| `approval_resolved` | IDs, `allowed \| denied \| auto_approved \| cancelled`, `decidedBy: "user" \| "policy"`, optional reason |
 | `tool_execution_started` | Tool Call ID and start metadata |
 | `tool_execution_progress` | Tool Call ID and bounded progress update |
-| `tool_call_completed` | Tool Call ID, `succeeded | failed | denied | cancelled | skipped`, optional Tool Result |
+| `tool_call_completed` | Tool Call ID, `succeeded \| failed \| denied \| cancelled \| skipped`, optional Tool Result |
 | `candidate_completion_detected` | Model Turn and Assistant Message IDs |
-| `model_turn_completed` | Model Turn ID, `completed | failed | cancelled`, usage, optional failure |
+| `model_turn_completed` | Model Turn ID, `completed \| failed \| cancelled`, usage, optional failure |
 | `verification_started` | Verification ID and Candidate Completion reference |
 | `verification_progress` | Verification ID and bounded evidence/progress update |
-| `verification_completed` | Verification ID, `succeeded | continue | failed | cancelled`, evidence, optional feedback |
+| `verification_completed` | Verification ID, `succeeded \| continue \| failed \| cancelled`, evidence, optional feedback |
 | `cancellation_requested` | reason and state from which cancellation was requested |
 | `runtime_limit_reached` | limit kind, configured limit, and observed value |
 | `session_settled` | Agent Result |
