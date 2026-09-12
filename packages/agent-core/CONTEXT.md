@@ -25,6 +25,10 @@ _Avoid_: Confirmation, permission flag
 The rule set determining whether a proposed mutating action requires human review or executes automatically.
 _Avoid_: Permission mode, security level, bypass flag
 
+**Schema Validation**:
+Checking model-supplied tool arguments against a declared parameter schema before invocation. This is distinct from post-change Verification.
+_Avoid_: Verification, testing
+
 **Tool Result**:
 The normalized outcome returned to the model and runtime after a Tool Call executes, is rejected, or fails.
 _Avoid_: Command output, execution response
