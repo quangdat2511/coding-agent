@@ -23,6 +23,11 @@ Agent State is the authoritative current snapshot. A deterministic reducer is th
 commits state transitions. Session Events are immutable observations emitted after a transition
 commits; they are not commands and do not form an event-sourcing or replay contract.
 
+This ADR standardizes the Approval state as `awaiting_approval`, replacing the working name
+`PENDING_APPROVAL` in the earlier
+[tool-contract and safety decision](./0001-tool-contracts-and-safety-policy.md). This is a
+terminology refinement, not a change to Approval behavior.
+
 The Agent Session interface has four operations:
 
 ```typescript
@@ -51,6 +56,47 @@ type CommandResult =
       message: string;
     };
 ```
+
+The public types above and the terminal result below depend on these minimum shapes:
+
+```typescript
+type JsonValue =
+  | null
+  | boolean
+  | number
+  | string
+  | readonly JsonValue[]
+  | { readonly [key: string]: JsonValue };
+
+interface CodingTask {
+  objective: string;
+}
+
+interface UsageTotals {
+  inputTokens: number;
+  outputTokens: number;
+  cachedInputTokens?: number;
+  reasoningTokens?: number;
+}
+
+interface AgentFailure {
+  code: AgentFailureCode;
+  message: string;
+  details?: Readonly<Record<string, JsonValue>>;
+}
+
+interface VerificationSummary {
+  outcome: "succeeded" | "continue" | "failed" | "cancelled";
+  evidence: readonly Readonly<Record<string, JsonValue>>[];
+}
+```
+
+`repoRoot` is construction configuration rather than part of the Coding Task and is validated
+before the session reaches `ready`. The exact exported type organization belongs to
+[Define package APIs and dependency direction](https://datn-fit-hcmus.atlassian.net/browse/CDA-20),
+while the evidence records and feedback representation belong to
+[Define MVP context, planning, verification, and session memory](https://datn-fit-hcmus.atlassian.net/browse/CDA-23).
+The shapes above are the minimum semantics those decisions must preserve.
 
 All commands pass through one serialized internal queue. `start` is accepted once. An Approval
 command must name the currently pending Approval. A repeated cancellation while cancelling or
@@ -152,6 +198,11 @@ failures become structured error Tool Results. They are appended to the transcri
 self-correct. They do not fail the Agent Session unless the consecutive-recoverable-failure limit
 is exhausted. Remaining calls in the same batch continue in order.
 
+A denial or recoverable Tool Result never skips later calls. `skipped` is reserved for a queued but
+unstarted Tool Call when the session begins terminating, such as after cancellation, a fatal
+failure, or an exhausted limit. A skipped call records the session-ending reason and has no Tool
+Result because no later Model Turn will occur.
+
 An in-progress Assistant Message lives outside the canonical transcript. Renderable text and
 explicitly displayable reasoning update that partial message. Opaque provider reasoning is retained
 for provider round-tripping but is not published as displayable content. Tool Call argument
@@ -188,6 +239,11 @@ Agent Core enforces injected limits for:
 The earlier idea of "non-progress turns" is rejected because Agent Core cannot infer semantic
 progress deterministically. Consecutive recoverable failures are measurable: the counter increments
 for each error Tool Result and resets after a successful Tool Result.
+
+Verification `continue` does not increment the recoverable-failure counter. It always starts a new
+Model Turn, so `maxModelTurns` and maximum active execution duration already bound repeated
+Candidate Completion and Verification cycles. A separate `maxVerificationAttempts` limit is
+deliberately excluded from the MVP as redundant configuration.
 
 Active execution time includes model streaming, Tool Call execution, and Verification. It excludes
 `ready` and human time in `awaiting_approval`. Cancellation uses its own injected grace period.
@@ -257,7 +313,8 @@ active model, tool, or Verification adapter through its `AbortSignal`.
 
 - With no active effect, the session quiesces synchronously.
 - A pending Approval resolves as cancelled.
-- The active and remaining queued Tool Calls receive terminal cancelled outcomes in model order.
+- The active Tool Call receives a cancelled outcome; queued but unstarted Tool Calls receive
+  skipped outcomes in model order.
 - A partial Assistant Message and its Model Turn complete with cancelled outcomes.
 - An active Verification run completes with a cancelled outcome.
 - Provider-side computation or billing may continue when that provider lacks native cancellation;
@@ -340,7 +397,7 @@ Payloads contain the minimum immutable semantic data:
 | `assistant_message_completed` | Message ID, `completed | failed | cancelled`, final or partial message, optional failure |
 | `tool_call_queued` | Model Turn ID, queue index, normalized Tool Call |
 | `approval_requested` | Approval ID, Tool Call ID, mutation summary, policy |
-| `approval_resolved` | IDs, `allowed | denied | auto_approved | cancelled`, actor, optional reason |
+| `approval_resolved` | IDs, `allowed | denied | auto_approved | cancelled`, `decidedBy: "user" | "policy"`, optional reason |
 | `tool_execution_started` | Tool Call ID and start metadata |
 | `tool_execution_progress` | Tool Call ID and bounded progress update |
 | `tool_call_completed` | Tool Call ID, `succeeded | failed | denied | cancelled | skipped`, optional Tool Result |
