@@ -13,6 +13,30 @@ _Avoid_: Prompt, chat, job
 The in-memory lifecycle that executes exactly one Coding Task.
 _Avoid_: Conversation, persistent session
 
+**Model Turn**:
+One model request and streamed response together with the resolution of every Tool Call produced
+by that response.
+_Avoid_: Message, prompt, loop iteration
+
+**Agent State**:
+The authoritative current snapshot of an Agent Session, including its lifecycle, transcript,
+active work, and outcome.
+_Avoid_: Runtime state, UI state, event log
+
+**Session Event**:
+An ordered observation that a committed change occurred within an Agent Session.
+_Avoid_: Provider event, UI event, replay command
+
+**Candidate Completion**:
+A model response with no Tool Calls that proposes the Coding Task is finished but has not yet
+passed Verification.
+_Avoid_: Final answer, successful result
+
+**Agent Result**:
+The single terminal outcome of an Agent Session, including its completion status and supporting
+evidence or failure reason.
+_Avoid_: Exit code, final message, summary
+
 **Tool Call**:
 A model request to invoke one controlled agent capability.
 _Avoid_: Function call, command

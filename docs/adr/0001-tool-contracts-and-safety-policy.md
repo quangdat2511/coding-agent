@@ -56,11 +56,16 @@ All filesystem operations must remain strictly bounded to the active repository 
 - Tools are categorized by mutation impact:
   - **Read-only**: `read` is automatically approved and executed without user intervention.
   - **Mutating**: `write`, `edit`, and `bash` require explicit approval.
-- Agent Core models approval as a first-class lifecycle state (`PENDING_APPROVAL`).
+- Agent Core models approval as the first-class `awaiting_approval` lifecycle state. The later
+  [Agent Session state-machine decision](./0002-agent-session-state-machine-and-event-protocol.md)
+  standardizes the earlier working name `PENDING_APPROVAL`; the behavior is unchanged.
 - Agent Core exposes an `ApprovalPolicy` contract:
-  - `"ask"` (default): Used by interactive CLI/TUI interfaces, yielding execution to human decision (`ALLOW` or `DENY`).
+  - `"ask"` (default): Used by interactive CLI/TUI interfaces, yielding execution to human
+    decision (`allow` or `deny`).
   - `"auto-approve"`: Used exclusively in isolated execution harnesses (such as automated TerminalBench benchmark runs).
-- When a human selects `DENY`, Agent Core returns a `ToolResult` with `isError: true` and `error.code: "APPROVAL_DENIED"`, containing user feedback to allow model adaptation, alongside an explicit emergency session abort option.
+- When a human selects `deny`, Agent Core returns a `ToolResult` with `isError: true` and
+  `error.code: "APPROVAL_DENIED"`, containing user feedback to allow model adaptation, alongside
+  an explicit emergency session abort option.
 
 ### 5. Partial Changes and Atomicity Invariants
 
