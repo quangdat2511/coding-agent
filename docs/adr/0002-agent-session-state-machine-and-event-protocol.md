@@ -205,10 +205,12 @@ failures become structured error Tool Results. They are appended to the transcri
 self-correct. They do not fail the Agent Session unless the consecutive-recoverable-failure limit
 is exhausted. Remaining calls in the same batch continue in order.
 
-A denial or recoverable Tool Result never skips later calls. `skipped` is reserved for a queued but
-unstarted Tool Call when the session begins terminating, such as after cancellation, a fatal
-failure, or an exhausted limit. A skipped call records the session-ending reason and has no Tool
-Result because no later Model Turn will occur.
+A denial or recoverable Tool Result never skips later calls. `tool_execution_started` is the
+execution boundary: a Tool Call without that event is unstarted. `cancelled` is reserved for a call
+that crossed that boundary and was aborted; `skipped` is reserved for an unstarted Tool Call when
+the session begins terminating, such as after cancellation, a fatal failure, or an exhausted limit.
+A skipped call records the session-ending reason and has no Tool Result because no later Model Turn
+will occur.
 
 An in-progress Assistant Message lives outside the canonical transcript. Renderable text and
 explicitly displayable reasoning update that partial message. Opaque provider reasoning is retained
@@ -319,9 +321,12 @@ An accepted cancellation enters `cancelling` immediately, schedules no new work,
 active model, tool, or Verification adapter through its `AbortSignal`.
 
 - With no active effect, the session quiesces synchronously.
-- A pending Approval resolves as cancelled.
-- The active Tool Call receives a cancelled outcome; queued but unstarted Tool Calls receive
-  skipped outcomes in model order.
+- A pending Approval resolves as cancelled with `decidedBy: "user"`, because the accepted `cancel`
+  command is the user's decision to terminate the session.
+- The Tool Call associated with that pending Approval has not emitted `tool_execution_started`, so
+  it receives a skipped outcome, not a cancelled outcome, and has no Tool Result.
+- An executing Tool Call receives a cancelled outcome; any later queued, unstarted Tool Calls
+  receive skipped outcomes in model order.
 - A partial Assistant Message and its Model Turn complete with cancelled outcomes.
 - An active Verification run completes with a cancelled outcome.
 - Provider-side computation or billing may continue when that provider lacks native cancellation;
