@@ -65,8 +65,9 @@ those suites are exactly what can be written concurrently.
 Each slice below is sized to one ticket. This record carries no dates: scheduling belongs to the
 tracker, and a sprint boundary moving is not a change to this decision.
 
-An arrow into a join means the join needs that slice, not that the join unlocks later work: the
-tracks keep running past a join they have already fed.
+Node prefixes name the track: A is Agent Core, B is Tools, C is Terminal UI, D is Coding Agent,
+E is provider breadth, F is evaluation. An arrow into a join means the join needs that slice, not
+that the join unlocks later work: the tracks keep running past a join they have already fed.
 
 ```mermaid
 flowchart LR
@@ -77,31 +78,12 @@ flowchart LR
   T1["Tier 1<br/>MVP feature-complete"]
   T2["Tier 2<br/>MVP evaluated"]
   X30["CDA-30<br/>provider and model"]
-
-  subgraph TA["Track A: Agent Core"]
-    A1["A1 ports and<br/>construction"] --> A2["A2 loop core"] --> A3["A3 approval"] --> A4["A4 cancellation<br/>and limits"]
-  end
-
-  subgraph TB["Track B: Tools"]
-    B1["B1 workspace<br/>and read"] --> B2["B2 write<br/>and edit"] --> B3["B3 bash with<br/>scrubbed env"] --> B4["B4 verification<br/>runner"]
-  end
-
-  subgraph TC["Track C: Terminal UI"]
-    C1["C1 renderer and<br/>virtualization"] --> C2["C2 approval<br/>overlay"]
-  end
-
-  subgraph TD["Track D: Coding Agent"]
-    D1["D1 CLI and<br/>ModelPort"] --> D2["D2 non-dumpable and<br/>ancestor check"] --> D3["D3 files and<br/>exit codes"] --> D4["D4 projection"]
-  end
-
-  subgraph TE["Track E: provider breadth"]
-    E1["Anthropic, OpenRouter,<br/>OpenAI, xAI"]
-  end
-
-  subgraph TF["Track F: evaluation"]
-    F1["F1 artifact build"] --> F2["F2 adapter and<br/>uv CI job"] --> F3["F3 oracle job"]
-  end
-
+  A1["A1 ports and<br/>construction"] --> A2["A2 loop core"] --> A3["A3 approval"] --> A4["A4 cancellation<br/>and limits"]
+  B1["B1 workspace<br/>and read"] --> B2["B2 write<br/>and edit"] --> B3["B3 bash with<br/>scrubbed env"] --> B4["B4 verification<br/>runner"]
+  C1["C1 renderer and<br/>virtualization"] --> C2["C2 approval<br/>overlay"]
+  D1["D1 CLI and<br/>ModelPort"] --> D2["D2 non-dumpable and<br/>ancestor check"] --> D3["D3 files and<br/>exit codes"] --> D4["D4 projection"]
+  E1["E Anthropic, OpenRouter,<br/>OpenAI, xAI"]
+  F1["F1 artifact build"] --> F2["F2 adapter and<br/>uv CI job"] --> F3["F3 oracle job"]
   S0 --> J1
   J1 --> A1
   J1 --> C1
@@ -109,11 +91,9 @@ flowchart LR
   J1 --> E1
   A1 -->|ports| B1
   D3 -->|CLI contract| F1
-
   A2 --> J2
   B1 --> J2
   D1 --> J2
-
   A3 --> J3
   A4 --> J3
   B2 --> J3
@@ -121,7 +101,6 @@ flowchart LR
   B4 --> J3
   C2 --> J3
   D4 --> J3
-
   J2 --> T1
   J3 --> T1
   E1 --> T1
