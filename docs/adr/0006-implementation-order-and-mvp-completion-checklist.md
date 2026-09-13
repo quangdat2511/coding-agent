@@ -239,9 +239,16 @@ something works.
 
 ### 7. Tier 2: MVP evaluated
 
-Tier 2 is the recorded benchmark result. It is separate because its first item depends on a decision
-outside this record and its second costs paid compute, and a checklist whose final item cannot be
-scheduled cannot tell the team when to stop building.
+Tier 2 is the recorded benchmark result. It is separate because nothing in it is reached by writing
+code alone: it costs paid Modal compute and model spend, it depends on third parties the team does
+not control (Modal availability, Harbor behavior, provider rate limits), its isolation test needs a
+container on each backend a job will use, and the provider and model it runs on is still an open
+decision (item 3). Tier 1, by contrast, is entirely code and tests that run on a developer machine
+for nothing. A checklist whose final item cannot be scheduled cannot tell the team when to stop
+building, which is why the line is drawn here.
+
+The split is not a licence to treat tier 2 as optional. The map's destination names reproducible
+TerminalBench evaluation, so the MVP reaches it only when both tiers are complete.
 
 1. ADR 0005 §9 criterion 4. Its first clause is already satisfied: CDA-29 is resolved by ADR 0001 §8,
    an accepted amendment. What remains is that the evaluated artifact implements §8 and that the
