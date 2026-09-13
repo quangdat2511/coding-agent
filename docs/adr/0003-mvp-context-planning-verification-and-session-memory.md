@@ -24,7 +24,7 @@ The agent runtime minimizes upfront token ingestion while guaranteeing immediate
   1. `AGENTS.md`
   2. `CLAUDE.md`
   Discovery stops immediately upon finding the first existing file. This eliminates redundant context loading when `CLAUDE.md` is a symlink or mirror of `AGENTS.md`.
-- **Byte-Exact Size Cap**: The loaded instruction content is capped at **32 KiB (32,768 UTF-8 bytes)**. If the file exceeds this limit, the runtime truncates the content and appends `\n[...project instructions truncated...]\n`.
+- **Byte-Exact Size Cap**: Packaged project instructions are strictly capped at **32 KiB (32,768 UTF-8 bytes)**, inclusive of the truncation marker `\n[...project instructions truncated...]\n`. When raw file content exceeds 32 KiB, the runtime reserves the byte length of the marker (`markerBytes = 40`), truncates the content at the nearest valid UTF-8 code point boundary within `32,768 - markerBytes` bytes, and appends the marker. This guarantees that packaged instructions never exceed 32,768 UTF-8 bytes under any encoding scenario.
 - **Prompt Packaging**: Project instructions are wrapped in XML tags within the initial system prompt:
   ```xml
   <project_context>
@@ -50,10 +50,35 @@ Explicit planning is implemented at the model prompt layer rather than as a stat
 
 When a model turn completes without tool calls, Agent Core detects a `Candidate Completion` and enters the `verifying` state, invoking the injected `VerificationPolicy`:
 
-- **Automated Command Execution**: In environments where a verification command is provided (via task configuration, user input, or benchmark harness):
-  1. The command executes non-interactively in `repoRoot` under standard command timeout constraints.
-  2. **Byte-Exact Output Budget**: The captured command output adheres to the **40 KiB (40,960 UTF-8 bytes)** budget defined in ADR 0001. If the output exceeds 40 KiB, it is truncated with the marker `\n[...output truncated...]\n` before being recorded in evidence or injected into feedback, preventing context explosion during verbose test failures.
-  3. **Test Assertion Failures (`exitCode !== 0`)**: The policy returns `outcome: "continue"`. A structured user message containing the bounded output is injected into the next Model Turn:
+- **Automated Command Execution and Discriminated Runner Result**: In environments where a verification command is provided (via task configuration, user input, or benchmark harness), the command executes non-interactively in `repoRoot` under standard command timeout constraints. The underlying runner produces a discriminated result:
+  ```typescript
+  type VerificationRunnerResult =
+    | {
+        readonly status: "completed";
+        readonly exitCode: number;
+        readonly stdout: string;
+        readonly stderr: string;
+        readonly durationMs: number;
+      }
+    | {
+        readonly status: "timed_out";
+        readonly timeoutMs: number;
+        readonly stdout: string;
+        readonly stderr: string;
+        readonly durationMs: number;
+      }
+    | {
+        readonly status: "launch_failed";
+        readonly error: string;
+        readonly exitCode?: number; // e.g. 127 for command not found, 126 for non-executable, or shell syntax error
+        readonly durationMs: number;
+      };
+  ```
+
+  The verification policy evaluates the discriminated runner result without overlapping outcomes:
+  1. **Byte-Exact Output Budget**: Any captured stdout/stderr adheres to the **40 KiB (40,960 UTF-8 bytes)** budget defined in ADR 0001, truncating excess output with `\n[...output truncated...]\n` at valid UTF-8 code point boundaries before recording evidence or constructing feedback.
+  2. **Pass (`status === "completed"` with `exitCode === 0`)**: The policy returns `outcome: "succeeded"`, transitioning the session to `succeeded`.
+  3. **Test Assertion Failures (`status === "completed"` with `exitCode !== 0`, excluding launch errors)**: The command ran to completion but test assertions failed. The policy returns `outcome: "continue"`. A structured user message containing the bounded output is injected into the next Model Turn:
      ```text
      [Verification Failed]
      Command: {command}
@@ -62,12 +87,13 @@ When a model turn completes without tool calls, Agent Core detects a `Candidate 
      {output}
      Please analyze the failure, adjust your changes, and verify again.
      ```
-  4. **Execution/System Failures**: If the command cannot be launched (command not found, syntax error in command invocation, or execution timeout), the policy returns `outcome: "failed"` with `AgentFailureCode: "VERIFICATION_FAILED"`. This halts the session immediately rather than trapping the model in an unrecoverable environment loop.
-  5. **Pass (`exitCode === 0`)**: The policy returns `outcome: "succeeded"`, transitioning the session to `succeeded`.
+  4. **Execution and System Failures (`status === "timed_out"` or `status === "launch_failed"`)**: The command could not run to normal test completion (binary not found / ENOENT, exit code 127/126, shell syntax error, or command timeout). The policy returns `outcome: "failed"` with `AgentFailureCode: "VERIFICATION_FAILED"`. This immediately halts the session rather than trapping the model in an unrecoverable environment loop.
+
 - **Fallback Verification**: If no verification command is configured:
   - Both mutating tasks (`workspaceChanged === true`) and read-only or informational tasks (`workspaceChanged === false`) are accepted as valid completions, returning `outcome: "succeeded"`.
   - Evidence records the observed workspace mutation state: `{ type: "no_command_configured", workspaceChanged: boolean }`. Callers requiring mandatory workspace mutation can inspect `AgentResult.workspaceChanged` upon session settlement.
-- **Evidence Schema**: Every verification outcome records structured evidence in `VerificationSummary.evidence`:
+
+- **Evidence Schema**: Every verification outcome records structured evidence conforming to this closed union:
   ```typescript
   type VerificationEvidence =
     | {
@@ -76,6 +102,16 @@ When a model turn completes without tool calls, Agent Core detects a `Candidate 
         readonly exitCode: number;
         readonly stdout: string;
         readonly stderr: string;
+        readonly durationMs: number;
+      }
+    | {
+        readonly type: "command_system_failure";
+        readonly command: string;
+        readonly failureKind: "timed_out" | "launch_failed";
+        readonly message: string;
+        readonly exitCode?: number;
+        readonly stdout?: string;
+        readonly stderr?: string;
         readonly durationMs: number;
       }
     | {
