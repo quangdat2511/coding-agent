@@ -1,5 +1,10 @@
 # CDA-21 — Terminal-Bench integration requirements
 
+> **Superseded pins (2026-09-13):** the
+> [TerminalBench evaluation protocol](../adr/0005-terminalbench-evaluation-protocol.md) re-pins
+> evaluation to Terminal-Bench 4.0.0 and Harbor 0.23.0 and corrects this report's README citation
+> for `2b0442c`. The trial behaviors the protocol relies on were rechecked at both Harbor versions.
+
 ## Decision
 
 **Recommendation / inference:** Integrate Coding Agent as a standalone agent in the current
