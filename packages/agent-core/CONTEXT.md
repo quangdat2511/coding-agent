@@ -65,6 +65,10 @@ _Avoid_: Testing, validation
 The injected rule set that evaluates a Candidate Completion and decides whether the Agent Session succeeds, continues with feedback, or fails.
 _Avoid_: Test runner, evaluation script, completion validator
 
+**Verification Runner**:
+The execution adapter responsible for launching and supervising verification commands in the workspace environment and returning a discriminated runner result.
+_Avoid_: Test runner, shell executor, subshell, CI runner
+
 **Verification Evidence**:
 Structured observations (such as command execution records, exit codes, and output payloads) gathered during Verification to substantiate task completion.
 _Avoid_: Test logs, proof, verification data

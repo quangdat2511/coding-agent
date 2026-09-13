@@ -76,7 +76,7 @@ When a model turn completes without tool calls, Agent Core detects a `Candidate 
   ```
 
   The verification policy evaluates the discriminated runner result without overlapping outcomes:
-  1. **Byte-Exact Output Budget**: Any captured stdout/stderr adheres to the **40 KiB (40,960 UTF-8 bytes)** budget defined in ADR 0001, truncating excess output with `\n[...output truncated...]\n` at valid UTF-8 code point boundaries before recording evidence or constructing feedback.
+  1. **Byte-Exact Output Budget**: The captured output budget is **40 KiB (40,960 UTF-8 bytes)** applied to combined stdout and stderr. It strictly reuses ADR-0001's dynamic head+tail split (`headBudget = tailBudget = (40,960 - markerBytes) / 2`) truncated at valid UTF-8 code point boundaries with the marker `\n[...output truncated...]\n` before recording evidence or injecting into feedback. This preserves both initial test execution context and final assertion failure diagnostics for model self-correction.
   2. **Pass (`status === "completed"` with `exitCode === 0`)**: The policy returns `outcome: "succeeded"`, transitioning the session to `succeeded`.
   3. **Test Assertion Failures (`status === "completed"` with `exitCode !== 0`, excluding launch errors)**: The command ran to completion but test assertions failed. The policy returns `outcome: "continue"`. A structured user message containing the bounded output is injected into the next Model Turn:
      ```text
@@ -90,8 +90,8 @@ When a model turn completes without tool calls, Agent Core detects a `Candidate 
   4. **Execution and System Failures (`status === "timed_out"` or `status === "launch_failed"`)**: The command could not run to normal test completion (binary not found / ENOENT, exit code 127/126, shell syntax error, or command timeout). The policy returns `outcome: "failed"` with `AgentFailureCode: "VERIFICATION_FAILED"`. This immediately halts the session rather than trapping the model in an unrecoverable environment loop.
 
 - **Fallback Verification**: If no verification command is configured:
-  - Both mutating tasks (`workspaceChanged === true`) and read-only or informational tasks (`workspaceChanged === false`) are accepted as valid completions, returning `outcome: "succeeded"`.
-  - Evidence records the observed workspace mutation state: `{ type: "no_command_configured", workspaceChanged: boolean }`. Callers requiring mandatory workspace mutation can inspect `AgentResult.workspaceChanged` upon session settlement.
+  - Fallback verification is non-gating: it unconditionally returns `outcome: "succeeded"` regardless of `workspaceChanged`, because `CodingTask` defines no field distinguishing read-only from mutating intent.
+  - The `workspaceChanged` check is evidence-only: evidence records the observed mutation state as `{ type: "no_command_configured", workspaceChanged: boolean }`. External callers requiring mandatory workspace modifications can evaluate `AgentResult.workspaceChanged` upon session settlement without turning verification into an implicit gate.
 
 - **Evidence Schema**: Every verification outcome records structured evidence conforming to this closed union:
   ```typescript
