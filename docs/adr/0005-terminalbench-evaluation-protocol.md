@@ -41,8 +41,9 @@ These facts shape it:
   `medical-claims-processing` declares an MCP server and `cumulative-layout-shift` a skills
   directory.
 - Every base image is a glibc Linux distribution (Debian, Ubuntu, or Fedora); none is Alpine. The
-  final `WORKDIR` is `/app` for 58 tasks, `/workspace` for 5, and `/app/sglang`, `/app/vllm`, or
-  `/task` for one task each. Six tasks declare the whole `/app` directory as a verifier artifact.
+  final-stage `WORKDIR` of the task image, or of the main service's image in a Compose task, is
+  `/app` for 58 tasks, `/workspace` for 5, and `/app/sglang`, `/app/vllm`, or `/task` for one task
+  each. Six tasks declare the whole `/app` directory as a verifier artifact.
 - Harbor passes the task's agent timeout only to its built-in oracle agent. A custom agent cannot
   read it; Harbor enforces it by cancelling the agent's `run()`.
 - In a single-step trial, Harbor records `AgentTimeoutError` or `NonZeroAgentExitCodeError` as the
@@ -52,14 +53,65 @@ These facts shape it:
   matching the command's output against provider-error patterns.
 - Harbor calls `populate_context_post_run` only when `run()` left the `AgentContext` empty.
 - Harbor's `mean` metric counts a trial without a reward as 0.
-- In `harbor run`, `-n` is `--n-concurrent` and `-k` is `--n-attempts`. A `--ae` value may be a
-  `${VAR}` template resolved from the host environment, and Harbor scrubs the values of
-  credential-like keys, such as names containing `KEY`, from the trial directory.
+- Harbor's own retry deletes a trial's directory before running it again, and it selects
+  exceptions by exact class name.
+- The meanings of the `harbor run` flags the procedure uses are listed with their source in §7.
 
 The research needs two corrections. It cites the README at `2b0442c` as running
 `terminal-bench/terminal-bench@latest` with `-k 5`, but that commit's README is branded
-Frontier-Bench and runs `frontier-bench/frontier-bench` with `-n 5`; the quoted form appears in
-the 4.0.0 README. Its version pins are superseded by §1.
+Frontier-Bench and runs `frontier-bench/frontier-bench` with `-n 5`, and in Harbor `-n` sets
+concurrency rather than repetitions. The quoted `-k 5` form appears in the 4.0.0 README. The
+research's version pins are superseded by §1.
+
+## Evidence behind this record
+
+This record contains three kinds of statements, and none should be read as another kind.
+
+**Read in source.** The following were read in Harbor at
+[`1e5c5c6`](https://github.com/harbor-framework/harbor/tree/1e5c5c6) and Terminal-Bench at
+[`452bf30`](https://github.com/harbor-framework/terminal-bench/tree/452bf30); none was observed in
+a running job.
+
+| Statement | Source |
+| --- | --- |
+| A custom agent does not receive the task's agent timeout | [`trial/trial.py` L1069](https://github.com/harbor-framework/harbor/blob/1e5c5c6/src/harbor/trial/trial.py#L1069) |
+| `AgentTimeoutError` and `NonZeroAgentExitCodeError` are recorded and verification still runs | [`trial/single_step.py` L84](https://github.com/harbor-framework/harbor/blob/1e5c5c6/src/harbor/trial/single_step.py#L84) |
+| Any other exception from the trial's run skips verification | [`trial/trial.py` L426](https://github.com/harbor-framework/harbor/blob/1e5c5c6/src/harbor/trial/trial.py#L426) |
+| `exec_as_agent` raises a classified error on a non-zero exit | [`agents/installed/base.py` L962](https://github.com/harbor-framework/harbor/blob/1e5c5c6/src/harbor/agents/installed/base.py#L962) |
+| `populate_context_post_run` runs only for an empty `AgentContext` | [`trial/trial.py` L935](https://github.com/harbor-framework/harbor/blob/1e5c5c6/src/harbor/trial/trial.py#L935) |
+| `mean` counts a missing reward as 0 | [`metrics/base.py` L25](https://github.com/harbor-framework/harbor/blob/1e5c5c6/src/harbor/metrics/base.py#L25) |
+| Retry deletes the trial directory and matches exact exception class names | [`trial/queue.py` L83](https://github.com/harbor-framework/harbor/blob/1e5c5c6/src/harbor/trial/queue.py#L83), [L222](https://github.com/harbor-framework/harbor/blob/1e5c5c6/src/harbor/trial/queue.py#L222), [`models/trial/result.py` L32](https://github.com/harbor-framework/harbor/blob/1e5c5c6/src/harbor/models/trial/result.py#L32) |
+| Harbor scrubs only values passed through `--ae` and verifier settings, only in UTF-8 text files, replacing them with `[REDACTED]` | [`trial/trial.py` L1008](https://github.com/harbor-framework/harbor/blob/1e5c5c6/src/harbor/trial/trial.py#L1008), [L1053](https://github.com/harbor-framework/harbor/blob/1e5c5c6/src/harbor/trial/trial.py#L1053), [`utils/env.py` L5](https://github.com/harbor-framework/harbor/blob/1e5c5c6/src/harbor/utils/env.py#L5) |
+| Tasks default to the `public` network mode | [`models/task/config.py` L70](https://github.com/harbor-framework/harbor/blob/1e5c5c6/src/harbor/models/task/config.py#L70) |
+| On Modal, exec starts in the explicit `cwd`, else the task's `workdir`, else the final-stage Dockerfile `WORKDIR`; in Compose mode Harbor leaves it unset | [`environments/definition.py` L146](https://github.com/harbor-framework/harbor/blob/1e5c5c6/src/harbor/environments/definition.py#L146), [`environments/modal.py` L1023](https://github.com/harbor-framework/harbor/blob/1e5c5c6/src/harbor/environments/modal.py#L1023) |
+| Modal declares GPU support outside its VM runtime; Harbor's Docker environment declares none | [`environments/modal.py` L987](https://github.com/harbor-framework/harbor/blob/1e5c5c6/src/harbor/environments/modal.py#L987), [`environments/docker/docker.py` L311](https://github.com/harbor-framework/harbor/blob/1e5c5c6/src/harbor/environments/docker/docker.py#L311) |
+| The default ATIF version is ATIF-v1.8 (ATIF-v1.7 at Harbor 0.21.0) | [`models/trajectories/trajectory.py` L26](https://github.com/harbor-framework/harbor/blob/1e5c5c6/src/harbor/models/trajectories/trajectory.py#L26) |
+| The separate verifier environment is built from the task's tests | [`trial/trial.py` L912](https://github.com/harbor-framework/harbor/blob/1e5c5c6/src/harbor/trial/trial.py#L912) |
+| The dataset statistics in the context | every `task.toml`, `environment/Dockerfile` (final-stage `WORKDIR`), `environment/docker-compose.yaml`, and `instruction.md` under [`tasks/`](https://github.com/harbor-framework/terminal-bench/tree/452bf30/tasks), parsed by script |
+
+**Tried locally.** Bun 1.3.14 on macOS arm64 compiled a one-line script for both §2 targets with
+both autoload flags. `file` reported glibc-linked x86-64 and aarch64 ELF executables of about
+94 MB, and the highest `GLIBC_` symbol version found by `strings` was 2.17, a heuristic rather than
+a loader test. The Coding Agent CLI does not exist yet, so its size and behavior are untested.
+
+**Assumed, not yet executed.** The smoke job in §7 is the first point at which these are checked:
+
+- No Harbor job has run: Harbor was not installed, the Docker daemon was not running, and no Modal
+  account was used.
+- That `terminal-bench/terminal-bench@4.0.0` resolves from the registry is taken from the
+  [release notes](https://github.com/harbor-framework/terminal-bench/releases/tag/v4.0.0).
+- Uploading a roughly 94 MB executable within Harbor's default 360 s agent-setup timeout is
+  untested.
+- In the eleven Compose tasks, the process starting in the main image's `WORKDIR` follows Docker
+  Compose semantics; Harbor's Docker-in-Docker code on Modal was not read.
+- What happens to the Coding Agent process after Harbor cancels `run()` on timeout was not traced.
+  §5 keeps sessions well inside the task timeout so that the protocol does not depend on it.
+- The §6 ATIF mapping has not produced a `trajectory.json` that validates.
+- A job directory's size is unknown; §8 handles any size.
+
+**Prescribed.** The CLI flags, exit codes, file names and contents, profile values, adapter steps,
+and procedure are decisions, not observations. The source facts above are why they are feasible,
+and §9 is where they are shown to work.
 
 ## Decision
 
@@ -127,16 +179,14 @@ coding-agent run
 `--approval-policy auto-approve` is required rather than implied. ADR 0004 §6 selects
 `"auto-approve"` only on the headless path and ADR 0001 §4 reserves it for isolated harnesses, so a
 person who runs `coding-agent run` outside a harness must opt in on the command line, where the
-choice is also visible in the recorded invocation.
+choice is also visible in the recorded invocation. The flag only makes the choice explicit. It does
+not detect whether the process really runs in an isolated harness, which remains the caller's
+obligation under ADR 0001 §4.
 
 The task is read from a file because Harbor instructions are long Markdown documents, and a file
 avoids shell quoting and argument-length limits. There are no per-limit flags. An Evaluation
 Profile names a source-controlled set of limits (§5), so a build fixes its limits and they cannot
 drift between invocations.
-
-Coding Agent reads provider credentials once at startup and removes the provider credential
-variables from the environment of `bash` Tool Calls and Verification Runner processes. A
-model-issued `env` therefore cannot copy a credential into the transcript, which §8 publishes.
 
 | Exit code | Meaning | Files in `--output-dir` |
 | --- | --- | --- |
@@ -170,10 +220,6 @@ at which ADR 0002 §7 requires a schema version.
 - **`result.json`** is written after `session_settled`. It records the exit code, the Agent Result,
   and the finish time.
 
-When a run fails with `MODEL_FAILURE` after the provider returned an HTTP error, the Agent Result's
-failure details include that HTTP status. ADR 0002 §4 already preserves provider failure details;
-§7 needs the status to tell provider throttling from agent behavior.
-
 ### 5. Evaluation Profile and task conditions
 
 `--profile terminalbench` changes only `SessionLimits`. The system prompt, Project Instructions
@@ -203,11 +249,18 @@ Inside a task container:
   unchanged, and the model reaches paths outside it, such as the `/data` or `/root` paths some
   instructions name, through `bash`. Setting `repoRoot` to `/` was rejected: it disables the jail,
   and the symbolic-link rule would still reject paths such as `/bin` on merged-usr distributions.
-- No verification command is configured. Harbor builds the separate verifier environment from the
-  task's tests after the agent phase, and the task guidelines forbid copying tests into the agent
-  image, so the Verification Policy returns ADR 0003 §3's non-gating `succeeded` with
-  `no_command_configured` evidence. The Harbor reward is the only success measure; the Agent Result
-  is diagnostic.
+- No verification command is configured, because the agent has no tests to run: Harbor builds the
+  separate verifier environment from the task's tests after the agent phase, and the task
+  guidelines forbid copying tests into the agent image.
+- `openAgentSession` still requires a `VerificationPolicy` (ADR 0004 §3). The headless path passes
+  the same Verification Policy implementation as the interactive path (ADR 0004 §7), constructed
+  without a command; it is not a separate no-op policy. At each Candidate Completion, Agent Core
+  enters `verifying` and emits `verification_started`. The policy returns `succeeded` with
+  `{ type: "no_command_configured", workspaceChanged }` evidence (ADR 0003 §3), and Agent Core
+  emits `verification_completed` and moves to `succeeded` (ADR 0002 §2). The policy never returns
+  `continue`, so Verification adds no Model Turn, and the first Candidate Completion ends the Agent
+  Session. A model that stops early ends its trial early. The Harbor reward is the only success
+  measure; the Agent Result is diagnostic.
 - The Coding Task objective is Harbor's instruction, verbatim. No prompt template, extra
   instruction, skill, or MCP configuration is passed, and task-declared MCP servers and skills
   directories are ignored, because MCP and skill loading are outside the MVP. The two affected
@@ -283,8 +336,21 @@ agents convert their native logs to ATIF the same way.
 ### 7. Execution procedure
 
 Every job runs from the repository root with `uv run --project evaluation/terminalbench --frozen`.
-Credentials are passed as `${VAR}` templates, so their values appear neither in shell history nor
-in the job directory.
+Credentials are passed as `${VAR}` templates, which Harbor resolves from the host environment
+([`agents/factory.py` L146](https://github.com/harbor-framework/harbor/blob/1e5c5c6/src/harbor/agents/factory.py#L146)),
+so their values appear neither in shell history nor in the job's `config.json`.
+
+The procedure relies on these Harbor 0.23.0 flag meanings. `-n` in particular is not a repetition
+count.
+
+| Flag | Meaning at `1e5c5c6` | Source |
+| --- | --- | --- |
+| `-k`, `--n-attempts` | independent attempts per task; default 1 | [`cli/jobs.py` L457](https://github.com/harbor-framework/harbor/blob/1e5c5c6/src/harbor/cli/jobs.py#L457), [`models/job/config.py` L403](https://github.com/harbor-framework/harbor/blob/1e5c5c6/src/harbor/models/job/config.py#L403) |
+| `-n`, `--n-concurrent` | number of trials running at the same time; affects wall-clock time only | [`cli/jobs.py` L538](https://github.com/harbor-framework/harbor/blob/1e5c5c6/src/harbor/cli/jobs.py#L538) |
+| `-r`, `--max-retries` | reruns of a trial that ended with an exception; default 0. An exception qualifies by exact class name, and the trial directory is deleted before each rerun | [`cli/jobs.py` L563](https://github.com/harbor-framework/harbor/blob/1e5c5c6/src/harbor/cli/jobs.py#L563), [`trial/queue.py` L83](https://github.com/harbor-framework/harbor/blob/1e5c5c6/src/harbor/trial/queue.py#L83), [L222](https://github.com/harbor-framework/harbor/blob/1e5c5c6/src/harbor/trial/queue.py#L222) |
+| `-i`, `--include-task-name` | runs only the named tasks; glob patterns allowed | [`cli/jobs.py` L1151](https://github.com/harbor-framework/harbor/blob/1e5c5c6/src/harbor/cli/jobs.py#L1151) |
+| `--ae`, `--agent-env` | `KEY=VALUE` environment variable for the agent | [`cli/jobs.py` L669](https://github.com/harbor-framework/harbor/blob/1e5c5c6/src/harbor/cli/jobs.py#L669) |
+| `harbor jobs resume -f`, `--filter-error-type` | before resuming, deletes trials without `result.json` and trials whose exception type is listed; default `CancelledError` | [`cli/jobs.py` L2190](https://github.com/harbor-framework/harbor/blob/1e5c5c6/src/harbor/cli/jobs.py#L2190), [`job.py` L268](https://github.com/harbor-framework/harbor/blob/1e5c5c6/src/harbor/job.py#L268) |
 
 1. **Build** the artifact at the evaluated commit (§2).
 2. **Oracle job**: `harbor run -d terminal-bench/terminal-bench@4.0.0 -a oracle -e modal -k 1`.
@@ -306,22 +372,40 @@ in the job directory.
      -o <jobs directory> --job-name <job name>
    ```
 
+5. **Rerun job**, only when the rule below selects trials: the recorded-job command with one `-i`
+   per selected task and `--job-name <job name>-rerun`.
+
 Rules for the recorded job:
 
 - Exactly one provider and model per job, declared in the manifest. This decision does not choose
   the model.
-- One attempt per task. Additional attempts for measuring variance are separate jobs, reported
-  separately.
-- No task filtering, timeout override, or timeout multiplier. Concurrency is free and recorded; it
-  changes wall-clock time, not task conditions.
-- No retries. `harbor jobs resume` is used only with its default `--filter-error-type
-  CancelledError`, which resumes trials the harness never finished; a finished trial is never rerun.
+- One attempt per task (`-k 1`). Additional attempts for measuring variance are separate jobs,
+  reported separately.
+- No task filtering outside the rerun job, and no timeout override or timeout multiplier.
+  Concurrency is free and recorded, because it changes wall-clock time, not task conditions.
+- `-r 0`. Harbor's own retry is not used, because it deletes the failed trial's directory, which is
+  the evidence the report must describe. A failed trial is rerun in the separate rerun job instead.
+- `harbor jobs resume` is used only with its default `--filter-error-type CancelledError`, so it
+  removes only trials that the harness never finished or cancelled.
 
-A recorded job is **valid** when all 66 trials wrote `result.json` and at most three trials failed
-for reasons outside Coding Agent. Those reasons are a trial exception other than `AgentTimeoutError`
-or `NonZeroAgentExitCodeError`, and an Agent Result failed with `MODEL_FAILURE` whose details record
-an HTTP 401, 403, or 429 response. An invalid job is archived and listed, and the whole job is
-repeated under a new name.
+A trial is **rerun-eligible** when either condition holds:
+
+- Its `result.json` has no verifier reward. Harbor still verifies after `AgentTimeoutError` and
+  `NonZeroAgentExitCodeError`, the only errors the adapter's own logic raises (§6), so a missing
+  reward means the trial failed outside the Agent Session: while building or starting the
+  environment, installing or launching the agent, or running the verifier.
+- Its Agent Result failed with `MODEL_FAILURE` and the failure details record an HTTP 401, 403, 429,
+  or 5xx response from the provider. This condition depends on a decision outside this record; see
+  Dependencies.
+
+Every rerun-eligible trial runs exactly once more, in one rerun job with the same artifact and
+flags. A rerun trial is never rerun. A trial is **completed** when it has a verifier reward and is
+not rerun-eligible. Each task's recorded outcome is its original trial when that trial completed,
+and its rerun trial otherwise.
+
+The recorded job is **valid** when every task has a completed trial in the recorded job or the
+rerun job. A job that is not valid publishes no headline reward, but both jobs are still archived
+and reported.
 
 ### 8. Records and reporting
 
@@ -330,18 +414,46 @@ For each recorded job, `evaluation/terminalbench/runs/<job name>/` is committed 
 - **`manifest.json`**: the §1 pins, including the Harbor and Modal SDK versions from `uv.lock`; the
   Coding Agent commit, version, Bun version, and artifact SHA-256 values; the `terminalbench`
   profile values; provider, model, and sampling settings; every Harbor flag used; the names, never
-  the values, of the environment variables passed; job start and end times; the oracle and smoke
-  job names; and the archive's SHA-256.
-- **`report.md`**: Harbor's `mean` reward over all 66 trials, with a trial that has no reward
-  counted as 0, and the reward distribution; a per-task table of reward, Agent Result outcome and
-  failure code, Model Turns, Tool Calls, tokens, duration, and trial exception type; a
-  cross-tabulation of Agent Result outcome against reward; the harness-flaky tasks; and the tasks
-  whose declared MCP servers or skills were ignored.
+  the values, of the environment variables passed; job start and end times; the oracle, smoke, and
+  rerun job names; the secret scan's patterns, file count, and result; and the SHA-256 of every
+  archive part.
+- **`report.md`**: whether the job is valid (§7); the mean reward over the 66 recorded outcomes,
+  computed as Harbor's `mean` computes it, and the reward distribution; a per-task table of
+  reward, Agent Result outcome and failure code, Model Turns, Tool Calls, tokens, duration, and
+  trial exception type; a cross-tabulation of Agent Result outcome against reward; every
+  rerun-eligible trial with its reason, meaning the exception type and the phase it occurred in
+  (from the trial's `environment_setup`, `agent_setup`, `agent_execution`, and `verifier` timings)
+  or the provider's HTTP status, together with its rerun's outcome; the harness-flaky tasks; and the
+  tasks whose declared MCP servers or skills were ignored.
 
-The complete Harbor job directory, including every trial's `config.json`, `lock.json`,
-`result.json`, verifier output, and agent logs, is too large to commit. It is archived and attached
-to a GitHub Release of this repository tagged at the evaluated commit. Before upload, the archive is
-searched for the credential values used, and any match blocks publication.
+The complete Harbor job directories of the recorded and rerun jobs, including every trial's
+`config.json`, `lock.json`, `result.json`, verifier output, and agent logs, are too large to commit.
+They are archived and attached to a GitHub Release of this repository tagged at the evaluated
+commit. The repository is private, so release assets are visible to everyone with read access to
+it; publication is still treated as permanent. GitHub requires each release asset to be under
+2 GiB and allows up to 1,000 assets per release, with no limit on total size
+([GitHub documentation](https://docs.github.com/en/repositories/releasing-projects-on-github/about-releases)),
+so an archive of 2 GiB or more is split into parts.
+
+Agent logs can contain credentials, because a Tool Result records command output. Harbor's scrub
+does not make them safe. At the end of each trial it replaces values passed through `--ae` or
+verifier settings with `[REDACTED]`, but only in files that look like UTF-8 text
+([`trial/trial.py` L1044](https://github.com/harbor-framework/harbor/blob/1e5c5c6/src/harbor/trial/trial.py#L1044),
+[L1053](https://github.com/harbor-framework/harbor/blob/1e5c5c6/src/harbor/trial/trial.py#L1053)).
+The replacement also erases the evidence that a key leaked. Publication therefore requires a
+secret scan. Every step below is mandatory, and a failed step blocks the upload:
+
+1. Search every file in the uncompressed job directories, including binary files and files Harbor
+   did not scrub, for the exact value of every credential the jobs used. A match fails the scan.
+2. Search the same files for `[REDACTED]`. Each occurrence is reviewed. One that Harbor wrote over a
+   credential means the credential appeared in the logs, even though its value is gone.
+3. Search the same files for the provider key prefixes `sk-ant-`, `sk-or-`, `sk-proj-`, `xai-`,
+   and `AIza`. Each match is reviewed, and the scan fails until every match is shown not to be a
+   credential or is removed from the archive.
+4. Revoke every credential that steps 1 to 3 show appeared in the logs, whether or not it would
+   have been published, because the logs may already have been sent to the model provider and are
+   already on the host.
+5. Record the scan's patterns, file count, and result in the manifest.
 
 The report has no Pi column and no pass or fail threshold. A later Pi run under the same pins, which
 Harbor's built-in `pi` agent would allow, is outside this protocol.
@@ -357,10 +469,27 @@ TerminalBench evaluation is complete as an MVP capability when:
 3. The adapter's tests cover command construction, exit-code mapping, forwarding of exactly one
    provider key, and ATIF conversion of a complete and a truncated event log, each validated
    against Harbor's `Trajectory` model.
-4. The oracle, smoke, and recorded jobs of §7 have run, the recorded job is valid, its manifest and
-   report are committed, and its archive is published.
+4. The oracle, smoke, recorded, and any rerun jobs of §7 have run; the recorded job is valid under
+   §7; its manifest and report are committed; and its archive passed §8's secret scan and is
+   published.
 
 No reward value is a criterion.
+
+## Dependencies
+
+This protocol relies on two behaviors that belong to other decisions. It states what it needs from
+them and decides neither.
+
+- **Whether tool processes inherit provider credentials:**
+  [Decide whether tool processes inherit provider credentials](https://datn-fit-hcmus.atlassian.net/browse/CDA-29).
+  This is tool safety policy, owned by ADR 0001, and the exposure is the same on the interactive
+  path. Until CDA-29 is resolved, a model-issued `env` can copy the provider key into a Tool Result
+  and from there into `events.jsonl` and `trajectory.json`, and §8's secret scan is the only
+  control before logs leave the host.
+- **The provider's HTTP status in `MODEL_FAILURE` details.** §7's second rerun condition reads it.
+  ADR 0002 §4 preserves a normalized provider reason in the failure details, but no decision says
+  the HTTP status is part of that reason. Until the provider error contract includes it, a
+  `MODEL_FAILURE` without a recorded status is not rerun-eligible and counts as an agent outcome.
 
 ## Consequences
 
@@ -376,8 +505,11 @@ No reward value is a criterion.
   long builds; the two tasks with MCP servers or skills run without them; and in the six tasks that
   hand all of `/app` to the verifier, any Scratchpad files reach the verifier. Removing one of these
   amends ADR 0001, ADR 0003, or the MVP scope, not this protocol.
-- Retries and resumption are restricted, so an unreliable provider or backend can invalidate a whole
-  job; the three-trial allowance is the only tolerance.
+- A trial that fails outside Coding Agent is rerun once in a separate job. That costs a second task
+  environment, but it keeps the failed trial's evidence. A persistent backend or provider fault
+  leaves the job without a headline result instead of shrinking the denominator.
+- Publishing a job archive costs a mandatory secret scan, and until CDA-29 is resolved that scan is
+  the only protection against a credential in published logs.
 - CDA-21's research remains the background source, with the corrections in this record's context,
   and its pins are superseded by §1.
 - Implementation order for §9 belongs to
