@@ -175,7 +175,7 @@ export interface ModelPort {
 
 export interface Clock {
   now(): string; // ISO-8601 wall-clock time for occurredAt
-  monotonicMs(): number; // durations and the active-execution limit
+  monotonicMs(): number; // durations and maxDurationMs
 }
 
 export type IdKind =
@@ -193,8 +193,8 @@ export interface IdSource {
 export interface SessionLimits {
   maxModelTurns: number;
   maxToolCalls: number;
-  maxActiveExecutionMs: number;
-  maxConsecutiveRecoverableToolFailures: number;
+  maxDurationMs: number;
+  maxConsecutiveRecoverableFailures: number;
   cancellationGraceMs: number;
 }
 ```
@@ -208,9 +208,17 @@ Sampling settings such as maximum output tokens are bound into the port by the c
 Cancellation has one path, `dispatch({ type: "cancel" })`, so every cancellation passes through ADR
 0002's serialized command queue and emits `cancellation_requested`. The composition root maps
 process signals to that command. `SessionLimits` has no separate Verification-attempt limit,
-because ADR 0002 excludes one; concrete values are Coding Agent configuration.
+because ADR 0002 excludes one; concrete values are Coding Agent configuration. Its field names
+follow §4 of the
+[MVP context, planning, verification, and session memory decision](./0003-mvp-context-planning-verification-and-session-memory.md)
+(ADR 0003).
 
-The Verification port carries ADR 0002's three decisions:
+ADR 0003 §4 does not state that `maxConsecutiveRecoverableFailures` counts Tool Call failures, while
+ADR 0002 §4 counts error Tool Results and does not increment the counter on a Verification
+`continue`, so ADR 0003 needs an amendment that states the counter's scope; this decision keeps the
+field name unchanged.
+
+The Verification port carries ADR 0002's three outcomes, spelled as in ADR 0003 §3:
 
 ```typescript
 export interface VerificationPolicy {
@@ -225,18 +233,20 @@ export interface VerificationPolicy {
 }
 
 export type VerificationDecision =
-  | { decision: "succeed"; evidence: readonly VerificationEvidence[] }
+  | { outcome: "succeeded"; evidence: readonly VerificationEvidence[] }
   | {
-      decision: "continue";
+      outcome: "continue";
       evidence: readonly VerificationEvidence[];
       feedback: VerificationFeedback;
     }
-  | { decision: "fail"; evidence: readonly VerificationEvidence[]; message: string };
+  | { outcome: "failed"; evidence: readonly VerificationEvidence[]; message: string };
 ```
 
-The shapes of `VerificationEvidence`, `VerificationFeedback`, and `VerificationProgress` belong to
-[Define MVP context, planning, verification, and session memory](https://datn-fit-hcmus.atlassian.net/browse/CDA-23);
-until then they are ADR 0002's serializable JSON records.
+`VerificationEvidence` is the closed union that ADR 0003 §3 defines (`command_execution`,
+`command_system_failure`, and `no_command_configured`). `VerificationFeedback` is the structured
+`[Verification Failed]` user message that ADR 0003 §3 injects into the next Model Turn after a
+`continue` outcome. ADR 0003 §3 defines no progress payload, so `VerificationProgress` remains ADR
+0002's bounded progress update.
 
 As amended in ADR 0001 §2, Agent Core owns the path-validation step: when it runs (preflight, before
 Approval), what it guarantees, and what a failure becomes. The step is expressed as a port with a
@@ -335,8 +345,8 @@ as cancelled whether `execute` resolves or rejects, and waits for it to settle w
 cancellation grace period (ADR 0002 §5).
 
 Not exported: the state machine implementation and the Tool Call scheduler. Agent Core performs no
-automatic retry or recovery (ADR 0002 §4) and no history compaction; context and memory belong to
-CDA-23.
+automatic retry or recovery (ADR 0002 §4) and no history compaction; ADR 0003 §4 limits in-session
+memory to the canonical transcript and defers compaction.
 
 ### 4. `@coding-agent/tools`
 
@@ -453,12 +463,18 @@ execution harnesses.
 
 The Verification policy implementation lives outside `agent-core`. ADR 0002 has the Coding Agent
 composition root supply it, and running checks needs I/O that §3 excludes. Agent Core owns only the
-`VerificationPolicy` port and the Verification phase. CDA-23 decides the policy's checks and whether
-the implementation needs its own package.
+`VerificationPolicy` port and the Verification phase. ADR 0003 §3 fixes the checks: a configured
+verification command runs non-interactively in `repoRoot`, its runner result maps to `succeeded`,
+`continue`, or `failed`, and without a configured command the policy returns a non-gating
+`succeeded`.
 
-Context Intelligence, Planning, and Memory also belong to CDA-23. The Pi architecture research
-recommends keeping context transformation at the model boundary. If CDA-23 adopts that, the
-transformation arrives as an injected port on `openAgentSession`. Every such placement follows §1.
+ADR 0003 settles context, planning, and memory without a new Agent Core port. Project instructions
+from `AGENTS.md` or `CLAUDE.md` are capped at 32 KiB and packaged into the initial system prompt
+with environment metadata (ADR 0003 §1). Planning is a system-prompt requirement with a `.scratch/`
+convention rather than a runtime state (ADR 0003 §2). In-session memory is the canonical transcript,
+with no compaction (ADR 0003 §4). The composition root therefore assembles the `systemPrompt` passed
+to `openAgentSession`, because reading those files is filesystem I/O that §3 excludes from Agent
+Core. Every such placement follows §1.
 
 ### 8. Relationship to Pi
 
