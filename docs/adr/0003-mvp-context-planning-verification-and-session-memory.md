@@ -1,0 +1,104 @@
+# MVP Context, Planning, Verification, and Session Memory
+
+Status: accepted
+
+Date: 2026-09-13
+
+## Context
+
+Ticket [CDA-23](https://datn-fit-hcmus.atlassian.net/browse/CDA-23) defines the minimum runtime behavior for repository context gathering, explicit planning, post-change verification, and in-session memory for the Bun/TypeScript Coding Agent MVP. Earlier architectural decisions established the foundation:
+
+- [ADR 0001: Tool Contracts and Safety Policy](./0001-tool-contracts-and-safety-policy.md) ([CDA-19](https://datn-fit-hcmus.atlassian.net/browse/CDA-19)) standardized tool schemas, sandbox boundaries (`repoRoot`), mutation classifications, and a 40 KiB UTF-8 byte budget for tool outputs.
+- [ADR 0002: Agent Session State Machine and Event Protocol](./0002-agent-session-state-machine-and-event-protocol.md) ([CDA-16](https://datn-fit-hcmus.atlassian.net/browse/CDA-16)) defined the 9 lifecycle states, candidate completion detection, and delegated the exact evidence shapes and feedback representations to CDA-23.
+- Map Epic [CDA-13](https://datn-fit-hcmus.atlassian.net/browse/CDA-13) ruled out-of-scope all vector databases, RAG/embeddings, cross-session persistent memory, and MCP/LSP integrations for the MVP.
+
+This record establishes the normative behavior, data shapes, and operational policies for context ingestion, planning constraints, verification loop closure, and session memory bounds.
+
+## Decision
+
+### 1. Repository Context Gathering and Project Instructions
+
+The agent runtime minimizes upfront token ingestion while guaranteeing immediate compliance with repository conventions:
+
+- **Discovery and Precedence**: The runtime inspects `repoRoot` for project instructions in this strict precedence order:
+  1. `AGENTS.md`
+  2. `CLAUDE.md`
+  Discovery stops immediately upon finding the first existing file. This eliminates redundant context loading when `CLAUDE.md` is a symlink or mirror of `AGENTS.md`.
+- **Byte-Exact Size Cap**: The loaded instruction content is capped at **32 KiB (32,768 UTF-8 bytes)**. If the file exceeds this limit, the runtime truncates the content and appends `\n[...project instructions truncated...]\n`.
+- **Prompt Packaging**: Project instructions are wrapped in XML tags within the initial system prompt:
+  ```xml
+  <project_context>
+  <project_instructions path="AGENTS.md">
+  {content}
+  </project_instructions>
+  </project_context>
+  ```
+- **Environment Metadata**: The initial context supplies execution environment details: working directory (`cwd`), platform, and registered tool snippets.
+- **On-Demand Discovery**: Eager scanning of repository trees (e.g. `git ls-files` or recursive directory traversal) is explicitly rejected. All repository structure inspection and source code reading are model-driven via tools (`read` and `bash` with `find`, `ls`, `rg`, `git`).
+
+### 2. Model-Driven Explicit Planning and Scratchpad Conventions
+
+Explicit planning is implemented at the model prompt layer rather than as a state machine expansion:
+
+- **Zero Runtime State Expansion**: `Agent Core` retains the 9 states accepted in ADR 0002; no `planning` state or rigid runtime plan gate is introduced. This preserves seamless execution in both interactive TUI and headless unattended environments (TerminalBench).
+- **System Prompt Requirement**: The system prompt enforces explicit planning through instructions:
+  > *"Before invoking any mutating tool (`write`, `edit`, `bash`), you must analyze the objective, state your assumptions, and outline a numbered, step-by-step execution plan in your initial response turn."*
+- **Transcript Persistence**: The plan is emitted as standard text content within the first `AssistantMessage`. Because the canonical transcript is immutable and included in subsequent Model Turns, the plan remains visible to the model throughout the session without custom state management.
+- **Scratchpad Convention**: For complex tasks requiring persistent notes or checklists across multiple turns, the runtime establishes the `.scratch/` directory convention (e.g. `.scratch/plan.md`). The model writes to this directory using the standard `write` tool within `repoRoot`.
+
+### 3. Post-Change Verification Policy and Feedback Loop
+
+When a model turn completes without tool calls, Agent Core detects a `Candidate Completion` and enters the `verifying` state, invoking the injected `VerificationPolicy`:
+
+- **Automated Command Execution**: In environments where a verification command is provided (via task configuration, user input, or benchmark harness):
+  1. The command executes non-interactively in `repoRoot` under standard command timeout constraints.
+  2. **Test Assertion Failures (`exitCode !== 0`)**: The policy returns `outcome: "continue"`. A structured user message is injected into the next Model Turn:
+     ```text
+     [Verification Failed]
+     Command: {command}
+     Exit code: {exitCode}
+     Output:
+     {output}
+     Please analyze the failure, adjust your changes, and verify again.
+     ```
+  3. **Execution/System Failures**: If the command cannot be launched (command not found, syntax error in command invocation, or execution timeout), the policy returns `outcome: "failed"` with `AgentFailureCode: "VERIFICATION_FAILED"`. This halts the session immediately rather than trapping the model in an unrecoverable environment loop.
+  4. **Pass (`exitCode === 0`)**: The policy returns `outcome: "succeed"`, transitioning the session to `succeeded`.
+- **Fallback Verification**: If no verification command is configured:
+  - If mutations occurred (`workspaceChanged === true`), the policy verifies non-empty workspace modifications and returns `outcome: "succeed"`.
+  - Evidence is recorded as `{ type: "no_command_configured", workspaceChanged: true }`.
+- **Evidence Schema**: Every verification outcome records structured evidence in `VerificationSummary.evidence`:
+  ```typescript
+  type VerificationEvidence =
+    | {
+        readonly type: "command_execution";
+        readonly command: string;
+        readonly exitCode: number;
+        readonly stdout: string;
+        readonly stderr: string;
+        readonly durationMs: number;
+      }
+    | {
+        readonly type: "no_command_configured";
+        readonly workspaceChanged: boolean;
+      };
+  ```
+
+### 4. In-Session Memory and Bounded Limits
+
+Memory management in the MVP is strictly bounded to one in-memory task session:
+
+- **No Dynamic LLM Compaction**: Dynamic summarization turns and rolling message truncation are deferred. In-session memory consists solely of the immutable canonical transcript (messages, tool calls, and tool results).
+- **Tool Output Budgets**: Tool results remain strictly capped at 40 KiB UTF-8 bytes per ADR 0001, preventing context explosion from command outputs or file reads.
+- **Session Limits Defaults**: To prevent runaway token consumption, `Agent Core` enforces these defaults:
+  - `maxModelTurns`: **30**
+  - `maxToolCalls`: **100**
+  - `maxDurationMs`: **600,000 ms** (10 minutes active execution)
+  - `maxConsecutiveRecoverableFailures`: **3**
+- **Breach Semantics**: When any limit is exhausted, the session terminates immediately in `failed` with code `LIMIT_EXCEEDED`. If any mutating tool was executed prior to exhaustion, `partialChangesPossible` is set to `true`.
+
+## Consequences
+
+- **Architectural Simplicity**: Keeps `Agent Core` deep and minimal, relying on model prompt capabilities for planning and file conventions for scratchpad notes.
+- **Closed Verification Loop**: Provides an automated self-correction loop when tests fail, satisfying the requirements for reproducible TerminalBench evaluation.
+- **Context Determinism**: Prevents out-of-memory errors and context overflow through upfront file caps (32 KiB) and per-tool output limits (40 KiB).
+- **Deferred Complexity**: Compaction algorithms, vector stores, persistent sessions, and AST indexing remain clean follow-ups once the end-to-end MVP is validated.

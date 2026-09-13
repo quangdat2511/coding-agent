@@ -60,3 +60,19 @@ _Avoid_: Command output, execution response
 **Verification**:
 Evidence gathered after a change to determine whether the Coding Task's result is valid.
 _Avoid_: Testing, validation
+
+**Verification Policy**:
+The injected rule set that evaluates a Candidate Completion and decides whether the Agent Session succeeds, continues with feedback, or fails.
+_Avoid_: Test runner, evaluation script, completion validator
+
+**Verification Evidence**:
+Structured observations (such as command execution records, exit codes, and output payloads) gathered during Verification to substantiate task completion.
+_Avoid_: Test logs, proof, verification data
+
+**Project Instructions**:
+Repository-level guidance documents (such as `AGENTS.md`) loaded into the initial session context to guide model behavior.
+_Avoid_: System prompt, context file, rules
+
+**Scratchpad**:
+A temporary in-repository workspace or file (such as `.scratch/`) used by the agent for planning and intermediate notes.
+_Avoid_: Memory, workspace cache, draft directory
