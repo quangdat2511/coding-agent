@@ -1,6 +1,6 @@
 # TerminalBench Evaluation Protocol
 
-Status: proposed
+Status: accepted
 
 Date: 2026-09-13
 
