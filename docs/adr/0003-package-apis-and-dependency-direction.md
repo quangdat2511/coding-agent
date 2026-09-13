@@ -51,8 +51,7 @@ The allowed edges are:
 
 The table is an allowlist. Every other edge is forbidden, including any edge into `coding-agent`,
 any edge out of `ai` or `tui`, `agent-core → tools`, `tools → ai`, and any cycle.
-`@coding-agent/tools` is a fifth package that CDA-20 does not name; §4 gives the reason and the
-fallback.
+`@coding-agent/tools` is a fifth package added to CDA-20's original four; §4 gives the reason.
 
 "Type-only" describes built output, not installation. Agent Core's public types expose `ai` types —
 an Agent Result carries an `AssistantMessage` — so consumers need `ai` to typecheck. Every allowed
@@ -125,6 +124,9 @@ export interface ToolDeclaration<S extends TSchema = TSchema> {
 }
 ```
 
+Throughout this decision, `TSchema` and `Static` are imported from `typebox` (TypeBox 1.x), as ADR
+0001 §1 requires.
+
 `ai` may retry a request only before its response stream opens, with a bound the caller sets and
 may set to zero, and never after the first stream event. Retries consume ADR 0002's
 active-execution budget and may be billed. ADR 0002 states that no automatic retry exists in this
@@ -162,7 +164,7 @@ export function openAgentSession(config: {
   verification: VerificationPolicy;
   limits: SessionLimits;
   clock: Clock;
-  ids: IdGenerator;
+  ids: IdSource;
 }): OpenSessionResult;
 
 export interface ModelPort {
@@ -184,7 +186,7 @@ export type IdKind =
   | "approval"
   | "verification";
 
-export interface IdGenerator {
+export interface IdSource {
   next(kind: IdKind): string;
 }
 
@@ -236,10 +238,9 @@ The shapes of `VerificationEvidence`, `VerificationFeedback`, and `VerificationP
 [Define MVP context, planning, verification, and session memory](https://datn-fit-hcmus.atlassian.net/browse/CDA-23);
 until then they are ADR 0002's serializable JSON records.
 
-ADR 0001 assigns path validation to Agent Core. Agent Core owns the step: when it runs (preflight,
-before Approval), what it guarantees, and what a failure becomes. The step is expressed as a port
-with a branded path type, so an unvalidated string cannot be passed where a validated path is
-required:
+As amended in ADR 0001 §2, Agent Core owns the path-validation step: when it runs (preflight, before
+Approval), what it guarantees, and what a failure becomes. The step is expressed as a port with a
+branded path type, so an unvalidated string cannot be passed where a validated path is required:
 
 ```typescript
 export type RepoPath = string & { readonly __brand: "RepoPath" };
@@ -326,11 +327,11 @@ component being audited. Agent Core assembles ADR 0001's `ToolResult` from the o
 Call ID, the tool name, the measured duration, and the Approval metadata that only Agent Core holds.
 `ToolResult`, `ToolErrorCode`, and `ToolProgress` are exported from Agent Core.
 
-`prepare` and `execute` report every expected failure as a returned code and must not throw. ADR
-0002 requires a tool failure to become an error Tool Result, but ADR 0001's `ToolErrorCode` has no
-code for an unexpected failure, so the result recorded for a thrown exception needs an ADR 0001
-amendment (see Consequences). After an accepted cancellation, Agent Core records an executing Tool
-Call as cancelled whether `execute` resolves or rejects, and waits for it to settle within the
+`prepare` and `execute` report every expected failure as a returned code and must not throw. If
+either throws or rejects anyway, Agent Core records a recoverable error Tool Result with
+`TOOL_INTERNAL_ERROR` (ADR 0001 §6), as ADR 0002 requires for tool failures; the exception itself
+never enters Agent State. After an accepted cancellation, Agent Core records an executing Tool Call
+as cancelled whether `execute` resolves or rejects, and waits for it to settle within the
 cancellation grace period (ADR 0002 §5).
 
 Not exported: the state machine implementation and the Tool Call scheduler. Agent Core performs no
@@ -347,15 +348,13 @@ would give the package whose tests must be fastest a dependency on `node:fs` and
 `node:child_process`.
 
 `@coding-agent/tools` therefore holds the four tool implementations and the filesystem
-implementation of `WorkspaceResolver`, and it type-imports the ports from `agent-core`. This
-exceeds CDA-20's four-package framing and must be confirmed in review. If the team keeps four
-packages, the same implementations move into `agent-core` behind the same ports, `agent-core`
-accepts the I/O dependency, and no public type in this decision changes.
+implementation of `WorkspaceResolver`, and it type-imports the ports from `agent-core`. The fifth
+package keeps `agent-core` free of `node:fs` and `node:child_process`, in the same port style ADR
+0002 uses for its adapters, and keeps `coding-agent` a thin composition root. CDA-20's description
+and `CONTEXT-MAP.md` list all five packages.
 
-This placement relies on a reading of ADR 0001: its assignment of path validation to Agent Core is
-read as ownership of the validation step and its guarantees, which stay in Agent Core (§3), while
-the filesystem code that performs the step lives here. If review reads ADR 0001 as requiring that
-code inside `agent-core`, this section amends ADR 0001 and must say so when accepted.
+This placement follows ADR 0001 §2 as amended: Agent Core owns the path-validation step and its
+guarantees (§3), while the filesystem code that performs the step lives here.
 
 ```typescript
 export function createWorkspaceResolver(
@@ -375,10 +374,10 @@ export function bashTool(): ExecutableTool<typeof BashParams>;
 `createWorkspaceResolver` canonicalizes and validates `repoRoot` once, which satisfies ADR 0002's
 requirement that `repoRoot` be valid before the Agent Session reaches `ready`. Tools take no
 `repoRoot` argument; it arrives through `ctx.workspace`. `bashTool` takes no timeout options,
-because ADR 0001 fixes the 30-second default and the 120-second cap. Filesystem helpers inside the
-package accept `RepoPath` rather than `string`, so skipping validation is a type error. Individual
-tools are exported alongside the default registry so an evaluation harness can compose a narrower
-one.
+because ADR 0001 fixes the 30,000 ms default and the 120,000 ms cap for `timeoutMs`. Filesystem
+helpers inside the package accept `RepoPath` rather than `string`, so skipping validation is a type
+error. Individual tools are exported alongside the default registry so an evaluation harness can
+compose a narrower one.
 
 ### 5. `@coding-agent/tui`
 
@@ -467,13 +466,13 @@ transformation arrives as an injected port on `openAgentSession`. Every such pla
 depends on Pi. The only Pi package in any manifest is `@earendil-works/pi-tui` 0.85.1, which the
 throwaway TUI prototype uses as a reference baseline.
 
-Attribution is separate from naming. `packages/ai/src/utils/event-stream.ts`, added in `1da45ea`
-(CDA-8), matches Pi's `packages/ai/src/utils/event-stream.ts` at the commit the Pi architecture
-research examined, except for removed comments and lint fixes. Pi is MIT-licensed
-(`Copyright (c) 2025 Mario Zechner`), and that license requires its copyright and permission notice
-in copies or substantial portions. The repository carries no such notice, and renaming symbols does
-not satisfy the requirement. The file must retain the notice or be rewritten; this applies to the
-current code whether or not this decision is accepted.
+Attribution is separate from naming. Pi is MIT-licensed (`Copyright (c) 2025 Mario Zechner`), and
+that license requires its copyright and permission notice in copies or substantial portions, so
+code adapted from Pi keeps that notice; renaming symbols does not satisfy the requirement.
+`packages/ai/src/utils/event-stream.ts`, added in `1da45ea` (CDA-8), matches Pi's
+`packages/ai/src/utils/event-stream.ts` at the commit the Pi architecture research examined, except
+for removed comments and lint fixes. It must carry the notice or be rewritten; that work is separate
+from this decision.
 
 The divergences that matter are structural: the allowlisted, type-only package graph with one
 composition root; sequential Tool Call execution (ADR 0002 §3), where Pi runs calls in parallel by
@@ -496,14 +495,35 @@ renamed:
 | `builtinProviders` / `builtinModels` | `defaultProviders()` / `createProviderDirectory()` |
 | `ModelsImpl` | `ProviderDirectory` |
 | `ApiKeyAuth` / `ProviderAuth` / `envApiKeyAuth` | `ApiKeySource` / `ProviderCredentials` / `apiKeyFromEnv` |
+| `anthropicProvider`, `googleProvider`, `openaiProvider`, `opencodeProvider`, `openrouterProvider`, `xaiProvider` | `createAnthropicProvider()`, `createGoogleProvider()`, `createOpenAIProvider()`, `createOpencodeProvider()`, `createOpenRouterProvider()`, `createXaiProvider()` |
 | `EventStream`, `AssistantMessageEventStream`, `createAssistantMessageEventStream` | internal; `ModelStream` is exported |
 | `providers/all.ts` | `providers/registry.ts` |
 
-The replacement names were checked against Pi's exports. The names this decision introduces also
-avoid Pi's public `createAgentSession`, `ToolDefinition`, and `ModelRegistry`
+The per-provider factories match Pi's `pi-ai/providers/*` subpath exports. The replacement names
+were checked against Pi's public exports, including subpath exports. The names this decision
+introduces also avoid Pi's public `createAgentSession`, `ToolDefinition`, and `ModelRegistry`
 (`pi-coding-agent`), `AgentTool` (`pi-agent-core`), and `ApiKeyCredential` (`pi-ai`). `Model`,
 `Message`, `UserMessage`, `AssistantMessage`, `Context`, `StreamOptions`, and `Provider` are kept as
 domain terms.
+
+The same comparison covers the other four packages. Their exported names were checked against the
+public exports of `pi-ai`, `pi-agent-core`, `pi-tui`, and `pi-coding-agent` at the commit the Pi
+architecture research examined, following each package's `exports` entry points and their
+re-exports:
+
+| Package | Names checked | Exact matches with a Pi public export |
+| --- | --- | --- |
+| `agent-core` | the ADR 0001 and ADR 0002 types it exports and the names in §3 (41 names) | `AgentSession` (`pi-coding-agent`), `AgentState` (`pi-agent-core`), `JsonValue` (`pi-agent-core`, `pi-ai`), `IdGenerator` (`pi-agent-core`) |
+| `tools` | `createWorkspaceResolver`, `createDefaultTools`, `readTool`, `writeTool`, `editTool`, `bashTool`, `ReadParams`, `WriteParams`, `EditParams`, `BashParams` | none |
+| `tui` | `renderTui`, `TuiModel`, `TuiHandlers`, `TuiHandle` | none |
+| `coding-agent` | `runInteractive`, `runHeadless`, `projectSessionEvent`, `CliOptions`, `HeadlessOptions`, `HeadlessResult` | none |
+
+| Match | Decision |
+| --- | --- |
+| `AgentSession` | kept: Agent Core glossary term, fixed by ADR 0002 |
+| `AgentState` | kept: Agent Core glossary term, fixed by ADR 0002 |
+| `JsonValue` | kept: generic name for ADR 0002's JSON value type; it encodes no design choice |
+| `IdGenerator` | renamed to `IdSource` (§3) |
 
 A later public export that matches a Pi export is renamed, or kept with its reason recorded in the
 decision that introduces it. The renamed symbols have no consumers outside `packages/ai`, so the
@@ -541,17 +561,16 @@ demonstrate: every sibling is linked, and `bun test` does not typecheck.
   [Decide implementation order and the MVP completion checklist](https://datn-fit-hcmus.atlassian.net/browse/CDA-22).
 - Both SDK clients in `packages/ai` are currently constructed without `maxRetries`, so each retries
   failed requests twice by default. They must pass the bound from §2.
-- `CONTEXT-MAP.md` must add `@coding-agent/tools` and remove its statement that package APIs and
-  dependency direction are still undecided.
+- This decision amends ADR 0001 (ADR 0001 §7): Agent Core owns the path-validation step while its
+  filesystem code may be injected; `TOOL_INTERNAL_ERROR` is a recoverable error code for unexpected
+  tool failures; tool schemas use `typebox` 1.x instead of `@sinclair/typebox` 0.x; and the bash
+  input is `timeoutMs`, in milliseconds.
+- `CONTEXT-MAP.md` lists `@coding-agent/tools` as its own context, and CDA-20's description names
+  all five packages.
 - Costs accepted: a fifth package; a rename pass across `packages/ai`; a two-phase tool port that is
   more work than a single `execute`; per-provider capability declarations; and an injected clock
-  and ID generator that lengthen construction at the composition root.
-- Before acceptance, review must confirm the fifth package and the reading of ADR 0001 in §4.
-- Before Agent Core implements Tool Call dispatch, ADR 0001 needs an amendment that adds a
-  `ToolErrorCode` for an unexpected tool failure.
-- Before the first tool is written, the TypeBox package needs confirmation: ADR 0001 names
-  `@sinclair/typebox`, whose current release is 0.34.52, while TypeBox 1.x is published as
-  `typebox` (1.3.30), the package Pi uses. ADR 0001's bash `timeout` input also states no unit.
+  and ID source that lengthen construction at the composition root.
 - `ToolProgress` is shaped with the first tool that reports progress; Agent Core owns and bounds
   it.
-- `packages/ai/src/utils/event-stream.ts` must retain Pi's MIT notice or be rewritten (§8).
+- Adding Pi's MIT notice to `packages/ai/src/utils/event-stream.ts`, or rewriting that file, remains
+  separate follow-up work (§8).

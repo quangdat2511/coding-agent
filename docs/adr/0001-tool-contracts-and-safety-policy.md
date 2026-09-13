@@ -2,7 +2,7 @@
 
 Status: accepted
 
-Date: 2026-09-11 (Refined: 2026-09-12)
+Date: 2026-09-11 (Refined: 2026-09-12; Amended: 2026-09-13)
 
 ## Context
 
@@ -16,7 +16,7 @@ We establish the following tool contracts and safety guarantees across the archi
 
 ### 1. Schema Definition, Validation Seam, and Error Classifications
 
-- Tool parameter schemas are declared using `@sinclair/typebox`. TypeBox schemas are native JSON Schema objects, eliminating translation overhead when providing tool definitions to LLM providers (OpenAI, Anthropic).
+- Tool parameter schemas are declared using the `typebox` package (TypeBox 1.x), not the `@sinclair/typebox` 0.x package; `Type`, `TSchema`, and `Static` are imported from `typebox`. TypeBox schemas are native JSON Schema objects, eliminating translation overhead when providing tool definitions to LLM providers (OpenAI, Anthropic).
 - Parameter checking (**Schema Validation**) occurs at the Agent Core boundary prior to tool invocation.
 - If model arguments fail Schema Validation, Agent Core intercepts the failure before execution and returns a structured `ToolResult` with `isError: true` and an explicit error code to the model transcript, enabling the model to self-correct in the next turn.
 - Error codes are stable identifiers (string union), distinct from the human-readable `message` or the approval `reason`.
@@ -28,7 +28,9 @@ We establish the following tool contracts and safety guarantees across the archi
 | `read` | `{ path: string, offset?: number, limit?: number }` | Numbered text lines (`line \| content`), canonical path, line range metadata | `NOT_FOUND`, `IS_DIRECTORY`, `PATH_OUTSIDE_REPO`, `PERMISSION_DENIED`, `SCHEMA_VIOLATION` (invalid offset/limit) |
 | `write` | `{ path: string, content: string }` | Canonical path, bytes written | `PATH_OUTSIDE_REPO`, `PARENT_CREATION_FAILED`, `PERMISSION_DENIED`, `SCHEMA_VIOLATION` |
 | `edit` | `{ path: string, targetContent: string, replacementContent: string }` | Canonical path, replacement count (1) | `NO_MATCH`, `AMBIGUOUS_MATCH`, `NOT_FOUND`, `IS_DIRECTORY`, `PATH_OUTSIDE_REPO`, `PERMISSION_DENIED`, `SCHEMA_VIOLATION` |
-| `bash` | `{ command: string, timeout?: number, cwd?: string }` | Combined stdout/stderr, exit code (0), duration | `TIMEOUT`, `SIGNAL`, `NON_ZERO_EXIT`, `PATH_OUTSIDE_REPO` (invalid cwd), `APPROVAL_DENIED`, `SCHEMA_VIOLATION` |
+| `bash` | `{ command: string, timeoutMs?: number, cwd?: string }` | Combined stdout/stderr, exit code (0), duration | `TIMEOUT`, `SIGNAL`, `NON_ZERO_EXIT`, `PATH_OUTSIDE_REPO` (invalid cwd), `APPROVAL_DENIED`, `SCHEMA_VIOLATION` |
+
+Any tool may also fail with `TOOL_INTERNAL_ERROR` (§6).
 
 ### 2. Repository-bound Path Jailing and Symlink Boundaries
 
@@ -42,9 +44,11 @@ All filesystem operations must remain strictly bounded to the active repository 
   3. Create any missing intermediate directory components directly without traversing symlinks.
   4. Perform the temporary file creation and atomic rename strictly within that verified directory.
 
+Agent Core owns the path-validation step: it decides when validation runs (during preflight, before Approval), what the step guarantees, and how a failure becomes a `ToolResult`. The filesystem code that performs the checks need not live in the Agent Core package; it may be injected through a port, and the [package API decision](./0003-package-apis-and-dependency-direction.md) places it in `@coding-agent/tools`.
+
 ### 3. Bash Command Execution Bounds and Byte-Exact Budget
 
-- **Timeout**: Default command execution timeout is 30 seconds, with an enforced hard maximum cap of 120 seconds if a custom timeout is requested by the model.
+- **Timeout**: `timeoutMs` is measured in milliseconds, like every other duration field (for example `durationMs`). The default command execution timeout is 30,000 ms (30 seconds), with an enforced hard maximum cap of 120,000 ms (120 seconds) if a custom timeout is requested by the model.
 - **Byte-Exact Output Budget**:
   - The returned command `content` is strictly bounded at **40 KiB (40,960 UTF-8 bytes)**, *inclusive* of the truncation marker: `\n[...output truncated...]\n`.
   - When raw output exceeds 40 KiB, head and tail budgets are calculated dynamically from the remaining budget after reserving the UTF-8 byte length of the marker: `headBudget = tailBudget = (40,960 - markerBytes) / 2`.
@@ -96,7 +100,8 @@ type ToolErrorCode =
   | "TIMEOUT"
   | "SIGNAL"
   | "NON_ZERO_EXIT"
-  | "APPROVAL_DENIED";
+  | "APPROVAL_DENIED"
+  | "TOOL_INTERNAL_ERROR";
 
 interface ToolResult {
   toolCallId: string;
@@ -119,10 +124,21 @@ interface ToolResult {
 }
 ```
 
+`TOOL_INTERNAL_ERROR` reports an unexpected failure inside a tool, such as a thrown exception or a rejected promise, that no other code describes. It is recoverable: Agent Core returns it to the model as an error `ToolResult` like any other code, so the model can adapt, and it counts toward the consecutive recoverable Tool Call failure limit. Its `message` is a sanitized summary, never a raw `Error`, stack trace, or mutable reference. A failure caused by an accepted cancellation is recorded as cancelled rather than with this code. If the failure occurs while a mutating tool executes, partial changes may exist, as for any failed mutating call. The name is deliberately distinct from the Agent Session's terminal `INTERNAL_ERROR` failure code.
+
+### 7. Amendments
+
+On 2026-09-13, the [package API decision](./0003-package-apis-and-dependency-direction.md) amended this record:
+
+- **Path-validation ownership** (§2): Agent Core owns the validation step; the filesystem code that performs it may be injected through a port.
+- **Unexpected tool failures** (§1, §6): `TOOL_INTERNAL_ERROR` is added as a recoverable error code.
+- **Schema package** (§1): `typebox` 1.x replaces `@sinclair/typebox` 0.x.
+- **Bash timeout unit** (§1, §3): the input field is `timeoutMs`, measured in milliseconds.
+
 ## Consequences
 
-- **TypeBox adoption**: Packages declaring or validating tools will standardize on `@sinclair/typebox`.
+- **TypeBox adoption**: Packages declaring or validating tools will standardize on `typebox` (TypeBox 1.x).
 - **Downstream unblocking**:
-  - CDA-20 can define clean package boundaries knowing Agent Core owns execution, path validation, and approval states, while AI owns only schema types and raw streaming.
+  - CDA-20 can define clean package boundaries knowing Agent Core owns execution, the path-validation step (§2), and approval states, while AI owns only schema types and raw streaming.
   - CDA-23 can model context budgeting based on the byte-exact 40 KiB output cap and 300-line read defaults.
   - CDA-24 can implement the TerminalBench evaluation runner using `approvalPolicy: "auto-approve"`.
