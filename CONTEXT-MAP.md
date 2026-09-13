@@ -20,4 +20,4 @@
   an executable application.
 
 Package APIs and dependency direction are defined in
-[Package APIs and Dependency Direction](./docs/adr/0003-package-apis-and-dependency-direction.md).
+[Package APIs and Dependency Direction](./docs/adr/0004-package-apis-and-dependency-direction.md).

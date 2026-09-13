@@ -44,7 +44,7 @@ All filesystem operations must remain strictly bounded to the active repository 
   3. Create any missing intermediate directory components directly without traversing symlinks.
   4. Perform the temporary file creation and atomic rename strictly within that verified directory.
 
-Agent Core owns the path-validation step: it decides when validation runs (during preflight, before Approval), what the step guarantees, and how a failure becomes a `ToolResult`. The filesystem code that performs the checks need not live in the Agent Core package; it may be injected through a port, and the [package API decision](./0003-package-apis-and-dependency-direction.md) places it in `@coding-agent/tools`.
+Agent Core owns the path-validation step: it decides when validation runs (during preflight, before Approval), what the step guarantees, and how a failure becomes a `ToolResult`. The filesystem code that performs the checks need not live in the Agent Core package; it may be injected through a port, and the [package API decision](./0004-package-apis-and-dependency-direction.md) places it in `@coding-agent/tools`.
 
 ### 3. Bash Command Execution Bounds and Byte-Exact Budget
 
@@ -128,7 +128,7 @@ interface ToolResult {
 
 ### 7. Amendments
 
-On 2026-09-13, the [package API decision](./0003-package-apis-and-dependency-direction.md) amended this record:
+On 2026-09-13, the [package API decision](./0004-package-apis-and-dependency-direction.md) amended this record:
 
 - **Path-validation ownership** (§2): Agent Core owns the validation step; the filesystem code that performs it may be injected through a port.
 - **Unexpected tool failures** (§1, §6): `TOOL_INTERNAL_ERROR` is added as a recoverable error code.
