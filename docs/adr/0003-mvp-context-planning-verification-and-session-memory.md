@@ -76,7 +76,7 @@ When a model turn completes without tool calls, Agent Core detects a `Candidate 
   ```
 
   The verification policy evaluates the discriminated runner result without overlapping outcomes:
-  1. **Byte-Exact Output Budget**: The captured output budget is **40 KiB (40,960 UTF-8 bytes)** applied to combined stdout and stderr. It strictly reuses ADR-0001's dynamic head+tail split (`headBudget = tailBudget = (40,960 - markerBytes) / 2`) truncated at valid UTF-8 code point boundaries with the marker `\n[...output truncated...]\n` before recording evidence or injecting into feedback. This preserves both initial test execution context and final assertion failure diagnostics for model self-correction.
+  1. **Byte-Exact Output Budget**: The captured output budget is **40 KiB (40,960 UTF-8 bytes)** applied to combined stdout and stderr. It strictly reuses the dynamic head+tail split algorithm, marker, and valid UTF-8 boundary rules defined in [ADR 0001](./0001-tool-contracts-and-safety-policy.md) before recording evidence or injecting into feedback. Citing ADR-0001 directly avoids duplicating the algorithm formula while preserving both initial test execution context and final assertion failure diagnostics for model self-correction.
   2. **Pass (`status === "completed"` with `exitCode === 0`)**: The policy returns `outcome: "succeeded"`, transitioning the session to `succeeded`.
   3. **Test Assertion Failures (`status === "completed"` with `exitCode !== 0`, excluding launch errors)**: The command ran to completion but test assertions failed. The policy returns `outcome: "continue"`. A structured user message containing the bounded output is injected into the next Model Turn:
      ```text
@@ -126,7 +126,7 @@ Memory management in the MVP is strictly bounded to one in-memory task session:
 
 - **No Dynamic LLM Compaction**: Dynamic summarization turns and rolling message truncation are deferred. In-session memory consists solely of the immutable canonical transcript (messages, tool calls, and tool results).
 - **Tool Output Budgets**: Tool results remain strictly capped at 40 KiB UTF-8 bytes per ADR 0001, preventing context explosion from command outputs or file reads.
-- **Session Limits Defaults**: To prevent runaway token consumption, `Agent Core` enforces these defaults:
+- **Session Limits Defaults**: Agent Core enforces injected limits at runtime, while ownership of concrete default values belongs to `Coding Agent` configuration per [ADR 0002](./0002-agent-session-state-machine-and-event-protocol.md). For the MVP, `Coding Agent` establishes these standard defaults:
   - `maxModelTurns`: **30**
   - `maxToolCalls`: **100**
   - `maxDurationMs`: **600,000 ms** (10 minutes active execution)
