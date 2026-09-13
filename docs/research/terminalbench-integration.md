@@ -1,5 +1,21 @@
 # CDA-21 — Terminal-Bench integration requirements
 
+> **Corrections (2026-09-13).** The
+> [TerminalBench evaluation protocol](../adr/0005-terminalbench-evaluation-protocol.md) (ADR 0005)
+> supersedes two points in this report. Read it before implementing from this report.
+>
+> - **Pins.** Evaluation is re-pinned to Terminal-Bench 4.0.0 and Harbor 0.23.0. The Terminal-Bench
+>   3.0.0 and Harbor 0.21.0 pins below are no longer the baseline.
+> - **README citation and the `-n` flag.** This report attributes the
+>   `terminal-bench/terminal-bench@latest -k 5 --agent oracle` command to the README at `2b0442c`.
+>   That commit's README is branded Frontier-Bench and runs `frontier-bench/frontier-bench` with
+>   `-n 5`. In Harbor, `-n` is `--n-concurrent`, the number of trials running at the same time; it
+>   repeats nothing. Repeated attempts are `-k`, `--n-attempts`. The `-k 5` command quoted below is
+>   valid Harbor usage and matches the Terminal-Bench 4.0.0 README, but a reader who follows the
+>   `2b0442c` link sees `-n 5`. ADR 0005 §7 lists each flag's meaning with its Harbor source line.
+>
+> The Harbor trial behaviors ADR 0005 relies on were rechecked at both Harbor versions.
+
 ## Decision
 
 **Recommendation / inference:** Integrate Coding Agent as a standalone agent in the current
