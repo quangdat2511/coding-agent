@@ -306,6 +306,15 @@ TerminalBench evaluation, so the MVP reaches it only when both tiers are complet
    model, and this record does not either: a cheap weak model produces a valid job that says nothing,
    so the choice needs its own thinking and becomes its own decision ticket on the map.
 
+Item 3 blocks nothing in tier 1, but it should be decided while tier 1 is still running rather than
+after it closes, for two reasons. It carries lead time that is not decision time: a paid key, a rate
+limit checked at the concurrency the job will use, and possibly a quota increase. And it can reach
+back into tier 1, because ADR 0005 §7's second rerun condition reads the provider's HTTP status from
+`MODEL_FAILURE` details, which ADR 0005 lists as an open dependency; once the provider is known, that
+status belongs in its adapter, and adapters are track E, which is tier 1 work. Deciding late risks
+reopening a tier-1 item that was already called complete. Any point after track E starts is soon
+enough.
+
 No reward value is a criterion, in either tier.
 
 ## Consequences
