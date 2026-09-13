@@ -318,10 +318,13 @@ and declares `AgentCapabilities(atif=True)`.
    `<provider>` and `<model-id>` come from Harbor's `-m` value split at its first `/`, so an
    OpenRouter model identifier keeps its own slash. `<environment_logs_dir>` is `/logs/agent` in a
    single-agent trial. The only credential in the process environment is the selected provider's
-   key, supplied through `--ae`. The `exec` and the absence of a pipeline keep
-   [ADR 0001 §8](./0001-tool-contracts-and-safety-policy.md) item 3 true: Harbor's launcher shell
-   is replaced rather than left alive holding the key, and no `tee`/`grep` sibling retains it. No
-   job may run until that key is unreachable from Tool Call processes (§7).
+   key, supplied through `--ae`. The `exec` and the absence of a pipeline satisfy
+   [ADR 0001 §8](./0001-tool-contracts-and-safety-policy.md)'s `"auto-approve"` launch contract:
+   Harbor's launcher shell is replaced rather than left alive holding the key, and no `tee`/`grep`
+   sibling retains it. Coding Agent's own startup ancestor check (ADR 0001 §8) then confirms no
+   ancestor holds the key before it opens the Agent Session, so an adapter that failed to `exec`
+   would abort the trial rather than leak. No job may run until that key is unreachable from Tool
+   Call processes (§7).
 3. Calls `environment.exec` directly rather than `exec_as_agent`, then maps the exit code. For 0,
    1, and 130 the Agent Session settled, so `run()` returns normally and a failed or cancelled Agent
    Result is scored like any other outcome, not recorded as a harness exception. For any other code
