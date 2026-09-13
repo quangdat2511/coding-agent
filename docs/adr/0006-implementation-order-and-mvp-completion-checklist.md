@@ -14,7 +14,8 @@ observable checklist proves the MVP destination has been reached.
 Every architectural decision this order depends on is recorded:
 
 - [Tool contracts and safety policy](./0001-tool-contracts-and-safety-policy.md) fixes the four tool
-  contracts, the path jail, the Approval Policy, and the 40 KiB output budget.
+  contracts, the path jail, the Approval Policy, the 40 KiB output budget, and, in §8, credential
+  isolation for tool and Verification processes.
 - [Agent Session state machine and event protocol](./0002-agent-session-state-machine-and-event-protocol.md)
   fixes nine states, nineteen Session Event types, and the Agent Session interface.
 - [MVP context, planning, verification, and session memory](./0003-mvp-context-planning-verification-and-session-memory.md)
@@ -36,8 +37,12 @@ pricing metadata.
 Two constraints shaped this order. Provider spend is a real limit on a university project, so the
 provider that people run all day cannot be chosen for architectural tidiness alone. And
 [Decide whether tool processes inherit provider credentials](https://datn-fit-hcmus.atlassian.net/browse/CDA-29)
-is resolving in parallel with this decision, which is what allows the `bash` slice to carry its rule
-instead of deferring it.
+resolved as ADR 0001 §8 while this decision was being written, which is why the credential rule is
+placed in slices rather than deferred. That rule is not one line in the `bash` tool: it puts the
+credential variable names in `ai`, the scrubbed child environment in `tools` for both `bash` and the
+Verification Runner, and the non-dumpable hardening plus the `"auto-approve"` startup ancestor check
+in the composition root, with the per-backend isolation test in the evaluation track. The order
+carries it in four places.
 
 ## Decision
 
@@ -77,6 +82,9 @@ Slice 0 blocks every other slice and contains no agent behavior.
   rot silently.
 - Make Google conformant to the contract, including the `generateContent` and Interactions variant
   selector of ADR 0004 §2.
+- Export the provider credential variable names from `ai`. ADR 0001 §8 makes `ai` the single source
+  of truth for that set, and both `tools` and the composition root read it, so it belongs in the
+  slice that fixes `ai`'s public surface rather than in whichever slice needs it first.
 - Add Pi's MIT copyright and permission notice to `packages/ai/src/utils/event-stream.ts`, or rewrite
   the file (ADR 0004 §8).
 - Give all five packages a manifest following `packages/ai` (`private: true`,
@@ -107,8 +115,8 @@ not been shown to work.
 | --- | --- | --- |
 | B1 | `createWorkspaceResolver` and `read` | Symbolic links and paths outside `repoRoot` are rejected as `PATH_OUTSIDE_REPO` against a temporary repository |
 | B2 | `write` and `edit` | Temporary-file write with atomic rename, and the 40 KiB head-and-tail budget, both asserted byte-exactly |
-| B3 | `bash`, with the child-environment credential rule from CDA-29 | A `bash` Tool Call cannot obtain the provider credential by any path the CDA-29 resolution names |
-| B4 | The Verification Runner behind `VerificationPolicy`, outside Agent Core per ADR 0004 §7 | `completed` with exit 0, `completed` with a non-zero exit, `timed_out`, and `launch_failed` each map to the ADR 0003 §3 outcome |
+| B3 | `bash`, built on the scrubbed child environment of ADR 0001 §8 rule 1 | A `bash` Tool Call cannot read a provider credential from its inherited environment, and the stripped set is exactly the names `ai` declares, leaving variables the task or user set untouched |
+| B4 | The Verification Runner behind `VerificationPolicy`, outside Agent Core per ADR 0004 §7, on the same scrubbed environment that ADR 0001 §8's Verification parity requires | `completed` with exit 0, `completed` with a non-zero exit, `timed_out`, and `launch_failed` each map to the ADR 0003 §3 outcome, and a Verification command cannot read a provider credential either |
 
 **Track C, Terminal UI.** Starts at Join 1 and depends on no sibling.
 
@@ -125,8 +133,9 @@ piece of the interaction model that can slip without weakening anything the dest
 | Slice | Contents | Exit criterion |
 | --- | --- | --- |
 | D1 | Configuration, CLI parsing, the `ModelPort` adapter over `ai`, the system prompt assembly of ADR 0003 §1 and §2, and `coding-agent run` | Usage and configuration errors exit 2 before any Agent Session opens |
-| D2 | The full ADR 0005 §3 and §4 contract: exit codes 0, 1, 130, 2, 70; `run.json`, `events.jsonl`, `result.json` at `schemaVersion` 1; the `default` and `terminalbench` profiles | A smoke test per exit code asserts the files each run writes |
-| D3 | `projectSessionEvent` and the interactive path | The projection has unit tests and performs no I/O |
+| D2 | The composition root's two ADR 0001 §8 duties: marking the process non-dumpable through `prctl` before the first tool or Verification child, and, under `"auto-approve"` only, walking the ancestor chain at startup and refusing to open a session when an ancestor still holds a credential | A launcher that does not `exec`-replace itself is rejected with exit 2, and a same-uid child cannot read the Coding Agent process's `/proc/<pid>/environ` or `/proc/<pid>/mem` |
+| D3 | The full ADR 0005 §3 and §4 contract: exit codes 0, 1, 130, 2, 70; `run.json`, `events.jsonl`, `result.json` at `schemaVersion` 1; the `default` and `terminalbench` profiles | A smoke test per exit code asserts the files each run writes |
+| D4 | `projectSessionEvent` and the interactive path | The projection has unit tests and performs no I/O |
 
 **Track E, provider breadth.** Runs from Join 1, parallel to everything else: Anthropic, then
 OpenRouter, OpenAI, and xAI, each against one shared conformance suite of recorded fixtures. Exit
@@ -138,13 +147,13 @@ but it is excluded from the conformance suite, from the completion checklist, an
 `--provider` values of ADR 0005 §3. Promoting it would be a scope change to
 [the map](https://datn-fit-hcmus.atlassian.net/browse/CDA-13), not an ordering choice.
 
-**Track F, evaluation.** Starts after D2, because the adapter depends on the command line and the
+**Track F, evaluation.** Starts after D3, because the adapter depends on the command line and the
 files.
 
 | Slice | Contents | Exit criterion |
 | --- | --- | --- |
 | F1 | The artifact build of ADR 0005 §2: both targets, `artifact-manifest.json`, and `--version` | `--version` output matches the manifest for both executables |
-| F2 | The Python adapter at `evaluation/terminalbench/`, plus a CI job that runs its tests with `uv --frozen` | Command construction, exit-code mapping, single-key forwarding, and ATIF conversion of a complete and a truncated event log all pass, each validated against Harbor's `Trajectory` model |
+| F2 | The Python adapter at `evaluation/terminalbench/`, plus a CI job that runs its tests with `uv --frozen`. Its command satisfies ADR 0001 §8's launch contract: it `exec`s the agent so Harbor's credential-bearing shell is replaced, and pipes its output nowhere (ADR 0005 §6) | Command construction, exit-code mapping, single-key forwarding, and ATIF conversion of a complete and a truncated event log all pass, each validated against Harbor's `Trajectory` model, and a test asserts the command `exec`s with no pipeline |
 | F3 | The oracle job of ADR 0005 §7 step 2 | The job completes on Modal and its harness-flaky tasks are listed |
 
 The oracle job is in the MVP because it receives no credential and no model spend, so it is the one
@@ -161,8 +170,15 @@ recorded job depends on all four.
   through a real session, and it is deliberately reached through the headless entry point: it needs
   no Ink, no projection, and it is the contract the evaluation adapter consumes. The TUI is not
   deferred by this, because track C has been running since Join 1.
-- **Join 3, the interactive path.** A3, A4, B2, B3, B4, C2, and D3 meet: the same named task runs
-  through the full-screen TUI with one approval and one cancellation.
+
+  ADR 0001 §8 does not gate this join, even though ADR 0005 §3 makes `--approval-policy auto-approve`
+  mandatory on the headless path. The skeleton registers `read` only, so it starts no child process
+  and §8 has nothing to guard yet. §8 becomes mandatory the moment B3 or B4 lands a tool that spawns
+  one, and D2 must precede D3, because D3 is where the headless contract is declared complete.
+- **Join 3, the interactive path.** A3, A4, B2, B3, B4, C2, and D4 meet: the same named task runs
+  through the full-screen TUI with one approval and one cancellation. D2's ancestor check does not
+  gate this join: ADR 0001 §8 scopes that check to `"auto-approve"` and accepts the `"ask"` residual,
+  so the interactive path is unaffected by it.
 
 ### 5. Provider for first light and for daily use
 
@@ -188,7 +204,12 @@ something works.
    one: ADR 0004 §3 shapes `ToolProgress` with the first tool that reports progress, and ADR 0005 §4
    already omits both from the on-disk log.
 2. The four tools satisfy ADR 0001, including schemas, the path jail, the 40 KiB budget, and the bash
-   timeout bound; and a test shows a `bash` Tool Call cannot obtain the provider credential.
+   timeout bound. Credential isolation per ADR 0001 §8 is shown by test: neither a `bash` Tool Call
+   nor a Verification command inherits a provider credential; a same-uid child cannot read the
+   Coding Agent process's `/proc/<pid>/environ` or `/proc/<pid>/mem`; and under `"auto-approve"` a
+   launcher that leaves a credential-bearing ancestor alive is rejected with exit 2. The
+   cross-process guarantee is Linux-only and scoped to `"auto-approve"`, and the `"ask"` residual is
+   accepted by ADR 0001 §8 rather than closed here.
 3. Verification exercises all three configured-command outcomes (`succeeded`, `continue` with the
    injected feedback message, `failed` with `VERIFICATION_FAILED`) and the non-gating fallback with
    `no_command_configured` evidence.
@@ -222,9 +243,11 @@ Tier 2 is the recorded benchmark result. It is separate because its first item d
 outside this record and its second costs paid compute, and a checklist whose final item cannot be
 scheduled cannot tell the team when to stop building.
 
-1. ADR 0005 §9 criterion 4: CDA-29 is resolved by an accepted amendment to ADR 0001, the evaluated
-   artifact implements it, and the isolation test has passed on each backend used, recorded in the
-   artifact manifest for that commit.
+1. ADR 0005 §9 criterion 4. Its first clause is already satisfied: CDA-29 is resolved by ADR 0001 §8,
+   an accepted amendment. What remains is that the evaluated artifact implements §8 and that the
+   automated isolation test has passed on each backend used, inside containers built from
+   Terminal-Bench task images, as both a root and a non-root agent user, recorded in the artifact
+   manifest for that commit.
 2. ADR 0005 §9 criterion 5: the smoke, recorded, and any rerun jobs have run after criterion 4 held;
    the recorded job is valid under ADR 0005 §7; its manifest and report are committed; and its
    archive passed the secret scan and is published.
@@ -239,9 +262,14 @@ No reward value is a criterion, in either tier.
 - Slice 0 is a wide change to `packages/ai` with no user-visible behavior, and nothing else can start
   until it merges. That is the cost of putting the boundary graph and the provider contract before
   any agent behavior.
-- The B3 slice depends on CDA-29 resolving. It is resolving in parallel, so the dependency is
-  expected to be satisfied by the time B3 starts; if it is not, B3 waits rather than shipping a
-  `bash` tool whose child environment is later rewritten.
+- Credential isolation is no longer a dependency on an open decision: ADR 0001 §8 fixes it, and this
+  order places it in Slice 0 (`ai` exports the names), B3 and B4 (the scrubbed child environment),
+  D2 (non-dumpable hardening and the `"auto-approve"` ancestor check), F2 (the adapter's `exec` launch
+  contract), and tier 2 (the per-backend isolation test). The cost is that a security rule is spread
+  across four packages, so no single slice can be reviewed as "the credential slice".
+- D2 introduces `bun:ffi` to reach `prctl`, which is the first non-portable call in the codebase. The
+  cross-process guarantee it buys exists only on Linux under `"auto-approve"`, so day-to-day
+  development on macOS runs with the `"ask"` residual that ADR 0001 §8 accepts.
 - Tier 1 can be reached, demonstrated, and written up without spending anything on a recorded
   benchmark job. Tier 2 cannot start until the credential rule is implemented and tested per
   backend.
