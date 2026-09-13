@@ -89,6 +89,23 @@ a running job.
 | The separate verifier environment is built from the task's tests | [`trial/trial.py` L912](https://github.com/harbor-framework/harbor/blob/1e5c5c6/src/harbor/trial/trial.py#L912) |
 | The dataset statistics in the context | every `task.toml`, `environment/Dockerfile` (final-stage `WORKDIR`), `environment/docker-compose.yaml`, and `instruction.md` under [`tasks/`](https://github.com/harbor-framework/terminal-bench/tree/452bf30/tasks), parsed by script |
 
+The Linux behavior behind §7's credential isolation precondition was read in Linux v6.16.
+`/proc/<pid>/environ` opens in read mode
+([`fs/proc/base.c` L1003](https://github.com/torvalds/linux/blob/v6.16/fs/proc/base.c#L1003)) and
+serves the region between `env_start` and `env_end`
+([L1028](https://github.com/torvalds/linux/blob/v6.16/fs/proc/base.c#L1028)). Access succeeds for a
+caller with the same user and group IDs
+([`kernel/ptrace.c` L317](https://github.com/torvalds/linux/blob/v6.16/kernel/ptrace.c#L317)) unless
+the target is non-dumpable and the caller lacks `CAP_SYS_PTRACE`
+([L342](https://github.com/torvalds/linux/blob/v6.16/kernel/ptrace.c#L342)) or a security module
+denies it ([L346](https://github.com/torvalds/linux/blob/v6.16/kernel/ptrace.c#L346)). Yama's
+`ptrace_scope` restricts only attach-mode access
+([`security/yama/yama_lsm.c` L355](https://github.com/torvalds/linux/blob/v6.16/security/yama/yama_lsm.c#L355)),
+which `/proc/<pid>/mem` uses
+([`fs/proc/base.c` L874](https://github.com/torvalds/linux/blob/v6.16/fs/proc/base.c#L874)) but
+`environ` does not. Whether a backend's container runtime serves `/proc` the same way was not
+checked, which is why §7's isolation test runs on each backend.
+
 **Tried locally.** Bun 1.3.14 on macOS arm64 compiled a one-line script for both §2 targets with
 both autoload flags. `file` reported glibc-linked x86-64 and aarch64 ELF executables of about
 94 MB, and the highest `GLIBC_` symbol version found by `strings` was 2.17, a heuristic rather than
@@ -299,7 +316,8 @@ and declares `AgentCapabilities(atif=True)`.
    `<provider>` and `<model-id>` come from Harbor's `-m` value split at its first `/`, so an
    OpenRouter model identifier keeps its own slash. `<environment_logs_dir>` is `/logs/agent` in a
    single-agent trial. The only credential in the process environment is the selected provider's
-   key, supplied through `--ae` (§7).
+   key, supplied through `--ae`. No job may run until that key is unreachable from Tool Call
+   processes (§7).
 3. Calls `environment.exec` directly rather than `exec_as_agent`, then maps the exit code. For 0,
    1, and 130 the Agent Session settled, so `run()` returns normally and a failed or cancelled Agent
    Result is scored like any other outcome, not recorded as a harness exception. For any other code
@@ -352,15 +370,43 @@ count.
 | `--ae`, `--agent-env` | `KEY=VALUE` environment variable for the agent | [`cli/jobs.py` L669](https://github.com/harbor-framework/harbor/blob/1e5c5c6/src/harbor/cli/jobs.py#L669) |
 | `harbor jobs resume -f`, `--filter-error-type` | before resuming, deletes trials without `result.json` and trials whose exception type is listed; default `CancelledError` | [`cli/jobs.py` L2190](https://github.com/harbor-framework/harbor/blob/1e5c5c6/src/harbor/cli/jobs.py#L2190), [`job.py` L268](https://github.com/harbor-framework/harbor/blob/1e5c5c6/src/harbor/job.py#L268) |
 
+**Credential isolation precondition.** The smoke, recorded, and rerun jobs place a provider
+credential in a task container where `bash` runs auto-approved and the network is public. Any
+process that can read that credential can send it anywhere during the trial. §8's secret scan
+inspects only the archive afterwards, so it can neither detect nor prevent that. None of these
+jobs may start until all of the following hold:
+
+1. [CDA-29](https://datn-fit-hcmus.atlassian.net/browse/CDA-29) is resolved by an accepted
+   amendment to ADR 0001.
+2. The resolution guarantees that no process started by a Tool Call or the Verification Runner can
+   obtain the provider credential: not from its inherited environment, not from
+   `/proc/<pid>/environ` of the Coding Agent process, and not from that process's memory. Removing
+   the variable from child environments does not meet this by itself. Linux lets a process with the
+   same user and group read another process's `/proc/<pid>/environ` unless the target is
+   non-dumpable or a security module denies it, and serves that file from the process's original
+   environment region (see Evidence).
+3. The artifact under evaluation implements the resolution, and an automated test demonstrates it
+   on every backend the job will use. The test runs inside containers built from Terminal-Bench
+   4.0.0 task images, as the user Harbor runs the agent as: at least one task whose agent runs as
+   root and one whose agent runs as a non-root user. Tool Calls in the test attempt each path in
+   item 2, and none reveals the credential. The artifact manifest records the ADR amendment and the
+   passing test run for the artifact's commit and backend.
+
+If CDA-29 resolves that tool processes may obtain the credential, these jobs remain blocked until a
+new decision amends this record, for example by keeping the credential out of the task container.
+The oracle job receives no credential and is not gated.
+
 1. **Build** the artifact at the evaluated commit (§2).
 2. **Oracle job**: `harbor run -d terminal-bench/terminal-bench@4.0.0 -a oracle -e modal -k 1`.
    A task whose oracle reward is below 1 is listed in the report as harness-flaky and stays in the
    denominator.
-3. **Smoke job**: the recorded-job command below, restricted with `-i` to `bun-sourcemap-leak`,
-   `music-harmony`, and `photonic-waveguide-routing`, three CPU-only single-container tasks with
-   small resource requests. It may use `-e docker`. It passes when each trial has a reward, the
+3. **Smoke job**, only after the credential isolation precondition holds for its backend: the
+   recorded-job command below, restricted with `-i` to `bun-sourcemap-leak`, `music-harmony`, and
+   `photonic-waveguide-routing`, three CPU-only single-container tasks with small resource
+   requests. It may use `-e docker`. It passes when each trial has a reward, the
    three Coding Agent files, a validated `trajectory.json`, and token counts.
-4. **Recorded job**:
+4. **Recorded job**, only after the credential isolation precondition holds on Modal for the
+   artifact being evaluated:
 
    ```sh
    uv run --project evaluation/terminalbench --frozen harbor run \
@@ -372,8 +418,8 @@ count.
      -o <jobs directory> --job-name <job name>
    ```
 
-5. **Rerun job**, only when the rule below selects trials: the recorded-job command with one `-i`
-   per selected task and `--job-name <job name>-rerun`.
+5. **Rerun job**, only when the rule below selects trials: the recorded-job command, under the same
+   precondition, with one `-i` per selected task and `--job-name <job name>-rerun`.
 
 Rules for the recorded job:
 
@@ -441,7 +487,9 @@ verifier settings with `[REDACTED]`, but only in files that look like UTF-8 text
 ([`trial/trial.py` L1044](https://github.com/harbor-framework/harbor/blob/1e5c5c6/src/harbor/trial/trial.py#L1044),
 [L1053](https://github.com/harbor-framework/harbor/blob/1e5c5c6/src/harbor/trial/trial.py#L1053)).
 The replacement also erases the evidence that a key leaked. Publication therefore requires a
-secret scan. Every step below is mandatory, and a failed step blocks the upload:
+secret scan. The scan protects only the archive: it cannot detect or prevent a credential sent over
+the network while a trial ran, which only §7's credential isolation precondition addresses. Every
+step below is mandatory, and a failed step blocks the upload:
 
 1. Search every file in the uncompressed job directories, including binary files and files Harbor
    did not scrub, for the exact value of every credential the jobs used. A match fails the scan.
@@ -469,9 +517,14 @@ TerminalBench evaluation is complete as an MVP capability when:
 3. The adapter's tests cover command construction, exit-code mapping, forwarding of exactly one
    provider key, and ATIF conversion of a complete and a truncated event log, each validated
    against Harbor's `Trajectory` model.
-4. The oracle, smoke, recorded, and any rerun jobs of §7 have run; the recorded job is valid under
+4. **Prerequisite for criterion 5:** §7's credential isolation precondition holds. CDA-29 is
+   resolved by an accepted ADR 0001 amendment, the evaluated artifact implements it, and the
+   isolation test has passed on each backend used, for that artifact's commit.
+5. The oracle, smoke, recorded, and any rerun jobs of §7 have run; every smoke, recorded, and rerun
+   job started after criterion 4 held for its artifact and backend; the recorded job is valid under
    §7; its manifest and report are committed; and its archive passed §8's secret scan and is
-   published.
+   published. A smoke, recorded, or rerun job that started before criterion 4 held does not count,
+   and its credential is revoked.
 
 No reward value is a criterion.
 
@@ -480,12 +533,13 @@ No reward value is a criterion.
 This protocol relies on two behaviors that belong to other decisions. It states what it needs from
 them and decides neither.
 
-- **Whether tool processes inherit provider credentials:**
+- **Whether tool processes can obtain provider credentials:**
   [Decide whether tool processes inherit provider credentials](https://datn-fit-hcmus.atlassian.net/browse/CDA-29).
   This is tool safety policy, owned by ADR 0001, and the exposure is the same on the interactive
-  path. Until CDA-29 is resolved, a model-issued `env` can copy the provider key into a Tool Result
-  and from there into `events.jsonl` and `trajectory.json`, and §8's secret scan is the only
-  control before logs leave the host.
+  path. It is a blocking prerequisite, not an open question the procedure can run around: §7
+  forbids the smoke, recorded, and rerun jobs until CDA-29 is resolved and its enforcement is
+  tested, and §9 makes that criterion 4. Without it, a model-issued command can read the key and
+  send it over the task's public network during a trial, which no later check can undo.
 - **The provider's HTTP status in `MODEL_FAILURE` details.** §7's second rerun condition reads it.
   ADR 0002 §4 preserves a normalized provider reason in the failure details, but no decision says
   the HTTP status is part of that reason. Until the provider error contract includes it, a
@@ -508,8 +562,9 @@ them and decides neither.
 - A trial that fails outside Coding Agent is rerun once in a separate job. That costs a second task
   environment, but it keeps the failed trial's evidence. A persistent backend or provider fault
   leaves the job without a headline result instead of shrinking the denominator.
-- Publishing a job archive costs a mandatory secret scan, and until CDA-29 is resolved that scan is
-  the only protection against a credential in published logs.
+- No job that receives a provider credential can run until CDA-29 is resolved, implemented, and
+  tested on the backend, so the evaluation cannot start before that ADR 0001 amendment. The
+  mandatory secret scan protects published archives only and is not a substitute.
 - CDA-21's research remains the background source, with the corrections in this record's context,
   and its pins are superseded by §1.
 - Implementation order for §9 belongs to
