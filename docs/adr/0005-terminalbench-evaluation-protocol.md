@@ -305,10 +305,12 @@ and declares `AgentCapabilities(atif=True)`.
 `run(instruction, environment, context)`:
 
 1. Uploads the instruction to `/installed-agent/instruction.md`.
-2. Executes the following command with no exec `cwd` and no exec timeout:
+2. Executes the following command with no exec `cwd` and no exec timeout. Harbor runs it through a
+   shell that holds the provider key, so the command `exec`s the agent, replacing that shell, and
+   pipes its output nowhere:
 
    ```sh
-   /installed-agent/coding-agent run --task-file /installed-agent/instruction.md \
+   exec /installed-agent/coding-agent run --task-file /installed-agent/instruction.md \
      --provider <provider> --model <model-id> --approval-policy auto-approve \
      --profile terminalbench --output-dir <environment_logs_dir>/coding-agent
    ```
@@ -316,8 +318,10 @@ and declares `AgentCapabilities(atif=True)`.
    `<provider>` and `<model-id>` come from Harbor's `-m` value split at its first `/`, so an
    OpenRouter model identifier keeps its own slash. `<environment_logs_dir>` is `/logs/agent` in a
    single-agent trial. The only credential in the process environment is the selected provider's
-   key, supplied through `--ae`. No job may run until that key is unreachable from Tool Call
-   processes (§7).
+   key, supplied through `--ae`. The `exec` and the absence of a pipeline keep
+   [ADR 0001 §8](./0001-tool-contracts-and-safety-policy.md) item 3 true: Harbor's launcher shell
+   is replaced rather than left alive holding the key, and no `tee`/`grep` sibling retains it. No
+   job may run until that key is unreachable from Tool Call processes (§7).
 3. Calls `environment.exec` directly rather than `exec_as_agent`, then maps the exit code. For 0,
    1, and 130 the Agent Session settled, so `run()` returns normally and a failed or cancelled Agent
    Result is scored like any other outcome, not recorded as a harness exception. For any other code
@@ -533,13 +537,14 @@ No reward value is a criterion.
 This protocol relies on two behaviors that belong to other decisions. It states what it needs from
 them and decides neither.
 
-- **Whether tool processes can obtain provider credentials:**
-  [Decide whether tool processes inherit provider credentials](https://datn-fit-hcmus.atlassian.net/browse/CDA-29).
-  This is tool safety policy, owned by ADR 0001, and the exposure is the same on the interactive
-  path. It is a blocking prerequisite, not an open question the procedure can run around: §7
-  forbids the smoke, recorded, and rerun jobs until CDA-29 is resolved and its enforcement is
-  tested, and §9 makes that criterion 4. Without it, a model-issued command can read the key and
-  send it over the task's public network during a trial, which no later check can undo.
+- **Credential isolation for tool processes:**
+  [CDA-29](https://datn-fit-hcmus.atlassian.net/browse/CDA-29), resolved by
+  [ADR 0001 §8](./0001-tool-contracts-and-safety-policy.md). This is tool safety policy owned by
+  ADR 0001, and the exposure is the same on the interactive path. It is a blocking prerequisite,
+  not an open question the procedure can run around: §7 forbids the smoke, recorded, and rerun jobs
+  until ADR 0001 §8 is accepted, implemented in the evaluated artifact, and confirmed by the
+  per-backend test, and §9 makes that criterion 4. Without it, a model-issued command can read the
+  key and send it over the task's public network during a trial, which no later check can undo.
 - **The provider's HTTP status in `MODEL_FAILURE` details.** §7's second rerun condition reads it.
   ADR 0002 §4 preserves a normalized provider reason in the failure details, but no decision says
   the HTTP status is part of that reason. Until the provider error contract includes it, a

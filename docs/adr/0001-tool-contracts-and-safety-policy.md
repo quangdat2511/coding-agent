@@ -135,10 +135,33 @@ On 2026-09-13, the [package API decision](./0004-package-apis-and-dependency-dir
 - **Schema package** (§1): `typebox` 1.x replaces `@sinclair/typebox` 0.x.
 - **Bash timeout unit** (§1, §3): the input field is `timeoutMs`, measured in milliseconds.
 
+On 2026-09-13, the [credential-isolation decision](https://datn-fit-hcmus.atlassian.net/browse/CDA-29) amended this record:
+
+- **Credential isolation** (§8): a new section requires that the provider credentials Coding Agent uses be unreachable from any process started for a Tool Call or by the Verification Runner.
+
+### 8. Credential Isolation for Tool and Verification Processes
+
+Coding Agent authenticates to Model Providers with credentials it reads from its own environment: the provider API-key variables that `@coding-agent/ai` defines. `bash` Tool Calls (§3) and the Verification Runner ([ADR 0003](./0003-mvp-context-planning-verification-and-session-memory.md) §3) start child processes on the model's behalf. Under the `"auto-approve"` policy (§4) with network access these children run unattended, so one that obtains a credential can send it anywhere; even under `"ask"`, a credential copied into a Tool Result enters the transcript, the Session Event log, and any exported trajectory. The credentials Coding Agent uses must therefore be unreachable from any such process.
+
+This rule was grounded in Linux experiments (Docker, kernel 6.12, same-uid child): removing the variable from a child's environment blocks only the inherited copy; the credential still sits in the launcher's `/proc/<pid>/environ` and process memory, because an in-process delete does not rewrite the environment region fixed at `execve`. Marking the launcher non-dumpable is what denies a same-uid child those files. See [ADR 0005](./0005-terminalbench-evaluation-protocol.md) for the evidence links.
+
+The rule is normative:
+
+1. **Non-inheritance.** Every process started for a Tool Call or by the Verification Runner is launched with an environment from which Coding Agent's provider-credential variables are removed. The removed set is exactly the credential variable names `@coding-agent/ai` declares for its providers, which is the single source of truth, not an arbitrary denylist. Variables the task or user set in the environment, such as a task's own `GH_TOKEN`, are not touched: only the keys Coding Agent itself uses are stripped, so there is no separate opt-out to misconfigure.
+2. **Non-recovery.** Because a same-user child can read the launcher's `/proc/<pid>/environ`, `/proc/<pid>/mem`, and `/proc/<pid>/fd`, where the credential remains after an in-process delete, item 1 alone is insufficient. On Linux the Coding Agent process marks itself non-dumpable (`prctl(PR_SET_DUMPABLE, SUID_DUMP_DISABLE)`) before it starts the first Tool Call or Verification child, so a same-uid child without `CAP_SYS_PTRACE` cannot read those files.
+3. **No credential-bearing relative.** The credential must not persist in any other live process reachable by a tool child, such as a parent shell that was launched with the credential or a pipeline sibling, and must not be written to a file a same-uid process can read. A credential held only inside the non-dumpable Coding Agent process satisfies this; a launcher that leaves a credential-bearing shell alive as an ancestor or sibling of the tool child does not.
+4. **Verification parity.** Verification Runner commands follow items 1 to 3 identically to `bash`.
+5. **Scope of the guarantee.** The guarantee is that a Tool Call or Verification child running as the same user, without `CAP_SYS_PTRACE`, cannot obtain the credentials. It does not defend against a child granted `CAP_SYS_PTRACE`, nor against a platform without a non-dumpable equivalent: on macOS a same-user process can read another's startup environment through `KERN_PROCARGS2` and `ps`, and there is no `PR_SET_DUMPABLE` analogue, so item 2 is Linux-only. Reproducible evaluation runs under `"auto-approve"` in Linux containers, where the full guarantee holds; the interactive path gates every mutating command behind Approval (§4), and its macOS residual is accepted and documented rather than closed in this MVP.
+
+Enforcement follows the package boundaries in [ADR 0004](./0004-package-apis-and-dependency-direction.md). `@coding-agent/ai` exports the credential variable names as the single source of truth. `@coding-agent/tools`, which implements the `bash` tool and the Verification Runner adapter, builds the scrubbed child environment. `@coding-agent/coding-agent`, the composition root that reads the credentials, applies the non-dumpable hardening and supplies the credential-name set to strip. The evaluation adapter obligations that keep item 3 true under Harbor — execute the agent in place so the credential-bearing launcher shell is replaced, and use no output pipeline that retains the credential in a sibling — are fixed by ADR 0005.
+
+An automated test enforces the rule: on each backend an evaluation uses, it runs inside a container as the user Harbor runs the agent as and confirms a Tool Call cannot recover a credential through inherited environment, `/proc/<pid>/environ`, `/proc/<pid>/mem`, or a credential-bearing ancestor or sibling. ADR 0005 §7 and §9 make that test a precondition for any evaluation job that carries a credential.
+
 ## Consequences
 
 - **TypeBox adoption**: Packages declaring or validating tools will standardize on `typebox` (TypeBox 1.x).
 - **Downstream unblocking**:
   - CDA-20 can define clean package boundaries knowing Agent Core owns execution, the path-validation step (§2), and approval states, while AI owns only schema types and raw streaming.
   - CDA-23 can model context budgeting based on the byte-exact 40 KiB output cap and 300-line read defaults.
-  - CDA-24 can implement the TerminalBench evaluation runner using `approvalPolicy: "auto-approve"`.
+  - CDA-24 can implement the TerminalBench evaluation runner using `approvalPolicy: "auto-approve"`, once §8's credential isolation is enforced and tested per ADR 0005.
+- **Credential isolation cost** (§8): the composition root marks the process non-dumpable through a `prctl` call (via `bun:ffi`) before the first Tool Call or Verification child, and `@coding-agent/tools` strips the AI-declared credential variables from every such child. The guarantee is Linux-only; the interactive macOS path keeps a documented residual, and a child with `CAP_SYS_PTRACE` is out of scope.
