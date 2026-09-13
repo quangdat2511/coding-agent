@@ -52,7 +52,8 @@ When a model turn completes without tool calls, Agent Core detects a `Candidate 
 
 - **Automated Command Execution**: In environments where a verification command is provided (via task configuration, user input, or benchmark harness):
   1. The command executes non-interactively in `repoRoot` under standard command timeout constraints.
-  2. **Test Assertion Failures (`exitCode !== 0`)**: The policy returns `outcome: "continue"`. A structured user message is injected into the next Model Turn:
+  2. **Byte-Exact Output Budget**: The captured command output adheres to the **40 KiB (40,960 UTF-8 bytes)** budget defined in ADR 0001. If the output exceeds 40 KiB, it is truncated with the marker `\n[...output truncated...]\n` before being recorded in evidence or injected into feedback, preventing context explosion during verbose test failures.
+  3. **Test Assertion Failures (`exitCode !== 0`)**: The policy returns `outcome: "continue"`. A structured user message containing the bounded output is injected into the next Model Turn:
      ```text
      [Verification Failed]
      Command: {command}
@@ -61,11 +62,11 @@ When a model turn completes without tool calls, Agent Core detects a `Candidate 
      {output}
      Please analyze the failure, adjust your changes, and verify again.
      ```
-  3. **Execution/System Failures**: If the command cannot be launched (command not found, syntax error in command invocation, or execution timeout), the policy returns `outcome: "failed"` with `AgentFailureCode: "VERIFICATION_FAILED"`. This halts the session immediately rather than trapping the model in an unrecoverable environment loop.
-  4. **Pass (`exitCode === 0`)**: The policy returns `outcome: "succeed"`, transitioning the session to `succeeded`.
+  4. **Execution/System Failures**: If the command cannot be launched (command not found, syntax error in command invocation, or execution timeout), the policy returns `outcome: "failed"` with `AgentFailureCode: "VERIFICATION_FAILED"`. This halts the session immediately rather than trapping the model in an unrecoverable environment loop.
+  5. **Pass (`exitCode === 0`)**: The policy returns `outcome: "succeeded"`, transitioning the session to `succeeded`.
 - **Fallback Verification**: If no verification command is configured:
-  - If mutations occurred (`workspaceChanged === true`), the policy verifies non-empty workspace modifications and returns `outcome: "succeed"`.
-  - Evidence is recorded as `{ type: "no_command_configured", workspaceChanged: true }`.
+  - Both mutating tasks (`workspaceChanged === true`) and read-only or informational tasks (`workspaceChanged === false`) are accepted as valid completions, returning `outcome: "succeeded"`.
+  - Evidence records the observed workspace mutation state: `{ type: "no_command_configured", workspaceChanged: boolean }`. Callers requiring mandatory workspace mutation can inspect `AgentResult.workspaceChanged` upon session settlement.
 - **Evidence Schema**: Every verification outcome records structured evidence in `VerificationSummary.evidence`:
   ```typescript
   type VerificationEvidence =
