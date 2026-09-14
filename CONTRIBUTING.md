@@ -2,7 +2,7 @@
 
 Tài liệu này quy định quy trình làm việc chung của nhóm, từ lúc nhận ticket trên Jira cho tới khi ticket được đóng.
 
-Mọi thành viên đều phải tuân thủ quy trình này. 
+Mọi thành viên đều phải tuân thủ quy trình này.
 
 ## Mục lục
 
@@ -38,7 +38,7 @@ Nhóm áp dụng **Trunk-Based Development**: **trunk của repo là nhánh `mai
 | 2 | Cập nhật `main`, tách branch mới | Branch ngắn hạn theo đúng quy ước tên |
 | 3 | Code và commit | Các commit nhỏ (khuyến khích), message tiếng Anh |
 | 4 | Push branch lên remote | Branch đã có trên GitHub |
-| 5 | Rebase `main` mới nhất vào branch và xử lí hết conflict| Branch không còn lệch `main`, hết conflict |
+| 5 | Rebase `main` mới nhất vào branch và xử lý hết conflict | Branch không còn lệch `main`, hết conflict |
 | 6 | Mở Pull Request (ticket được Jira automation tự chuyển sang `In Review`), **tự review lại toàn bộ diff**, chuyển **Ready for review** | PR đúng định dạng tiêu đề, đã điền template, chủ PR hiểu rõ mọi thay đổi |
 | 7 | Request review, sửa theo góp ý | Đủ approve, mọi conversation đã resolve, CI pass |
 | 8 | **Squash and merge** vào `main` | `main` có thêm đúng 1 commit |
@@ -70,6 +70,7 @@ Quy tắc:
   - PR được merge vào `main`: `In Review` → `Done`.
   - Ticket `Blocked` hết blocker: `Blocked` → `To Do`.
 - Nếu ticket có khối lượng công việc lớn, chủ động **tách thành nhiều ticket/branch nhỏ**. PR nhỏ giúp reviewer dễ đọc, review nhanh và chính xác hơn, đồng thời hạn chế conflict.
+- Nếu ticket của mình đang ở trạng thái `Blocked`, chủ động **liên hệ và hối thúc người phụ trách ticket đang chặn** để họ hoàn thành sớm, tránh chỉ ngồi chờ đợi bị động (xem thêm chiều ngược lại ở [Bước 9](#bước-9-dọn-dẹp-và-đóng-ticket)).
 
 ---
 
@@ -188,11 +189,13 @@ Quy ước của nhóm: nếu conflict nằm ở phần code của người khá
 
 Điền đầy đủ [template PR](.github/pull_request_template.md): link ticket, loại thay đổi, thay đổi gì, vì sao, cách giải quyết, cách kiểm thử (nếu có thay đổi code), ảnh chụp màn hình (nếu có thay đổi giao diện) và checklist.
 
+> **Lưu ý:** Có thể dùng AI hỗ trợ soạn tiêu đề và mô tả PR, nhưng chủ PR phải **đọc lại toàn bộ trước khi chuyển PR sang Ready for review**, đảm bảo nội dung phản ánh đúng và đầy đủ thay đổi thực tế.
+
 ### Kích thước PR
 
 PR càng nhỏ càng tốt, xem quy tắc tách nhỏ ticket/branch ở [Bước 1](#bước-1-nhận-ticket-trên-jira).
 
-### Tự review trước khi request review
+### Tự review trước khi chuyển sang Ready for review
 
 **Bắt buộc: chủ PR phải tự review lại toàn bộ diff của mình trước khi chuyển PR sang Ready for review.** Đây không phải là bước hình thức - đây là điều kiện tiên quyết.
 
@@ -206,7 +209,7 @@ Reviewer chỉ bắt đầu review khi PR ở trạng thái **Ready for review**
 
 Trong lúc chưa tự review xong, để PR ở trạng thái **Draft** để tránh reviewer vào xem nhầm lúc chưa sẵn sàng.
 
-**Chỉ chủ PR** mới được bấm **Ready for review**. Người khác (kể cả reviewer) không tự ý chuyển PR của người khác sang Ready for review, vì chỉ chủ PR mới biết PR đã thực sự sẵn sàng hay chưa.
+**Chỉ chủ PR** mới được chuyển qua lại giữa **Draft** và **Ready for review**. Người khác (kể cả reviewer) không tự ý chuyển trạng thái PR của người khác theo cả hai chiều, vì chỉ chủ PR mới biết PR đã thực sự sẵn sàng hay chưa.
 
 Ngay khi PR được mở (kể cả Draft), ticket tự chuyển sang `In Review` ([Bước 1](#bước-1-nhận-ticket-trên-jira)).
 
@@ -216,8 +219,9 @@ Ngay khi PR được mở (kể cả Draft), ticket tự chuyển sang `In Revie
 
 ### Điều kiện request review
 
-Chỉ được request review khi PR đã thoả **cả hai** điều kiện sau:
+Chỉ được request review khi PR đã thoả **cả ba** điều kiện sau:
 
+- **PR đang ở trạng thái Ready for review.** Không request review khi PR còn ở Draft ([Bước 6](#bước-6-mở-pull-request)).
 - **CI pass toàn bộ.** Không request review khi còn check đỏ - reviewer không phải người đi sửa lint hay test hộ.
 - **Branch đã up to date với `main`.** Rebase `main` mới nhất vào branch và xử lý hết conflict trước ([Bước 5](#bước-5-đồng-bộ-với-main)).
 
@@ -225,9 +229,10 @@ Nếu trong lúc chờ review mà `main` đã tiến lên hoặc CI chuyển san
 
 ### Với chủ PR
 
-- Chủ động **request reviewer** ngay khi PR chuyển sang **Ready for review**, không chờ người khác tự vào xem.
 - **Chọn reviewer hợp lý**. Lưu ý mọi reviewer đều phải approve thì PR mới được merge ([Bước 8](#bước-8-merge)).
+- Chủ động **request reviewer** ngay khi PR chuyển sang **Ready for review**, không chờ người khác tự vào xem.
 - Sửa theo góp ý thì push commit mới lên cùng branch (không cần tạo PR mới).
+- Nếu đã quá thời hạn review khuyến nghị (2 ngày) mà chưa nhận được phản hồi, chủ động **nhắc lại reviewer** để tránh PR bị treo quá lâu.
 
 ### Với reviewer
 
@@ -235,6 +240,8 @@ Nếu trong lúc chờ review mà `main` đã tiến lên hoặc CI chuyển san
 - Chủ động **sắp xếp thời gian review sớm nhất có thể** ngay khi được request, để branch không bị giữ lâu, đúng tinh thần short-lived branch và giúp PR được merge sớm. Nên review xong **trong vòng 2 ngày** kể từ khi được request.
 - Để lại comment cụ thể, gắn với dòng code cần góp ý.
 - Chỉ approve khi đã hiểu rõ chủ PR đang làm gì và đồng ý với thay đổi cũng như hướng triển khai đó.
+- Có thể dùng AI hỗ trợ quá trình review và gợi ý nội dung comment, nhưng phải **tự đánh giá gợi ý đó có hợp lý không trước khi đăng comment** - không copy-paste nguyên văn suggestion của AI khi chưa hiểu rõ.
+- Khi được chủ PR nhắc lại vì review trễ hẹn, **giữ thái độ tích cực, không xem đó là sự làm phiền** - review sớm giúp đảm bảo tiến độ chung của cả nhóm không bị đình trệ.
 
 ### Resolve conversation
 
@@ -297,6 +304,6 @@ git branch -D CDA-12-add-user-login    # xoá branch ở local
 
 Ticket tự chuyển sang `Done`, và các ticket bị nó block tự về `To Do` nếu không còn blocker nào khác ([Bước 1](#bước-1-nhận-ticket-trên-jira)).
 
-Khi thấy ticket bị block đã về `To Do`, báo ngay cho người đảm nhận (assignee) để họ có thể bắt tay vào làm.
+Khi thấy ticket bị block đã về `To Do`, báo ngay cho người đảm nhận (assignee) để họ có thể bắt tay vào làm - đây là chiều ngược lại của quy tắc hối thúc blocker ở [Bước 1](#bước-1-nhận-ticket-trên-jira).
 
 ---
