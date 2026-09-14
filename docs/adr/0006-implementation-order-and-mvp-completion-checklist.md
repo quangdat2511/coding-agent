@@ -87,9 +87,10 @@ flowchart LR
   S0 --> J1
   J1 --> A1
   J1 --> C1
-  J1 --> D1
   J1 --> E1
   A1 -->|ports| B1
+  A1 -->|ports| D1
+  C1 -->|TuiModel| D4
   D3 -->|CLI contract| F1
   A2 --> J2
   B1 --> J2
@@ -172,7 +173,9 @@ not been shown to work.
 The split rail stays out of the MVP. ADR 0004 §5 already makes it opt-in, which makes it the one
 piece of the interaction model that can slip without weakening anything the destination names.
 
-**Track D, Coding Agent.** Owns the two later joins.
+**Track D, Coding Agent.** Starts once A1 has published the ports, because D1's `ModelPort` adapter
+and `coding-agent run` both need `ModelPort` and `openAgentSession`, which Agent Core defines. D4
+also needs `TuiModel` from C1, because `tui` owns that type. Owns the two later joins.
 
 | Slice | Contents | Exit criterion |
 | --- | --- | --- |
@@ -207,7 +210,7 @@ recorded job depends on all four.
 ### 4. Join points
 
 - **Join 1, after Slice 0.** The contract and the boundary graph exist. Tracks A, C, and E start;
-  track B starts once A1 lands.
+  tracks B and D start once A1 lands, because both implement or consume ports that A1 defines.
 - **Join 2, the walking skeleton.** A2, B1, and D1 meet: headless `coding-agent run` completes the
   named fixture task using Google, `read` only, the auto-approved path, and no configured
   verification command, exiting 0. This is the first moment a real model response drives a real tool
