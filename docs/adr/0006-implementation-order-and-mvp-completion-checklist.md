@@ -125,8 +125,12 @@ Slice 0 blocks every other slice and contains no agent behavior.
   overrides only where a model genuinely differs. Four of the five fields are properties of the API
   family rather than the model, and adding five fields to 385 catalog entries would create rows that
   rot silently.
-- Make Google conformant to the contract, including the `generateContent` and Interactions variant
-  selector of ADR 0004 §2.
+- Add the API-variant selector of ADR 0004 §2 and make Google conformant through its
+  `generateContent` variant, replacing today's route through Gemini's OpenAI-compatible Chat
+  Completions endpoint. The Interactions variant is not implemented in the MVP: it links turns
+  through a server-side `previous_interaction_id`, and whether that fits Agent Core owning the
+  transcript (ADR 0002) is unverified. The selector leaves room to add it later without a new
+  provider.
 - Export the provider credential variable names from `ai`. ADR 0001 §8 makes `ai` the single source
   of truth for that set, and both `tools` and the composition root read it, so it belongs in the
   slice that fixes `ai`'s public surface rather than in whichever slice needs it first.
@@ -137,7 +141,8 @@ Slice 0 blocks every other slice and contains no agent behavior.
   fails on a remaining sibling import.
 
 Exit criteria: `bun --filter '*' typecheck`, `bun test`, and `biome ci .` pass; `ai` streams a Tool
-Call from Google both against a recorded fixture and against the live API; and a deliberately added
+Call from Google through the `generateContent` variant, both against a recorded fixture and against
+the live API; and a deliberately added
 forbidden import fails CI. The last one matters because an enforcement rule that has never failed has
 not been shown to work.
 
