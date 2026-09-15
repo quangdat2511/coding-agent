@@ -2,7 +2,7 @@
 
 Tài liệu này quy định quy trình làm việc chung của nhóm, từ lúc nhận ticket trên Jira cho tới khi ticket được đóng.
 
-Mọi thành viên đều phải tuân thủ quy trình này. 
+Mọi thành viên đều phải tuân thủ quy trình này.
 
 ## Mục lục
 
@@ -38,11 +38,11 @@ Nhóm áp dụng **Trunk-Based Development**: **trunk của repo là nhánh `mai
 | 2 | Cập nhật `main`, tách branch mới | Branch ngắn hạn theo đúng quy ước tên |
 | 3 | Code và commit | Các commit nhỏ (khuyến khích), message tiếng Anh |
 | 4 | Push branch lên remote | Branch đã có trên GitHub |
-| 5 | Rebase `main` mới nhất vào branch và xử lí hết conflict| Branch không còn lệch `main`, hết conflict |
-| 6 | Mở Pull Request, **tự review lại toàn bộ diff**, chuyển **Ready for review** | PR đúng định dạng tiêu đề, đã điền template, chủ PR hiểu rõ mọi thay đổi |
-| 7 | Request review + chuyển ticket sang `In Review`, sửa theo góp ý | Đủ approve, mọi conversation đã resolve, CI pass |
+| 5 | Rebase `main` mới nhất vào branch và xử lý hết conflict | Branch không còn lệch `main`, hết conflict |
+| 6 | Mở Pull Request (ticket được Jira automation tự chuyển sang `In Review`), **tự review lại toàn bộ diff**, chuyển **Ready for review** | PR đúng định dạng tiêu đề, đã điền template, chủ PR hiểu rõ mọi thay đổi |
+| 7 | Request review, sửa theo góp ý | Đủ approve, mọi conversation đã resolve, CI pass |
 | 8 | **Squash and merge** vào `main` | `main` có thêm đúng 1 commit |
-| 9 | Chuyển ticket sang `Done`; khuyến khích xoá branch ở local và remote sau khi merge | Ticket đã đóng; branch merge rồi có thể xoá hoặc giữ lại |
+| 9 | Khuyến khích xoá branch ở local sau khi merge (branch remote được GitHub tự xoá, ticket được Jira automation tự chuyển sang `Done`) | Ticket đã đóng; branch remote đã xoá, branch local có thể xoá hoặc giữ lại |
 
 ---
 
@@ -53,20 +53,24 @@ Vòng đời status của một ticket:
 ```
 Luồng chính:  To Do → In Progress → In Review → Done
 
-Blocked:      Blocked → To Do                    (khi đã hết blocker)
+Blocked:      Blocked → To Do                    (tự động khi đã hết blocker)
 Cancelled:    mọi status trừ Done → Cancelled    (khi ticket bị huỷ)
 ```
 
 - Phần lớn ticket đi thẳng luồng chính, bắt đầu từ `To Do`.
-- `Blocked`: dành cho ticket chưa làm được vì còn phụ thuộc ticket khác. Khi không còn blocker nào thì chuyển về `To Do` ([Bước 9](#bước-9-dọn-dẹp-và-đóng-ticket)).
+- `Blocked`: dành cho ticket chưa làm được vì còn phụ thuộc ticket khác. Ticket tự động chuyển về `To Do` khi **tất cả** ticket block nó đều đã `Done`. Chỉ cần còn một ticket block chưa xong thì nó vẫn ở `Blocked`.
 - `Cancelled`: ticket bị huỷ, không làm nữa. Có thể chuyển sang `Cancelled` từ bất kỳ status nào **trừ** `Done`. PR tương ứng (nếu có) cũng đóng lại mà không merge.
 
 Quy tắc:
 
 - Mỗi phần công việc đều phải có **ticket trên Jira** trước khi bắt đầu code.
 - Khi bắt đầu làm, tự assign ticket cho mình và chuyển status từ `To Do` → `In Progress`.
-- Khi request review, chuyển sang `In Review` ([Bước 7](#bước-7-review)); khi PR đã merge, chuyển sang `Done` ([Bước 9](#bước-9-dọn-dẹp-và-đóng-ticket)).
-- Nếu ticket có khối lượng công việc lớn, chủ động **tách thành nhiều ticket/branch nhỏ**. PR nhỏ giúp review nhanh và chính xác hơn, đồng thời hạn chế conflict.
+- Các bước chuyển status còn lại do Jira automation tự xử lý, **không cần chuyển tay**:
+  - Mở PR (kể cả Draft): `In Progress` → `In Review`. Ticket ở lại `In Review` trong suốt quá trình review.
+  - PR được merge vào `main`: `In Review` → `Done`.
+  - Ticket `Blocked` hết blocker: `Blocked` → `To Do`.
+- Nếu ticket có khối lượng công việc lớn, chủ động **tách thành nhiều ticket/branch nhỏ**. PR nhỏ giúp reviewer dễ đọc, review nhanh và chính xác hơn, đồng thời hạn chế conflict.
+- Nếu ticket của mình đang ở trạng thái `Blocked`, chủ động **liên hệ và hối thúc người phụ trách ticket đang chặn** để họ hoàn thành sớm, tránh chỉ ngồi chờ đợi bị động (xem thêm chiều ngược lại ở [Bước 9](#bước-9-dọn-dẹp-và-đóng-ticket)).
 
 ---
 
@@ -80,6 +84,8 @@ git pull origin main
 git checkout -b CDA-12-add-user-login
 ```
 
+> **Mẹo:** Không cần tự gõ lệnh `git checkout -b`. Trên trang chi tiết ticket ở Jira, mở mục **Create branch**, phần **Git create & checkout a new branch** có sẵn lệnh tạo branch với tên sinh từ mã và tiêu đề ticket, chỉ cần copy về chạy. Trước khi chạy, kiểm tra lại tên branch có đúng [quy tắc đặt tên](#quy-tắc-đặt-tên-branch) bên dưới không.
+
 ### Quy tắc đặt tên branch
 
 ```
@@ -89,7 +95,7 @@ git checkout -b CDA-12-add-user-login
 | Thành phần | Mô tả |
 |------------|-------|
 | Ticket | Mã task trên Jira, ví dụ `CDA-2`, `CDA-12` |
-| Mô tả ngắn gọn | Kebab-case, **viết bằng tiếng Anh**, mô tả công việc |
+| Mô tả ngắn gọn | Kebab-case, mô tả công việc |
 
 **Ví dụ:** `CDA-12-add-user-login`
 
@@ -105,7 +111,7 @@ git checkout -b CDA-12-add-user-login
 ```bash
 git add <file>                  # stage từng file
 git add .                       # stage toàn bộ thay đổi
-git commit -m "add login form"  # commit message viết bằng tiếng Anh
+git commit -m "add login form"
 ```
 
 ### Quy tắc commit
@@ -147,7 +153,7 @@ git push --force-with-lease
 
 > Dùng `--force-with-lease` thay vì `--force`: nếu có người khác vừa push lên cùng branch, lệnh sẽ dừng lại thay vì ghi đè mất commit của họ.
 
-> **Lưu ý:** `git merge main` bị cấm trong quy trình của nhóm. Nếu lỡ tay merge, hãy gỡ commit merge ra rồi rebase lại. Riêng nút **Squash and merge** trên GitHub ở [Bước 8](#bước-8-merge) là cách merge PR duy nhất được dùng.
+> **Lưu ý:** `git merge main` bị cấm trong quy trình của nhóm. Nếu lỡ tay merge, hãy gỡ commit merge ra rồi rebase lại.
 
 ### Khi có conflict
 
@@ -181,13 +187,15 @@ Quy ước của nhóm: nếu conflict nằm ở phần code của người khá
 
 ### Nội dung PR
 
-Điền đầy đủ [template PR](.github/pull_request_template.md): mô tả thay đổi, link ticket, loại thay đổi, cách kiểm thử, ảnh chụp màn hình (nếu có thay đổi giao diện) và checklist.
+Điền đầy đủ [template PR](.github/pull_request_template.md): link ticket, loại thay đổi, thay đổi gì, vì sao, cách giải quyết, cách kiểm thử (nếu có thay đổi code), ảnh chụp màn hình (nếu có thay đổi giao diện) và checklist.
+
+> **Lưu ý:** Có thể dùng AI hỗ trợ soạn tiêu đề và mô tả PR, nhưng chủ PR phải **đọc lại toàn bộ trước khi chuyển PR sang Ready for review**, đảm bảo nội dung phản ánh đúng và đầy đủ thay đổi thực tế.
 
 ### Kích thước PR
 
-Để đảm bảo chất lượng review và hạn chế tối đa xung đột code, nên **tách nhỏ PR** nhất có thể để reviewer dễ đọc, dễ hiểu.
+PR càng nhỏ càng tốt, xem quy tắc tách nhỏ ticket/branch ở [Bước 1](#bước-1-nhận-ticket-trên-jira).
 
-### Tự review trước khi request review
+### Tự review trước khi chuyển sang Ready for review
 
 **Bắt buộc: chủ PR phải tự review lại toàn bộ diff của mình trước khi chuyển PR sang Ready for review.** Đây không phải là bước hình thức - đây là điều kiện tiên quyết.
 
@@ -201,7 +209,9 @@ Reviewer chỉ bắt đầu review khi PR ở trạng thái **Ready for review**
 
 Trong lúc chưa tự review xong, để PR ở trạng thái **Draft** để tránh reviewer vào xem nhầm lúc chưa sẵn sàng.
 
-PR cũng cần được chuyển **về lại Draft** trong quá trình review nếu chủ PR cần push commit khi chưa xử lý xong hết góp ý - xem [Bước 7](#bước-7-review).
+**Chỉ chủ PR** mới được chuyển qua lại giữa **Draft** và **Ready for review**. Người khác (kể cả reviewer) không tự ý chuyển trạng thái PR của người khác theo cả hai chiều, vì chỉ chủ PR mới biết PR đã thực sự sẵn sàng hay chưa.
+
+Ngay khi PR được mở (kể cả Draft), ticket tự chuyển sang `In Review` ([Bước 1](#bước-1-nhận-ticket-trên-jira)).
 
 ---
 
@@ -209,29 +219,29 @@ PR cũng cần được chuyển **về lại Draft** trong quá trình review n
 
 ### Điều kiện request review
 
-Chỉ được request review khi PR đã thoả **cả hai** điều kiện sau:
+Chỉ được request review khi PR đã thoả **cả ba** điều kiện sau:
 
+- **PR đang ở trạng thái Ready for review.** Không request review khi PR còn ở Draft ([Bước 6](#bước-6-mở-pull-request)).
 - **CI pass toàn bộ.** Không request review khi còn check đỏ - reviewer không phải người đi sửa lint hay test hộ.
 - **Branch đã up to date với `main`.** Rebase `main` mới nhất vào branch và xử lý hết conflict trước ([Bước 5](#bước-5-đồng-bộ-với-main)).
 
 Nếu trong lúc chờ review mà `main` đã tiến lên hoặc CI chuyển sang đỏ, chủ PR chủ động rebase và sửa cho xanh lại, không để reviewer phải chờ.
 
-### Khi request review
-
-Ngay khi PR chuyển sang **Ready for review** và đã request reviewer, chủ PR phải chuyển status ticket trên Jira từ `In Progress` → `In Review`. Nhìn vào board là biết ticket nào đang chờ người khác xem.
-
-Ticket ở lại `In Review` trong suốt quá trình review, kể cả khi đang sửa theo góp ý, chỉ rời trạng thái này khi PR được merge vào `main` (→ `Done`) hoặc PR bị huỷ bỏ (→ `Cancelled`).
-
 ### Với chủ PR
 
+- **Chọn reviewer hợp lý**. Lưu ý mọi reviewer đều phải approve thì PR mới được merge ([Bước 8](#bước-8-merge)).
 - Chủ động **request reviewer** ngay khi PR chuyển sang **Ready for review**, không chờ người khác tự vào xem.
-- Trả lời **mọi** comment của reviewer; sửa xong thì push commit mới lên cùng branch (không cần tạo PR mới).
+- Sửa theo góp ý thì push commit mới lên cùng branch (không cần tạo PR mới).
+- Nếu đã quá thời hạn review khuyến nghị (2 ngày) mà chưa nhận được phản hồi, chủ động **nhắc lại reviewer** để tránh PR bị treo quá lâu.
 
 ### Với reviewer
 
-- Chủ động **sắp xếp thời gian review sớm nhất có thể** ngay khi được request, để branch không bị giữ lâu, đúng tinh thần short-lived branch và giúp PR được merge sớm.
+- **Bắt buộc review** PR khi được request. Nếu thấy việc mình được request review là không hợp lý, **nêu ý kiến** với chủ PR, không im lặng và bỏ qua không review.
+- Chủ động **sắp xếp thời gian review sớm nhất có thể** ngay khi được request, để branch không bị giữ lâu, đúng tinh thần short-lived branch và giúp PR được merge sớm. Nên review xong **trong vòng 2 ngày** kể từ khi được request.
 - Để lại comment cụ thể, gắn với dòng code cần góp ý.
 - Chỉ approve khi đã hiểu rõ chủ PR đang làm gì và đồng ý với thay đổi cũng như hướng triển khai đó.
+- Có thể dùng AI hỗ trợ quá trình review và gợi ý nội dung comment, nhưng phải **tự đánh giá gợi ý đó có hợp lý không trước khi đăng comment** - không copy-paste nguyên văn suggestion của AI khi chưa hiểu rõ.
+- Khi được chủ PR nhắc lại vì review trễ hẹn, **giữ thái độ tích cực, không xem đó là sự làm phiền** - review sớm giúp đảm bảo tiến độ chung của cả nhóm không bị đình trệ.
 
 ### Resolve conversation
 
@@ -258,7 +268,7 @@ Mục đích: mỗi lần reviewer được gọi vào là một lần PR thực
 
 ### Điều kiện merge
 
-- **Tất cả** thành viên cùng phụ trách task phải approve. Nếu có thành viên khác (không trực tiếp phụ trách task) chủ động yêu cầu được review, cũng phải đợi người đó approve mới được merge.
+- **Tất cả reviewer** của PR phải approve, kể cả người không trực tiếp phụ trách task nhưng chủ động yêu cầu được review.
 - **Tất cả conversation trên PR phải được resolve** (xem [Bước 7](#bước-7-review)).
 - CI pass toàn bộ. Repo hiện có các check **PR title, Biome, import alias, typecheck, test và build**.
 - Nhánh phải được **rebase lên `main` mới nhất** trước khi merge (xem [Bước 5](#bước-5-đồng-bộ-với-main)).
@@ -269,18 +279,18 @@ Mục đích: mỗi lần reviewer được gọi vào là một lần PR thực
 
 ### Cách merge
 
-- Bắt buộc dùng **Squash and merge** - gộp nhiều commit nhỏ thành **một commit** cho thống nhất và gọn gàng.
-- Commit message sau squash = **đúng tiêu đề PR**, không giữ lại phần liệt kê danh sách các commit lẻ mà GitHub tự động điền vào ô message. Trước khi bấm **Confirm squash and merge**, xoá hết phần nội dung (body) đó, chỉ để lại dòng tiêu đề.
+- Repo chỉ bật **Squash and merge** (các kiểu merge khác đã bị tắt), nên khi merge PR, mọi commit trên branch sẽ được gộp thành **một commit** duy nhất trên `main`.
+- Repo đã được cấu hình sẵn: commit message sau squash mặc định là **tiêu đề PR**, ô **Extended description** mặc định để trống. Không cần sửa gì, chỉ việc bấm **Confirm squash and merge**.
 
 ---
 
 ## Bước 9: Dọn dẹp và đóng ticket
 
-Sau khi PR đã merge, branch coi như xong nhiệm vụ. Khuyến khích xoá cho gọn, nhưng không bắt buộc.
+Sau khi PR đã merge, branch coi như xong nhiệm vụ.
 
-Xoá branch ở remote: nhấn nút **Delete branch** ngay trên PR đã merge.
+Branch ở remote được GitHub **tự động xoá** sau khi merge, không cần làm gì thêm.
 
-Xoá branch ở local:
+Branch ở local thì khuyến khích xoá cho gọn, nhưng không bắt buộc:
 
 ```bash
 git checkout main
@@ -290,11 +300,10 @@ git branch -D CDA-12-add-user-login    # xoá branch ở local
 
 > **Vì sao là `-D` chứ không phải `-d`:** nhóm dùng **Squash and merge**, GitHub tạo ra một commit hoàn toàn mới trên `main` chứ không giữ lại các commit của branch. Git vì thế không nhận ra branch đã được merge và `git branch -d` sẽ báo `error: the branch '...' is not fully merged`. Chỉ dùng `-D` sau khi đã chắc chắn PR đã merge thành công.
 
-Cuối cùng, chuyển ticket trên Jira từ `In Review` → `Done`.
+### Status ticket sau khi merge
 
-Nếu ticket vừa xong đang **block** ticket khác:
+Ticket tự chuyển sang `Done`, và các ticket bị nó block tự về `To Do` nếu không còn blocker nào khác ([Bước 1](#bước-1-nhận-ticket-trên-jira)).
 
-- Chỉ chuyển **ticket đang bị block** từ `Blocked` → `To Do` khi nó không còn blocker nào khác.
-- Khi ticket đó chuyển được sang `To Do`, báo ngay cho người đảm nhận (assignee) để họ có thể bắt tay vào làm.
+Khi thấy ticket bị block đã về `To Do`, báo ngay cho người đảm nhận (assignee) để họ có thể bắt tay vào làm - đây là chiều ngược lại của quy tắc hối thúc blocker ở [Bước 1](#bước-1-nhận-ticket-trên-jira).
 
 ---
