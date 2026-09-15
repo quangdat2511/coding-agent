@@ -130,8 +130,6 @@ Slice 0 blocks every other slice and contains no agent behavior.
 - Export the provider credential variable names from `ai`. ADR 0001 §8 makes `ai` the single source
   of truth for that set, and both `tools` and the composition root read it, so it belongs in the
   slice that fixes `ai`'s public surface rather than in whichever slice needs it first.
-- Add Pi's MIT copyright and permission notice to `packages/ai/src/utils/event-stream.ts`, or rewrite
-  the file (ADR 0004 §8).
 - Give all five packages a manifest following `packages/ai` (`private: true`,
   `exports: { ".": "./src/index.ts" }`) with the §1 allowed edges as `workspace:*` dependencies.
 - Add the ADR 0004 §9 enforcement: Biome `noRestrictedImports` overrides per package, `noEnum`, and
@@ -280,8 +278,7 @@ something works.
    the manifest. This is ADR 0005 §9 criterion 2.
 10. The adapter's tests pass in CI under `uv`. This is ADR 0005 §9 criterion 3.
 11. The oracle job has run on Modal and its harness-flaky tasks are recorded.
-12. `packages/ai/src/utils/event-stream.ts` carries Pi's MIT notice or has been rewritten.
-13. ADR 0004 and ADR 0005 are marked `accepted`. This record marks them so; implementing against a
+12. ADR 0004 and ADR 0005 are marked `accepted`. This record marks them so; implementing against a
     proposed record invites re-litigating a five-package boundary decision mid-build.
 
 ### 7. Tier 2: MVP evaluated
@@ -319,6 +316,19 @@ reopening a tier-1 item that was already called complete. Any point after track 
 enough.
 
 No reward value is a criterion, in either tier.
+
+### 8. Pi attribution is deferred past the MVP
+
+ADR 0004 §8 requires `packages/ai/src/utils/event-stream.ts` to carry Pi's MIT copyright and
+permission notice or be rewritten. That requirement stands; this record sets only its timing, and
+it is not a completion criterion in either tier.
+
+More code is likely to be adapted from Pi while the tracks run, and the repository stays private
+until the MVP is complete, including the choice of this project's own license. ADR 0005 §7 attaches
+evaluation assets to a Release of this same private repository, so no Pi-derived code reaches anyone
+outside it during either tier. Attribution is therefore one pass over every Pi-derived file after the
+MVP, done before the repository, an executable, or any release is made public. So that the pass is a
+lookup rather than a search, each pull request that adapts code from Pi names the files it adapted.
 
 ## Consequences
 
