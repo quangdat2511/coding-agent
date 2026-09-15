@@ -201,8 +201,8 @@ files.
 | F2 | The Python adapter at `evaluation/terminalbench/`, plus a CI job that runs its tests with `uv --frozen`. Its command satisfies ADR 0001 §8's launch contract: it `exec`s the agent so Harbor's credential-bearing shell is replaced, and pipes its output nowhere (ADR 0005 §6) | Command construction, exit-code mapping, single-key forwarding, and ATIF conversion of a complete and a truncated event log all pass, each validated against Harbor's `Trajectory` model, and a test asserts the command `exec`s with no pipeline |
 | F3 | The oracle job of ADR 0005 §7 step 2 | The job completes on Modal and its harness-flaky tasks are listed |
 
-The oracle job is in the MVP because it receives no credential and no model spend, so it is the one
-Harbor job that can prove the dataset pin, the Harbor pin, `uv --frozen`, and Modal access before the
+The oracle job is in the MVP because it receives no credential and no model spend, though it does
+cost Modal compute, so it is the one Harbor job that can prove the dataset pin, the Harbor pin, `uv --frozen`, and Modal access before the
 recorded job depends on all four.
 
 ### 4. Join points
@@ -277,19 +277,23 @@ something works.
 9. The artifact build produces both executables and `artifact-manifest.json`, and `--version` matches
    the manifest. This is ADR 0005 §9 criterion 2.
 10. The adapter's tests pass in CI under `uv`. This is ADR 0005 §9 criterion 3.
-11. The oracle job has run on Modal and its harness-flaky tasks are recorded.
+11. The oracle job has run on Modal and its harness-flaky tasks are recorded. This is the one tier-1
+    item that is not free: it needs a Modal account and pays compute for all 66 task environments,
+    three of them with an H100, though it uses no model and no credential.
 12. ADR 0004 and ADR 0005 are marked `accepted`. This record marks them so; implementing against a
     proposed record invites re-litigating a five-package boundary decision mid-build.
 
 ### 7. Tier 2: MVP evaluated
 
-Tier 2 is the recorded benchmark result. It is separate because nothing in it is reached by writing
-code alone: it costs paid Modal compute and model spend, it depends on third parties the team does
-not control (Modal availability, Harbor behavior, provider rate limits), its isolation test needs a
-container on each backend a job will use, and the provider and model it runs on is still an open
-decision (item 3). Tier 1, by contrast, is entirely code and tests that run on a developer machine
-for nothing. A checklist whose final item cannot be scheduled cannot tell the team when to stop
-building, which is why the line is drawn here.
+Tier 2 is the recorded benchmark result. The line between the tiers is not whether Modal is
+involved, since tier 1's oracle job runs there too. It is drawn where a job carries a provider
+credential and spends on a model. Every tier-2 job does both, so tier 2 is gated on the isolation
+test passing in a container on each backend a job will use, it spends model money on top of
+compute, it depends on provider rate limits the team does not control, and the provider and model
+it runs on is still an open decision (item 3). Tier 1 has no credential, no model spend, and no open
+decision: it is code and tests on a developer machine, plus one oracle job that needs a Modal account
+and compute (§6 item 11). A checklist whose final item cannot be scheduled cannot tell the team when
+to stop building, which is why the line is drawn here.
 
 The split is not a licence to treat tier 2 as optional. The map's destination names reproducible
 TerminalBench evaluation, so the MVP reaches it only when both tiers are complete.
@@ -343,8 +347,8 @@ lookup rather than a search, each pull request that adapts code from Pi names th
 - D2 introduces `bun:ffi` to reach `prctl`, which is the first non-portable call in the codebase. The
   cross-process guarantee it buys exists only on Linux under `"auto-approve"`, so day-to-day
   development on macOS runs with the `"ask"` residual that ADR 0001 §8 accepts.
-- Tier 1 can be reached, demonstrated, and written up without spending anything on a recorded
-  benchmark job. Tier 2 cannot start until the credential rule is implemented and tested per
+- Tier 1 can be reached, demonstrated, and written up without model spend or a credential-carrying
+  job; its only paid step is one oracle job on Modal. Tier 2 cannot start until the credential rule is implemented and tested per
   backend.
 - The MVP ships without the split rail and without progress events for tools or Verification. Both
   are declared deferrals, not omissions.
