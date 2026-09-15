@@ -121,10 +121,12 @@ Slice 0 blocks every other slice and contains no agent behavior.
   of those names.
 - Pass the transport retry bound from the caller to both SDK clients, which today default to two
   retries (ADR 0004 §2 and its consequences).
-- Declare `ModelCapabilities` as per-provider constants inside each provider adapter, with per-model
-  overrides only where a model genuinely differs. Four of the five fields are properties of the API
-  family rather than the model, and adding five fields to 385 catalog entries would create rows that
-  rot silently.
+- Declare `ModelCapabilities` as constants per provider and API variant, chosen by the variant
+  selector, with per-model overrides only where a model genuinely differs. Capabilities follow the
+  API a provider speaks, and the same wire format can still differ between providers (xAI's
+  Chat-Completions-compatible endpoint delivers tool arguments whole while OpenAI streams them), so
+  neither the provider nor the variant alone is enough. Adding five fields to 385 catalog entries
+  would create rows that rot silently.
 - Add the API-variant selector of ADR 0004 §2 and make Google conformant through its
   `generateContent` variant, replacing today's route through Gemini's OpenAI-compatible Chat
   Completions endpoint. The Interactions variant is not implemented in the MVP: it links turns
