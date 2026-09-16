@@ -37,6 +37,10 @@ The single terminal outcome of an Agent Session, including its completion status
 evidence or failure reason.
 _Avoid_: Exit code, final message, summary
 
+**Session Limits**:
+The bounded runtime constraints (model turns, tool calls, active execution duration, and consecutive recoverable failures) enforced on an Agent Session to guarantee termination.
+_Avoid_: Quotas, timeouts, guardrails
+
 **Tool Call**:
 A model request to invoke one controlled agent capability.
 _Avoid_: Function call, command
