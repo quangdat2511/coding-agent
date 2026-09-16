@@ -4,12 +4,17 @@ import type { Context, Model } from "@/types";
 
 type AnthropicStreamChunk =
   | {
+      type: "message_start";
+      message: { usage: { input_tokens: number; output_tokens?: number } };
+    }
+  | {
       type: "content_block_delta";
       delta: { type: "text_delta"; text: string };
     }
   | {
       type: "message_delta";
       delta: { stop_reason: string | null; stop_sequence: string | null };
+      usage?: { output_tokens: number };
     }
   | {
       type: "message_stop";
@@ -149,6 +154,28 @@ describe("Anthropic stream finishReason handling", () => {
     expect(turnEndEvent.message.finishReason).toEqual({
       reason: "end_turn",
       rawReason: "end_turn",
+    });
+  });
+
+  it("captures input_tokens from message_start and output_tokens from message_delta", async () => {
+    mockEvents = [
+      {
+        type: "message_start",
+        message: { usage: { input_tokens: 42, output_tokens: 0 } },
+      },
+      { type: "content_block_delta", delta: { type: "text_delta", text: "Hello with usage" } },
+      {
+        type: "message_delta",
+        delta: { stop_reason: "end_turn", stop_sequence: null },
+        usage: { output_tokens: 18 },
+      },
+      { type: "message_stop" },
+    ];
+
+    const turnEndEvent = await collectTurnEndEvent(stream(model, context, { apiKey: "test-key" }));
+    expect(turnEndEvent.message.usage).toEqual({
+      inputTokens: 42,
+      outputTokens: 18,
     });
   });
 });

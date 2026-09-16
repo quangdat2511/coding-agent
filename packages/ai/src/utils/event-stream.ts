@@ -18,6 +18,9 @@ export class EventStream<T, R = T> implements AsyncIterable<T> {
       this.resolveFinalResult = resolve;
       this.rejectFinalResult = reject;
     });
+    // Prevent unhandled promise rejection if finalResultPromise rejects
+    // but the consumer only consumes the stream via async iteration without calling .result()
+    this.finalResultPromise.catch(() => {});
   }
 
   push(event: T): void {

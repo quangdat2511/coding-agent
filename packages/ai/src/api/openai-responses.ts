@@ -2,6 +2,7 @@ import OpenAI from "openai";
 import type { ModelStream } from "@/stream";
 import type { AssistantMessage, Context, FinishReason, Model, StreamOptions, Usage } from "@/types";
 import { createModelEventStream } from "@/utils/event-stream";
+import { flattenMessageContent } from "@/utils/messages";
 
 export type OpenAIRawFinishReason =
   | OpenAI.Chat.Completions.ChatCompletionChunk.Choice["finish_reason"]
@@ -36,16 +37,10 @@ export function buildParams(
   }
 
   for (const msg of context.messages) {
-    if (msg.role === "user") {
-      const content =
-        typeof msg.content === "string"
-          ? msg.content
-          : msg.content.map((c) => (c.type === "text" ? c.text : c.content)).join("");
-      messages.push({ role: "user", content });
-    } else if (msg.role === "assistant") {
-      const content = msg.content.map((c) => (c.type === "text" ? c.text : c.arguments)).join("");
-      messages.push({ role: "assistant", content });
-    }
+    messages.push({
+      role: msg.role,
+      content: flattenMessageContent(msg),
+    });
   }
 
   return messages;

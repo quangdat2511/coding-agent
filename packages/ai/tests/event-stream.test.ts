@@ -117,4 +117,19 @@ describe("ModelEventStream", () => {
     expect(events).toEqual([{ type: "error", error: { message: "Something went wrong" } }]);
     expect(stream.result()).rejects.toThrow("Something went wrong");
   });
+
+  it("should not cause unhandled rejection if consumed without calling result()", async () => {
+    const stream = createModelEventStream();
+    stream.push({ type: "error", error: { message: "Silent error" } });
+
+    const events = [];
+    for await (const event of stream) {
+      events.push(event);
+    }
+
+    expect(events.length).toBe(1);
+    expect(events[0]?.type).toBe("error");
+    // Ensure waiting a tick does not trigger an unhandled rejection
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  });
 });

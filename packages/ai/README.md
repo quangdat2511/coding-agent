@@ -106,7 +106,7 @@ When calling `models.stream()`, the returned object is a structural `ModelStream
 
 - **`stream_start`**: Emitted when stream output begins.
 - **`content_block_start`**: Emitted at the start of a content block with `index` and the initial `block`.
-- **`content_block_delta`**: Emitted with chunk deltas (`text_delta` or `tool_call_arguments_delta`).
+- **`content_block_delta`**: Emitted with chunk deltas (`text_delta`).
 - **`content_block_stop`**: Emitted when a content block finishes.
 - **`turn_delta`**: Emitted with incremental `usage` and/or `finishReason`.
 - **`turn_end`**: Emitted at turn completion with the final, complete `AssistantMessage`.

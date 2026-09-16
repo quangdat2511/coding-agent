@@ -2,6 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import type { ModelStream } from "@/stream";
 import type { AssistantMessage, Context, FinishReason, Model, StreamOptions, Usage } from "@/types";
 import { createModelEventStream } from "@/utils/event-stream";
+import { flattenMessageContent } from "@/utils/messages";
 
 export type AnthropicRawStopReason =
   | Anthropic.RawMessageDeltaEvent.Delta["stop_reason"]
@@ -31,16 +32,10 @@ export function buildParams(context: Context): Anthropic.MessageParam[] {
   const messages: Anthropic.MessageParam[] = [];
 
   for (const msg of context.messages) {
-    if (msg.role === "user") {
-      const content =
-        typeof msg.content === "string"
-          ? msg.content
-          : msg.content.map((c) => (c.type === "text" ? c.text : c.content)).join("");
-      messages.push({ role: "user", content });
-    } else if (msg.role === "assistant") {
-      const content = msg.content.map((c) => (c.type === "text" ? c.text : c.arguments)).join("");
-      messages.push({ role: "assistant", content });
-    }
+    messages.push({
+      role: msg.role,
+      content: flattenMessageContent(msg),
+    });
   }
 
   return messages;
@@ -88,11 +83,19 @@ export function stream(model: Model, context: Context, options?: StreamOptions):
 
       let currentText = "";
       let finishReason: FinishReason = { reason: "end_turn", rawReason: "unknown" };
-      let usage: Usage | undefined;
+      let inputTokens = 0;
+      let outputTokens = 0;
+      let hasUsage = false;
       let blockStopped = false;
 
       for await (const chunk of anthropicStream) {
-        if (chunk.type === "content_block_delta" && chunk.delta.type === "text_delta") {
+        if (chunk.type === "message_start") {
+          if (chunk.message?.usage) {
+            hasUsage = true;
+            inputTokens = chunk.message.usage.input_tokens ?? 0;
+            outputTokens = chunk.message.usage.output_tokens ?? 0;
+          }
+        } else if (chunk.type === "content_block_delta" && chunk.delta.type === "text_delta") {
           const delta = chunk.delta.text;
           currentText += delta;
           eventStream.push({
@@ -111,10 +114,8 @@ export function stream(model: Model, context: Context, options?: StreamOptions):
             finishReason = mapAnthropicFinishReason(chunk.delta.stop_reason);
           }
           if (chunk.usage) {
-            usage = {
-              inputTokens: 0,
-              outputTokens: chunk.usage.output_tokens,
-            };
+            hasUsage = true;
+            outputTokens = chunk.usage.output_tokens ?? outputTokens;
           }
         }
       }
@@ -125,6 +126,13 @@ export function stream(model: Model, context: Context, options?: StreamOptions):
           index: 0,
         });
       }
+
+      const usage: Usage | undefined = hasUsage
+        ? {
+            inputTokens,
+            outputTokens,
+          }
+        : undefined;
 
       eventStream.push({
         type: "turn_delta",

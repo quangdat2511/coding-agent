@@ -1,8 +1,6 @@
 import type { AssistantMessage, ContentBlock, FinishReason, Usage } from "@/types";
 
-export type ContentBlockDelta =
-  | { type: "text_delta"; text: string }
-  | { type: "tool_call_arguments_delta"; arguments: string };
+export type ContentBlockDelta = { type: "text_delta"; text: string };
 
 export type ModelStreamEvent =
   | { type: "stream_start" }

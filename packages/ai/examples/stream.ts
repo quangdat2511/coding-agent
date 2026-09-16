@@ -179,25 +179,30 @@ export async function main(args: string[] = process.argv.slice(2)): Promise<void
 
   let textReceived = false;
   const startTime = Date.now();
+  let finalMessage: AssistantMessage;
 
-  const finalMessage = await runStream(models, model, prompt, {
-    onDelta: (delta) => {
-      process.stdout.write(delta);
-      textReceived = true;
-    },
-  });
-
-  const elapsedSeconds = ((Date.now() - startTime) / 1000).toFixed(2);
-
-  if (finalMessage.finishReason.reason === "error") {
+  try {
+    finalMessage = await runStream(models, model, prompt, {
+      onDelta: (delta) => {
+        process.stdout.write(delta);
+        textReceived = true;
+      },
+    });
+  } catch (error) {
     if (!textReceived) {
-      console.error("\n❌ Failed with error");
+      console.error(
+        `\n❌ Failed with error: ${error instanceof Error ? error.message : String(error)}`,
+      );
     } else {
-      console.error("\n\n❌ Stream interrupted with error");
+      console.error(
+        `\n\n❌ Stream interrupted with error: ${error instanceof Error ? error.message : String(error)}`,
+      );
     }
     process.exitCode = 1;
     return;
   }
+
+  const elapsedSeconds = ((Date.now() - startTime) / 1000).toFixed(2);
 
   console.log("\n\n--------------------------------------------------");
   console.log(
