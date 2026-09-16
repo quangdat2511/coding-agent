@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import { defineProvider, ProviderDirectory } from "@/models";
 import type { Context, Model, StreamOptions } from "@/types";
-import { createAssistantMessageEventStream } from "@/utils/event-stream";
+import { createModelEventStream } from "@/utils/event-stream";
 
 describe("ProviderDirectory", () => {
   const dummyModel: Model = {
@@ -17,7 +17,7 @@ describe("ProviderDirectory", () => {
       auth: {},
       getModels: () => [dummyModel],
       stream: (_model: Model, _context: Context, _options?: StreamOptions) => {
-        return createAssistantMessageEventStream();
+        return createModelEventStream();
       },
     };
   }
@@ -49,7 +49,7 @@ describe("ProviderDirectory", () => {
     const registry = new ProviderDirectory();
     let streamCalledWith: { model: Model; context: Context; options?: StreamOptions } | undefined;
 
-    const stream = createAssistantMessageEventStream();
+    const stream = createModelEventStream();
     registry.setProvider({
       id: "mock-provider",
       name: "Mock Provider",
@@ -89,7 +89,7 @@ describe("defineProvider", () => {
       auth: {},
       models: [],
       api: {
-        stream: () => createAssistantMessageEventStream(),
+        stream: () => createModelEventStream(),
       },
     });
 
@@ -113,7 +113,7 @@ describe("defineProvider", () => {
       api: {
         stream: (_model, _context, options) => {
           capturedOptions = options;
-          return createAssistantMessageEventStream();
+          return createModelEventStream();
         },
       },
     });
@@ -145,7 +145,7 @@ describe("defineProvider", () => {
       api: {
         stream: (_model, _context, options) => {
           capturedOptions = options;
-          return createAssistantMessageEventStream();
+          return createModelEventStream();
         },
       },
     });
@@ -176,7 +176,7 @@ describe("defineProvider", () => {
       api: {
         stream: (_model, _context, options) => {
           capturedOptions = options;
-          return createAssistantMessageEventStream();
+          return createModelEventStream();
         },
       },
     });
@@ -212,7 +212,7 @@ describe("defineProvider", () => {
       api: {
         stream: (_model, _context, options) => {
           capturedOptions = options;
-          return createAssistantMessageEventStream();
+          return createModelEventStream();
         },
       },
     });

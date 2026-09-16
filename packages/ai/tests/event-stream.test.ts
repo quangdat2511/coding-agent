@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import type { AssistantMessage } from "@/types";
-import { createAssistantMessageEventStream, EventStream } from "@/utils/event-stream";
+import { createModelEventStream, EventStream } from "@/utils/event-stream";
 
 describe("EventStream", () => {
   it("should yield events as they are pushed", async () => {
@@ -66,15 +66,15 @@ describe("EventStream", () => {
   });
 });
 
-describe("AssistantMessageEventStream", () => {
-  it("should extract final result on 'done' event", async () => {
-    const stream = createAssistantMessageEventStream();
+describe("ModelEventStream", () => {
+  it("should extract final result on 'turn_end' event", async () => {
+    const stream = createModelEventStream();
 
     const finalMessage: AssistantMessage = {
       role: "assistant",
       content: [{ type: "text", text: "Hello" }],
       model: "test-model",
-      stopReason: "stop",
+      finishReason: { reason: "end_turn", rawReason: "stop" },
     };
 
     const pullTask = (async () => {
@@ -83,9 +83,19 @@ describe("AssistantMessageEventStream", () => {
       }
     })();
 
-    stream.push({ type: "start", partial: finalMessage });
-    stream.push({ type: "text_delta", delta: "Hello", partial: finalMessage });
-    stream.push({ type: "done", reason: "stop", message: finalMessage });
+    stream.push({ type: "stream_start" });
+    stream.push({
+      type: "content_block_start",
+      index: 0,
+      block: { type: "text", text: "" },
+    });
+    stream.push({
+      type: "content_block_delta",
+      index: 0,
+      delta: { type: "text_delta", text: "Hello" },
+    });
+    stream.push({ type: "content_block_stop", index: 0 });
+    stream.push({ type: "turn_end", message: finalMessage });
 
     await pullTask;
 
@@ -93,24 +103,18 @@ describe("AssistantMessageEventStream", () => {
     expect(result).toBe(finalMessage);
   });
 
-  it("should extract error on 'error' event", async () => {
-    const stream = createAssistantMessageEventStream();
+  it("should reject result on 'error' event", async () => {
+    const stream = createModelEventStream();
 
-    const errMessage: AssistantMessage = {
-      role: "assistant",
-      content: [],
-      model: "test-model",
-      stopReason: "error",
-      errorMessage: "Something went wrong",
-    };
-
-    stream.push({ type: "error", reason: "error", error: errMessage });
+    stream.push({ type: "error", error: { message: "Something went wrong" } });
 
     // Consume stream
-    for await (const _ of stream) {
+    const events = [];
+    for await (const event of stream) {
+      events.push(event);
     }
 
-    const result = await stream.result();
-    expect(result).toBe(errMessage);
+    expect(events).toEqual([{ type: "error", error: { message: "Something went wrong" } }]);
+    expect(stream.result()).rejects.toThrow("Something went wrong");
   });
 });

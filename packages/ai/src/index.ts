@@ -1,5 +1,6 @@
 export * from "@/auth/helpers";
 export * from "@/auth/types";
+export * from "@/capabilities";
 export * from "@/models";
 export * from "@/providers/anthropic";
 export * from "@/providers/google";
@@ -8,4 +9,6 @@ export * from "@/providers/opencode";
 export * from "@/providers/openrouter";
 export * from "@/providers/registry";
 export * from "@/providers/xai";
+export * from "@/stream";
+export * from "@/tool";
 export * from "@/types";

@@ -1,6 +1,6 @@
 import type { ProviderCredentials } from "@/auth/types";
+import type { ModelStream } from "@/stream";
 import type { Context, Model, StreamOptions } from "@/types";
-import type { AssistantMessageEventStream } from "@/utils/event-stream";
 
 export interface Provider {
   id: string;
@@ -9,11 +9,11 @@ export interface Provider {
   auth: ProviderCredentials;
   headers?: Record<string, string> | (() => Record<string, string>);
   getModels(): readonly Model[];
-  stream(model: Model, context: Context, options?: StreamOptions): AssistantMessageEventStream;
+  stream(model: Model, context: Context, options?: StreamOptions): ModelStream;
 }
 
 export interface ProviderApi {
-  stream(model: Model, context: Context, options?: StreamOptions): AssistantMessageEventStream;
+  stream(model: Model, context: Context, options?: StreamOptions): ModelStream;
 }
 
 export interface ProviderOptions {
@@ -75,7 +75,7 @@ export class ProviderDirectory {
     return provider.getModels().find((m) => m.id === modelId);
   }
 
-  stream(model: Model, context: Context, options?: StreamOptions): AssistantMessageEventStream {
+  stream(model: Model, context: Context, options?: StreamOptions): ModelStream {
     const provider = this.getProvider(model.provider);
     if (!provider) {
       throw new Error(`Provider ${model.provider} not found`);
