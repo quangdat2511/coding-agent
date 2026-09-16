@@ -19,8 +19,7 @@ This package is designed for internal use within the `coding-agent` ecosystem
 The following example demonstrates the fundamental workflow: initializing a provider collection, preparing a conversation context, and using the `stream` method to receive real-time updates
 
 ```typescript
-import { createProviderDirectory } from "@coding-agent/ai";
-import type { Context } from "@coding-agent/ai/types";
+import { createProviderDirectory, type Context } from "@coding-agent/ai";
 
 // 1. Initialize the collection of built-in providers (OpenAI, Google, ...)
 const models = createProviderDirectory();
@@ -72,7 +71,7 @@ context.messages.push(finalMessage);
 
 ## Key Interfaces & Types
 
-These types are exported from `@coding-agent/ai/types` to ensure type safety across the project
+These types are exported from `@coding-agent/ai` to ensure type safety across the project
 
 ### 1. `Context` and `Message`
 

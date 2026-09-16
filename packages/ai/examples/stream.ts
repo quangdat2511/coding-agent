@@ -1,6 +1,11 @@
 import { loadRootEnv } from "@examples/utils/env";
-import type { AssistantMessage, Context, Model, ProviderDirectory } from "@/index";
-import { createProviderDirectory } from "@/providers/registry";
+import {
+  type AssistantMessage,
+  type Context,
+  createProviderDirectory,
+  type Model,
+  type ProviderDirectory,
+} from "@/index";
 
 export const DEFAULT_MODELS: Record<string, string> = {
   google: "gemini-3.6-flash",
