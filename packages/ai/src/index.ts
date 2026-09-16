@@ -8,5 +8,4 @@ export * from "@/providers/opencode";
 export * from "@/providers/openrouter";
 export * from "@/providers/registry";
 export * from "@/providers/xai";
-export * from "@/stream";
 export * from "@/types";

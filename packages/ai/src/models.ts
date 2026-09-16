@@ -1,6 +1,5 @@
 import type { ProviderCredentials } from "@/auth/types";
-import type { ModelStream } from "@/stream";
-import type { Context, Model, StreamOptions } from "@/types";
+import type { Context, Model, ModelStream, StreamOptions } from "@/types";
 
 export interface Provider {
   id: string;

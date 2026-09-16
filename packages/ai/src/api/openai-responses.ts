@@ -1,6 +1,14 @@
 import OpenAI from "openai";
-import type { ModelStream } from "@/stream";
-import type { AssistantMessage, Context, FinishReason, Model, StreamOptions, Usage } from "@/types";
+import type {
+  AssistantMessage,
+  Context,
+  FinishReason,
+  Model,
+  ModelStream,
+  StreamOptions,
+  Usage,
+} from "@/types";
+
 import { createModelEventStream } from "@/utils/event-stream";
 import { flattenMessageContent } from "@/utils/messages";
 

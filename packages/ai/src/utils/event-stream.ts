@@ -1,5 +1,4 @@
-import type { ModelStreamEvent } from "@/stream";
-import type { AssistantMessage } from "@/types";
+import type { AssistantMessage, ModelStreamEvent } from "@/types";
 
 export class EventStream<T, R = T> implements AsyncIterable<T> {
   private queue: T[] = [];
