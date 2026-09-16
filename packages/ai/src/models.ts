@@ -1,4 +1,4 @@
-import type { ProviderAuth } from "@/auth/types";
+import type { ProviderCredentials } from "@/auth/types";
 import type { Context, Model, StreamOptions } from "@/types";
 import type { AssistantMessageEventStream } from "@/utils/event-stream";
 
@@ -6,27 +6,27 @@ export interface Provider {
   id: string;
   name: string;
   baseUrl?: string;
-  auth: ProviderAuth;
+  auth: ProviderCredentials;
   headers?: Record<string, string> | (() => Record<string, string>);
   getModels(): readonly Model[];
   stream(model: Model, context: Context, options?: StreamOptions): AssistantMessageEventStream;
 }
 
-export interface ProviderStreams {
+export interface ProviderApi {
   stream(model: Model, context: Context, options?: StreamOptions): AssistantMessageEventStream;
 }
 
-export interface CreateProviderOptions {
+export interface ProviderOptions {
   id: string;
   name?: string;
   baseUrl?: string;
-  auth: ProviderAuth;
+  auth: ProviderCredentials;
   models: readonly Model[];
-  api: ProviderStreams;
+  api: ProviderApi;
   headers?: Record<string, string> | (() => Record<string, string>);
 }
 
-export function createProvider(input: CreateProviderOptions): Provider {
+export function defineProvider(input: ProviderOptions): Provider {
   return {
     id: input.id,
     name: input.name ?? input.id,
@@ -57,7 +57,7 @@ export function createProvider(input: CreateProviderOptions): Provider {
   };
 }
 
-export class ModelsImpl {
+export class ProviderDirectory {
   private providers = new Map<string, Provider>();
 
   setProvider(provider: Provider): void {

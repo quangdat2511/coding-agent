@@ -1,9 +1,9 @@
 import { describe, expect, it } from "bun:test";
-import { createProvider, ModelsImpl } from "@/models";
+import { defineProvider, ProviderDirectory } from "@/models";
 import type { Context, Model, StreamOptions } from "@/types";
 import { createAssistantMessageEventStream } from "@/utils/event-stream";
 
-describe("ModelsImpl", () => {
+describe("ProviderDirectory", () => {
   const dummyModel: Model = {
     id: "test-model-1",
     name: "Test Model 1",
@@ -23,7 +23,7 @@ describe("ModelsImpl", () => {
   }
 
   it("should register and retrieve providers with setProvider and getProvider", () => {
-    const registry = new ModelsImpl();
+    const registry = new ProviderDirectory();
     expect(registry.getProvider("mock-provider")).toBeUndefined();
 
     const provider = createMockProvider();
@@ -33,7 +33,7 @@ describe("ModelsImpl", () => {
   });
 
   it("should get model by provider and model ID", () => {
-    const registry = new ModelsImpl();
+    const registry = new ProviderDirectory();
     const provider = createMockProvider();
     registry.setProvider(provider);
 
@@ -46,7 +46,7 @@ describe("ModelsImpl", () => {
   });
 
   it("should dispatch stream calls to the matching provider", () => {
-    const registry = new ModelsImpl();
+    const registry = new ProviderDirectory();
     let streamCalledWith: { model: Model; context: Context; options?: StreamOptions } | undefined;
 
     const stream = createAssistantMessageEventStream();
@@ -73,7 +73,7 @@ describe("ModelsImpl", () => {
   });
 
   it("should throw error when streaming with unregistered provider", () => {
-    const registry = new ModelsImpl();
+    const registry = new ProviderDirectory();
     const context: Context = { messages: [] };
 
     expect(() => {
@@ -82,9 +82,9 @@ describe("ModelsImpl", () => {
   });
 });
 
-describe("createProvider", () => {
+describe("defineProvider", () => {
   it("should default name to id if not provided", () => {
-    const provider = createProvider({
+    const provider = defineProvider({
       id: "custom-id",
       auth: {},
       models: [],
@@ -100,7 +100,7 @@ describe("createProvider", () => {
   it("should merge options and resolve auth credentials during stream", async () => {
     let capturedOptions: StreamOptions | undefined;
 
-    const provider = createProvider({
+    const provider = defineProvider({
       id: "auth-provider",
       baseUrl: "https://api.example.com",
       auth: {
@@ -132,7 +132,7 @@ describe("createProvider", () => {
   it("should allow explicit apiKey and baseURL overrides in StreamOptions", async () => {
     let capturedOptions: StreamOptions | undefined;
 
-    const provider = createProvider({
+    const provider = defineProvider({
       id: "auth-provider",
       baseUrl: "https://api.example.com",
       auth: {
@@ -165,7 +165,7 @@ describe("createProvider", () => {
   it("should merge static provider headers with caller headers during stream", () => {
     let capturedOptions: StreamOptions | undefined;
 
-    const provider = createProvider({
+    const provider = defineProvider({
       id: "header-provider",
       auth: {},
       headers: {
@@ -202,7 +202,7 @@ describe("createProvider", () => {
     let callCount = 0;
     let capturedOptions: StreamOptions | undefined;
 
-    const provider = createProvider({
+    const provider = defineProvider({
       id: "dynamic-header-provider",
       auth: {},
       headers: () => ({

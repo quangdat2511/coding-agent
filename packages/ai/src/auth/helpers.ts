@@ -1,6 +1,6 @@
-import type { ApiKeyAuth } from "@/auth/types";
+import type { ApiKeySource } from "@/auth/types";
 
-export function envApiKeyAuth(name: string, envVars: readonly string[]): ApiKeyAuth {
+export function apiKeyFromEnv(name: string, envVars: readonly string[]): ApiKeySource {
   return {
     name,
     resolve: async () => {
