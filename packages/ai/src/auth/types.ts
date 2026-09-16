@@ -1,8 +1,8 @@
-export interface ApiKeyAuth {
+export interface ApiKeySource {
   name: string;
   resolve(): Promise<string | undefined>;
 }
 
-export interface ProviderAuth {
-  apiKey?: ApiKeyAuth;
+export interface ProviderCredentials {
+  apiKey?: ApiKeySource;
 }

@@ -1,37 +1,46 @@
 import { describe, expect, it } from "bun:test";
 import {
-  anthropicProvider,
-  builtinModels,
-  builtinProviders,
-  googleProvider,
-  openaiProvider,
-  opencodeProvider,
-  openrouterProvider,
-  xaiProvider,
+  createAnthropicProvider,
+  createGoogleProvider,
+  createOpenAIProvider,
+  createOpencodeProvider,
+  createOpenRouterProvider,
+  createProviderDirectory,
+  createXaiProvider,
+  defaultProviders,
 } from "@/index";
 
 describe("Built-in Providers & Registry", () => {
-  it("should register all 6 built-in providers in builtinProviders()", () => {
-    const providers = builtinProviders();
+  it("should register all 6 built-in providers in defaultProviders()", () => {
+    const providers = defaultProviders();
     const providerIds = providers.map((p) => p.id);
 
     expect(providerIds).toEqual(["anthropic", "google", "openai", "opencode", "openrouter", "xai"]);
   });
 
   it("should export all provider factories from index", () => {
-    expect(typeof anthropicProvider).toBe("function");
-    expect(typeof googleProvider).toBe("function");
-    expect(typeof openaiProvider).toBe("function");
-    expect(typeof opencodeProvider).toBe("function");
-    expect(typeof openrouterProvider).toBe("function");
-    expect(typeof xaiProvider).toBe("function");
-    expect(typeof builtinProviders).toBe("function");
-    expect(typeof builtinModels).toBe("function");
+    expect(typeof createAnthropicProvider).toBe("function");
+    expect(typeof createGoogleProvider).toBe("function");
+    expect(typeof createOpenAIProvider).toBe("function");
+    expect(typeof createOpencodeProvider).toBe("function");
+    expect(typeof createOpenRouterProvider).toBe("function");
+    expect(typeof createXaiProvider).toBe("function");
+    expect(typeof defaultProviders).toBe("function");
+    expect(typeof createProviderDirectory).toBe("function");
   });
 
-  describe("opencodeProvider", () => {
+  it("should keep EventStream helpers internal and unexported from index", async () => {
+    const indexExports = await import("@/index");
+    expect((indexExports as Record<string, unknown>).EventStream).toBeUndefined();
+    expect((indexExports as Record<string, unknown>).AssistantMessageEventStream).toBeUndefined();
+    expect(
+      (indexExports as Record<string, unknown>).createAssistantMessageEventStream,
+    ).toBeUndefined();
+  });
+
+  describe("createOpencodeProvider", () => {
     it("should initialize OpenCode Zen provider with correct metadata and base URL", () => {
-      const provider = opencodeProvider();
+      const provider = createOpencodeProvider();
 
       expect(provider.id).toBe("opencode");
       expect(provider.name).toBe("OpenCode Zen");
@@ -42,7 +51,7 @@ describe("Built-in Providers & Registry", () => {
       const originalKey = process.env.OPENCODE_API_KEY;
       try {
         process.env.OPENCODE_API_KEY = "test-opencode-key-123";
-        const provider = opencodeProvider();
+        const provider = createOpencodeProvider();
         expect(await provider.auth.apiKey?.resolve()).toBe("test-opencode-key-123");
       } finally {
         if (originalKey === undefined) {
@@ -54,7 +63,7 @@ describe("Built-in Providers & Registry", () => {
     });
 
     it("should contain 35 models adhering to Model interface", () => {
-      const provider = opencodeProvider();
+      const provider = createOpencodeProvider();
       const models = provider.getModels();
 
       expect(models.length).toBe(35);
@@ -72,7 +81,7 @@ describe("Built-in Providers & Registry", () => {
     });
 
     it("should configure dynamic x-session-id in headers", () => {
-      const provider = opencodeProvider();
+      const provider = createOpencodeProvider();
       expect(typeof provider.headers).toBe("function");
 
       const headersFn = provider.headers as () => Record<string, string>;
@@ -88,7 +97,7 @@ describe("Built-in Providers & Registry", () => {
       const originalSession = process.env.OPENCODE_SESSION_ID;
       try {
         process.env.OPENCODE_SESSION_ID = "custom-session-123";
-        const provider = opencodeProvider();
+        const provider = createOpencodeProvider();
         const headersFn = provider.headers as () => Record<string, string>;
         expect(headersFn()["x-session-id"]).toBe("custom-session-123");
       } finally {
@@ -101,9 +110,9 @@ describe("Built-in Providers & Registry", () => {
     });
   });
 
-  describe("openrouterProvider", () => {
+  describe("createOpenRouterProvider", () => {
     it("should configure default HTTP-Referer and X-Title headers", () => {
-      const provider = openrouterProvider();
+      const provider = createOpenRouterProvider();
       expect(provider.headers).toEqual({
         "HTTP-Referer": "https://github.com/quangdat2511/coding-agent",
         "X-Title": "Coding Agent",
@@ -111,9 +120,9 @@ describe("Built-in Providers & Registry", () => {
     });
   });
 
-  describe("builtinModels registry", () => {
+  describe("createProviderDirectory registry", () => {
     it("should find models across providers", () => {
-      const models = builtinModels();
+      const models = createProviderDirectory();
 
       const opencodeModel = models.getModel("opencode", "gpt-5");
       expect(opencodeModel).toBeDefined();

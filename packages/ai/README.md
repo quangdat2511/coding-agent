@@ -19,11 +19,10 @@ This package is designed for internal use within the `coding-agent` ecosystem
 The following example demonstrates the fundamental workflow: initializing a provider collection, preparing a conversation context, and using the `stream` method to receive real-time updates
 
 ```typescript
-import { builtinModels } from "@coding-agent/ai/providers/all";
-import type { Context } from "@coding-agent/ai/types";
+import { createProviderDirectory, type Context } from "@coding-agent/ai";
 
 // 1. Initialize the collection of built-in providers (OpenAI, Google, ...)
-const models = builtinModels();
+const models = createProviderDirectory();
 
 // 2. Retrieve a specific model by provider ID and model ID
 const model = models.getModel("openai", "gpt-4o");
@@ -72,7 +71,7 @@ context.messages.push(finalMessage);
 
 ## Key Interfaces & Types
 
-These types are exported from `@coding-agent/ai/types` to ensure type safety across the project
+These types are exported from `@coding-agent/ai` to ensure type safety across the project
 
 ### 1. `Context` and `Message`
 
@@ -110,22 +109,22 @@ When calling `models.stream()`, the returned object is an `AssistantMessageEvent
 - **`done`**: Emitted at the end of the stream when generation completes. Contains the full, final `message` and the `reason` it stopped.
 - **`error`**: Emitted if an error occurs on the provider's side during streaming.
 
-### 3. `ModelsImpl` and `Provider`
+### 3. `ProviderDirectory` and `Provider`
 
-`ModelsImpl` is used to manage and initialize multiple AI APIs.
+`ProviderDirectory` is used to manage and initialize multiple AI APIs.
 
 - **`Provider`**: The interface representing a specific platform (e.g., OpenAI, Anthropic). Each Provider has an `.auth` property for credentials, a `getModels()` function to list supported models, and its own `stream()` implementation.
-- **`ModelsImpl`**: Acts as a registry holding all available providers.
+- **`ProviderDirectory`**: Acts as a registry holding all available providers.
 
 ```typescript
 // Built-in providers include: openai, google, anthropic, openrouter, xai, opencode
-const models = builtinModels(); 
+const models = createProviderDirectory(); 
 
 // Registering a custom provider
 models.setProvider(myCustomProvider);
 
 // Getting a reference to a specific provider
-const anthropicProvider = models.getProvider("anthropic");
+const provider = models.getProvider("anthropic");
 ```
 
 ### 4. `StreamOptions`

@@ -1,6 +1,11 @@
 import { loadRootEnv } from "@examples/utils/env";
-import type { AssistantMessage, Context, Model, ModelsImpl } from "@/index";
-import { builtinModels } from "@/providers/all";
+import {
+  type AssistantMessage,
+  type Context,
+  createProviderDirectory,
+  type Model,
+  type ProviderDirectory,
+} from "@/index";
 
 export const DEFAULT_MODELS: Record<string, string> = {
   google: "gemini-3.6-flash",
@@ -44,7 +49,7 @@ export interface StreamRunOptions {
  * Encapsulates the core library stream API workflow.
  */
 export async function runStream(
-  models: ModelsImpl,
+  models: ProviderDirectory,
   model: Model,
   prompt: string,
   options: StreamRunOptions = {},
@@ -87,7 +92,7 @@ export async function runStream(
  * Resolves the provider and model based on user arguments or defaults.
  */
 export async function resolveProviderAndModel(
-  models: ModelsImpl,
+  models: ProviderDirectory,
   argProvider?: string,
   argModel?: string,
 ): Promise<{ model: Model; providerId: string }> {
@@ -151,7 +156,7 @@ export async function main(args: string[] = process.argv.slice(2)): Promise<void
   const [argProvider, argModel, ...promptParts] = args;
   const prompt = promptParts.length > 0 ? promptParts.join(" ") : DEFAULT_PROMPT;
 
-  const models = builtinModels();
+  const models = createProviderDirectory();
   const { model, providerId } = await resolveProviderAndModel(models, argProvider, argModel);
   const provider = models.getProvider(providerId);
 
