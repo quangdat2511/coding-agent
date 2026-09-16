@@ -1,5 +1,4 @@
-import type { ModelCapabilities } from "@/capabilities";
-import type { ToolDeclaration } from "@/tool";
+import type { TSchema } from "typebox";
 
 // Content blocks
 export interface TextBlock {
@@ -47,6 +46,15 @@ export interface Usage {
   raw?: Record<string, unknown>;
 }
 
+// Model capabilities
+export interface ModelCapabilities {
+  readonly parallelToolCallControl: boolean;
+  readonly cancellation: "client_abort_only" | "native_in_flight";
+  readonly toolArgumentDelivery: "streamed" | "whole";
+  readonly usageTiming: "incremental" | "final";
+  readonly serverSideTools: boolean;
+}
+
 // Model
 export interface Model {
   id: string;
@@ -70,6 +78,13 @@ export interface AssistantMessage {
 }
 
 export type Message = UserMessage | AssistantMessage;
+
+// Tools
+export interface ToolDeclaration<S extends TSchema = TSchema> {
+  readonly name: string;
+  readonly description: string;
+  readonly parameters: S;
+}
 
 // Context
 export interface Context {
