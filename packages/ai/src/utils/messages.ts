@@ -2,9 +2,17 @@ import type { Message } from "@/types";
 
 export function flattenMessageContent(msg: Message): string {
   if (msg.role === "user") {
-    return typeof msg.content === "string"
-      ? msg.content
-      : msg.content.map((c) => (c.type === "text" ? c.text : c.content)).join("");
+    if (typeof msg.content === "string") {
+      return msg.content;
+    }
+    if (msg.content.some((c) => c.type !== "text")) {
+      throw new Error("tool_call/tool_result content is not supported by this adapter yet");
+    }
+    return msg.content.map((c) => (c.type === "text" ? c.text : "")).join("");
   }
-  return msg.content.map((c) => (c.type === "text" ? c.text : c.arguments)).join("");
+
+  if (msg.content.some((c) => c.type !== "text")) {
+    throw new Error("tool_call/tool_result content is not supported by this adapter yet");
+  }
+  return msg.content.map((c) => (c.type === "text" ? c.text : "")).join("");
 }

@@ -8,8 +8,18 @@ type AnthropicStreamChunk =
       message: { usage: { input_tokens: number; output_tokens?: number } };
     }
   | {
+      type: "content_block_start";
+      index: number;
+      content_block: { type: string; text?: string };
+    }
+  | {
       type: "content_block_delta";
+      index: number;
       delta: { type: "text_delta"; text: string };
+    }
+  | {
+      type: "content_block_stop";
+      index: number;
     }
   | {
       type: "message_delta";
@@ -21,12 +31,18 @@ type AnthropicStreamChunk =
     };
 
 let mockEvents: AnthropicStreamChunk[] = [];
+let lastClientOptions: { maxRetries?: number } | undefined;
+let lastCreateOptions: { signal?: AbortSignal } | undefined;
 
 mock.module("@anthropic-ai/sdk", () => {
   return {
     default: class MockAnthropic {
+      constructor(options?: { maxRetries?: number }) {
+        lastClientOptions = options;
+      }
       messages = {
-        create: mock(async () => {
+        create: mock(async (_body: unknown, options?: { signal?: AbortSignal }) => {
+          lastCreateOptions = options;
           return (async function* () {
             for (const event of mockEvents) {
               yield event;
@@ -76,13 +92,13 @@ describe("mapAnthropicFinishReason", () => {
     });
   });
 
-  it("maps null, undefined, or unknown to end_turn or other", () => {
+  it("maps null, undefined, or unknown to other", () => {
     expect(mapAnthropicFinishReason(null)).toEqual({
-      reason: "end_turn",
+      reason: "other",
       rawReason: "unknown",
     });
     expect(mapAnthropicFinishReason(undefined)).toEqual({
-      reason: "end_turn",
+      reason: "other",
       rawReason: "unknown",
     });
     expect(mapAnthropicFinishReason("other_reason")).toEqual({
@@ -102,7 +118,13 @@ describe("Anthropic stream finishReason handling", () => {
 
   it("maps message_delta stop_reason max_tokens to max_output_tokens on turn_end event and message", async () => {
     mockEvents = [
-      { type: "content_block_delta", delta: { type: "text_delta", text: "Tokens exceeded" } },
+      { type: "content_block_start", index: 0, content_block: { type: "text" } },
+      {
+        type: "content_block_delta",
+        index: 0,
+        delta: { type: "text_delta", text: "Tokens exceeded" },
+      },
+      { type: "content_block_stop", index: 0 },
       { type: "message_delta", delta: { stop_reason: "max_tokens", stop_sequence: null } },
       { type: "message_stop" },
     ];
@@ -117,7 +139,9 @@ describe("Anthropic stream finishReason handling", () => {
 
   it("maps message_delta stop_reason tool_use to tool_call on turn_end event and message", async () => {
     mockEvents = [
-      { type: "content_block_delta", delta: { type: "text_delta", text: "Using tool" } },
+      { type: "content_block_start", index: 0, content_block: { type: "text" } },
+      { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "Using tool" } },
+      { type: "content_block_stop", index: 0 },
       { type: "message_delta", delta: { stop_reason: "tool_use", stop_sequence: null } },
       { type: "message_stop" },
     ];
@@ -131,7 +155,9 @@ describe("Anthropic stream finishReason handling", () => {
 
   it("maps message_delta stop_reason refusal to content_filter on turn_end event and message", async () => {
     mockEvents = [
-      { type: "content_block_delta", delta: { type: "text_delta", text: "Refusal" } },
+      { type: "content_block_start", index: 0, content_block: { type: "text" } },
+      { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "Refusal" } },
+      { type: "content_block_stop", index: 0 },
       { type: "message_delta", delta: { stop_reason: "refusal", stop_sequence: null } },
       { type: "message_stop" },
     ];
@@ -145,7 +171,9 @@ describe("Anthropic stream finishReason handling", () => {
 
   it("maps message_delta stop_reason end_turn to end_turn on turn_end event and message", async () => {
     mockEvents = [
-      { type: "content_block_delta", delta: { type: "text_delta", text: "Done" } },
+      { type: "content_block_start", index: 0, content_block: { type: "text" } },
+      { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "Done" } },
+      { type: "content_block_stop", index: 0 },
       { type: "message_delta", delta: { stop_reason: "end_turn", stop_sequence: null } },
       { type: "message_stop" },
     ];
@@ -163,7 +191,13 @@ describe("Anthropic stream finishReason handling", () => {
         type: "message_start",
         message: { usage: { input_tokens: 42, output_tokens: 0 } },
       },
-      { type: "content_block_delta", delta: { type: "text_delta", text: "Hello with usage" } },
+      { type: "content_block_start", index: 0, content_block: { type: "text" } },
+      {
+        type: "content_block_delta",
+        index: 0,
+        delta: { type: "text_delta", text: "Hello with usage" },
+      },
+      { type: "content_block_stop", index: 0 },
       {
         type: "message_delta",
         delta: { stop_reason: "end_turn", stop_sequence: null },
@@ -177,5 +211,62 @@ describe("Anthropic stream finishReason handling", () => {
       inputTokens: 42,
       outputTokens: 18,
     });
+  });
+
+  it("handles multi-block responses without emitting stops for unstarted blocks", async () => {
+    mockEvents = [
+      { type: "content_block_start", index: 0, content_block: { type: "text" } },
+      { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "Part 1" } },
+      { type: "content_block_stop", index: 0 },
+      { type: "content_block_start", index: 1, content_block: { type: "tool_use" } },
+      { type: "content_block_stop", index: 1 },
+      { type: "message_delta", delta: { stop_reason: "end_turn", stop_sequence: null } },
+      { type: "message_stop" },
+    ];
+
+    const streamObj = stream(model, context, { apiKey: "test-key" });
+    const events = [];
+    for await (const ev of streamObj) {
+      events.push(ev);
+    }
+    const startEvents = events.filter((e) => e.type === "content_block_start");
+    const stopEvents = events.filter((e) => e.type === "content_block_stop");
+    expect(startEvents.length).toBe(1);
+    expect(startEvents[0]?.index).toBe(0);
+    expect(stopEvents.length).toBe(1);
+    expect(stopEvents[0]?.index).toBe(0);
+  });
+
+  it("defaults finishReason to other with unknown when stream has no finish_reason", async () => {
+    mockEvents = [
+      { type: "content_block_start", index: 0, content_block: { type: "text" } },
+      { type: "content_block_stop", index: 0 },
+      { type: "message_stop" },
+    ];
+
+    const turnEndEvent = await collectTurnEndEvent(stream(model, context, { apiKey: "test-key" }));
+    expect(turnEndEvent.message.finishReason).toEqual({
+      reason: "other",
+      rawReason: "unknown",
+    });
+  });
+
+  it("passes maxRetries to client and signal to create", async () => {
+    const controller = new AbortController();
+    mockEvents = [
+      { type: "content_block_start", index: 0, content_block: { type: "text" } },
+      { type: "content_block_stop", index: 0 },
+      { type: "message_delta", delta: { stop_reason: "end_turn", stop_sequence: null } },
+      { type: "message_stop" },
+    ];
+    await collectTurnEndEvent(
+      stream(model, context, {
+        apiKey: "test-key",
+        maxRetries: 2,
+        signal: controller.signal,
+      }),
+    );
+    expect(lastClientOptions?.maxRetries).toBe(2);
+    expect(lastCreateOptions?.signal).toBe(controller.signal);
   });
 });

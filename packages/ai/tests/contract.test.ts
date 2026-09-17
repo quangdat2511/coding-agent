@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import { Type } from "typebox";
 import type {
+  AssistantContentBlock,
   AssistantMessage,
   ContentBlock,
   Context,
@@ -16,6 +17,7 @@ import type {
   ToolResultBlock,
   UserMessage,
 } from "@/index";
+import { flattenMessageContent } from "@/utils/messages";
 
 describe("ADR 0004 Model Interaction Contract", () => {
   it("supports ToolDeclaration with TypeBox 1.x schema", () => {
@@ -224,5 +226,64 @@ describe("ADR 0004 Model Interaction Contract", () => {
     const result = await fakeStream.result();
     expect(result.content).toEqual([{ type: "text", text: "Hi" }]);
     expect(result.finishReason.reason).toBe("end_turn");
+  });
+
+  it("supports AssistantContentBlock variants for model stream events", () => {
+    const textBlock: AssistantContentBlock = { type: "text", text: "Hello" };
+    const toolCallBlock: AssistantContentBlock = {
+      type: "tool_call",
+      toolCallId: "call-1",
+      name: "search",
+      arguments: "{}",
+    };
+
+    const event1: ModelStreamEvent = {
+      type: "content_block_start",
+      index: 0,
+      block: textBlock,
+    };
+    const event2: ModelStreamEvent = {
+      type: "content_block_start",
+      index: 1,
+      block: toolCallBlock,
+    };
+
+    expect(event1.type).toBe("content_block_start");
+    expect(event2.type).toBe("content_block_start");
+  });
+
+  it("flattenMessageContent flattens text messages and throws on tool_call or tool_result blocks", () => {
+    const plainUser: UserMessage = { role: "user", content: "hello world" };
+    expect(flattenMessageContent(plainUser)).toBe("hello world");
+
+    const textOnlyUser: UserMessage = {
+      role: "user",
+      content: [
+        { type: "text", text: "part 1 " },
+        { type: "text", text: "part 2" },
+      ],
+    };
+    expect(flattenMessageContent(textOnlyUser)).toBe("part 1 part 2");
+
+    const userWithToolResult: UserMessage = {
+      role: "user",
+      content: [
+        { type: "text", text: "hello" },
+        { type: "tool_result", toolCallId: "1", content: "data", isError: false },
+      ],
+    };
+    expect(() => flattenMessageContent(userWithToolResult)).toThrow(
+      "tool_call/tool_result content is not supported by this adapter yet",
+    );
+
+    const assistantWithToolCall: AssistantMessage = {
+      role: "assistant",
+      content: [{ type: "tool_call", toolCallId: "1", name: "tool", arguments: "{}" }],
+      model: "gpt-4o",
+      finishReason: { reason: "tool_call", rawReason: "tool_calls" },
+    };
+    expect(() => flattenMessageContent(assistantWithToolCall)).toThrow(
+      "tool_call/tool_result content is not supported by this adapter yet",
+    );
   });
 });

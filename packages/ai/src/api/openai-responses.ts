@@ -30,8 +30,10 @@ export function mapOpenAIFinishReason(
       return { reason: "tool_call", rawReason };
     case "content_filter":
       return { reason: "content_filter", rawReason };
+    case "error":
+      return { reason: "error", rawReason };
     default:
-      return { reason: reason ? "other" : "end_turn", rawReason };
+      return { reason: "other", rawReason: reason ?? "unknown" };
   }
 }
 
@@ -75,16 +77,21 @@ export function stream(model: Model, context: Context, options?: StreamOptions):
         apiKey,
         baseURL: options?.baseURL,
         defaultHeaders: options?.headers,
+        maxRetries: options?.maxRetries,
       });
       const messages = buildParams(context);
 
-      const response = await client.chat.completions.create({
-        model: model.id,
-        messages: messages,
-        temperature: options?.temperature,
-        max_tokens: options?.maxTokens,
-        stream: true,
-      });
+      const response = await client.chat.completions.create(
+        {
+          model: model.id,
+          messages: messages,
+          temperature: options?.temperature,
+          max_tokens: options?.maxTokens,
+          stream: true,
+          stream_options: { include_usage: true },
+        },
+        { signal: options?.signal },
+      );
 
       eventStream.push({ type: "stream_start" });
       eventStream.push({
@@ -94,7 +101,7 @@ export function stream(model: Model, context: Context, options?: StreamOptions):
       });
 
       let currentText = "";
-      let finishReason: FinishReason = { reason: "end_turn", rawReason: "unknown" };
+      let finishReason: FinishReason = { reason: "other", rawReason: "unknown" };
       let usage: Usage | undefined;
 
       for await (const chunk of response) {

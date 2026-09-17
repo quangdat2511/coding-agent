@@ -45,21 +45,19 @@ const stream = models.stream(model, context);
 // 5. Iterate through the stream events
 for await (const event of stream) {
   switch (event.type) {
-    case "start":
-      console.log(`[Starting response from ${event.partial.model}]`);
+    case "content_block_delta":
+      if (event.delta.type === "text_delta") {
+        // Output the text chunks in real-time
+        process.stdout.write(event.delta.text);
+      }
       break;
-    
-    case "text_delta":
-      // Output the text chunks in real-time
-      process.stdout.write(event.delta);
+
+    case "turn_end":
+      console.log(`\n[Finished. Stop reason: ${event.message.finishReason.reason}]`);
       break;
-    
-    case "done":
-      console.log(`\n[Finished. Stop reason: ${event.reason}]`);
-      break;
-    
+
     case "error":
-      console.error(`\n[Error occurred]: ${event.error.errorMessage}`);
+      console.error(`\n[Error occurred]: ${event.error.message}`);
       break;
   }
 }

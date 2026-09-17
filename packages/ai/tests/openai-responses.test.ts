@@ -7,22 +7,39 @@ type OpenAIStreamChunk = {
     delta?: { content?: string };
     finish_reason?: string | null;
   }>;
+  usage?: {
+    prompt_tokens: number;
+    completion_tokens: number;
+  };
 };
 
 let mockChunks: OpenAIStreamChunk[] = [];
+let lastClientOptions: { maxRetries?: number } | undefined;
+let lastCreateBody: { stream_options?: { include_usage?: boolean } } | undefined;
+let lastCreateOptions: { signal?: AbortSignal } | undefined;
 
 mock.module("openai", () => {
   return {
     default: class MockOpenAI {
+      constructor(options?: { maxRetries?: number }) {
+        lastClientOptions = options;
+      }
       chat = {
         completions: {
-          create: mock(async () => {
-            return (async function* () {
-              for (const chunk of mockChunks) {
-                yield chunk;
-              }
-            })();
-          }),
+          create: mock(
+            async (
+              body: { stream_options?: { include_usage?: boolean } },
+              options?: { signal?: AbortSignal },
+            ) => {
+              lastCreateBody = body;
+              lastCreateOptions = options;
+              return (async function* () {
+                for (const chunk of mockChunks) {
+                  yield chunk;
+                }
+              })();
+            },
+          ),
         },
       };
     },
@@ -57,17 +74,24 @@ describe("mapOpenAIFinishReason", () => {
     });
   });
 
-  it("maps stop, null, undefined, or unknown to end_turn or other", () => {
+  it("maps error to error", () => {
+    expect(mapOpenAIFinishReason("error")).toEqual({
+      reason: "error",
+      rawReason: "error",
+    });
+  });
+
+  it("maps stop to end_turn, and null, undefined, or unknown to other", () => {
     expect(mapOpenAIFinishReason("stop")).toEqual({
       reason: "end_turn",
       rawReason: "stop",
     });
     expect(mapOpenAIFinishReason(null)).toEqual({
-      reason: "end_turn",
+      reason: "other",
       rawReason: "unknown",
     });
     expect(mapOpenAIFinishReason(undefined)).toEqual({
-      reason: "end_turn",
+      reason: "other",
       rawReason: "unknown",
     });
     expect(mapOpenAIFinishReason("custom_reason")).toEqual({
@@ -130,5 +154,46 @@ describe("OpenAI stream finishReason handling", () => {
       rawReason: "stop",
     });
     expect(turnEndEvent.message.content).toEqual([{ type: "text", text: "Done" }]);
+  });
+
+  it("captures usage from stream chunk on turn_delta and turn_end", async () => {
+    mockChunks = [
+      { choices: [{ delta: { content: "Hello" }, finish_reason: null }] },
+      {
+        choices: [{ delta: {}, finish_reason: "stop" }],
+        usage: { prompt_tokens: 10, completion_tokens: 5 },
+      },
+    ];
+
+    const turnEndEvent = await collectTurnEndEvent(stream(model, context, { apiKey: "test-key" }));
+    expect(turnEndEvent.message.usage).toEqual({
+      inputTokens: 10,
+      outputTokens: 5,
+    });
+  });
+
+  it("defaults finishReason to other with unknown when stream has no finish_reason", async () => {
+    mockChunks = [{ choices: [{ delta: { content: "Incomplete" }, finish_reason: null }] }];
+
+    const turnEndEvent = await collectTurnEndEvent(stream(model, context, { apiKey: "test-key" }));
+    expect(turnEndEvent.message.finishReason).toEqual({
+      reason: "other",
+      rawReason: "unknown",
+    });
+  });
+
+  it("passes maxRetries to client and stream_options and signal to create", async () => {
+    const controller = new AbortController();
+    mockChunks = [{ choices: [{ delta: { content: "Hi" }, finish_reason: "stop" }] }];
+    await collectTurnEndEvent(
+      stream(model, context, {
+        apiKey: "test-key",
+        maxRetries: 3,
+        signal: controller.signal,
+      }),
+    );
+    expect(lastClientOptions?.maxRetries).toBe(3);
+    expect(lastCreateBody?.stream_options).toEqual({ include_usage: true });
+    expect(lastCreateOptions?.signal).toBe(controller.signal);
   });
 });

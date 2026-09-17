@@ -132,4 +132,17 @@ describe("ModelEventStream", () => {
     // Ensure waiting a tick does not trigger an unhandled rejection
     await new Promise((resolve) => setTimeout(resolve, 20));
   });
+
+  it("should reject result() if stream ends without a terminal message", async () => {
+    const stream = createModelEventStream();
+    stream.push({ type: "stream_start" });
+    stream.end();
+
+    const events = [];
+    for await (const event of stream) {
+      events.push(event);
+    }
+    expect(events.length).toBe(1);
+    expect(stream.result()).rejects.toThrow("Stream ended without a terminal message");
+  });
 });

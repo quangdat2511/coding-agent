@@ -21,6 +21,7 @@ export interface ToolResultBlock {
 }
 
 export type ContentBlock = TextBlock | ToolCallBlock | ToolResultBlock;
+export type AssistantContentBlock = TextBlock | ToolCallBlock;
 
 // Finish reason
 export type NormalizedFinishReason =
@@ -108,7 +109,7 @@ export type ContentBlockDelta = { type: "text_delta"; text: string };
 
 export type ModelStreamEvent =
   | { type: "stream_start" }
-  | { type: "content_block_start"; index: number; block: ContentBlock }
+  | { type: "content_block_start"; index: number; block: AssistantContentBlock }
   | { type: "content_block_delta"; index: number; delta: ContentBlockDelta }
   | { type: "content_block_stop"; index: number }
   | { type: "turn_delta"; usage?: Usage; finishReason?: FinishReason }

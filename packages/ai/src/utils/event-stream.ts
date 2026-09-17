@@ -4,6 +4,7 @@ export class EventStream<T, R = T> implements AsyncIterable<T> {
   private queue: T[] = [];
   private waiting: ((value: IteratorResult<T>) => void)[] = [];
   private done = false;
+  private settled = false;
   private finalResultPromise: Promise<R>;
   private resolveFinalResult!: (result: R) => void;
   private rejectFinalResult!: (reason?: unknown) => void;
@@ -14,8 +15,14 @@ export class EventStream<T, R = T> implements AsyncIterable<T> {
     this.isComplete = isComplete;
     this.extractResult = extractResult;
     this.finalResultPromise = new Promise((resolve, reject) => {
-      this.resolveFinalResult = resolve;
-      this.rejectFinalResult = reject;
+      this.resolveFinalResult = (result: R) => {
+        this.settled = true;
+        resolve(result);
+      };
+      this.rejectFinalResult = (reason?: unknown) => {
+        this.settled = true;
+        reject(reason);
+      };
     });
     // Prevent unhandled promise rejection if finalResultPromise rejects
     // but the consumer only consumes the stream via async iteration without calling .result()
@@ -45,7 +52,11 @@ export class EventStream<T, R = T> implements AsyncIterable<T> {
   end(result?: R): void {
     this.done = true;
     if (result !== undefined) {
-      this.resolveFinalResult(result);
+      if (!this.settled) {
+        this.resolveFinalResult(result);
+      }
+    } else if (!this.settled) {
+      this.rejectFinalResult(new Error("Stream ended without a terminal message"));
     }
     while (this.waiting.length > 0) {
       const waiter = this.waiting.shift();
