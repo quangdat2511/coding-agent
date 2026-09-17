@@ -14,6 +14,7 @@ type OpenAIStreamChunk = {
 };
 
 let mockChunks: OpenAIStreamChunk[] = [];
+let mockCreateError: Error | null = null;
 let lastClientOptions: { maxRetries?: number } | undefined;
 let lastCreateBody: { stream_options?: { include_usage?: boolean } } | undefined;
 let lastCreateOptions: { signal?: AbortSignal } | undefined;
@@ -31,6 +32,9 @@ mock.module("openai", () => {
               body: { stream_options?: { include_usage?: boolean } },
               options?: { signal?: AbortSignal },
             ) => {
+              if (mockCreateError) {
+                throw mockCreateError;
+              }
               lastCreateBody = body;
               lastCreateOptions = options;
               return (async function* () {
@@ -195,5 +199,81 @@ describe("OpenAI stream finishReason handling", () => {
     expect(lastClientOptions?.maxRetries).toBe(3);
     expect(lastCreateBody?.stream_options).toEqual({ include_usage: true });
     expect(lastCreateOptions?.signal).toBe(controller.signal);
+  });
+
+  it("maps mid-stream error finish_reason from OpenRouter to error", async () => {
+    mockChunks = [
+      { choices: [{ delta: { content: "Hello, I was about to" }, finish_reason: null }] },
+      { choices: [{ delta: {}, finish_reason: "error" }] },
+    ];
+
+    const turnEndEvent = await collectTurnEndEvent(stream(model, context, { apiKey: "test-key" }));
+    expect(turnEndEvent.message.finishReason).toEqual({
+      reason: "error",
+      rawReason: "error",
+    });
+    expect(turnEndEvent.message.content).toEqual([{ type: "text", text: "Hello, I was about to" }]);
+  });
+
+  it("captures usage when delivered in a standalone chunk with empty choices", async () => {
+    mockChunks = [
+      { choices: [{ delta: { content: "Hello" }, finish_reason: "stop" }] },
+      { choices: [], usage: { prompt_tokens: 25, completion_tokens: 12 } },
+    ];
+
+    const turnEndEvent = await collectTurnEndEvent(stream(model, context, { apiKey: "test-key" }));
+    expect(turnEndEvent.message.usage).toEqual({
+      inputTokens: 25,
+      outputTokens: 12,
+    });
+  });
+
+  it("emits error event and rejects result() when context contains tool_call/tool_result", async () => {
+    const contextWithToolResult: Context = {
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "text", text: "hi" },
+            { type: "tool_result", toolCallId: "call-1", content: "ok", isError: false },
+          ],
+        },
+      ],
+    };
+
+    const streamObj = stream(model, contextWithToolResult, { apiKey: "test-key" });
+    const events = [];
+    for await (const ev of streamObj) {
+      events.push(ev);
+    }
+    expect(events.length).toBe(1);
+    expect(events[0]?.type).toBe("error");
+    if (events[0]?.type === "error") {
+      expect(events[0].error.message).toContain(
+        "tool_call/tool_result content is not supported by this adapter yet",
+      );
+    }
+    await expect(streamObj.result()).rejects.toThrow(
+      "tool_call/tool_result content is not supported by this adapter yet",
+    );
+  });
+
+  it("emits error event and rejects result() when create throws an error", async () => {
+    mockCreateError = new Error("Connection aborted");
+    try {
+      const streamObj = stream(model, context, { apiKey: "test-key" });
+      const events = [];
+      for await (const ev of streamObj) {
+        events.push(ev);
+      }
+      expect(events.length).toBe(1);
+      expect(events[0]?.type).toBe("error");
+      if (events[0]?.type === "error") {
+        expect(events[0].error.message).toBe("Connection aborted");
+      }
+      await expect(streamObj.result()).rejects.toThrow("Connection aborted");
+    } finally {
+      mockCreateError = null;
+    }
   });
 });

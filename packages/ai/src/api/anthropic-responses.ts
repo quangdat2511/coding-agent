@@ -112,13 +112,15 @@ export function stream(model: Model, context: Context, options?: StreamOptions):
             });
           }
         } else if (chunk.type === "content_block_delta" && chunk.delta.type === "text_delta") {
-          const delta = chunk.delta.text;
-          currentText += delta;
-          eventStream.push({
-            type: "content_block_delta",
-            index: chunk.index,
-            delta: { type: "text_delta", text: delta },
-          });
+          if (startedBlocks.has(chunk.index)) {
+            const delta = chunk.delta.text;
+            currentText += delta;
+            eventStream.push({
+              type: "content_block_delta",
+              index: chunk.index,
+              delta: { type: "text_delta", text: delta },
+            });
+          }
         } else if (chunk.type === "content_block_stop") {
           if (startedBlocks.has(chunk.index)) {
             startedBlocks.delete(chunk.index);

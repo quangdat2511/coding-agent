@@ -105,7 +105,7 @@ export function stream(model: Model, context: Context, options?: StreamOptions):
       let usage: Usage | undefined;
 
       for await (const chunk of response) {
-        const choice = chunk.choices[0];
+        const choice = chunk.choices?.[0];
         if (choice?.finish_reason != null) {
           finishReason = mapOpenAIFinishReason(choice.finish_reason);
         }

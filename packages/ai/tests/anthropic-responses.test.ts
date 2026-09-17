@@ -31,6 +31,7 @@ type AnthropicStreamChunk =
     };
 
 let mockEvents: AnthropicStreamChunk[] = [];
+let mockCreateError: Error | null = null;
 let lastClientOptions: { maxRetries?: number } | undefined;
 let lastCreateOptions: { signal?: AbortSignal } | undefined;
 
@@ -42,6 +43,9 @@ mock.module("@anthropic-ai/sdk", () => {
       }
       messages = {
         create: mock(async (_body: unknown, options?: { signal?: AbortSignal }) => {
+          if (mockCreateError) {
+            throw mockCreateError;
+          }
           lastCreateOptions = options;
           return (async function* () {
             for (const event of mockEvents) {
@@ -268,5 +272,86 @@ describe("Anthropic stream finishReason handling", () => {
     );
     expect(lastClientOptions?.maxRetries).toBe(2);
     expect(lastCreateOptions?.signal).toBe(controller.signal);
+  });
+
+  it("handles multi-block response when tool_use block precedes text block", async () => {
+    mockEvents = [
+      { type: "content_block_start", index: 0, content_block: { type: "tool_use" } },
+      { type: "content_block_stop", index: 0 },
+      { type: "content_block_start", index: 1, content_block: { type: "text" } },
+      {
+        type: "content_block_delta",
+        index: 1,
+        delta: { type: "text_delta", text: "Text after tool" },
+      },
+      { type: "content_block_stop", index: 1 },
+      { type: "message_delta", delta: { stop_reason: "end_turn", stop_sequence: null } },
+      { type: "message_stop" },
+    ];
+
+    const streamObj = stream(model, context, { apiKey: "test-key" });
+    const events = [];
+    for await (const ev of streamObj) {
+      events.push(ev);
+    }
+    const startEvents = events.filter((e) => e.type === "content_block_start");
+    const stopEvents = events.filter((e) => e.type === "content_block_stop");
+    expect(startEvents.length).toBe(1);
+    expect(startEvents[0]?.index).toBe(1);
+    expect(stopEvents.length).toBe(1);
+    expect(stopEvents[0]?.index).toBe(1);
+    const turnEnd = events.find((e) => e.type === "turn_end");
+    if (turnEnd?.type === "turn_end") {
+      expect(turnEnd.message.content).toEqual([{ type: "text", text: "Text after tool" }]);
+    }
+  });
+
+  it("emits error event and rejects result() when context contains tool_call/tool_result", async () => {
+    const contextWithToolResult: Context = {
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "text", text: "hi" },
+            { type: "tool_result", toolCallId: "call-1", content: "ok", isError: false },
+          ],
+        },
+      ],
+    };
+
+    const streamObj = stream(model, contextWithToolResult, { apiKey: "test-key" });
+    const events = [];
+    for await (const ev of streamObj) {
+      events.push(ev);
+    }
+    expect(events.length).toBe(1);
+    expect(events[0]?.type).toBe("error");
+    if (events[0]?.type === "error") {
+      expect(events[0].error.message).toContain(
+        "tool_call/tool_result content is not supported by this adapter yet",
+      );
+    }
+    await expect(streamObj.result()).rejects.toThrow(
+      "tool_call/tool_result content is not supported by this adapter yet",
+    );
+  });
+
+  it("emits error event and rejects result() when messages.create throws an error", async () => {
+    mockCreateError = new Error("API rate limit exceeded");
+    try {
+      const streamObj = stream(model, context, { apiKey: "test-key" });
+      const events = [];
+      for await (const ev of streamObj) {
+        events.push(ev);
+      }
+      expect(events.length).toBe(1);
+      expect(events[0]?.type).toBe("error");
+      if (events[0]?.type === "error") {
+        expect(events[0].error.message).toBe("API rate limit exceeded");
+      }
+      await expect(streamObj.result()).rejects.toThrow("API rate limit exceeded");
+    } finally {
+      mockCreateError = null;
+    }
   });
 });
