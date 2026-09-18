@@ -89,7 +89,7 @@ export function stream(model: Model, context: Context, options?: StreamOptions):
       eventStream.push({ type: "stream_start" });
 
       let currentText = "";
-      let finishReason: FinishReason = { reason: "other", rawReason: "unknown" };
+      let finishReason: FinishReason | undefined;
       let inputTokens = 0;
       let outputTokens = 0;
       let hasUsage = false;
@@ -138,6 +138,10 @@ export function stream(model: Model, context: Context, options?: StreamOptions):
             outputTokens = chunk.usage.output_tokens ?? outputTokens;
           }
         }
+      }
+
+      if (!finishReason) {
+        throw new Error("Stream ended without a finish reason");
       }
 
       const usage: Usage | undefined = hasUsage

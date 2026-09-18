@@ -241,18 +241,25 @@ describe("Anthropic stream finishReason handling", () => {
     expect(stopEvents[0]?.index).toBe(0);
   });
 
-  it("defaults finishReason to other with unknown when stream has no finish_reason", async () => {
+  it("emits error event and rejects result() when stream has no finish_reason", async () => {
     mockEvents = [
       { type: "content_block_start", index: 0, content_block: { type: "text" } },
       { type: "content_block_stop", index: 0 },
       { type: "message_stop" },
     ];
 
-    const turnEndEvent = await collectTurnEndEvent(stream(model, context, { apiKey: "test-key" }));
-    expect(turnEndEvent.message.finishReason).toEqual({
-      reason: "other",
-      rawReason: "unknown",
-    });
+    const streamObj = stream(model, context, { apiKey: "test-key" });
+    const events = [];
+    for await (const ev of streamObj) {
+      events.push(ev);
+    }
+    const errorEvent = events.find((e) => e.type === "error");
+    expect(errorEvent).toBeDefined();
+    if (errorEvent?.type === "error") {
+      expect(errorEvent.error.message).toBe("Stream ended without a finish reason");
+    }
+    expect(events.some((e) => e.type === "turn_end")).toBe(false);
+    await expect(streamObj.result()).rejects.toThrow("Stream ended without a finish reason");
   });
 
   it("passes maxRetries to client and signal to create", async () => {

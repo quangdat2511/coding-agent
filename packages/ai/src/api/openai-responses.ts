@@ -101,7 +101,7 @@ export function stream(model: Model, context: Context, options?: StreamOptions):
       });
 
       let currentText = "";
-      let finishReason: FinishReason = { reason: "other", rawReason: "unknown" };
+      let finishReason: FinishReason | undefined;
       let usage: Usage | undefined;
 
       for await (const chunk of response) {
@@ -124,6 +124,10 @@ export function stream(model: Model, context: Context, options?: StreamOptions):
             outputTokens: chunk.usage.completion_tokens,
           };
         }
+      }
+
+      if (!finishReason) {
+        throw new Error("Stream ended without a finish reason");
       }
 
       eventStream.push({

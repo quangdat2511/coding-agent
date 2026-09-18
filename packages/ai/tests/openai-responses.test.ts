@@ -176,14 +176,21 @@ describe("OpenAI stream finishReason handling", () => {
     });
   });
 
-  it("defaults finishReason to other with unknown when stream has no finish_reason", async () => {
+  it("emits error event and rejects result() when stream has no finish_reason", async () => {
     mockChunks = [{ choices: [{ delta: { content: "Incomplete" }, finish_reason: null }] }];
 
-    const turnEndEvent = await collectTurnEndEvent(stream(model, context, { apiKey: "test-key" }));
-    expect(turnEndEvent.message.finishReason).toEqual({
-      reason: "other",
-      rawReason: "unknown",
-    });
+    const streamObj = stream(model, context, { apiKey: "test-key" });
+    const events = [];
+    for await (const ev of streamObj) {
+      events.push(ev);
+    }
+    const errorEvent = events.find((e) => e.type === "error");
+    expect(errorEvent).toBeDefined();
+    if (errorEvent?.type === "error") {
+      expect(errorEvent.error.message).toBe("Stream ended without a finish reason");
+    }
+    expect(events.some((e) => e.type === "turn_end")).toBe(false);
+    await expect(streamObj.result()).rejects.toThrow("Stream ended without a finish reason");
   });
 
   it("passes maxRetries to client and stream_options and signal to create", async () => {
