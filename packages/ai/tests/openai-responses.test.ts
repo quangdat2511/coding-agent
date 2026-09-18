@@ -208,6 +208,16 @@ describe("OpenAI stream finishReason handling", () => {
     expect(lastCreateOptions?.signal).toBe(controller.signal);
   });
 
+  it("defaults maxRetries to 0 when omitted in StreamOptions", async () => {
+    mockChunks = [{ choices: [{ delta: { content: "Hi" }, finish_reason: "stop" }] }];
+    await collectTurnEndEvent(
+      stream(model, context, {
+        apiKey: "test-key",
+      }),
+    );
+    expect(lastClientOptions?.maxRetries).toBe(0);
+  });
+
   it("maps mid-stream error finish_reason from OpenRouter to error", async () => {
     mockChunks = [
       { choices: [{ delta: { content: "Hello, I was about to" }, finish_reason: null }] },

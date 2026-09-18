@@ -37,3 +37,8 @@ _Avoid_: Tool definition, tool spec, function definition
 **Model Capabilities**:
 Declared behavioral differences between Model Providers and API variants that callers can inspect.
 _Avoid_: Provider features, model flags, feature set
+
+**Transport Retry Bound**:
+The caller-specified maximum number of attempts the AI transport layer may make to re-issue a request that fails before the response stream opens. It never retries after the first stream event.
+_Avoid_: Session retry, agent retry, loop retry
+
