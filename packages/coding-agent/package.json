@@ -1,0 +1,22 @@
+{
+  "name": "@coding-agent/coding-agent",
+  "module": "src/index.ts",
+  "type": "module",
+  "private": true,
+  "main": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "dependencies": {
+    "@coding-agent/ai": "workspace:*",
+    "@coding-agent/agent-core": "workspace:*",
+    "@coding-agent/tools": "workspace:*",
+    "@coding-agent/tui": "workspace:*"
+  }
+}
