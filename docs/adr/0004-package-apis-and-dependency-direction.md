@@ -213,10 +213,8 @@ follow §4 of the
 [MVP context, planning, verification, and session memory decision](./0003-mvp-context-planning-verification-and-session-memory.md)
 (ADR 0003).
 
-ADR 0003 §4 does not state that `maxConsecutiveRecoverableFailures` counts Tool Call failures, while
-ADR 0002 §4 counts error Tool Results and does not increment the counter on a Verification
-`continue`, so ADR 0003 needs an amendment that states the counter's scope; this decision keeps the
-field name unchanged.
+ADR 0003 §4, as amended by [CDA-35](https://datn-fit-hcmus.atlassian.net/browse/CDA-35), states the
+counter's scope; this decision keeps the field name unchanged.
 
 The Verification port carries ADR 0002's three outcomes, spelled as in ADR 0003 §3:
 
