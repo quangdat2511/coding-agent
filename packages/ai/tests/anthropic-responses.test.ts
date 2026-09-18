@@ -281,6 +281,21 @@ describe("Anthropic stream finishReason handling", () => {
     expect(lastCreateOptions?.signal).toBe(controller.signal);
   });
 
+  it("defaults maxRetries to 0 when omitted in StreamOptions", async () => {
+    mockEvents = [
+      { type: "content_block_start", index: 0, content_block: { type: "text" } },
+      { type: "content_block_stop", index: 0 },
+      { type: "message_delta", delta: { stop_reason: "end_turn", stop_sequence: null } },
+      { type: "message_stop" },
+    ];
+    await collectTurnEndEvent(
+      stream(model, context, {
+        apiKey: "test-key",
+      }),
+    );
+    expect(lastClientOptions?.maxRetries).toBe(0);
+  });
+
   it("handles multi-block response when tool_use block precedes text block", async () => {
     mockEvents = [
       { type: "content_block_start", index: 0, content_block: { type: "tool_use" } },
