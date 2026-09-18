@@ -1,20 +1,32 @@
-import type { AssistantMessage, AssistantMessageEvent } from "@/types";
+import type { AssistantMessage, ModelStreamEvent } from "@/types";
 
 export class EventStream<T, R = T> implements AsyncIterable<T> {
   private queue: T[] = [];
   private waiting: ((value: IteratorResult<T>) => void)[] = [];
   private done = false;
+  private settled = false;
   private finalResultPromise: Promise<R>;
   private resolveFinalResult!: (result: R) => void;
+  private rejectFinalResult!: (reason?: unknown) => void;
   private isComplete: (event: T) => boolean;
   private extractResult: (event: T) => R;
 
   constructor(isComplete: (event: T) => boolean, extractResult: (event: T) => R) {
     this.isComplete = isComplete;
     this.extractResult = extractResult;
-    this.finalResultPromise = new Promise((resolve) => {
-      this.resolveFinalResult = resolve;
+    this.finalResultPromise = new Promise((resolve, reject) => {
+      this.resolveFinalResult = (result: R) => {
+        this.settled = true;
+        resolve(result);
+      };
+      this.rejectFinalResult = (reason?: unknown) => {
+        this.settled = true;
+        reject(reason);
+      };
     });
+    // Prevent unhandled promise rejection if finalResultPromise rejects
+    // but the consumer only consumes the stream via async iteration without calling .result()
+    this.finalResultPromise.catch(() => {});
   }
 
   push(event: T): void {
@@ -22,7 +34,11 @@ export class EventStream<T, R = T> implements AsyncIterable<T> {
 
     if (this.isComplete(event)) {
       this.done = true;
-      this.resolveFinalResult(this.extractResult(event));
+      try {
+        this.resolveFinalResult(this.extractResult(event));
+      } catch (err) {
+        this.rejectFinalResult(err);
+      }
     }
 
     const waiter = this.waiting.shift();
@@ -36,7 +52,11 @@ export class EventStream<T, R = T> implements AsyncIterable<T> {
   end(result?: R): void {
     this.done = true;
     if (result !== undefined) {
-      this.resolveFinalResult(result);
+      if (!this.settled) {
+        this.resolveFinalResult(result);
+      }
+    } else if (!this.settled) {
+      this.rejectFinalResult(new Error("Stream ended without a terminal message"));
     }
     while (this.waiting.length > 0) {
       const waiter = this.waiting.shift();
@@ -67,18 +87,16 @@ export class EventStream<T, R = T> implements AsyncIterable<T> {
   }
 }
 
-export class AssistantMessageEventStream extends EventStream<
-  AssistantMessageEvent,
-  AssistantMessage
-> {
+export class ModelEventStream extends EventStream<ModelStreamEvent, AssistantMessage> {
   constructor() {
     super(
-      (event) => event.type === "done" || event.type === "error",
+      (event) => event.type === "turn_end" || event.type === "error",
       (event) => {
-        if (event.type === "done") {
+        if (event.type === "turn_end") {
           return event.message;
-        } else if (event.type === "error") {
-          return event.error;
+        }
+        if (event.type === "error") {
+          throw new Error(event.error.message);
         }
         throw new Error("Unexpected event type for final result");
       },
@@ -86,6 +104,6 @@ export class AssistantMessageEventStream extends EventStream<
   }
 }
 
-export function createAssistantMessageEventStream(): AssistantMessageEventStream {
-  return new AssistantMessageEventStream();
+export function createModelEventStream(): ModelEventStream {
+  return new ModelEventStream();
 }

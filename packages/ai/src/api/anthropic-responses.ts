@@ -1,23 +1,38 @@
 import Anthropic from "@anthropic-ai/sdk";
-import type { AssistantMessage, Context, Model, StopReason, StreamOptions } from "@/types";
-import { AssistantMessageEventStream } from "@/utils/event-stream";
+import type {
+  AssistantMessage,
+  Context,
+  FinishReason,
+  Model,
+  ModelStream,
+  StreamOptions,
+  Usage,
+} from "@/types";
+
+import { createModelEventStream } from "@/utils/event-stream";
+import { flattenMessageContent } from "@/utils/messages";
 
 export type AnthropicRawStopReason =
   | Anthropic.RawMessageDeltaEvent.Delta["stop_reason"]
   | (string & {});
 
-export function mapAnthropicStopReason(
+export function mapAnthropicFinishReason(
   reason: AnthropicRawStopReason | null | undefined,
-): StopReason {
+): FinishReason {
+  const rawReason = reason ?? "unknown";
   switch (reason) {
+    case "end_turn":
+      return { reason: "end_turn", rawReason };
     case "max_tokens":
-      return "length";
+      return { reason: "max_output_tokens", rawReason };
     case "tool_use":
-      return "toolUse";
+      return { reason: "tool_call", rawReason };
     case "refusal":
-      return "error";
+      return { reason: "content_filter", rawReason };
+    case "stop_sequence":
+      return { reason: "stop_sequence", rawReason };
     default:
-      return "stop";
+      return { reason: "other", rawReason: reason ?? "unknown" };
   }
 }
 
@@ -25,26 +40,17 @@ export function buildParams(context: Context): Anthropic.MessageParam[] {
   const messages: Anthropic.MessageParam[] = [];
 
   for (const msg of context.messages) {
-    if (msg.role === "user") {
-      const content =
-        typeof msg.content === "string" ? msg.content : msg.content.map((c) => c.text).join("");
-      messages.push({ role: "user", content });
-    } else if (msg.role === "assistant") {
-      const content =
-        typeof msg.content === "string" ? msg.content : msg.content.map((c) => c.text).join("");
-      messages.push({ role: "assistant", content });
-    }
+    messages.push({
+      role: msg.role,
+      content: flattenMessageContent(msg),
+    });
   }
 
   return messages;
 }
 
-export function stream(
-  model: Model,
-  context: Context,
-  options?: StreamOptions,
-): AssistantMessageEventStream {
-  const eventStream = new AssistantMessageEventStream();
+export function stream(model: Model, context: Context, options?: StreamOptions): ModelStream {
+  const eventStream = createModelEventStream();
 
   (async () => {
     try {
@@ -52,13 +58,8 @@ export function stream(
       if (!apiKey) {
         eventStream.push({
           type: "error",
-          reason: "error",
           error: {
-            role: "assistant",
-            content: [],
-            model: model.id,
-            stopReason: "error",
-            errorMessage: "API key is required",
+            message: "API key is required",
           },
         });
         eventStream.end();
@@ -69,56 +70,113 @@ export function stream(
         apiKey,
         baseURL: options?.baseURL,
         defaultHeaders: options?.headers,
+        maxRetries: options?.maxRetries,
       });
       const messages = buildParams(context);
 
-      const stream = await client.messages.create({
-        model: model.id,
-        messages: messages,
-        system: context.systemPrompt,
-        temperature: options?.temperature,
-        max_tokens: options?.maxTokens || 4096,
-        stream: true,
-      });
+      const anthropicStream = await client.messages.create(
+        {
+          model: model.id,
+          messages: messages,
+          system: context.systemPrompt,
+          temperature: options?.temperature,
+          max_tokens: options?.maxTokens || 4096,
+          stream: true,
+        },
+        { signal: options?.signal },
+      );
+
+      eventStream.push({ type: "stream_start" });
 
       let currentText = "";
-      let stopReason: StopReason = "stop";
-      const partialMsg: AssistantMessage = {
-        role: "assistant",
-        content: [],
-        model: model.id,
-        stopReason: "stop",
-      };
+      let finishReason: FinishReason | undefined;
+      let inputTokens = 0;
+      let outputTokens = 0;
+      let hasUsage = false;
+      const startedBlocks = new Set<number>();
 
-      eventStream.push({ type: "start", partial: partialMsg });
-
-      for await (const chunk of stream) {
-        if (chunk.type === "content_block_delta" && chunk.delta.type === "text_delta") {
-          const delta = chunk.delta.text;
-          currentText += delta;
-          partialMsg.content = [{ type: "text", text: currentText }];
-          eventStream.push({ type: "text_delta", delta, partial: partialMsg });
+      for await (const chunk of anthropicStream) {
+        if (chunk.type === "message_start") {
+          if (chunk.message?.usage) {
+            hasUsage = true;
+            inputTokens = chunk.message.usage.input_tokens ?? 0;
+            outputTokens = chunk.message.usage.output_tokens ?? 0;
+          }
+        } else if (chunk.type === "content_block_start") {
+          if (chunk.content_block.type === "text") {
+            startedBlocks.add(chunk.index);
+            eventStream.push({
+              type: "content_block_start",
+              index: chunk.index,
+              block: { type: "text", text: "" },
+            });
+          }
+        } else if (chunk.type === "content_block_delta" && chunk.delta.type === "text_delta") {
+          if (startedBlocks.has(chunk.index)) {
+            const delta = chunk.delta.text;
+            currentText += delta;
+            eventStream.push({
+              type: "content_block_delta",
+              index: chunk.index,
+              delta: { type: "text_delta", text: delta },
+            });
+          }
+        } else if (chunk.type === "content_block_stop") {
+          if (startedBlocks.has(chunk.index)) {
+            startedBlocks.delete(chunk.index);
+            eventStream.push({
+              type: "content_block_stop",
+              index: chunk.index,
+            });
+          }
         } else if (chunk.type === "message_delta") {
           if (chunk.delta.stop_reason != null) {
-            stopReason = mapAnthropicStopReason(chunk.delta.stop_reason);
+            finishReason = mapAnthropicFinishReason(chunk.delta.stop_reason);
           }
-        } else if (chunk.type === "message_stop") {
-          partialMsg.stopReason = stopReason;
-          eventStream.push({ type: "done", reason: stopReason, message: partialMsg });
+          if (chunk.usage) {
+            hasUsage = true;
+            outputTokens = chunk.usage.output_tokens ?? outputTokens;
+          }
         }
       }
+
+      if (!finishReason) {
+        throw new Error("Stream ended without a finish reason");
+      }
+
+      const usage: Usage | undefined = hasUsage
+        ? {
+            inputTokens,
+            outputTokens,
+          }
+        : undefined;
+
+      eventStream.push({
+        type: "turn_delta",
+        finishReason,
+        usage,
+      });
+
+      const finalMsg: AssistantMessage = {
+        role: "assistant",
+        content: [{ type: "text", text: currentText }],
+        model: model.id,
+        finishReason,
+        usage,
+      };
+
+      eventStream.push({
+        type: "turn_end",
+        message: finalMsg,
+      });
 
       eventStream.end();
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : String(error);
-      const errorMsg: AssistantMessage = {
-        role: "assistant",
-        content: [],
-        model: model.id,
-        stopReason: "error",
-        errorMessage,
-      };
-      eventStream.push({ type: "error", reason: "error", error: errorMsg });
+      eventStream.push({
+        type: "error",
+        error: { message: errorMessage },
+      });
       eventStream.end();
     }
   })();

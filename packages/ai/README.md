@@ -45,21 +45,19 @@ const stream = models.stream(model, context);
 // 5. Iterate through the stream events
 for await (const event of stream) {
   switch (event.type) {
-    case "start":
-      console.log(`[Starting response from ${event.partial.model}]`);
+    case "content_block_delta":
+      if (event.delta.type === "text_delta") {
+        // Output the text chunks in real-time
+        process.stdout.write(event.delta.text);
+      }
       break;
-    
-    case "text_delta":
-      // Output the text chunks in real-time
-      process.stdout.write(event.delta);
+
+    case "turn_end":
+      console.log(`\n[Finished. Stop reason: ${event.message.finishReason.reason}]`);
       break;
-    
-    case "done":
-      console.log(`\n[Finished. Stop reason: ${event.reason}]`);
-      break;
-    
+
     case "error":
-      console.error(`\n[Error occurred]: ${event.error.errorMessage}`);
+      console.error(`\n[Error occurred]: ${event.error.message}`);
       break;
   }
 }
@@ -81,39 +79,58 @@ The standard structure for passing conversation history to the model.
 export interface Context {
   systemPrompt?: string;
   messages: Message[];
+  tools?: readonly ToolDeclaration[];
 }
 
-// Message can be from either the User or the Assistant
 export type Message = UserMessage | AssistantMessage;
 
 export interface UserMessage {
   role: "user";
-  content: string | TextContent[];
+  content: string | (TextBlock | ToolResultBlock)[];
 }
 
 export interface AssistantMessage {
   role: "assistant";
-  content: TextContent[];
+  content: (TextBlock | ToolCallBlock)[];
   model: string;
-  stopReason: StopReason; // "stop" | "length" | "toolUse" | "error" | "aborted"
-  errorMessage?: string;
+  finishReason: FinishReason;
+  usage?: Usage;
 }
 ```
 
-### 2. `AssistantMessageEvent`
+### 2. `ModelStream` and `ModelStreamEvent`
 
-When calling `models.stream()`, the returned object is an `AssistantMessageEventStream` which can be consumed using `for await`. It emits the following event types:
+When calling `models.stream()`, the returned object is a structural `ModelStream` (`AsyncIterable<ModelStreamEvent> & { result(): Promise<AssistantMessage> }`). It emits the following event sequence:
 
-- **`start`**: Emitted when the API begins sending data. Includes a `partial` draft of the `AssistantMessage`.
-- **`text_delta`**: Emitted continuously as text is generated. The `delta` contains the newly generated text chunk.
-- **`done`**: Emitted at the end of the stream when generation completes. Contains the full, final `message` and the `reason` it stopped.
-- **`error`**: Emitted if an error occurs on the provider's side during streaming.
+- **`stream_start`**: Emitted when stream output begins.
+- **`content_block_start`**: Emitted at the start of a content block with `index` and the initial `block`.
+- **`content_block_delta`**: Emitted with chunk deltas (`text_delta`).
+- **`content_block_stop`**: Emitted when a content block finishes.
+- **`turn_delta`**: Emitted with incremental `usage` and/or `finishReason`.
+- **`turn_end`**: Emitted at turn completion with the final, complete `AssistantMessage`.
+- **`error`**: Emitted with `{ message: string, code?: string }` if a mid-stream or request error occurs.
 
-### 3. `ProviderDirectory` and `Provider`
+### 3. `ToolDeclaration`
+
+Tool definitions use TypeBox 1.x schemas:
+
+```typescript
+import { Type } from "typebox";
+
+const tool: ToolDeclaration = {
+  name: "get_weather",
+  description: "Get current weather for a location",
+  parameters: Type.Object({
+    location: Type.String(),
+  }),
+};
+```
+
+### 4. `ProviderDirectory` and `Provider`
 
 `ProviderDirectory` is used to manage and initialize multiple AI APIs.
 
-- **`Provider`**: The interface representing a specific platform (e.g., OpenAI, Anthropic). Each Provider has an `.auth` property for credentials, a `getModels()` function to list supported models, and its own `stream()` implementation.
+- **`Provider`**: The interface representing a specific platform (e.g., OpenAI, Anthropic). Each Provider has an `.auth` property for credentials, a `getModels()` function to list supported models, and its own `stream()` implementation returning `ModelStream`.
 - **`ProviderDirectory`**: Acts as a registry holding all available providers.
 
 ```typescript
@@ -127,7 +144,7 @@ models.setProvider(myCustomProvider);
 const provider = models.getProvider("anthropic");
 ```
 
-### 4. `StreamOptions`
+### 5. `StreamOptions`
 
 Optional parameters passed when initiating a stream.
 
@@ -137,6 +154,9 @@ export interface StreamOptions {
   maxTokens?: number;
   apiKey?: string | Promise<string | undefined>;
   baseURL?: string;
+  headers?: Record<string, string>;
+  maxRetries?: number;
+  signal?: AbortSignal;
 }
 
 // Usage:

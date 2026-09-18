@@ -36,6 +36,8 @@ describe("Built-in Providers & Registry", () => {
     expect(
       (indexExports as Record<string, unknown>).createAssistantMessageEventStream,
     ).toBeUndefined();
+    expect((indexExports as Record<string, unknown>).ModelEventStream).toBeUndefined();
+    expect((indexExports as Record<string, unknown>).createModelEventStream).toBeUndefined();
   });
 
   describe("createOpencodeProvider", () => {

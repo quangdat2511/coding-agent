@@ -68,18 +68,20 @@ export async function runStream(
 
   for await (const event of eventStream) {
     switch (event.type) {
-      case "text_delta":
-        if (options.onDelta) {
-          options.onDelta(event.delta);
-        } else {
-          process.stdout.write(event.delta);
+      case "content_block_delta":
+        if (event.delta.type === "text_delta") {
+          if (options.onDelta) {
+            options.onDelta(event.delta.text);
+          } else {
+            process.stdout.write(event.delta.text);
+          }
         }
         break;
       case "error":
         if (options.onError) {
-          options.onError(event.error.errorMessage ?? "Unknown error");
+          options.onError(event.error.message);
         } else {
-          console.error(`\n❌ [Stream Error]: ${event.error.errorMessage}`);
+          console.error(`\n❌ [Stream Error]: ${event.error.message}`);
         }
         break;
     }
@@ -177,30 +179,35 @@ export async function main(args: string[] = process.argv.slice(2)): Promise<void
 
   let textReceived = false;
   const startTime = Date.now();
+  let finalMessage: AssistantMessage;
 
-  const finalMessage = await runStream(models, model, prompt, {
-    onDelta: (delta) => {
-      process.stdout.write(delta);
-      textReceived = true;
-    },
-  });
-
-  const elapsedSeconds = ((Date.now() - startTime) / 1000).toFixed(2);
-
-  if (finalMessage.stopReason === "error") {
+  try {
+    finalMessage = await runStream(models, model, prompt, {
+      onDelta: (delta) => {
+        process.stdout.write(delta);
+        textReceived = true;
+      },
+    });
+  } catch (error) {
     if (!textReceived) {
-      console.error(`\n❌ Failed with error: ${finalMessage.errorMessage ?? "Unknown error"}`);
+      console.error(
+        `\n❌ Failed with error: ${error instanceof Error ? error.message : String(error)}`,
+      );
     } else {
       console.error(
-        `\n\n❌ Stream interrupted with error: ${finalMessage.errorMessage ?? "Unknown error"}`,
+        `\n\n❌ Stream interrupted with error: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
     process.exitCode = 1;
     return;
   }
 
+  const elapsedSeconds = ((Date.now() - startTime) / 1000).toFixed(2);
+
   console.log("\n\n--------------------------------------------------");
-  console.log(`✨ Finished in ${elapsedSeconds}s | Stop Reason: ${finalMessage.stopReason}`);
+  console.log(
+    `✨ Finished in ${elapsedSeconds}s | Finish Reason: ${finalMessage.finishReason.reason} (${finalMessage.finishReason.rawReason})`,
+  );
   console.log("--------------------------------------------------");
 }
 

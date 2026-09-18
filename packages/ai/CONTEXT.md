@@ -21,3 +21,19 @@ _Avoid_: Model registry, models impl
 **Provider Credentials**:
 Authentication information and secret resolution needed to communicate with a Model Provider.
 _Avoid_: Provider auth, API key credential
+
+**Content Block**:
+A typed unit of structured content within a message: text, tool_call, or tool_result.
+_Avoid_: Content item, message part, chunk
+
+**Finish Reason**:
+A normalized completion reason paired with the Model Provider's raw value.
+_Avoid_: Stop reason, stop cause
+
+**Tool Declaration**:
+The name, description, and parameter schema of a tool, owned by AI and independent of execution.
+_Avoid_: Tool definition, tool spec, function definition
+
+**Model Capabilities**:
+Declared behavioral differences between Model Providers and API variants that callers can inspect.
+_Avoid_: Provider features, model flags, feature set

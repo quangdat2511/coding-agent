@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.33.1",
-    "openai": "^7.4.0"
+    "openai": "^7.4.0",
+    "typebox": "^1.0.0"
   }
 }
