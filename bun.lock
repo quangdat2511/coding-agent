@@ -11,6 +11,12 @@
         "typescript": "^7.0.2",
       },
     },
+    "packages/agent-core": {
+      "name": "@coding-agent/agent-core",
+      "dependencies": {
+        "@coding-agent/ai": "workspace:*",
+      },
+    },
     "packages/ai": {
       "name": "@coding-agent/ai",
       "dependencies": {
@@ -18,29 +24,14 @@
         "openai": "^7.4.0",
         "typebox": "^1.0.0",
       },
-      "devDependencies": {
-        "@types/bun": "latest",
-      },
-    },
-    "packages/agent-core": {
-      "name": "@coding-agent/agent-core",
-      "dependencies": {
-        "@coding-agent/ai": "workspace:*",
-      },
-      "devDependencies": {
-        "@types/bun": "latest",
-      },
     },
     "packages/coding-agent": {
       "name": "@coding-agent/coding-agent",
       "dependencies": {
-        "@coding-agent/ai": "workspace:*",
         "@coding-agent/agent-core": "workspace:*",
+        "@coding-agent/ai": "workspace:*",
         "@coding-agent/tools": "workspace:*",
         "@coding-agent/tui": "workspace:*",
-      },
-      "devDependencies": {
-        "@types/bun": "latest",
       },
     },
     "packages/tools": {
@@ -48,15 +39,9 @@
       "dependencies": {
         "@coding-agent/agent-core": "workspace:*",
       },
-      "devDependencies": {
-        "@types/bun": "latest",
-      },
     },
     "packages/tui": {
       "name": "@coding-agent/tui",
-      "devDependencies": {
-        "@types/bun": "latest",
-      },
     },
   },
   "packages": {
@@ -234,20 +219,12 @@
 
     "whatwg-url": ["whatwg-url@5.0.0", "", { "dependencies": { "tr46": "~0.0.3", "webidl-conversions": "^3.0.0" } }, "sha512-saE57nupxk6v3HY35+jzBwYa0rKSy0XR8JSxZPwgLr7ys0IBzhGviA1/TUGJLmSVqs8pb9AnvICXEuOHLprYTw=="],
 
-    "@coding-agent/ai/@types/bun": ["@types/bun@1.4.2", "", { "dependencies": { "bun-types": "1.4.2" } }, "sha512-GimotNn7+ZV0uVArItBbriZsR1oNf0+WTzPkdcFrzShI7k2norL0uzEaJT8T33dWr7O/c9ZDuAFQrctKCi72oQ=="],
-
     "@types/node-fetch/@types/node": ["@types/node@26.2.0", "", { "dependencies": { "undici-types": "~8.3.0" } }, "sha512-5IviulTZeRNp2vAJ514cc/HUlY5nZ9fCbq9DMyC52BrhFZACo3nI0R7qBxhQmo/d27NFe96ur/b7Wwxklda+kg=="],
 
     "bun-types/@types/node": ["@types/node@26.2.0", "", { "dependencies": { "undici-types": "~8.3.0" } }, "sha512-5IviulTZeRNp2vAJ514cc/HUlY5nZ9fCbq9DMyC52BrhFZACo3nI0R7qBxhQmo/d27NFe96ur/b7Wwxklda+kg=="],
 
-    "@coding-agent/ai/@types/bun/bun-types": ["bun-types@1.4.2", "", { "dependencies": { "@types/node": "*" } }, "sha512-bxV1FgK7yBIzjRe5zBozIM4Bem11ZJcCXSrjWRG3YWLt8yFDePu4cLjpebO8OvPeIE9trbyPF4fuj3Cia4Fj3w=="],
-
     "@types/node-fetch/@types/node/undici-types": ["undici-types@8.3.0", "", {}, "sha512-j375ScV60dom+YkPFIfTLcOiPxkN/buHz5GobjLhixFuANaNs3C9l4GmrWqejgXWJ7BbJcFYpTEUkS1Ge8bpZQ=="],
 
     "bun-types/@types/node/undici-types": ["undici-types@8.3.0", "", {}, "sha512-j375ScV60dom+YkPFIfTLcOiPxkN/buHz5GobjLhixFuANaNs3C9l4GmrWqejgXWJ7BbJcFYpTEUkS1Ge8bpZQ=="],
-
-    "@coding-agent/ai/@types/bun/bun-types/@types/node": ["@types/node@26.2.0", "", { "dependencies": { "undici-types": "~8.3.0" } }, "sha512-5IviulTZeRNp2vAJ514cc/HUlY5nZ9fCbq9DMyC52BrhFZACo3nI0R7qBxhQmo/d27NFe96ur/b7Wwxklda+kg=="],
-
-    "@coding-agent/ai/@types/bun/bun-types/@types/node/undici-types": ["undici-types@8.3.0", "", {}, "sha512-j375ScV60dom+YkPFIfTLcOiPxkN/buHz5GobjLhixFuANaNs3C9l4GmrWqejgXWJ7BbJcFYpTEUkS1Ge8bpZQ=="],
   }
 }

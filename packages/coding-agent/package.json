@@ -10,9 +10,6 @@
   "scripts": {
     "typecheck": "tsc --noEmit"
   },
-  "devDependencies": {
-    "@types/bun": "latest"
-  },
   "dependencies": {
     "@coding-agent/ai": "workspace:*",
     "@coding-agent/agent-core": "workspace:*",
