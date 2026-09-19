@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import {
+  ANTHROPIC_MESSAGES_CAPABILITIES,
   createAnthropicProvider,
   createGoogleProvider,
   createOpenAIProvider,
@@ -8,7 +9,12 @@ import {
   createProviderDirectory,
   createXaiProvider,
   defaultProviders,
+  GOOGLE_GENERATE_CONTENT_CAPABILITIES,
+  OPENAI_CHAT_COMPLETIONS_CAPABILITIES,
+  OPENROUTER_CHAT_COMPLETIONS_CAPABILITIES,
+  XAI_CHAT_COMPLETIONS_CAPABILITIES,
 } from "@/index";
+import type { ModelCapabilities } from "@/types";
 
 describe("Built-in Providers & Registry", () => {
   it("should register all 6 built-in providers in defaultProviders()", () => {
@@ -38,6 +44,65 @@ describe("Built-in Providers & Registry", () => {
     ).toBeUndefined();
     expect((indexExports as Record<string, unknown>).ModelEventStream).toBeUndefined();
     expect((indexExports as Record<string, unknown>).createModelEventStream).toBeUndefined();
+  });
+
+  describe("MVP provider capabilities", () => {
+    const mvpProviders: {
+      name: string;
+      factory: () => ReturnType<typeof createAnthropicProvider>;
+      expectedCapabilities: ModelCapabilities;
+    }[] = [
+      {
+        name: "anthropic",
+        factory: createAnthropicProvider,
+        expectedCapabilities: ANTHROPIC_MESSAGES_CAPABILITIES,
+      },
+      {
+        name: "google",
+        factory: createGoogleProvider,
+        expectedCapabilities: GOOGLE_GENERATE_CONTENT_CAPABILITIES,
+      },
+      {
+        name: "openai",
+        factory: createOpenAIProvider,
+        expectedCapabilities: OPENAI_CHAT_COMPLETIONS_CAPABILITIES,
+      },
+      {
+        name: "openrouter",
+        factory: createOpenRouterProvider,
+        expectedCapabilities: OPENROUTER_CHAT_COMPLETIONS_CAPABILITIES,
+      },
+      {
+        name: "xai",
+        factory: createXaiProvider,
+        expectedCapabilities: XAI_CHAT_COMPLETIONS_CAPABILITIES,
+      },
+    ];
+
+    for (const { name, factory, expectedCapabilities } of mvpProviders) {
+      it(`every ${name} model has capabilities matching its variant default`, () => {
+        const provider = factory();
+        const models = provider.getModels();
+        expect(models.length).toBeGreaterThan(0);
+
+        for (const model of models) {
+          expect(model.capabilities).toBeDefined();
+          expect(model.capabilities).toEqual(expectedCapabilities);
+        }
+      });
+    }
+  });
+
+  describe("opencode is not an MVP provider", () => {
+    it("opencode models do not have capabilities set", () => {
+      const provider = createOpencodeProvider();
+      const models = provider.getModels();
+      expect(models.length).toBeGreaterThan(0);
+
+      for (const model of models) {
+        expect(model.capabilities).toBeUndefined();
+      }
+    });
   });
 
   describe("createOpencodeProvider", () => {
