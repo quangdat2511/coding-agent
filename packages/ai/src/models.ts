@@ -4,6 +4,7 @@ import type { Context, Model, ModelStream, StreamOptions } from "@/types";
 export interface Provider {
   id: string;
   name: string;
+  variant?: string;
   baseUrl?: string;
   auth: ProviderCredentials;
   headers?: Record<string, string> | (() => Record<string, string>);
@@ -18,6 +19,7 @@ export interface ProviderApi {
 export interface ProviderOptions {
   id: string;
   name?: string;
+  variant?: string;
   baseUrl?: string;
   auth: ProviderCredentials;
   models: readonly Model[];
@@ -29,6 +31,7 @@ export function defineProvider(input: ProviderOptions): Provider {
   return {
     id: input.id,
     name: input.name ?? input.id,
+    variant: input.variant,
     baseUrl: input.baseUrl,
     auth: input.auth,
     headers: input.headers,

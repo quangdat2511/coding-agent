@@ -1,24 +1,26 @@
 import { stream } from "@/api/openai-responses";
 import { apiKeyFromEnv } from "@/auth/helpers";
-import { XAI_CHAT_COMPLETIONS_CAPABILITIES } from "@/capabilities";
+import { applyCapabilities, XAI_CHAT_COMPLETIONS_CAPABILITIES } from "@/capabilities";
 import { defineProvider, type Provider } from "@/models";
 import XAI_MODELS from "@/providers/xai.models.json";
-import type { Model, ModelCapabilities } from "@/types";
+import type { ModelCapabilities } from "@/types";
 
-function withDefaultCapabilities(
-  models: readonly { id: string; name: string; provider: string }[],
-  capabilities: ModelCapabilities,
-): Model[] {
-  return models.map((m) => ({ ...m, capabilities }));
+export interface XaiProviderOptions {
+  variant?: "chat_completions";
+  modelOverrides?: Record<string, Partial<ModelCapabilities>>;
 }
 
-export function createXaiProvider(): Provider {
+export function createXaiProvider(options?: XaiProviderOptions): Provider {
+  const variant = options?.variant ?? "chat_completions";
+  const defaultCaps = XAI_CHAT_COMPLETIONS_CAPABILITIES;
+
   return defineProvider({
     id: "xai",
     name: "xAI (Grok)",
+    variant,
     baseUrl: "https://api.x.ai/v1",
     auth: { apiKey: apiKeyFromEnv("xAI API key", ["XAI_API_KEY"]) },
-    models: withDefaultCapabilities(XAI_MODELS, XAI_CHAT_COMPLETIONS_CAPABILITIES),
+    models: applyCapabilities(XAI_MODELS, defaultCaps, options?.modelOverrides),
     api: { stream },
   });
 }

@@ -51,37 +51,44 @@ describe("Built-in Providers & Registry", () => {
       name: string;
       factory: () => ReturnType<typeof createAnthropicProvider>;
       expectedCapabilities: ModelCapabilities;
+      expectedVariant: string;
     }[] = [
       {
         name: "anthropic",
         factory: createAnthropicProvider,
         expectedCapabilities: ANTHROPIC_MESSAGES_CAPABILITIES,
+        expectedVariant: "messages",
       },
       {
         name: "google",
         factory: createGoogleProvider,
         expectedCapabilities: GOOGLE_GENERATE_CONTENT_CAPABILITIES,
+        expectedVariant: "generate_content",
       },
       {
         name: "openai",
         factory: createOpenAIProvider,
         expectedCapabilities: OPENAI_CHAT_COMPLETIONS_CAPABILITIES,
+        expectedVariant: "chat_completions",
       },
       {
         name: "openrouter",
         factory: createOpenRouterProvider,
         expectedCapabilities: OPENROUTER_CHAT_COMPLETIONS_CAPABILITIES,
+        expectedVariant: "chat_completions",
       },
       {
         name: "xai",
         factory: createXaiProvider,
         expectedCapabilities: XAI_CHAT_COMPLETIONS_CAPABILITIES,
+        expectedVariant: "chat_completions",
       },
     ];
 
-    for (const { name, factory, expectedCapabilities } of mvpProviders) {
-      it(`every ${name} model has capabilities matching its variant default`, () => {
+    for (const { name, factory, expectedCapabilities, expectedVariant } of mvpProviders) {
+      it(`every ${name} model has capabilities matching its variant default and variant is ${expectedVariant}`, () => {
         const provider = factory();
+        expect(provider.variant).toBe(expectedVariant);
         const models = provider.getModels();
         expect(models.length).toBeGreaterThan(0);
 
@@ -91,6 +98,40 @@ describe("Built-in Providers & Registry", () => {
         }
       });
     }
+
+    it("createOpenAIProvider accepts modelOverrides option", () => {
+      const provider = createOpenAIProvider({
+        modelOverrides: {
+          "gpt-4o": { parallelToolCallControl: false, serverSideTools: true },
+        },
+      });
+      expect(provider.variant).toBe("chat_completions");
+      const models = provider.getModels();
+      const gpt4o = models.find((m) => m.id === "gpt-4o");
+      expect(gpt4o).toBeDefined();
+      expect(gpt4o?.capabilities?.parallelToolCallControl).toBe(false);
+      expect(gpt4o?.capabilities?.serverSideTools).toBe(true);
+      expect(gpt4o?.capabilities?.toolArgumentDelivery).toBe("streamed");
+
+      const other = models.find((m) => m.id !== "gpt-4o");
+      expect(other?.capabilities).toEqual(OPENAI_CHAT_COMPLETIONS_CAPABILITIES);
+    });
+
+    it("createAnthropicProvider accepts modelOverrides option", () => {
+      const provider = createAnthropicProvider({
+        modelOverrides: {
+          "claude-sonnet-4-5": { serverSideTools: true },
+        },
+      });
+      expect(provider.variant).toBe("messages");
+      const models = provider.getModels();
+      const sonnet = models.find((m) => m.id === "claude-sonnet-4-5");
+      expect(sonnet).toBeDefined();
+      expect(sonnet?.capabilities?.serverSideTools).toBe(true);
+
+      const other = models.find((m) => m.id !== "claude-sonnet-4-5");
+      expect(other?.capabilities).toEqual(ANTHROPIC_MESSAGES_CAPABILITIES);
+    });
   });
 
   describe("opencode is not an MVP provider", () => {

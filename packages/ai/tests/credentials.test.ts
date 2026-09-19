@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { PROVIDER_CREDENTIAL_ENV_VARS } from "@/credentials";
+import { PROVIDER_CREDENTIAL_ENV_VARS, type ProviderCredentialEnvVar } from "@/credentials";
 
 describe("PROVIDER_CREDENTIAL_ENV_VARS", () => {
   it("contains exactly the 6 MVP provider credential variable names", () => {
@@ -25,5 +25,10 @@ describe("PROVIDER_CREDENTIAL_ENV_VARS", () => {
     // `as const` makes it readonly at compile time; at runtime the array
     // itself is frozen by Object.freeze in the module.
     expect(Object.isFrozen(PROVIDER_CREDENTIAL_ENV_VARS)).toBe(true);
+  });
+
+  it("exports ProviderCredentialEnvVar type matching the tuple elements", () => {
+    const validVar: ProviderCredentialEnvVar = "ANTHROPIC_API_KEY";
+    expect(PROVIDER_CREDENTIAL_ENV_VARS).toContain(validVar);
   });
 });

@@ -1,4 +1,4 @@
-import type { ModelCapabilities } from "@/types";
+import type { Model, ModelCapabilities } from "@/types";
 
 // ---------------------------------------------------------------------------
 // Default capabilities per (Provider × API Variant)
@@ -14,22 +14,22 @@ import type { ModelCapabilities } from "@/types";
 // ---------------------------------------------------------------------------
 
 /** Anthropic Messages API (Claude models via `@anthropic-ai/sdk`). */
-export const ANTHROPIC_MESSAGES_CAPABILITIES: ModelCapabilities = {
+export const ANTHROPIC_MESSAGES_CAPABILITIES: ModelCapabilities = Object.freeze({
   parallelToolCallControl: true,
   cancellation: "client_abort_only",
   toolArgumentDelivery: "streamed",
   usageTiming: "final",
   serverSideTools: false,
-};
+});
 
 /** OpenAI Chat Completions API (GPT / o-series via `openai` SDK). */
-export const OPENAI_CHAT_COMPLETIONS_CAPABILITIES: ModelCapabilities = {
+export const OPENAI_CHAT_COMPLETIONS_CAPABILITIES: ModelCapabilities = Object.freeze({
   parallelToolCallControl: true,
   cancellation: "client_abort_only",
   toolArgumentDelivery: "streamed",
   usageTiming: "final",
   serverSideTools: false,
-};
+});
 
 /**
  * Google `generateContent` API (Gemini models).
@@ -41,22 +41,22 @@ export const OPENAI_CHAT_COMPLETIONS_CAPABILITIES: ModelCapabilities = {
  * - `serverSideTools: true` — supports server-side tools such as code
  *   execution and Google Search grounding.
  */
-export const GOOGLE_GENERATE_CONTENT_CAPABILITIES: ModelCapabilities = {
+export const GOOGLE_GENERATE_CONTENT_CAPABILITIES: ModelCapabilities = Object.freeze({
   parallelToolCallControl: false,
   cancellation: "client_abort_only",
   toolArgumentDelivery: "whole",
   usageTiming: "final",
   serverSideTools: true,
-};
+});
 
 /** OpenRouter Chat Completions API (proxies multiple upstream providers). */
-export const OPENROUTER_CHAT_COMPLETIONS_CAPABILITIES: ModelCapabilities = {
+export const OPENROUTER_CHAT_COMPLETIONS_CAPABILITIES: ModelCapabilities = Object.freeze({
   parallelToolCallControl: true,
   cancellation: "client_abort_only",
   toolArgumentDelivery: "streamed",
   usageTiming: "final",
   serverSideTools: false,
-};
+});
 
 /**
  * xAI Chat Completions API (Grok models).
@@ -64,20 +64,20 @@ export const OPENROUTER_CHAT_COMPLETIONS_CAPABILITIES: ModelCapabilities = {
  * - `toolArgumentDelivery: "whole"` — xAI's Chat-Completions-compatible
  *   endpoint delivers tool arguments whole (ADR 0006 §2).
  */
-export const XAI_CHAT_COMPLETIONS_CAPABILITIES: ModelCapabilities = {
+export const XAI_CHAT_COMPLETIONS_CAPABILITIES: ModelCapabilities = Object.freeze({
   parallelToolCallControl: true,
   cancellation: "client_abort_only",
   toolArgumentDelivery: "whole",
   usageTiming: "final",
   serverSideTools: false,
-};
+});
 
 // ---------------------------------------------------------------------------
-// Per-model override mechanism
+// Per-model override mechanism & shared attacher
 // ---------------------------------------------------------------------------
 
 /**
- * Returns a new `ModelCapabilities` by shallow-merging partial overrides onto
+ * Returns a new frozen `ModelCapabilities` by shallow-merging partial overrides onto
  * the variant defaults. Used only where a specific model genuinely differs
  * from its variant default.
  */
@@ -85,5 +85,23 @@ export function withModelOverrides(
   defaults: ModelCapabilities,
   overrides: Partial<ModelCapabilities>,
 ): ModelCapabilities {
-  return { ...defaults, ...overrides };
+  return Object.freeze({ ...defaults, ...overrides });
+}
+
+/**
+ * Attaches default capabilities to a list of models, applying optional
+ * per-model overrides where specified.
+ */
+export function applyCapabilities(
+  models: readonly { id: string; name: string; provider: string }[],
+  defaultCapabilities: ModelCapabilities,
+  overrides?: Record<string, Partial<ModelCapabilities>>,
+): Model[] {
+  return models.map((m) => {
+    const modelOverride = overrides?.[m.id];
+    const capabilities = modelOverride
+      ? withModelOverrides(defaultCapabilities, modelOverride)
+      : defaultCapabilities;
+    return { ...m, capabilities };
+  });
 }

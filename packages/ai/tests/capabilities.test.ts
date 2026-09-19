@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import {
   ANTHROPIC_MESSAGES_CAPABILITIES,
+  applyCapabilities,
   GOOGLE_GENERATE_CONTENT_CAPABILITIES,
   OPENAI_CHAT_COMPLETIONS_CAPABILITIES,
   OPENROUTER_CHAT_COMPLETIONS_CAPABILITIES,
@@ -28,6 +29,10 @@ describe("Model Capabilities Constants", () => {
       expect(["streamed", "whole"]).toContain(caps.toolArgumentDelivery);
       expect(["incremental", "final"]).toContain(caps.usageTiming);
       expect(typeof caps.serverSideTools).toBe("boolean");
+    });
+
+    it(`${name} is frozen at runtime (Object.isFrozen)`, () => {
+      expect(Object.isFrozen(caps)).toBe(true);
     });
   }
 
@@ -108,5 +113,42 @@ describe("withModelOverrides", () => {
       toolArgumentDelivery: "whole",
     });
     expect(OPENAI_CHAT_COMPLETIONS_CAPABILITIES).toEqual(original);
+  });
+
+  it("returns a frozen object at runtime", () => {
+    const result = withModelOverrides(OPENAI_CHAT_COMPLETIONS_CAPABILITIES, {
+      toolArgumentDelivery: "whole",
+    });
+    expect(Object.isFrozen(result)).toBe(true);
+  });
+});
+
+describe("applyCapabilities", () => {
+  const rawModels = [
+    { id: "model-a", name: "Model A", provider: "test" },
+    { id: "model-b", name: "Model B", provider: "test" },
+  ];
+
+  it("applies default capabilities to all models when no overrides given", () => {
+    const models = applyCapabilities(rawModels, OPENAI_CHAT_COMPLETIONS_CAPABILITIES);
+    expect(models).toHaveLength(2);
+    expect(models[0]?.capabilities).toEqual(OPENAI_CHAT_COMPLETIONS_CAPABILITIES);
+    expect(models[1]?.capabilities).toEqual(OPENAI_CHAT_COMPLETIONS_CAPABILITIES);
+  });
+
+  it("applies per-model overrides only to the specified model id", () => {
+    const models = applyCapabilities(rawModels, OPENAI_CHAT_COMPLETIONS_CAPABILITIES, {
+      "model-b": { toolArgumentDelivery: "whole", serverSideTools: true },
+    });
+
+    expect(models[0]?.capabilities).toEqual(OPENAI_CHAT_COMPLETIONS_CAPABILITIES);
+    expect(models[1]?.capabilities?.toolArgumentDelivery).toBe("whole");
+    expect(models[1]?.capabilities?.serverSideTools).toBe(true);
+    expect(models[1]?.capabilities?.parallelToolCallControl).toBe(true);
+  });
+
+  it("does not mutate original raw models", () => {
+    applyCapabilities(rawModels, OPENAI_CHAT_COMPLETIONS_CAPABILITIES);
+    expect((rawModels[0] as { capabilities?: unknown } | undefined)?.capabilities).toBeUndefined();
   });
 });

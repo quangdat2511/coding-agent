@@ -17,11 +17,13 @@
  * Consumers that need to strip credentials from a child process environment
  * (ADR 0001 §8 rule 1) should remove exactly these keys and no others.
  */
-export const PROVIDER_CREDENTIAL_ENV_VARS: readonly string[] = Object.freeze([
+export const PROVIDER_CREDENTIAL_ENV_VARS = Object.freeze([
   "ANTHROPIC_API_KEY",
   "GOOGLE_API_KEY",
   "GEMINI_API_KEY",
   "OPENAI_API_KEY",
   "OPENROUTER_API_KEY",
   "XAI_API_KEY",
-]);
+] as const);
+
+export type ProviderCredentialEnvVar = (typeof PROVIDER_CREDENTIAL_ENV_VARS)[number];
