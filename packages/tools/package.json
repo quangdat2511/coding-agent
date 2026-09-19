@@ -1,0 +1,16 @@
+{
+  "name": "@coding-agent/tools",
+  "module": "src/index.ts",
+  "type": "module",
+  "private": true,
+  "main": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@coding-agent/agent-core": "workspace:*"
+  }
+}

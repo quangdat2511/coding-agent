@@ -12,9 +12,6 @@
     "typecheck": "tsc --noEmit",
     "example": "bun run examples/stream.ts"
   },
-  "devDependencies": {
-    "@types/bun": "latest"
-  },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.33.1",
     "openai": "^7.4.0",
