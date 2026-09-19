@@ -72,6 +72,7 @@ export function stream(model: Model, context: Context, options?: StreamOptions):
         baseURL: options?.baseURL,
         defaultHeaders: options?.headers,
         maxRetries: sanitizeMaxRetries(options?.maxRetries),
+        fetch: (url, init) => globalThis.fetch(url, init),
       });
       const messages = buildParams(context);
 

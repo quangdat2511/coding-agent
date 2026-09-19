@@ -1,4 +1,4 @@
-import { afterAll, describe, expect, it, spyOn } from "bun:test";
+import { afterAll, beforeAll, describe, expect, it, spyOn } from "bun:test";
 import { collectTurnEndEvent } from "@tests/test-utils";
 import OpenAI from "openai";
 import { mapOpenAIFinishReason, stream } from "@/api/openai-responses";
@@ -20,38 +20,6 @@ let mockCreateError: Error | null = null;
 let lastClientOptions: { maxRetries?: number } | undefined;
 let lastCreateBody: { stream_options?: { include_usage?: boolean } } | undefined;
 let lastCreateOptions: { signal?: AbortSignal } | undefined;
-
-const completionsCreateSpy = (
-  spyOn(OpenAI.Chat.Completions.prototype, "create") as unknown as {
-    mockImplementation: (
-      fn: (
-        this: { _client: { maxRetries?: number } },
-        body: unknown,
-        options?: { signal?: AbortSignal },
-      ) => unknown,
-    ) => { mockRestore: () => void };
-  }
-).mockImplementation(async function (
-  this: { _client: { maxRetries?: number } },
-  body: unknown,
-  options?: { signal?: AbortSignal },
-) {
-  if (mockCreateError) {
-    throw mockCreateError;
-  }
-  lastClientOptions = { maxRetries: this._client.maxRetries };
-  lastCreateBody = body as { stream_options?: { include_usage?: boolean } };
-  lastCreateOptions = options;
-  return (async function* () {
-    for (const chunk of mockChunks) {
-      yield chunk;
-    }
-  })();
-});
-
-afterAll(() => {
-  completionsCreateSpy.mockRestore();
-});
 
 describe("mapOpenAIFinishReason", () => {
   it("maps length to max_output_tokens", () => {
@@ -107,6 +75,42 @@ describe("mapOpenAIFinishReason", () => {
 });
 
 describe("OpenAI stream finishReason handling", () => {
+  let completionsCreateSpy: { mockRestore: () => void };
+
+  beforeAll(() => {
+    completionsCreateSpy = (
+      spyOn(OpenAI.Chat.Completions.prototype, "create") as unknown as {
+        mockImplementation: (
+          fn: (
+            this: { _client: { maxRetries?: number } },
+            body: unknown,
+            options?: { signal?: AbortSignal },
+          ) => unknown,
+        ) => { mockRestore: () => void };
+      }
+    ).mockImplementation(async function (
+      this: { _client: { maxRetries?: number } },
+      body: unknown,
+      options?: { signal?: AbortSignal },
+    ) {
+      if (mockCreateError) {
+        throw mockCreateError;
+      }
+      lastClientOptions = { maxRetries: this._client.maxRetries };
+      lastCreateBody = body as { stream_options?: { include_usage?: boolean } };
+      lastCreateOptions = options;
+      return (async function* () {
+        for (const chunk of mockChunks) {
+          yield chunk;
+        }
+      })();
+    });
+  });
+
+  afterAll(() => {
+    completionsCreateSpy?.mockRestore();
+  });
+
   const model: Model = { id: "gpt-4o", name: "GPT-4o", provider: "openai" };
   const context: Context = { messages: [{ role: "user", content: "Hello" }] };
 
