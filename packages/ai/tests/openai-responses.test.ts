@@ -1,5 +1,7 @@
-import { describe, expect, it, mock } from "bun:test";
+import { afterAll, describe, expect, it, spyOn } from "bun:test";
 import { collectTurnEndEvent } from "@tests/test-utils";
+import OpenAI from "openai";
+import { mapOpenAIFinishReason, stream } from "@/api/openai-responses";
 import type { Context, Model } from "@/types";
 
 type OpenAIStreamChunk = {
@@ -19,38 +21,37 @@ let lastClientOptions: { maxRetries?: number } | undefined;
 let lastCreateBody: { stream_options?: { include_usage?: boolean } } | undefined;
 let lastCreateOptions: { signal?: AbortSignal } | undefined;
 
-mock.module("openai", () => {
-  return {
-    default: class MockOpenAI {
-      constructor(options?: { maxRetries?: number }) {
-        lastClientOptions = options;
-      }
-      chat = {
-        completions: {
-          create: mock(
-            async (
-              body: { stream_options?: { include_usage?: boolean } },
-              options?: { signal?: AbortSignal },
-            ) => {
-              if (mockCreateError) {
-                throw mockCreateError;
-              }
-              lastCreateBody = body;
-              lastCreateOptions = options;
-              return (async function* () {
-                for (const chunk of mockChunks) {
-                  yield chunk;
-                }
-              })();
-            },
-          ),
-        },
-      };
-    },
-  };
+const completionsCreateSpy = (
+  spyOn(OpenAI.Chat.Completions.prototype, "create") as unknown as {
+    mockImplementation: (
+      fn: (
+        this: { _client: { maxRetries?: number } },
+        body: unknown,
+        options?: { signal?: AbortSignal },
+      ) => unknown,
+    ) => { mockRestore: () => void };
+  }
+).mockImplementation(async function (
+  this: { _client: { maxRetries?: number } },
+  body: unknown,
+  options?: { signal?: AbortSignal },
+) {
+  if (mockCreateError) {
+    throw mockCreateError;
+  }
+  lastClientOptions = { maxRetries: this._client.maxRetries };
+  lastCreateBody = body as { stream_options?: { include_usage?: boolean } };
+  lastCreateOptions = options;
+  return (async function* () {
+    for (const chunk of mockChunks) {
+      yield chunk;
+    }
+  })();
 });
 
-const { mapOpenAIFinishReason, stream } = await import("@/api/openai-responses");
+afterAll(() => {
+  completionsCreateSpy.mockRestore();
+});
 
 describe("mapOpenAIFinishReason", () => {
   it("maps length to max_output_tokens", () => {
