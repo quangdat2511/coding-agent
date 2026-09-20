@@ -85,7 +85,10 @@ export function withModelOverrides(
   defaults: ModelCapabilities,
   overrides: Partial<ModelCapabilities>,
 ): ModelCapabilities {
-  return Object.freeze({ ...defaults, ...overrides });
+  const definedOverrides = Object.fromEntries(
+    Object.entries(overrides).filter(([_, value]) => value !== undefined),
+  );
+  return Object.freeze({ ...defaults, ...definedOverrides });
 }
 
 /**

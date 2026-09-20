@@ -121,6 +121,13 @@ describe("withModelOverrides", () => {
     });
     expect(Object.isFrozen(result)).toBe(true);
   });
+
+  it("does not overwrite default capability when override property is undefined", () => {
+    const result = withModelOverrides(OPENAI_CHAT_COMPLETIONS_CAPABILITIES, {
+      parallelToolCallControl: undefined,
+    });
+    expect(result.parallelToolCallControl).toBe(true);
+  });
 });
 
 describe("applyCapabilities", () => {
