@@ -1,7 +1,7 @@
 {
   "$schema": "https://biomejs.dev/schemas/2.5.6/schema.json",
   "files": {
-    "includes": ["**", "!node_modules", "!dist", "!bun.lock"]
+    "includes": ["**", "!node_modules", "!**/dist", "!bun.lock"]
   },
   "assist": { "actions": { "source": { "organizeImports": "on" } } },
   "formatter": {
@@ -34,8 +34,123 @@
       },
       "style": {
         "noDefaultExport": "off",
-        "useImportType": "error"
+        "useImportType": "error",
+        "noEnum": "error"
       }
     }
-  }
+  },
+  "overrides": [
+    {
+      "includes": ["packages/ai/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": [
+                      "@coding-agent/agent-core",
+                      "@coding-agent/agent-core/**",
+                      "@coding-agent/tools",
+                      "@coding-agent/tools/**",
+                      "@coding-agent/tui",
+                      "@coding-agent/tui/**",
+                      "@coding-agent/coding-agent",
+                      "@coding-agent/coding-agent/**"
+                    ],
+                    "message": "ADR 0004 §1 forbids this dependency from ai. Wire collaborators through coding-agent instead."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["packages/agent-core/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": [
+                      "@coding-agent/tools",
+                      "@coding-agent/tools/**",
+                      "@coding-agent/tui",
+                      "@coding-agent/tui/**",
+                      "@coding-agent/coding-agent",
+                      "@coding-agent/coding-agent/**"
+                    ],
+                    "message": "ADR 0004 §1 forbids this dependency from agent-core. Wire collaborators through coding-agent instead."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["packages/tools/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": [
+                      "@coding-agent/ai",
+                      "@coding-agent/ai/**",
+                      "@coding-agent/tui",
+                      "@coding-agent/tui/**",
+                      "@coding-agent/coding-agent",
+                      "@coding-agent/coding-agent/**"
+                    ],
+                    "message": "ADR 0004 §1 forbids this dependency from tools. Wire collaborators through coding-agent instead."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["packages/tui/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": [
+                      "@coding-agent/ai",
+                      "@coding-agent/ai/**",
+                      "@coding-agent/agent-core",
+                      "@coding-agent/agent-core/**",
+                      "@coding-agent/tools",
+                      "@coding-agent/tools/**",
+                      "@coding-agent/coding-agent",
+                      "@coding-agent/coding-agent/**"
+                    ],
+                    "message": "ADR 0004 §1 forbids this dependency from tui. Wire collaborators through coding-agent instead."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
 }
