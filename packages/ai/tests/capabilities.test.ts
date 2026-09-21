@@ -36,12 +36,12 @@ describe("Model Capabilities Constants", () => {
     });
   }
 
-  it("Anthropic Messages: streams arguments, client-abort, parallel control, final usage, no server tools", () => {
+  it("Anthropic Messages: streams arguments, client-abort, parallel control, incremental usage, no server tools", () => {
     expect(ANTHROPIC_MESSAGES_CAPABILITIES).toEqual({
       parallelToolCallControl: true,
       cancellation: "client_abort_only",
       toolArgumentDelivery: "streamed",
-      usageTiming: "final",
+      usageTiming: "incremental",
       serverSideTools: false,
     });
   });

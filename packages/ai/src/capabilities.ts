@@ -13,12 +13,18 @@ import type { Model, ModelCapabilities } from "@/types";
 // is rejected: those rows rot silently (ADR 0006 §2).
 // ---------------------------------------------------------------------------
 
-/** Anthropic Messages API (Claude models via `@anthropic-ai/sdk`). */
+/**
+ * Anthropic Messages API (Claude models via `@anthropic-ai/sdk`).
+ *
+ * - `usageTiming: "incremental"` — Anthropic is confirmed to stream usage
+ *   progressively (partial at `message_start`, cumulative on each `message_delta`,
+ *   and final at `message_stop`).
+ */
 export const ANTHROPIC_MESSAGES_CAPABILITIES: ModelCapabilities = Object.freeze({
   parallelToolCallControl: true,
   cancellation: "client_abort_only",
   toolArgumentDelivery: "streamed",
-  usageTiming: "final",
+  usageTiming: "incremental",
   serverSideTools: false,
 });
 
