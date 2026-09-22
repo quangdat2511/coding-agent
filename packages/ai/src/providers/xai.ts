@@ -1,18 +1,27 @@
 import { stream } from "@/api/openai-responses";
 import { apiKeyFromEnv } from "@/auth/helpers";
 import { applyCapabilities, XAI_CHAT_COMPLETIONS_CAPABILITIES } from "@/capabilities";
-import { defineProvider, type Provider } from "@/models";
+import { type BaseProviderOptions, defineProvider, type Provider } from "@/models";
 import XAI_MODELS from "@/providers/xai.models.json";
 import type { ModelCapabilities } from "@/types";
 
-export interface XaiProviderOptions {
-  variant?: "chat_completions";
-  modelOverrides?: Record<string, Partial<ModelCapabilities>>;
-}
+/** API variants supported by the xAI provider. */
+export type XaiVariant = "chat_completions";
+
+/**
+ * Maps each supported API variant to its default capabilities.
+ * The `Record` exhaustiveness ensures a new variant entry is required
+ * whenever `XaiVariant` gains a new member.
+ */
+const XAI_VARIANT_CAPABILITIES: Record<XaiVariant, ModelCapabilities> = {
+  chat_completions: XAI_CHAT_COMPLETIONS_CAPABILITIES,
+};
+
+export interface XaiProviderOptions extends BaseProviderOptions<XaiVariant> {}
 
 export function createXaiProvider(options?: XaiProviderOptions): Provider {
   const variant = options?.variant ?? "chat_completions";
-  const defaultCaps = XAI_CHAT_COMPLETIONS_CAPABILITIES;
+  const defaultCaps = XAI_VARIANT_CAPABILITIES[variant];
 
   return defineProvider({
     id: "xai",

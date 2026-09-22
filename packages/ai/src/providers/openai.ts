@@ -1,18 +1,27 @@
 import { stream } from "@/api/openai-responses";
 import { apiKeyFromEnv } from "@/auth/helpers";
 import { applyCapabilities, OPENAI_CHAT_COMPLETIONS_CAPABILITIES } from "@/capabilities";
-import { defineProvider, type Provider } from "@/models";
+import { type BaseProviderOptions, defineProvider, type Provider } from "@/models";
 import OPENAI_MODELS from "@/providers/openai.models.json";
 import type { ModelCapabilities } from "@/types";
 
-export interface OpenAIProviderOptions {
-  variant?: "chat_completions";
-  modelOverrides?: Record<string, Partial<ModelCapabilities>>;
-}
+/** API variants supported by the OpenAI provider. */
+export type OpenAIVariant = "chat_completions";
+
+/**
+ * Maps each supported API variant to its default capabilities.
+ * The `Record` exhaustiveness ensures a new variant entry is required
+ * whenever `OpenAIVariant` gains a new member.
+ */
+const OPENAI_VARIANT_CAPABILITIES: Record<OpenAIVariant, ModelCapabilities> = {
+  chat_completions: OPENAI_CHAT_COMPLETIONS_CAPABILITIES,
+};
+
+export interface OpenAIProviderOptions extends BaseProviderOptions<OpenAIVariant> {}
 
 export function createOpenAIProvider(options?: OpenAIProviderOptions): Provider {
   const variant = options?.variant ?? "chat_completions";
-  const defaultCaps = OPENAI_CHAT_COMPLETIONS_CAPABILITIES;
+  const defaultCaps = OPENAI_VARIANT_CAPABILITIES[variant];
 
   return defineProvider({
     id: "openai",

@@ -14,7 +14,7 @@ import {
   OPENROUTER_CHAT_COMPLETIONS_CAPABILITIES,
   XAI_CHAT_COMPLETIONS_CAPABILITIES,
 } from "@/index";
-import type { ModelCapabilities } from "@/types";
+import type { ApiVariant, ModelCapabilities } from "@/types";
 
 describe("Built-in Providers & Registry", () => {
   it("should register all 6 built-in providers in defaultProviders()", () => {
@@ -51,7 +51,7 @@ describe("Built-in Providers & Registry", () => {
       name: string;
       factory: () => ReturnType<typeof createAnthropicProvider>;
       expectedCapabilities: ModelCapabilities;
-      expectedVariant: string;
+      expectedVariant: ApiVariant;
     }[] = [
       {
         name: "anthropic",

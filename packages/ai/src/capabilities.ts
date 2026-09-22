@@ -1,4 +1,4 @@
-import type { Model, ModelCapabilities } from "@/types";
+import type { ModelCapabilities } from "@/types";
 
 // ---------------------------------------------------------------------------
 // Default capabilities per (Provider × API Variant)
@@ -100,12 +100,18 @@ export function withModelOverrides(
 /**
  * Attaches default capabilities to a list of models, applying optional
  * per-model overrides where specified.
+ *
+ * The generic `T` preserves the full shape of the input model objects, and
+ * the intersection `T & { capabilities: ModelCapabilities }` guarantees that
+ * callers can access `capabilities` without an `undefined` guard — the type
+ * system now reflects the runtime guarantee that every model returned by this
+ * function always has a `capabilities` object.
  */
-export function applyCapabilities(
-  models: readonly { id: string; name: string; provider: string }[],
+export function applyCapabilities<T extends { id: string; name: string; provider: string }>(
+  models: readonly T[],
   defaultCapabilities: ModelCapabilities,
   overrides?: Record<string, Partial<ModelCapabilities>>,
-): Model[] {
+): (T & { capabilities: ModelCapabilities })[] {
   return models.map((m) => {
     const modelOverride = overrides?.[m.id];
     const capabilities = modelOverride
