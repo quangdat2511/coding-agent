@@ -56,6 +56,19 @@ export interface ModelCapabilities {
   readonly serverSideTools: boolean;
 }
 
+// API-variant selector (ADR 0004 §2, ADR 0006 §2)
+//
+// Covers all API families that the MVP and its planned extensions may speak.
+// Values beyond the current five MVP variants ("responses", "interactions") are
+// included so provider options can declare forward-compatibility without a
+// breaking type change when new variants land.
+export type ApiVariant =
+  | "messages"
+  | "chat_completions"
+  | "generate_content"
+  | "responses"
+  | "interactions";
+
 // Model
 export interface Model {
   id: string;

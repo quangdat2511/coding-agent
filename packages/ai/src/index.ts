@@ -1,5 +1,7 @@
 export * from "@/auth/helpers";
 export * from "@/auth/types";
+export * from "@/capabilities";
+export * from "@/credentials";
 export * from "@/models";
 export * from "@/providers/anthropic";
 export * from "@/providers/google";

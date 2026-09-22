@@ -1,9 +1,30 @@
 import type { ProviderCredentials } from "@/auth/types";
-import type { Context, Model, ModelStream, StreamOptions } from "@/types";
+import type {
+  ApiVariant,
+  Context,
+  Model,
+  ModelCapabilities,
+  ModelStream,
+  StreamOptions,
+} from "@/types";
+
+/**
+ * Shared base for all provider-specific options interfaces.
+ *
+ * `V` constrains which API-variant literals are valid for a given provider.
+ * Provider-specific interfaces extend this with the appropriate variant
+ * literal (e.g. `BaseProviderOptions<"messages">` for Anthropic), so callers
+ * get a compile-time error if they pass an unsupported variant.
+ */
+export interface BaseProviderOptions<V extends ApiVariant = ApiVariant> {
+  variant?: V;
+  modelOverrides?: Record<string, Partial<ModelCapabilities>>;
+}
 
 export interface Provider {
   id: string;
   name: string;
+  variant?: ApiVariant;
   baseUrl?: string;
   auth: ProviderCredentials;
   headers?: Record<string, string> | (() => Record<string, string>);
@@ -18,6 +39,7 @@ export interface ProviderApi {
 export interface ProviderOptions {
   id: string;
   name?: string;
+  variant?: ApiVariant;
   baseUrl?: string;
   auth: ProviderCredentials;
   models: readonly Model[];
@@ -29,6 +51,7 @@ export function defineProvider(input: ProviderOptions): Provider {
   return {
     id: input.id,
     name: input.name ?? input.id,
+    variant: input.variant,
     baseUrl: input.baseUrl,
     auth: input.auth,
     headers: input.headers,
