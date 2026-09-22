@@ -1,4 +1,6 @@
-import { afterAll, afterEach, describe, expect, it } from "bun:test";
+import { afterAll, afterEach, beforeAll, describe, expect, it, spyOn } from "bun:test";
+import { stream as anthropicStream } from "@/api/anthropic-responses";
+import { stream as openaiStream } from "@/api/openai-responses";
 import type { Context, Model, ModelStream, ModelStreamEvent, StreamOptions } from "@/types";
 import { sanitizeMaxRetries } from "@/utils/retry";
 
@@ -6,24 +8,29 @@ type FetchHandler = (url: string | URL | Request, init?: RequestInit) => Promise
 
 let currentHandler: FetchHandler | undefined;
 const originalFetch = globalThis.fetch;
+let fetchSpy: { mockRestore: () => void } | undefined;
 
-// Intercept fetch before dynamic import of response adapters
-globalThis.fetch = ((url: string | URL | Request, init?: RequestInit) => {
-  if (currentHandler) {
-    return currentHandler(url, init);
-  }
-  return originalFetch(url, init);
-}) as typeof globalThis.fetch;
-
-const { stream: anthropicStream } = await import("@/api/anthropic-responses");
-const { stream: openaiStream } = await import("@/api/openai-responses");
+beforeAll(() => {
+  fetchSpy = (
+    spyOn(globalThis, "fetch") as unknown as {
+      mockImplementation: (
+        fn: (url: string | URL | Request, init?: RequestInit) => Promise<Response>,
+      ) => { mockRestore: () => void };
+    }
+  ).mockImplementation(async (url, init) => {
+    if (currentHandler) {
+      return currentHandler(url, init);
+    }
+    return originalFetch(url, init);
+  });
+});
 
 afterEach(() => {
   currentHandler = undefined;
 });
 
 afterAll(() => {
-  globalThis.fetch = originalFetch;
+  fetchSpy?.mockRestore();
 });
 
 describe("sanitizeMaxRetries", () => {
