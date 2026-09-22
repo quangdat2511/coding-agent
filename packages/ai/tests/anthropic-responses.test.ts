@@ -1,5 +1,7 @@
-import { describe, expect, it, mock } from "bun:test";
+import { afterAll, beforeAll, describe, expect, it, spyOn } from "bun:test";
+import Anthropic from "@anthropic-ai/sdk";
 import { collectTurnEndEvent } from "@tests/test-utils";
+import { mapAnthropicFinishReason, stream } from "@/api/anthropic-responses";
 import type { Context, Model } from "@/types";
 
 type AnthropicStreamChunk =
@@ -34,31 +36,6 @@ let mockEvents: AnthropicStreamChunk[] = [];
 let mockCreateError: Error | null = null;
 let lastClientOptions: { maxRetries?: number } | undefined;
 let lastCreateOptions: { signal?: AbortSignal } | undefined;
-
-mock.module("@anthropic-ai/sdk", () => {
-  return {
-    default: class MockAnthropic {
-      constructor(options?: { maxRetries?: number }) {
-        lastClientOptions = options;
-      }
-      messages = {
-        create: mock(async (_body: unknown, options?: { signal?: AbortSignal }) => {
-          if (mockCreateError) {
-            throw mockCreateError;
-          }
-          lastCreateOptions = options;
-          return (async function* () {
-            for (const event of mockEvents) {
-              yield event;
-            }
-          })();
-        }),
-      };
-    },
-  };
-});
-
-const { mapAnthropicFinishReason, stream } = await import("@/api/anthropic-responses");
 
 describe("mapAnthropicFinishReason", () => {
   it("maps max_tokens to max_output_tokens", () => {
@@ -113,6 +90,41 @@ describe("mapAnthropicFinishReason", () => {
 });
 
 describe("Anthropic stream finishReason handling", () => {
+  let messagesCreateSpy: { mockRestore: () => void };
+
+  beforeAll(() => {
+    messagesCreateSpy = (
+      spyOn(Anthropic.Messages.prototype, "create") as unknown as {
+        mockImplementation: (
+          fn: (
+            this: { _client: { maxRetries?: number } },
+            body: unknown,
+            options?: { signal?: AbortSignal },
+          ) => unknown,
+        ) => { mockRestore: () => void };
+      }
+    ).mockImplementation(async function (
+      this: { _client: { maxRetries?: number } },
+      _body: unknown,
+      options?: { signal?: AbortSignal },
+    ) {
+      if (mockCreateError) {
+        throw mockCreateError;
+      }
+      lastClientOptions = { maxRetries: this._client.maxRetries };
+      lastCreateOptions = options;
+      return (async function* () {
+        for (const event of mockEvents) {
+          yield event;
+        }
+      })();
+    });
+  });
+
+  afterAll(() => {
+    messagesCreateSpy?.mockRestore();
+  });
+
   const model: Model = {
     id: "claude-3-5-sonnet",
     name: "Claude 3.5 Sonnet",
@@ -279,6 +291,21 @@ describe("Anthropic stream finishReason handling", () => {
     );
     expect(lastClientOptions?.maxRetries).toBe(2);
     expect(lastCreateOptions?.signal).toBe(controller.signal);
+  });
+
+  it("defaults maxRetries to 0 when omitted in StreamOptions", async () => {
+    mockEvents = [
+      { type: "content_block_start", index: 0, content_block: { type: "text" } },
+      { type: "content_block_stop", index: 0 },
+      { type: "message_delta", delta: { stop_reason: "end_turn", stop_sequence: null } },
+      { type: "message_stop" },
+    ];
+    await collectTurnEndEvent(
+      stream(model, context, {
+        apiKey: "test-key",
+      }),
+    );
+    expect(lastClientOptions?.maxRetries).toBe(0);
   });
 
   it("handles multi-block response when tool_use block precedes text block", async () => {

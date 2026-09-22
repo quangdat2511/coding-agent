@@ -11,6 +11,7 @@ import type {
 
 import { createModelEventStream } from "@/utils/event-stream";
 import { flattenMessageContent } from "@/utils/messages";
+import { sanitizeMaxRetries } from "@/utils/retry";
 
 export type AnthropicRawStopReason =
   | Anthropic.RawMessageDeltaEvent.Delta["stop_reason"]
@@ -70,7 +71,10 @@ export function stream(model: Model, context: Context, options?: StreamOptions):
         apiKey,
         baseURL: options?.baseURL,
         defaultHeaders: options?.headers,
-        maxRetries: options?.maxRetries,
+        maxRetries: sanitizeMaxRetries(options?.maxRetries),
+        // Delegate fetch dynamically to globalThis so runtime interceptors, test mocks,
+        // and environment proxies are resolved on each request rather than frozen at module load.
+        fetch: (url, init) => globalThis.fetch(url, init),
       });
       const messages = buildParams(context);
 
