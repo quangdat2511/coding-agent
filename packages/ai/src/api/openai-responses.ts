@@ -6,6 +6,8 @@ import type {
   Model,
   ModelStream,
   StreamOptions,
+  TextBlock,
+  ToolCallBlock,
   Usage,
 } from "@/types";
 
@@ -57,6 +59,19 @@ export function buildParams(
   return messages;
 }
 
+/**
+ * Tracks an in-progress tool call being assembled from streamed delta chunks.
+ * OpenAI streams tool arguments as `delta.tool_calls[n].function.arguments`
+ * fragments identified by `index`.
+ */
+interface PendingToolCall {
+  blockIndex: number;
+  index: number;
+  id: string;
+  name: string;
+  argumentsAccumulator: string;
+}
+
 export function stream(model: Model, context: Context, options?: StreamOptions): ModelStream {
   const eventStream = createModelEventStream();
 
@@ -98,30 +113,101 @@ export function stream(model: Model, context: Context, options?: StreamOptions):
       );
 
       eventStream.push({ type: "stream_start" });
-      eventStream.push({
-        type: "content_block_start",
-        index: 0,
-        block: { type: "text", text: "" },
-      });
 
+      let nextBlockIndex = 0;
+      let activeTextBlockIndex: number | null = null;
       let currentText = "";
       let finishReason: FinishReason | undefined;
       let usage: Usage | undefined;
 
+      // Tool call tracking: OpenAI tool_call index → pending tool call
+      const pendingToolCalls = new Map<number, PendingToolCall>();
+      // Completed content blocks in strict chronological wire order
+      const orderedBlocks: (TextBlock | ToolCallBlock)[] = [];
+
       for await (const chunk of response) {
         const choice = chunk.choices?.[0];
+
         if (choice?.finish_reason != null) {
           finishReason = mapOpenAIFinishReason(choice.finish_reason);
         }
-        const delta = choice?.delta?.content || "";
-        if (delta) {
-          currentText += delta;
+
+        // Handle text deltas
+        const textDelta = choice?.delta?.content;
+        if (textDelta) {
+          if (activeTextBlockIndex === null) {
+            activeTextBlockIndex = nextBlockIndex++;
+            eventStream.push({
+              type: "content_block_start",
+              index: activeTextBlockIndex,
+              block: { type: "text", text: "" },
+            });
+          }
+          currentText += textDelta;
           eventStream.push({
             type: "content_block_delta",
-            index: 0,
-            delta: { type: "text_delta", text: delta },
+            index: activeTextBlockIndex,
+            delta: { type: "text_delta", text: textDelta },
           });
         }
+
+        // Handle tool call deltas
+        const toolCallDeltas = choice?.delta?.tool_calls;
+        if (toolCallDeltas) {
+          // If a text block was active before tool calls arrived, close it first to preserve wire order.
+          if (activeTextBlockIndex !== null) {
+            eventStream.push({
+              type: "content_block_stop",
+              index: activeTextBlockIndex,
+            });
+            orderedBlocks.push({ type: "text", text: currentText });
+            activeTextBlockIndex = null;
+            currentText = "";
+          }
+
+          for (const tcDelta of toolCallDeltas) {
+            const tcIndex = tcDelta.index;
+
+            if (tcIndex === undefined) continue;
+
+            // First chunk for this tool call carries the id.
+            // Guard against duplicate id from proxies (OpenRouter, Groq, LiteLLM) resetting accumulator.
+            if (tcDelta.id && !pendingToolCalls.has(tcIndex)) {
+              const blockIndex = nextBlockIndex++;
+              const pending: PendingToolCall = {
+                blockIndex,
+                index: tcIndex,
+                id: tcDelta.id,
+                name: tcDelta.function?.name ?? "",
+                argumentsAccumulator: tcDelta.function?.arguments ?? "",
+              };
+              pendingToolCalls.set(tcIndex, pending);
+
+              eventStream.push({
+                type: "content_block_start",
+                index: blockIndex,
+                block: {
+                  type: "tool_call",
+                  toolCallId: pending.id,
+                  name: pending.name,
+                  arguments: "",
+                },
+              });
+            } else {
+              // Subsequent chunks: accumulate argument fragments.
+              const pending = pendingToolCalls.get(tcIndex);
+              if (pending) {
+                if (tcDelta.function?.name && !pending.name) {
+                  pending.name = tcDelta.function.name;
+                }
+                if (tcDelta.function?.arguments) {
+                  pending.argumentsAccumulator += tcDelta.function.arguments;
+                }
+              }
+            }
+          }
+        }
+
         if (chunk.usage) {
           usage = {
             inputTokens: chunk.usage.prompt_tokens,
@@ -134,10 +220,33 @@ export function stream(model: Model, context: Context, options?: StreamOptions):
         throw new Error("Stream ended without a finish reason");
       }
 
-      eventStream.push({
-        type: "content_block_stop",
-        index: 0,
-      });
+      // Close text block if one was still in flight.
+      if (activeTextBlockIndex !== null) {
+        eventStream.push({
+          type: "content_block_stop",
+          index: activeTextBlockIndex,
+        });
+        orderedBlocks.push({ type: "text", text: currentText });
+        activeTextBlockIndex = null;
+        currentText = "";
+      }
+
+      // Finalize all pending tool calls and emit their stop events in order of blockIndex.
+      const sortedPendingToolCalls = Array.from(pendingToolCalls.values()).sort(
+        (a, b) => a.blockIndex - b.blockIndex,
+      );
+      for (const pending of sortedPendingToolCalls) {
+        eventStream.push({
+          type: "content_block_stop",
+          index: pending.blockIndex,
+        });
+        orderedBlocks.push({
+          type: "tool_call",
+          toolCallId: pending.id,
+          name: pending.name,
+          arguments: pending.argumentsAccumulator,
+        });
+      }
 
       eventStream.push({
         type: "turn_delta",
@@ -147,7 +256,7 @@ export function stream(model: Model, context: Context, options?: StreamOptions):
 
       const finalMsg: AssistantMessage = {
         role: "assistant",
-        content: [{ type: "text", text: currentText }],
+        content: orderedBlocks,
         model: model.id,
         finishReason,
         usage,
