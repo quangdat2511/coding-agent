@@ -12,7 +12,13 @@ type AnthropicStreamChunk =
   | {
       type: "content_block_start";
       index: number;
-      content_block: { type: string; text?: string };
+      content_block: {
+        type: string;
+        text?: string;
+        id?: string;
+        name?: string;
+        input?: Record<string, unknown>;
+      };
     }
   | {
       type: "content_block_delta";
@@ -229,12 +235,17 @@ describe("Anthropic stream finishReason handling", () => {
     });
   });
 
-  it("handles multi-block responses without emitting stops for unstarted blocks", async () => {
+  it("handles multi-block responses — tool_use block emits start/stop and populates turn_end content", async () => {
     mockEvents = [
       { type: "content_block_start", index: 0, content_block: { type: "text" } },
       { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "Part 1" } },
       { type: "content_block_stop", index: 0 },
-      { type: "content_block_start", index: 1, content_block: { type: "tool_use" } },
+      // tool_use blocks now produce start/stop events and a ToolCallBlock on turn_end
+      {
+        type: "content_block_start",
+        index: 1,
+        content_block: { type: "tool_use", id: "toolu_01", name: "my_tool", input: {} },
+      },
       { type: "content_block_stop", index: 1 },
       { type: "message_delta", delta: { stop_reason: "end_turn", stop_sequence: null } },
       { type: "message_stop" },
@@ -247,10 +258,18 @@ describe("Anthropic stream finishReason handling", () => {
     }
     const startEvents = events.filter((e) => e.type === "content_block_start");
     const stopEvents = events.filter((e) => e.type === "content_block_stop");
-    expect(startEvents.length).toBe(1);
-    expect(startEvents[0]?.index).toBe(0);
-    expect(stopEvents.length).toBe(1);
-    expect(stopEvents[0]?.index).toBe(0);
+    // Both text and tool_use blocks now emit start/stop
+    expect(startEvents.length).toBe(2);
+    expect(stopEvents.length).toBe(2);
+    const turnEnd = events.find((e) => e.type === "turn_end");
+    if (turnEnd?.type === "turn_end") {
+      // turn_end carries both the text block and the (empty-args) tool call
+      const textBlocks = turnEnd.message.content.filter((b) => b.type === "text");
+      const toolCallBlocks = turnEnd.message.content.filter((b) => b.type === "tool_call");
+      expect(textBlocks.length).toBe(1);
+      expect(toolCallBlocks.length).toBe(1);
+      expect(toolCallBlocks[0]?.type === "tool_call" && toolCallBlocks[0].name).toBe("my_tool");
+    }
   });
 
   it("emits error event and rejects result() when stream has no finish_reason", async () => {
@@ -310,7 +329,11 @@ describe("Anthropic stream finishReason handling", () => {
 
   it("handles multi-block response when tool_use block precedes text block", async () => {
     mockEvents = [
-      { type: "content_block_start", index: 0, content_block: { type: "tool_use" } },
+      {
+        type: "content_block_start",
+        index: 0,
+        content_block: { type: "tool_use", id: "toolu_pre", name: "pre_tool", input: {} },
+      },
       { type: "content_block_stop", index: 0 },
       { type: "content_block_start", index: 1, content_block: { type: "text" } },
       {
@@ -330,13 +353,15 @@ describe("Anthropic stream finishReason handling", () => {
     }
     const startEvents = events.filter((e) => e.type === "content_block_start");
     const stopEvents = events.filter((e) => e.type === "content_block_stop");
-    expect(startEvents.length).toBe(1);
-    expect(startEvents[0]?.index).toBe(1);
-    expect(stopEvents.length).toBe(1);
-    expect(stopEvents[0]?.index).toBe(1);
+    // Both tool_use and text blocks emit start/stop
+    expect(startEvents.length).toBe(2);
+    expect(stopEvents.length).toBe(2);
     const turnEnd = events.find((e) => e.type === "turn_end");
     if (turnEnd?.type === "turn_end") {
-      expect(turnEnd.message.content).toEqual([{ type: "text", text: "Text after tool" }]);
+      const textBlocks = turnEnd.message.content.filter((b) => b.type === "text");
+      const toolCallBlocks = turnEnd.message.content.filter((b) => b.type === "tool_call");
+      expect(textBlocks).toEqual([{ type: "text", text: "Text after tool" }]);
+      expect(toolCallBlocks.length).toBe(1);
     }
   });
 
