@@ -122,8 +122,8 @@ export function stream(model: Model, context: Context, options?: StreamOptions):
 
       // Tool call tracking: OpenAI tool_call index → pending tool call
       const pendingToolCalls = new Map<number, PendingToolCall>();
-      // Completed content blocks in strict chronological wire order
-      const orderedBlocks: (TextBlock | ToolCallBlock)[] = [];
+      // Completed content blocks recorded by blockIndex to preserve chronological order
+      const completedBlocksByIndex = new Map<number, TextBlock | ToolCallBlock>();
 
       for await (const chunk of response) {
         const choice = chunk.choices?.[0];
@@ -135,6 +135,26 @@ export function stream(model: Model, context: Context, options?: StreamOptions):
         // Handle text deltas
         const textDelta = choice?.delta?.content;
         if (textDelta) {
+          // If tool calls were active before text deltas arrived, close them first to preserve wire order.
+          if (pendingToolCalls.size > 0) {
+            const sortedPendingToolCalls = Array.from(pendingToolCalls.values()).sort(
+              (a, b) => a.blockIndex - b.blockIndex,
+            );
+            for (const pending of sortedPendingToolCalls) {
+              eventStream.push({
+                type: "content_block_stop",
+                index: pending.blockIndex,
+              });
+              completedBlocksByIndex.set(pending.blockIndex, {
+                type: "tool_call",
+                toolCallId: pending.id,
+                name: pending.name,
+                arguments: pending.argumentsAccumulator,
+              });
+            }
+            pendingToolCalls.clear();
+          }
+
           if (activeTextBlockIndex === null) {
             activeTextBlockIndex = nextBlockIndex++;
             eventStream.push({
@@ -160,7 +180,7 @@ export function stream(model: Model, context: Context, options?: StreamOptions):
               type: "content_block_stop",
               index: activeTextBlockIndex,
             });
-            orderedBlocks.push({ type: "text", text: currentText });
+            completedBlocksByIndex.set(activeTextBlockIndex, { type: "text", text: currentText });
             activeTextBlockIndex = null;
             currentText = "";
           }
@@ -226,12 +246,12 @@ export function stream(model: Model, context: Context, options?: StreamOptions):
           type: "content_block_stop",
           index: activeTextBlockIndex,
         });
-        orderedBlocks.push({ type: "text", text: currentText });
+        completedBlocksByIndex.set(activeTextBlockIndex, { type: "text", text: currentText });
         activeTextBlockIndex = null;
         currentText = "";
       }
 
-      // Finalize all pending tool calls and emit their stop events in order of blockIndex.
+      // Finalize all remaining pending tool calls and emit their stop events in order of blockIndex.
       const sortedPendingToolCalls = Array.from(pendingToolCalls.values()).sort(
         (a, b) => a.blockIndex - b.blockIndex,
       );
@@ -240,13 +260,14 @@ export function stream(model: Model, context: Context, options?: StreamOptions):
           type: "content_block_stop",
           index: pending.blockIndex,
         });
-        orderedBlocks.push({
+        completedBlocksByIndex.set(pending.blockIndex, {
           type: "tool_call",
           toolCallId: pending.id,
           name: pending.name,
           arguments: pending.argumentsAccumulator,
         });
       }
+      pendingToolCalls.clear();
 
       eventStream.push({
         type: "turn_delta",
@@ -254,9 +275,14 @@ export function stream(model: Model, context: Context, options?: StreamOptions):
         usage,
       });
 
+      // Assemble final message content in exact wire index order.
+      const content: AssistantMessage["content"] = Array.from(completedBlocksByIndex.entries())
+        .sort(([a], [b]) => a - b)
+        .map(([_, block]) => block);
+
       const finalMsg: AssistantMessage = {
         role: "assistant",
-        content: orderedBlocks,
+        content,
         model: model.id,
         finishReason,
         usage,

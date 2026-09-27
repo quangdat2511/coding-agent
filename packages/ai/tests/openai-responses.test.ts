@@ -450,6 +450,61 @@ describe("OpenAI stream finishReason handling", () => {
     }
   });
 
+  it("preserves chronological ordering and contiguous 0-indexed indices when tool call is followed by text", async () => {
+    mockChunks = [
+      {
+        choices: [
+          {
+            delta: {
+              tool_calls: [
+                {
+                  index: 0,
+                  id: "call-1",
+                  type: "function",
+                  function: { name: "get_weather", arguments: '{"city":"Tokyo"}' },
+                },
+              ],
+            },
+            finish_reason: null,
+          },
+        ],
+      },
+      { choices: [{ delta: { content: "Here is the weather" }, finish_reason: null }] },
+      { choices: [{ delta: {}, finish_reason: "stop" }] },
+    ];
+
+    const streamObj = stream(model, context, { apiKey: "test-key" });
+    const events = [];
+    for await (const ev of streamObj) {
+      events.push(ev);
+    }
+
+    const startEvents = events.filter((e) => e.type === "content_block_start");
+    expect(startEvents.length).toBe(2);
+    expect(startEvents[0]?.index).toBe(0);
+    expect(startEvents[0]?.block.type).toBe("tool_call");
+    expect(startEvents[1]?.index).toBe(1);
+    expect(startEvents[1]?.block.type).toBe("text");
+
+    const stopEvents = events.filter((e) => e.type === "content_block_stop");
+    expect(stopEvents.length).toBe(2);
+    expect(stopEvents[0]?.index).toBe(0);
+    expect(stopEvents[1]?.index).toBe(1);
+
+    const turnEndEvent = events.find((e) => e.type === "turn_end");
+    if (turnEndEvent?.type === "turn_end") {
+      expect(turnEndEvent.message.content).toEqual([
+        {
+          type: "tool_call",
+          toolCallId: "call-1",
+          name: "get_weather",
+          arguments: '{"city":"Tokyo"}',
+        },
+        { type: "text", text: "Here is the weather" },
+      ]);
+    }
+  });
+
   it("handles parallel tool calls with sequential 0-indexed block indices", async () => {
     mockChunks = [
       {
