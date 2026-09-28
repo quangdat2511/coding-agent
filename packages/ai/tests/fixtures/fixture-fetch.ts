@@ -109,6 +109,12 @@ export async function withFixtureFetch(
     init?: RequestInit,
   ): Promise<Response> => {
     const request = input instanceof Request ? input : new Request(input as string, init);
+    const signal = request.signal ?? init?.signal;
+    if (signal?.aborted) {
+      return Promise.reject(
+        signal.reason ?? new DOMException("The operation was aborted.", "AbortError"),
+      );
+    }
     return Promise.resolve(override(request));
   };
 
@@ -155,6 +161,13 @@ export async function withCapturingFixtureFetch(
       headers[key] = value;
     });
     captured.push({ url: request.url, method: request.method, headers });
+
+    const signal = request.signal ?? init?.signal;
+    if (signal?.aborted) {
+      return Promise.reject(
+        signal.reason ?? new DOMException("The operation was aborted.", "AbortError"),
+      );
+    }
 
     return Promise.resolve(override(request));
   };

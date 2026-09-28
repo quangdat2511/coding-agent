@@ -292,10 +292,18 @@ for (const provider of PROVIDERS) {
       // Abort before stream() is even called.
       controller.abort();
 
+      const fixture = sseResponse(loadFixture(`${fixtureFamily}/text-streaming.txt`));
+
       await withFixtureFetch(
-        (_req) => {
-          // Throw AbortError synchronously so the SDK surfaces it correctly.
-          throw new DOMException("The operation was aborted.", "AbortError");
+        (req) => {
+          // Verify that the adapter passed controller.signal down to the transport request.
+          // If the adapter dropped or ignored the signal, req.signal is not aborted,
+          // so we return the success fixture instead of aborting. This will cause turn_end
+          // to be emitted and result() to resolve, which fails the test assertions below.
+          if (req.signal?.aborted) {
+            throw new DOMException("The operation was aborted.", "AbortError");
+          }
+          return fixture;
         },
         async () => {
           const ms = streamFn(model, BASE_CONTEXT, {
