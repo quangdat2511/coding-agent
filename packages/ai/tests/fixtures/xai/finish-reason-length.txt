@@ -1,0 +1,7 @@
+data: {"id":"chatcmpl-xai04","object":"chat.completion.chunk","created":1700000004,"model":"grok-3-mini-fast","choices":[{"index":0,"delta":{"role":"assistant","content":"This text exceeds the token limit"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-xai04","object":"chat.completion.chunk","created":1700000004,"model":"grok-3-mini-fast","choices":[{"index":0,"delta":{},"finish_reason":"length"}]}
+
+data: {"id":"chatcmpl-xai04","object":"chat.completion.chunk","created":1700000004,"model":"grok-3-mini-fast","choices":[],"usage":{"prompt_tokens":20,"completion_tokens":50,"total_tokens":70}}
+
+data: [DONE]

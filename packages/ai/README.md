@@ -176,3 +176,32 @@ bun run example google gemini-3.6-flash "Explain TypeScript advantages"
 bun run example openai gpt-4o "Explain monorepo architecture"
 ```
 
+## Conformance Test Suite & Fixture Recording
+
+`packages/ai` includes a recorded-fixture conformance test suite under `tests/conformance.test.ts`. This suite tests all provider adapters against pre-recorded SSE (Server-Sent Events) fixtures to guarantee that every adapter conforms to the `ModelResponseStream` contract without making live network calls or consuming API credits.
+
+### Fixture Locations
+
+Fixtures are stored under `packages/ai/tests/fixtures/<family>/`:
+- `anthropic/`: Fixtures for Anthropic Messages API.
+- `openai/`: Fixtures for OpenAI Chat Completions-compatible streaming.
+- `xai/`: Fixtures for providers delivering whole tool arguments (e.g. xAI).
+
+Each family provides standard test scenarios:
+- `text-streaming.txt`: Basic streaming text chunks.
+- `tool-call.txt`: Complete tool call with JSON arguments.
+- `tool-call-malformed-args.txt`: Tool call with invalid JSON arguments (verifies raw preservation).
+- `finish-reason-length.txt` / `finish-reason-max-tokens.txt`: Max tokens finish reason.
+- `usage-totals.txt`: Token usage reporting.
+
+### Refreshing Fixtures
+
+To record or update a fixture:
+1. Make a live streaming request outside CI using `curl -N --raw` or by using `withCapturingFixtureFetch` / a local fetch interceptor.
+2. Save the raw wire SSE output into the appropriate `.txt` file in `packages/ai/tests/fixtures/<family>/`.
+3. Verify that the conformance suite passes:
+   ```bash
+   bun test tests/conformance.test.ts
+   ```
+
+
