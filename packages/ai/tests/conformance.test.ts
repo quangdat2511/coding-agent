@@ -36,6 +36,7 @@ import {
   withFixtureFetch,
 } from "@tests/fixtures/fixture-fetch";
 import { stream as anthropicStream } from "@/api/anthropic-responses";
+import { stream as googleStream } from "@/api/google-generate-content";
 import { stream as openaiStream } from "@/api/openai-responses";
 import type { Context, Model, ModelCapabilities, ModelStream } from "@/types";
 
@@ -51,7 +52,7 @@ import type { Context, Model, ModelCapabilities, ModelStream } from "@/types";
 //   - fixtureFamily: which fixture directory to use ("anthropic" | "openai")
 // ---------------------------------------------------------------------------
 
-type AdapterFamily = "anthropic" | "openai" | "xai";
+type AdapterFamily = "anthropic" | "google" | "openai" | "xai";
 
 interface ProviderEntry {
   id: string;
@@ -112,17 +113,14 @@ const PROVIDERS: ProviderEntry[] = [
     streamFn: openaiStream,
     fixtureFamily: "xai",
   },
-  // --- Google (generateContent via OpenAI-compat) ---
-  // NOTE: Google's own generateContent adapter (CDA-42) will update this
-  // entry. For now it exercises the OpenAI-compat path that google.ts
-  // currently uses with whole argument delivery, so the harness is proven end-to-end.
+  // --- Google (generateContent, native) ---
   {
     id: "google",
-    label: "Google (generate_content via openai-compat)",
+    label: "Google (generate_content)",
     model: { id: "gemini-2.0-flash-lite", name: "Gemini 2.0 Flash Lite", provider: "google" },
     capabilities: GOOGLE_GENERATE_CONTENT_CAPABILITIES,
-    streamFn: openaiStream,
-    fixtureFamily: "xai",
+    streamFn: googleStream,
+    fixtureFamily: "google",
   },
 ];
 
@@ -241,8 +239,8 @@ for (const provider of PROVIDERS) {
     // -----------------------------------------------------------------------
     it("maps a max-output-tokens finish reason and preserves rawReason", async () => {
       const fixtureName =
-        fixtureFamily === "anthropic"
-          ? "anthropic/finish-reason-max-tokens.txt"
+        fixtureFamily === "anthropic" || fixtureFamily === "google"
+          ? `${fixtureFamily}/finish-reason-max-tokens.txt`
           : `${fixtureFamily}/finish-reason-length.txt`;
       const fixture = sseResponse(loadFixture(fixtureName));
 
@@ -396,6 +394,12 @@ for (const provider of PROVIDERS) {
               .split("\n")
               .filter((l) => l.includes("input_json_delta")).length;
             expect(deltaCount).toBeLessThanOrEqual(1);
+          } else if (fixtureFamily === "google") {
+            // Google delivers tool args as a complete `functionCall.args` object in one SSE chunk.
+            const functionCallChunks = rawFixture
+              .split("\n")
+              .filter((l) => l.includes('"functionCall"'));
+            expect(functionCallChunks.length).toBe(1);
           } else {
             const argChunks = rawFixture
               .split("\n")
@@ -408,6 +412,11 @@ for (const provider of PROVIDERS) {
               .split("\n")
               .filter((l) => l.includes("input_json_delta")).length;
             expect(deltaCount).toBeGreaterThan(1);
+          } else if (fixtureFamily === "google") {
+            const functionCallChunks = rawFixture
+              .split("\n")
+              .filter((l) => l.includes('"functionCall"'));
+            expect(functionCallChunks.length).toBeGreaterThan(1);
           } else {
             const argChunks = rawFixture
               .split("\n")

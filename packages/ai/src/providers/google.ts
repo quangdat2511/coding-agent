@@ -1,4 +1,4 @@
-import { stream } from "@/api/openai-responses";
+import { stream } from "@/api/google-generate-content";
 import { apiKeyFromEnv } from "@/auth/helpers";
 import { applyCapabilities, GOOGLE_GENERATE_CONTENT_CAPABILITIES } from "@/capabilities";
 import { type BaseProviderOptions, defineProvider, type Provider } from "@/models";
@@ -27,7 +27,7 @@ export function createGoogleProvider(options?: GoogleProviderOptions): Provider 
     id: "google",
     name: "Google (Gemini)",
     variant,
-    baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai/",
+    baseUrl: "https://generativelanguage.googleapis.com/v1beta/",
     auth: { apiKey: apiKeyFromEnv("Google API key", ["GOOGLE_API_KEY", "GEMINI_API_KEY"]) },
     models: applyCapabilities(GOOGLE_MODELS, defaultCaps, options?.modelOverrides),
     api: { stream },
