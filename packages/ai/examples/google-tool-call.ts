@@ -1,0 +1,69 @@
+import { loadRootEnv } from "@examples/utils/env";
+import { createProviderDirectory } from "@/index";
+
+async function main(): Promise<void> {
+  loadRootEnv();
+
+  const models = createProviderDirectory();
+  const provider = models.getProvider("google");
+  if (!provider) {
+    throw new Error("Google provider not found");
+  }
+
+  const model = models.getModel("google", "gemini-3.5-flash-lite");
+  if (!model) {
+    throw new Error("Model gemini-3.5-flash-lite not found");
+  }
+
+  console.log("==================================================");
+  console.log("Calling Google generateContent Live API with Tool Call");
+  console.log(`Model: ${model.id} (${model.name})`);
+  console.log("==================================================\n");
+
+  const stream = models.stream(model, {
+    messages: [
+      {
+        role: "user",
+        content: "What is the weather in Tokyo right now? Call get_weather to check.",
+      },
+    ],
+    tools: [
+      {
+        name: "get_weather",
+        description: "Get the current weather for a city",
+        parameters: {
+          type: "object",
+          properties: {
+            city: { type: "string", description: "The city name" },
+          },
+          required: ["city"],
+        },
+      },
+    ],
+  });
+
+  for await (const event of stream) {
+    console.log(`[Event] ${event.type}`);
+    if (event.type === "content_block_start" && event.block.type === "tool_call") {
+      console.log(`  -> Tool Call ID: ${event.block.toolCallId}`);
+      console.log(`  -> Function Name: ${event.block.name}`);
+      console.log(`  -> Arguments: ${event.block.arguments}`);
+    }
+  }
+
+  const result = await stream.result();
+
+  console.log("\n--------------------------------------------------");
+  console.log("Stream Complete:");
+  console.log(`Finish Reason: ${result.finishReason.reason} (${result.finishReason.rawReason})`);
+  console.log(
+    `Usage: inputTokens=${result.usage?.inputTokens}, outputTokens=${result.usage?.outputTokens}`,
+  );
+  console.log("Content Blocks:", JSON.stringify(result.content, null, 2));
+  console.log("--------------------------------------------------");
+}
+
+main().catch((err) => {
+  console.error("Execution failed:", err);
+  process.exit(1);
+});

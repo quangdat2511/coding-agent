@@ -344,8 +344,10 @@ export function stream(model: Model, context: Context, options?: StreamOptions):
           if (!parts) continue;
 
           for (const part of parts) {
-            if (part.text !== undefined) {
-              // Text part
+            if (
+              part.text !== undefined &&
+              (part.text.length > 0 || activeTextBlockIndex !== null)
+            ) {
               if (activeTextBlockIndex === null) {
                 activeTextBlockIndex = nextBlockIndex++;
                 eventStream.push({
