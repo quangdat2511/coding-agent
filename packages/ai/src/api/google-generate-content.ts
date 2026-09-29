@@ -60,11 +60,24 @@ interface GoogleUsageMetadata {
   promptTokenCount?: number;
   candidatesTokenCount?: number;
   totalTokenCount?: number;
+  cachedContentTokenCount?: number;
 }
 
 interface GoogleGenerateContentResponse {
   candidates?: GoogleCandidate[];
   usageMetadata?: GoogleUsageMetadata;
+}
+
+function extractUsage(meta?: GoogleUsageMetadata): Usage | undefined {
+  if (!meta) return undefined;
+  const usage: Usage = {
+    inputTokens: meta.promptTokenCount ?? 0,
+    outputTokens: meta.candidatesTokenCount ?? 0,
+  };
+  if (meta.cachedContentTokenCount !== undefined) {
+    usage.cachedInputTokens = meta.cachedContentTokenCount;
+  }
+  return usage;
 }
 
 // ---------------------------------------------------------------------------
@@ -88,8 +101,6 @@ export function mapGoogleFinishReason(
     PROHIBITED_CONTENT: "content_filter",
     SPII: "content_filter",
     MALFORMED_FUNCTION_CALL: "error",
-    UNEXPECTED_TOOL_CALL: "error",
-    TOO_MANY_TOOL_CALLS: "error",
   };
 
   const normalized = reason ? mapping[reason] : undefined;
@@ -234,7 +245,7 @@ export function stream(model: Model, context: Context, options?: StreamOptions):
       }
 
       const baseURL = options?.baseURL ?? "https://generativelanguage.googleapis.com/v1beta/";
-      const url = `${baseURL}models/${model.id}:streamGenerateContent?alt=sse&key=${apiKey}`;
+      const url = `${baseURL}models/${model.id}:streamGenerateContent?alt=sse`;
 
       const maxRetries = sanitizeMaxRetries(options?.maxRetries);
       let response: Response | undefined;
@@ -246,6 +257,7 @@ export function stream(model: Model, context: Context, options?: StreamOptions):
             method: "POST",
             headers: {
               "Content-Type": "application/json",
+              "x-goog-api-key": apiKey,
               ...options?.headers,
             },
             body: JSON.stringify(body),
@@ -318,10 +330,7 @@ export function stream(model: Model, context: Context, options?: StreamOptions):
           if (!candidate) {
             // Usage-only chunk (no candidate)
             if (chunk.usageMetadata) {
-              usage = {
-                inputTokens: chunk.usageMetadata.promptTokenCount ?? 0,
-                outputTokens: chunk.usageMetadata.candidatesTokenCount ?? 0,
-              };
+              usage = extractUsage(chunk.usageMetadata);
             }
             continue;
           }
@@ -333,10 +342,7 @@ export function stream(model: Model, context: Context, options?: StreamOptions):
 
           // Usage metadata
           if (chunk.usageMetadata) {
-            usage = {
-              inputTokens: chunk.usageMetadata.promptTokenCount ?? 0,
-              outputTokens: chunk.usageMetadata.candidatesTokenCount ?? 0,
-            };
+            usage = extractUsage(chunk.usageMetadata);
           }
 
           // Process parts
@@ -418,10 +424,7 @@ export function stream(model: Model, context: Context, options?: StreamOptions):
             finishReason = mapGoogleFinishReason(candidate.finishReason);
           }
           if (chunk.usageMetadata) {
-            usage = {
-              inputTokens: chunk.usageMetadata.promptTokenCount ?? 0,
-              outputTokens: chunk.usageMetadata.candidatesTokenCount ?? 0,
-            };
+            usage = extractUsage(chunk.usageMetadata);
           }
         }
       }
@@ -440,6 +443,16 @@ export function stream(model: Model, context: Context, options?: StreamOptions):
           type: "text",
           text: currentText,
         });
+      }
+
+      // Normalize finish reason if tool calls were produced:
+      // Google API sends finishReason: "STOP" even when tool calls are generated.
+      // Under ADR 0004 §2, any message with tool calls must normalize to "tool_call".
+      const hasToolCalls = Array.from(completedBlocksByIndex.values()).some(
+        (b) => b.type === "tool_call",
+      );
+      if (hasToolCalls && finishReason.reason === "end_turn") {
+        finishReason = { reason: "tool_call", rawReason: finishReason.rawReason };
       }
 
       eventStream.push({

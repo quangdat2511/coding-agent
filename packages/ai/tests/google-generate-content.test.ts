@@ -39,13 +39,11 @@ describe("mapGoogleFinishReason", () => {
     }
   });
 
-  it("maps malformed / unexpected tool reasons to error", () => {
-    for (const r of ["MALFORMED_FUNCTION_CALL", "UNEXPECTED_TOOL_CALL", "TOO_MANY_TOOL_CALLS"]) {
-      expect(mapGoogleFinishReason(r)).toEqual({
-        reason: "error",
-        rawReason: r,
-      });
-    }
+  it("maps malformed function call to error", () => {
+    expect(mapGoogleFinishReason("MALFORMED_FUNCTION_CALL")).toEqual({
+      reason: "error",
+      rawReason: "MALFORMED_FUNCTION_CALL",
+    });
   });
 
   it("maps null, undefined, and unrecognized reasons to other", () => {
@@ -196,7 +194,7 @@ describe("buildRequestBody", () => {
   });
 });
 
-describe("stream error handling", () => {
+describe("stream finishReason and usage normalization", () => {
   it("emits error event and rejects result() when API key is missing", async () => {
     const context: Context = { messages: [] };
     const ms = stream(TEST_MODEL, context);
@@ -214,5 +212,25 @@ describe("stream error handling", () => {
     ]);
 
     expect(ms.result()).rejects.toThrow("API key is required");
+  });
+
+  it("normalizes finishReason to tool_call when tool calls are present in the response", async () => {
+    const { loadFixture, sseResponse, withFixtureFetch } = await import(
+      "@tests/fixtures/fixture-fetch"
+    );
+    const fixture = sseResponse(loadFixture("google/tool-call.txt"));
+
+    await withFixtureFetch(fixture, async () => {
+      const ms = stream(TEST_MODEL, { messages: [] }, { apiKey: "test-key" });
+      const msg = await ms.result();
+
+      // Under ADR 0004 §2, reason must be normalized to "tool_call"
+      // while rawReason preserves provider's "STOP"
+      expect(msg.finishReason).toEqual({
+        reason: "tool_call",
+        rawReason: "STOP",
+      });
+      expect(msg.content.some((b) => b.type === "tool_call")).toBe(true);
+    });
   });
 });
