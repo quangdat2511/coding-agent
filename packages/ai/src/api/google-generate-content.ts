@@ -245,7 +245,8 @@ export function stream(model: Model, context: Context, options?: StreamOptions):
       }
 
       const baseURL = options?.baseURL ?? "https://generativelanguage.googleapis.com/v1beta/";
-      const url = `${baseURL}models/${model.id}:streamGenerateContent?alt=sse`;
+      const modelId = model.id.replace(/^models\//, "");
+      const url = `${baseURL}models/${modelId}:streamGenerateContent?alt=sse`;
 
       const maxRetries = sanitizeMaxRetries(options?.maxRetries);
       let response: Response | undefined;
@@ -270,6 +271,7 @@ export function stream(model: Model, context: Context, options?: StreamOptions):
           const status = response.status;
           if (attempt < maxRetries && (status >= 500 || status === 429)) {
             lastError = new Error(`HTTP ${status}: ${response.statusText}`);
+            await new Promise((resolve) => setTimeout(resolve, Math.min(50 * 2 ** attempt, 1000)));
             continue;
           }
 
@@ -277,7 +279,7 @@ export function stream(model: Model, context: Context, options?: StreamOptions):
           const errorBody = await response.text();
           throw new Error(`Google API error ${status}: ${errorBody}`);
         } catch (err) {
-          if (err instanceof DOMException && err.name === "AbortError") {
+          if ((err as Error)?.name === "AbortError" || options?.signal?.aborted) {
             throw err;
           }
           if (
@@ -285,6 +287,7 @@ export function stream(model: Model, context: Context, options?: StreamOptions):
             !(err instanceof Error && err.message.startsWith("Google API error"))
           ) {
             lastError = err instanceof Error ? err : new Error(String(err));
+            await new Promise((resolve) => setTimeout(resolve, Math.min(50 * 2 ** attempt, 1000)));
             continue;
           }
           throw err;
@@ -384,7 +387,9 @@ export function stream(model: Model, context: Context, options?: StreamOptions):
               }
 
               // Function call — arguments arrive whole (never streamed)
-              const toolCallId = `google-fc-${nextBlockIndex}`;
+              const toolCallId =
+                (part.functionCall as { id?: string }).id ??
+                `google-fc-${crypto.randomUUID().slice(0, 8)}-${nextBlockIndex}`;
               const blockIndex = nextBlockIndex++;
               const argsString =
                 typeof part.functionCall.args === "string"

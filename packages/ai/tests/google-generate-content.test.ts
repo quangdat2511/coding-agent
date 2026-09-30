@@ -233,4 +233,62 @@ describe("stream finishReason and usage normalization", () => {
       expect(msg.content.some((b) => b.type === "tool_call")).toBe(true);
     });
   });
+
+  it("extracts cachedContentTokenCount into usage.cachedInputTokens and strips models/ prefix", async () => {
+    const { sseResponse, withFixtureFetch } = await import("@tests/fixtures/fixture-fetch");
+    const rawSse =
+      'data: {"candidates":[{"content":{"parts":[{"text":"Cached response"}]},"finishReason":"STOP","index":0}],"usageMetadata":{"promptTokenCount":100,"candidatesTokenCount":20,"totalTokenCount":120,"cachedContentTokenCount":80}}\n\n';
+    const fixture = sseResponse(rawSse);
+
+    const modelWithPrefix: Model = {
+      id: "models/gemini-2.0-flash-lite",
+      name: "Gemini 2.0 Flash Lite",
+      provider: "google",
+    };
+
+    await withFixtureFetch(fixture, async () => {
+      const ms = stream(modelWithPrefix, { messages: [] }, { apiKey: "test-key" });
+      const msg = await ms.result();
+
+      expect(msg.usage).toEqual({
+        inputTokens: 100,
+        outputTokens: 20,
+        cachedInputTokens: 80,
+      });
+    });
+  });
+
+  it("generates unique synthetic toolCallId across turns with google-fc- prefix", async () => {
+    const { loadFixture, sseResponse, withFixtureFetch } = await import(
+      "@tests/fixtures/fixture-fetch"
+    );
+    const makeFixture = () => sseResponse(loadFixture("google/tool-call.txt"));
+
+    let id1 = "";
+    let id2 = "";
+
+    await withFixtureFetch(makeFixture(), async () => {
+      const ms1 = stream(TEST_MODEL, { messages: [] }, { apiKey: "test-key" });
+      const msg1 = await ms1.result();
+      const tc1 = msg1.content.find((b) => b.type === "tool_call");
+      expect(tc1).toBeDefined();
+      if (tc1?.type === "tool_call") {
+        id1 = tc1.toolCallId;
+        expect(id1.startsWith("google-fc-")).toBe(true);
+      }
+    });
+
+    await withFixtureFetch(makeFixture(), async () => {
+      const ms2 = stream(TEST_MODEL, { messages: [] }, { apiKey: "test-key" });
+      const msg2 = await ms2.result();
+      const tc2 = msg2.content.find((b) => b.type === "tool_call");
+      expect(tc2).toBeDefined();
+      if (tc2?.type === "tool_call") {
+        id2 = tc2.toolCallId;
+        expect(id2.startsWith("google-fc-")).toBe(true);
+      }
+    });
+
+    expect(id1).not.toBe(id2);
+  });
 });
