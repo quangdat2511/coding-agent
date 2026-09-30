@@ -151,12 +151,10 @@ export function buildRequestBody(context: Context): GoogleRequestBody {
           if (block.type === "text") {
             parts.push({ text: block.text });
           } else if (block.type === "tool_result") {
-            // Google represents tool results as functionResponse parts.
-            // Since `functionResponse` is not yet in the MVP request path
-            // (Agent Core is not built), we pass it as text for now.
-            // The full mapping will be added when Agent Core drives multi-turn
-            // tool loops through this adapter.
-            parts.push({ text: block.content });
+            // TODO(CDA-43): map sang functionResponse { name, response } khi Agent Core chạy multi-turn tool loop.
+            throw new Error(
+              "tool_result history is not supported by the Google adapter yet (CDA-43)",
+            );
           }
         }
       }
@@ -210,12 +208,23 @@ function parseSseLine(line: string): GoogleGenerateContentResponse | null {
   if (!line.startsWith("data: ")) return null;
   const json = line.slice("data: ".length).trim();
   if (!json || json === "[DONE]") return null;
-  return JSON.parse(json) as GoogleGenerateContentResponse;
+  try {
+    return JSON.parse(json) as GoogleGenerateContentResponse;
+  } catch {
+    return null;
+  }
 }
 
 // ---------------------------------------------------------------------------
 // Stream adapter
 // ---------------------------------------------------------------------------
+
+const RETRY_BASE_MS = 50;
+const RETRY_MAX_MS = 1000;
+
+function backoffDelayMs(attempt: number): number {
+  return Math.min(RETRY_BASE_MS * 2 ** attempt, RETRY_MAX_MS);
+}
 
 export function stream(model: Model, context: Context, options?: StreamOptions): ModelStream {
   const eventStream = createModelEventStream();
@@ -244,7 +253,8 @@ export function stream(model: Model, context: Context, options?: StreamOptions):
         }
       }
 
-      const baseURL = options?.baseURL ?? "https://generativelanguage.googleapis.com/v1beta/";
+      const rawBaseURL = options?.baseURL ?? "https://generativelanguage.googleapis.com/v1beta/";
+      const baseURL = `${rawBaseURL.replace(/\/+$/, "")}/`;
       const modelId = model.id.replace(/^models\//, "");
       const url = `${baseURL}models/${modelId}:streamGenerateContent?alt=sse`;
 
@@ -271,7 +281,7 @@ export function stream(model: Model, context: Context, options?: StreamOptions):
           const status = response.status;
           if (attempt < maxRetries && (status >= 500 || status === 429)) {
             lastError = new Error(`HTTP ${status}: ${response.statusText}`);
-            await new Promise((resolve) => setTimeout(resolve, Math.min(50 * 2 ** attempt, 1000)));
+            await new Promise((resolve) => setTimeout(resolve, backoffDelayMs(attempt)));
             continue;
           }
 
@@ -287,7 +297,7 @@ export function stream(model: Model, context: Context, options?: StreamOptions):
             !(err instanceof Error && err.message.startsWith("Google API error"))
           ) {
             lastError = err instanceof Error ? err : new Error(String(err));
-            await new Promise((resolve) => setTimeout(resolve, Math.min(50 * 2 ** attempt, 1000)));
+            await new Promise((resolve) => setTimeout(resolve, backoffDelayMs(attempt)));
             continue;
           }
           throw err;

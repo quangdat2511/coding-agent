@@ -92,22 +92,11 @@ describe("buildRequestBody", () => {
             },
           ],
         },
-        {
-          role: "user",
-          content: [
-            {
-              type: "tool_result",
-              toolCallId: "call_1",
-              content: '{"temp": 20}',
-              isError: false,
-            },
-          ],
-        },
       ],
     };
 
     const body = buildRequestBody(context);
-    expect(body.contents).toHaveLength(3);
+    expect(body.contents).toHaveLength(2);
 
     // User turn 1
     expect(body.contents[0]).toEqual({
@@ -128,12 +117,28 @@ describe("buildRequestBody", () => {
         },
       ],
     });
+  });
 
-    // User turn 2 with tool result
-    expect(body.contents[2]).toEqual({
-      role: "user",
-      parts: [{ text: '{"temp": 20}' }],
-    });
+  it("throws when user message contains tool_result (deferred to CDA-43)", () => {
+    const context: Context = {
+      messages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "tool_result",
+              toolCallId: "call_1",
+              content: '{"temp": 20}',
+              isError: false,
+            },
+          ],
+        },
+      ],
+    };
+
+    expect(() => buildRequestBody(context)).toThrow(
+      "tool_result history is not supported by the Google adapter yet (CDA-43)",
+    );
   });
 
   it("handles malformed JSON arguments in assistant tool_call gracefully", () => {
@@ -290,5 +295,47 @@ describe("stream finishReason and usage normalization", () => {
     });
 
     expect(id1).not.toBe(id2);
+  });
+
+  it("ignores malformed SSE data lines gracefully in stream", async () => {
+    const { sseResponse, withFixtureFetch } = await import("@tests/fixtures/fixture-fetch");
+    const rawSse =
+      'data: {"candidates":[{"content":{"parts":[{"text":"Hello"}]},"index":0}],"modelVersion":"gemini-2.0-flash-lite"}\n\n' +
+      "data: {malformed json chunk}\n\n" +
+      'data: {"candidates":[{"content":{"parts":[{"text":" world!"}]},"finishReason":"STOP","index":0}],"modelVersion":"gemini-2.0-flash-lite"}\n\n';
+    const fixture = sseResponse(rawSse);
+
+    await withFixtureFetch(fixture, async () => {
+      const ms = stream(TEST_MODEL, { messages: [] }, { apiKey: "test-key" });
+      const msg = await ms.result();
+      const text = msg.content
+        .filter((b) => b.type === "text")
+        .map((b) => (b as { text: string }).text)
+        .join("");
+      expect(text).toBe("Hello world!");
+    });
+  });
+
+  it("normalizes baseURL without trailing slash", async () => {
+    const { sseResponse, withCapturingFixtureFetch } = await import(
+      "@tests/fixtures/fixture-fetch"
+    );
+    const rawSse =
+      'data: {"candidates":[{"content":{"parts":[{"text":"OK"}]},"finishReason":"STOP","index":0}],"modelVersion":"gemini-2.0-flash-lite"}\n\n';
+
+    await withCapturingFixtureFetch(
+      () => sseResponse(rawSse),
+      async (captured) => {
+        const ms = stream(
+          TEST_MODEL,
+          { messages: [] },
+          { apiKey: "test-key", baseURL: "https://my-proxy.internal/v1beta" },
+        );
+        await ms.result();
+        expect(captured[0]?.url).toBe(
+          "https://my-proxy.internal/v1beta/models/gemini-2.0-flash-lite:streamGenerateContent?alt=sse",
+        );
+      },
+    );
   });
 });
