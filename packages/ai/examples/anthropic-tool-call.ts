@@ -48,7 +48,7 @@ async function main(): Promise<void> {
     if (event.type === "content_block_start" && event.block.type === "tool_call") {
       console.log(`  -> Tool Call ID: ${event.block.toolCallId}`);
       console.log(`  -> Function Name: ${event.block.name}`);
-      console.log(`  -> Arguments: ${event.block.arguments}`);
+      console.log("  -> Arguments: (streaming fragments...)");
     }
   }
 

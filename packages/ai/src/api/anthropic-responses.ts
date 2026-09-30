@@ -48,6 +48,24 @@ export function buildTools(tools?: readonly ToolDeclaration[]): Anthropic.Tool[]
   }));
 }
 
+interface UsageMetadataContainer {
+  cachedInputTokens?: number;
+  rawUsage?: Record<string, unknown>;
+}
+
+function mergeUsageMetadata(container: UsageMetadataContainer, wireUsage: unknown): void {
+  if (!wireUsage || typeof wireUsage !== "object") return;
+  const usageRecord = wireUsage as Record<string, unknown>;
+  const cacheRead = usageRecord.cache_read_input_tokens;
+  if (typeof cacheRead === "number") {
+    container.cachedInputTokens = cacheRead;
+  }
+  container.rawUsage = {
+    ...container.rawUsage,
+    ...usageRecord,
+  };
+}
+
 export function buildParams(context: Context): Anthropic.MessageParam[] {
   const messages: Anthropic.MessageParam[] = [];
 
@@ -71,7 +89,7 @@ export function buildParams(context: Context): Anthropic.MessageParam[] {
         }
         messages.push({
           role: "user",
-          content: parts,
+          content: parts.length > 0 ? parts : [{ type: "text", text: "" }],
         });
       }
     } else {
@@ -86,9 +104,12 @@ export function buildParams(context: Context): Anthropic.MessageParam[] {
         } else if (block.type === "tool_call") {
           let args: Record<string, unknown> = {};
           try {
-            args = JSON.parse(block.arguments) as Record<string, unknown>;
+            const parsed = JSON.parse(block.arguments);
+            if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+              args = parsed as Record<string, unknown>;
+            }
           } catch {
-            // Ignore parse errors if malformed
+            // Keep empty object fallback if malformed or non-object JSON
           }
           parts.push({
             type: "tool_use",
@@ -100,7 +121,7 @@ export function buildParams(context: Context): Anthropic.MessageParam[] {
       }
       messages.push({
         role: "assistant",
-        content: parts,
+        content: parts.length > 0 ? parts : [{ type: "text", text: "" }],
       });
     }
   }
@@ -166,8 +187,7 @@ export function stream(model: Model, context: Context, options?: StreamOptions):
       let finishReason: FinishReason | undefined;
       let inputTokens = 0;
       let outputTokens = 0;
-      let cachedInputTokens: number | undefined;
-      let rawUsage: Record<string, unknown> | undefined;
+      const usageMeta: UsageMetadataContainer = {};
       let hasUsage = false;
 
       // Track active text blocks and pending tool blocks by their wire chunk.index
@@ -182,17 +202,7 @@ export function stream(model: Model, context: Context, options?: StreamOptions):
             hasUsage = true;
             inputTokens = chunk.message.usage.input_tokens ?? 0;
             outputTokens = chunk.message.usage.output_tokens ?? 0;
-            const usageMeta = chunk.message.usage as unknown as {
-              cache_read_input_tokens?: number | null;
-              cache_creation_input_tokens?: number | null;
-            };
-            if (usageMeta.cache_read_input_tokens != null) {
-              cachedInputTokens = usageMeta.cache_read_input_tokens;
-            }
-            rawUsage = {
-              ...rawUsage,
-              ...(chunk.message.usage as unknown as Record<string, unknown>),
-            };
+            mergeUsageMetadata(usageMeta, chunk.message.usage);
           }
         } else if (chunk.type === "content_block_start") {
           if (chunk.content_block.type === "text") {
@@ -272,17 +282,7 @@ export function stream(model: Model, context: Context, options?: StreamOptions):
           if (chunk.usage) {
             hasUsage = true;
             outputTokens = chunk.usage.output_tokens ?? outputTokens;
-            const usageMeta = chunk.usage as unknown as {
-              cache_read_input_tokens?: number | null;
-              cache_creation_input_tokens?: number | null;
-            };
-            if (usageMeta.cache_read_input_tokens != null) {
-              cachedInputTokens = usageMeta.cache_read_input_tokens;
-            }
-            rawUsage = {
-              ...rawUsage,
-              ...(chunk.usage as unknown as Record<string, unknown>),
-            };
+            mergeUsageMetadata(usageMeta, chunk.usage);
           }
         }
       }
@@ -308,8 +308,10 @@ export function stream(model: Model, context: Context, options?: StreamOptions):
         ? {
             inputTokens,
             outputTokens,
-            ...(cachedInputTokens !== undefined ? { cachedInputTokens } : {}),
-            ...(rawUsage ? { raw: rawUsage } : {}),
+            ...(usageMeta.cachedInputTokens !== undefined
+              ? { cachedInputTokens: usageMeta.cachedInputTokens }
+              : {}),
+            ...(usageMeta.rawUsage ? { raw: usageMeta.rawUsage } : {}),
           }
         : undefined;
 

@@ -36,7 +36,9 @@ type AnthropicStreamChunk =
   | {
       type: "content_block_delta";
       index: number;
-      delta: { type: "text_delta"; text: string };
+      delta:
+        | { type: "text_delta"; text: string }
+        | { type: "input_json_delta"; partial_json: string };
     }
   | {
       type: "content_block_stop";
@@ -258,6 +260,97 @@ describe("buildParams", () => {
       },
     ]);
   });
+
+  it("handles non-object JSON values in assistant tool_call arguments gracefully", () => {
+    const context: Context = {
+      messages: [
+        {
+          role: "assistant",
+          content: [
+            {
+              type: "tool_call",
+              toolCallId: "call_null",
+              name: "null_tool",
+              arguments: "null",
+            },
+            {
+              type: "tool_call",
+              toolCallId: "call_num",
+              name: "num_tool",
+              arguments: "123",
+            },
+            {
+              type: "tool_call",
+              toolCallId: "call_arr",
+              name: "arr_tool",
+              arguments: "[1, 2]",
+            },
+          ],
+          model: "claude-haiku-4-5",
+          finishReason: { reason: "tool_call", rawReason: "tool_use" },
+        },
+      ],
+    };
+    const params = buildParams(context);
+    expect(params).toEqual([
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "tool_use",
+            id: "call_null",
+            name: "null_tool",
+            input: {},
+          },
+          {
+            type: "tool_use",
+            id: "call_num",
+            name: "num_tool",
+            input: {},
+          },
+          {
+            type: "tool_use",
+            id: "call_arr",
+            name: "arr_tool",
+            input: {},
+          },
+        ],
+      },
+    ]);
+  });
+
+  it("handles empty content array in user message with safe fallback", () => {
+    const context: Context = {
+      messages: [{ role: "user", content: [] }],
+    };
+    const params = buildParams(context);
+    expect(params).toEqual([
+      {
+        role: "user",
+        content: [{ type: "text", text: "" }],
+      },
+    ]);
+  });
+
+  it("handles empty content array in assistant message with safe fallback", () => {
+    const context: Context = {
+      messages: [
+        {
+          role: "assistant",
+          content: [],
+          model: "claude-haiku-4-5",
+          finishReason: { reason: "end_turn", rawReason: "end_turn" },
+        },
+      ],
+    };
+    const params = buildParams(context);
+    expect(params).toEqual([
+      {
+        role: "assistant",
+        content: [{ type: "text", text: "" }],
+      },
+    ]);
+  });
 });
 
 describe("Anthropic stream finishReason handling", () => {
@@ -474,6 +567,44 @@ describe("Anthropic stream finishReason handling", () => {
       expect(textBlocks.length).toBe(1);
       expect(toolCallBlocks.length).toBe(1);
       expect(toolCallBlocks[0]?.type === "tool_call" && toolCallBlocks[0].name).toBe("my_tool");
+    }
+  });
+
+  it("accumulates multiple input_json_delta fragments into complete raw tool_call arguments", async () => {
+    mockEvents = [
+      {
+        type: "content_block_start",
+        index: 0,
+        content_block: { type: "tool_use", id: "toolu_multi_delta", name: "fetch_city", input: {} },
+      },
+      {
+        type: "content_block_delta",
+        index: 0,
+        delta: { type: "input_json_delta", partial_json: '{"city":' },
+      },
+      {
+        type: "content_block_delta",
+        index: 0,
+        delta: { type: "input_json_delta", partial_json: ' "Ho Chi Minh' },
+      },
+      {
+        type: "content_block_delta",
+        index: 0,
+        delta: { type: "input_json_delta", partial_json: ' City"}' },
+      },
+      { type: "content_block_stop", index: 0 },
+      { type: "message_delta", delta: { stop_reason: "tool_use", stop_sequence: null } },
+      { type: "message_stop" },
+    ];
+
+    const turnEndEvent = await collectTurnEndEvent(stream(model, context, { apiKey: "test-key" }));
+    expect(turnEndEvent.message.content).toHaveLength(1);
+    const block = turnEndEvent.message.content[0];
+    expect(block?.type).toBe("tool_call");
+    if (block?.type === "tool_call") {
+      expect(block.toolCallId).toBe("toolu_multi_delta");
+      expect(block.name).toBe("fetch_city");
+      expect(block.arguments).toBe('{"city": "Ho Chi Minh City"}');
     }
   });
 
