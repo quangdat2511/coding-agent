@@ -11,6 +11,9 @@ let failed = false;
 try {
   for (const name of ["ai", "agent-core", "tools", "tui"]) {
     const output = join(outputDirectory, `${name}.js`);
+    // Third-party packages stay unbundled: only the package's own code can import a sibling, and
+    // bundling dependencies fails on optional peers that are not installed, such as Ink's
+    // react-devtools-core. The @/ aliases still resolve to the package's own files.
     const build = Bun.spawnSync(
       [
         process.execPath,
@@ -18,6 +21,8 @@ try {
         `packages/${name}/src/index.ts`,
         "--target",
         "bun",
+        "--packages",
+        "external",
         "--external",
         "@coding-agent/*",
         "--outfile",
