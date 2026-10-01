@@ -2,7 +2,8 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "paths": {
-      "@/*": ["./src/*"],
+      // tsc resolves the alias inside ai's source with this config, so fall back to ai/src
+      "@/*": ["./src/*", "../ai/src/*"],
       "@tests/*": ["./tests/*"]
     }
   },
