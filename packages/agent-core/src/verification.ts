@@ -1,4 +1,4 @@
-import type { AssistantMessage, Message } from "@coding-agent/ai";
+import type { AssistantMessage, Message, UserMessage } from "@coding-agent/ai";
 
 export type VerificationEvidence =
   | {
@@ -24,9 +24,7 @@ export type VerificationEvidence =
       readonly workspaceChanged: boolean;
     };
 
-export interface VerificationFeedback {
-  readonly message: string;
-}
+export type VerificationFeedback = UserMessage;
 
 export interface VerificationProgress {
   readonly message: string;

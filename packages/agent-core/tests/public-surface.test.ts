@@ -275,7 +275,7 @@ describe("verification port", () => {
             durationMs: 120,
           },
         ],
-        feedback: { message: "[Verification Failed]" },
+        feedback: { role: "user", content: "[Verification Failed]" },
       },
       {
         outcome: "failed",
@@ -314,6 +314,17 @@ describe("verification port", () => {
     const noMessage: VerificationDecision = { outcome: "failed", evidence: [] };
 
     expect([noFeedback.outcome, noMessage.outcome]).toEqual(["continue", "failed"]);
+  });
+
+  it("sends feedback to the model as a user message (compile-time)", () => {
+    const decision: VerificationDecision = {
+      outcome: "continue",
+      evidence: [],
+      // @ts-expect-error feedback is a user message, not an assistant message
+      feedback: { role: "assistant", content: [{ type: "text", text: "[Verification Failed]" }] },
+    };
+
+    expect(decision.outcome).toBe("continue");
   });
 
   it("keeps the evidence union closed (compile-time)", () => {
@@ -707,7 +718,7 @@ describe("session events", () => {
       verificationId: "verification-1",
       outcome: "continue",
       evidence: [],
-      feedback: { message: "[Verification Failed]" },
+      feedback: { role: "user", content: "[Verification Failed]" },
     },
   } satisfies EventData;
 
