@@ -5,7 +5,10 @@ export type ApprovalPolicy = "ask" | "auto-approve";
 export interface ModelPort {
   readonly identity: Model;
   readonly capabilities: ModelCapabilities;
-  stream(context: Context, request: { signal: AbortSignal; parallelToolCalls: false }): ModelStream;
+  stream(
+    context: Context,
+    request: { readonly signal: AbortSignal; readonly parallelToolCalls: false },
+  ): ModelStream;
 }
 
 export interface Clock {
@@ -26,9 +29,9 @@ export interface IdSource {
 }
 
 export interface SessionLimits {
-  maxModelTurns: number;
-  maxToolCalls: number;
-  maxDurationMs: number;
-  maxConsecutiveRecoverableFailures: number;
-  cancellationGraceMs: number;
+  readonly maxModelTurns: number;
+  readonly maxToolCalls: number;
+  readonly maxDurationMs: number;
+  readonly maxConsecutiveRecoverableFailures: number;
+  readonly cancellationGraceMs: number;
 }

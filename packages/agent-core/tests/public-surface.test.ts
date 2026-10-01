@@ -34,6 +34,15 @@ import * as surface from "@/index";
 
 const asRepoPath = (path: string): RepoPath => path as RepoPath;
 
+const finalMessage: AssistantMessage = {
+  role: "assistant",
+  content: [{ type: "text", text: "done" }],
+  model: "fake",
+  finishReason: { reason: "end_turn", rawReason: "stop" },
+};
+const fakeModelIdentity = { id: "fake", name: "Fake", provider: "fake" };
+const messageRef = { modelTurnId: "turn-1", messageId: "message-1" };
+
 describe("workspace port", () => {
   const workspace: WorkspaceResolver = {
     repoRoot: asRepoPath("/repo"),
@@ -151,15 +160,8 @@ describe("tool ports", () => {
 });
 
 describe("injected ports", () => {
-  const finalMessage: AssistantMessage = {
-    role: "assistant",
-    content: [{ type: "text", text: "done" }],
-    model: "fake",
-    finishReason: { reason: "end_turn", rawReason: "stop" },
-  };
-
   const model: ModelPort = {
-    identity: { id: "fake", name: "Fake", provider: "fake" },
+    identity: fakeModelIdentity,
     capabilities: {
       parallelToolCallControl: false,
       cancellation: "client_abort_only",
@@ -228,7 +230,7 @@ describe("injected ports", () => {
     };
     const withVerificationAttempts: SessionLimits = {
       ...limits,
-      // @ts-expect-error ADR 0002 excludes a separate verification-attempt limit
+      // @ts-expect-error there is no separate verification-attempt limit
       maxVerificationAttempts: 3,
     };
 
@@ -250,12 +252,7 @@ describe("injected ports", () => {
 describe("verification port", () => {
   const candidate = {
     transcript: [],
-    finalMessage: {
-      role: "assistant",
-      content: [{ type: "text", text: "done" }],
-      model: "fake",
-      finishReason: { reason: "end_turn", rawReason: "stop" },
-    } satisfies AssistantMessage,
+    finalMessage,
     workspaceChanged: true,
   };
   const context = { signal: new AbortController().signal, onProgress: () => {} };
@@ -322,7 +319,7 @@ describe("verification port", () => {
   it("keeps the evidence union closed (compile-time)", () => {
     const decision: VerificationDecision = {
       outcome: "succeeded",
-      // @ts-expect-error only the three ADR 0003 evidence records exist
+      // @ts-expect-error the evidence union is closed
       evidence: [{ type: "screenshot" }],
     };
 
@@ -377,12 +374,6 @@ describe("agent session interface", () => {
 describe("agent result", () => {
   const usage: UsageTotals = { inputTokens: 10, outputTokens: 5 };
   const base = { usage, workspaceChanged: false, partialChangesPossible: false, lastSequence: 7 };
-  const finalMessage: AssistantMessage = {
-    role: "assistant",
-    content: [{ type: "text", text: "done" }],
-    model: "fake",
-    finishReason: { reason: "end_turn", rawReason: "stop" },
-  };
 
   const describeResult = (result: AgentResult): string => {
     switch (result.outcome) {
@@ -505,12 +496,6 @@ describe("agent state", () => {
     name: "write",
     arguments: '{"path":"a.ts","content":""}',
   };
-  const finalMessage: AssistantMessage = {
-    role: "assistant",
-    content: [{ type: "text", text: "done" }],
-    model: "fake",
-    finishReason: { reason: "end_turn", rawReason: "stop" },
-  };
   const resultBase = {
     usage: common.usage,
     workspaceChanged: false,
@@ -540,7 +525,7 @@ describe("agent state", () => {
       phase: "verifying",
       verification: {
         verificationId: "verification-1",
-        candidate: { modelTurnId: "turn-1", messageId: "message-1" },
+        candidate: messageRef,
       },
     },
     { ...common, phase: "cancelling", requestedFrom: "executing_tool", reason: "user" },
@@ -656,12 +641,6 @@ describe("session events", () => {
   type DataOf<T extends SessionEvent["type"]> = Extract<SessionEvent, { type: T }>["data"];
   type EventData = { [T in SessionEvent["type"]]: DataOf<T> };
 
-  const finalMessage: AssistantMessage = {
-    role: "assistant",
-    content: [{ type: "text", text: "done" }],
-    model: "fake",
-    finishReason: { reason: "end_turn", rawReason: "stop" },
-  };
   const usage = { inputTokens: 10, outputTokens: 5 };
   const toolCall: NormalizedToolCall = { id: "tool-1", name: "write", arguments: "{}" };
 
@@ -682,9 +661,9 @@ describe("session events", () => {
     model_turn_started: {
       modelTurnId: "turn-1",
       index: 0,
-      model: { id: "fake", name: "Fake", provider: "fake" },
+      model: fakeModelIdentity,
     },
-    assistant_message_started: { modelTurnId: "turn-1", messageId: "message-1" },
+    assistant_message_started: messageRef,
     assistant_content_delta: { messageId: "message-1", blockIndex: 0, kind: "text", delta: "Look" },
     assistant_message_completed: {
       messageId: "message-1",
@@ -692,7 +671,7 @@ describe("session events", () => {
       message: finalMessage,
     },
     model_turn_completed: { modelTurnId: "turn-1", outcome: "completed", usage },
-    candidate_completion_detected: { modelTurnId: "turn-1", messageId: "message-1" },
+    candidate_completion_detected: messageRef,
     tool_call_queued: { modelTurnId: "turn-1", queueIndex: 0, toolCall },
     approval_requested: {
       approvalId: "approval-1",
@@ -721,7 +700,7 @@ describe("session events", () => {
     },
     verification_started: {
       verificationId: "verification-1",
-      candidate: { modelTurnId: "turn-1", messageId: "message-1" },
+      candidate: messageRef,
     },
     verification_progress: { verificationId: "verification-1", update: { message: "running" } },
     verification_completed: {
@@ -732,7 +711,7 @@ describe("session events", () => {
     },
   } satisfies EventData;
 
-  it("has nineteen event types, each with the payload ADR 0002 lists", () => {
+  it("has nineteen event types, each with its payload", () => {
     expect(Object.keys(payloads)).toHaveLength(19);
   });
 

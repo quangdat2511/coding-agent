@@ -8,21 +8,21 @@ import type { VerificationPolicy } from "@/verification";
 import type { WorkspaceResolver } from "@/workspace";
 
 export type SessionCommand =
-  | { type: "start"; task: CodingTask }
+  | { readonly type: "start"; readonly task: CodingTask }
   | {
-      type: "resolve_approval";
-      approvalId: string;
-      decision: "allow" | "deny";
-      reason?: string;
+      readonly type: "resolve_approval";
+      readonly approvalId: string;
+      readonly decision: "allow" | "deny";
+      readonly reason?: string;
     }
-  | { type: "cancel"; reason?: string };
+  | { readonly type: "cancel"; readonly reason?: string };
 
 export type CommandResult =
-  | { accepted: true; sequence: number }
+  | { readonly accepted: true; readonly sequence: number }
   | {
-      accepted: false;
-      code: "INVALID_STATE" | "ALREADY_STARTED" | "STALE_APPROVAL" | "ALREADY_SETTLED";
-      message: string;
+      readonly accepted: false;
+      readonly code: "INVALID_STATE" | "ALREADY_STARTED" | "STALE_APPROVAL" | "ALREADY_SETTLED";
+      readonly message: string;
     };
 
 export interface AgentSession {
@@ -33,17 +33,22 @@ export interface AgentSession {
 }
 
 export interface OpenSessionConfig {
-  model: ModelPort;
-  systemPrompt: string;
-  tools: ToolRegistry;
-  workspace: WorkspaceResolver;
-  approvalPolicy: ApprovalPolicy;
-  verification: VerificationPolicy;
-  limits: SessionLimits;
-  clock: Clock;
-  ids: IdSource;
+  readonly model: ModelPort;
+  readonly systemPrompt: string;
+  readonly tools: ToolRegistry;
+  readonly workspace: WorkspaceResolver;
+  readonly approvalPolicy: ApprovalPolicy;
+  readonly verification: VerificationPolicy;
+  readonly limits: SessionLimits;
+  readonly clock: Clock;
+  readonly ids: IdSource;
 }
 
 export type OpenSessionResult =
-  | { ok: true; session: AgentSession }
-  | { ok: false; code: "INVALID_CONFIGURATION"; message: string; field?: string };
+  | { readonly ok: true; readonly session: AgentSession }
+  | {
+      readonly ok: false;
+      readonly code: "INVALID_CONFIGURATION";
+      readonly message: string;
+      readonly field?: string;
+    };

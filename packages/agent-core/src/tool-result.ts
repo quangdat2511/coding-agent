@@ -13,6 +13,11 @@ export type ToolErrorCode =
   | "APPROVAL_DENIED"
   | "TOOL_INTERNAL_ERROR";
 
+export interface ToolError {
+  readonly code: ToolErrorCode;
+  readonly message: string;
+}
+
 export type ApprovalStatus = "allowed" | "denied" | "auto_approved";
 
 export type ApprovalDecider = "user" | "policy";
@@ -22,10 +27,7 @@ export interface ToolResult {
   readonly toolName: string;
   readonly content: string;
   readonly isError: boolean;
-  readonly error?: {
-    readonly code: ToolErrorCode;
-    readonly message: string;
-  };
+  readonly error?: ToolError;
   readonly metadata?: {
     readonly durationMs: number;
     readonly approval?: {

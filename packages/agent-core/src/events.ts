@@ -1,5 +1,5 @@
 import type { AssistantMessage, Model } from "@coding-agent/ai";
-import type { ApprovalPolicy, SessionLimits } from "@/ports";
+import type { SessionLimits } from "@/ports";
 import type { AgentFailure, AgentFailureCode, AgentResult, UsageTotals } from "@/result";
 import type {
   AssistantMessageRef,
@@ -7,6 +7,7 @@ import type {
   DisplayContentKind,
   ModelTurnRef,
   NormalizedToolCall,
+  PendingApproval,
   VerificationRun,
 } from "@/state";
 import type { CodingTask } from "@/task";
@@ -31,7 +32,7 @@ export type LimitKind = Exclude<keyof SessionLimits, "cancellationGraceMs">;
 
 export type SkipReason = "CANCELLED" | AgentFailureCode;
 
-export type StepOutcome = "completed" | "failed" | "cancelled";
+export type ModelTurnOutcome = "completed" | "failed" | "cancelled";
 
 export type SessionStartedEvent = SessionEventEnvelope<"session_started", { task: CodingTask }>;
 
@@ -64,12 +65,17 @@ export type AssistantContentDeltaEvent = SessionEventEnvelope<
 
 export type AssistantMessageCompletedEvent = SessionEventEnvelope<
   "assistant_message_completed",
-  { messageId: string; outcome: StepOutcome; message: AssistantMessage; failure?: AgentFailure }
+  {
+    messageId: string;
+    outcome: ModelTurnOutcome;
+    message: AssistantMessage;
+    failure?: AgentFailure;
+  }
 >;
 
 export type ModelTurnCompletedEvent = SessionEventEnvelope<
   "model_turn_completed",
-  { modelTurnId: string; outcome: StepOutcome; usage: UsageTotals; failure?: AgentFailure }
+  { modelTurnId: string; outcome: ModelTurnOutcome; usage: UsageTotals; failure?: AgentFailure }
 >;
 
 export type CandidateCompletionDetectedEvent = SessionEventEnvelope<
@@ -84,7 +90,7 @@ export type ToolCallQueuedEvent = SessionEventEnvelope<
 
 export type ApprovalRequestedEvent = SessionEventEnvelope<
   "approval_requested",
-  { approvalId: string; toolCallId: string; summary: string; policy: ApprovalPolicy }
+  PendingApproval & { toolCallId: string }
 >;
 
 export type ApprovalResolvedEvent = SessionEventEnvelope<
