@@ -1,0 +1,331 @@
+import { afterEach, describe, expect, it } from "bun:test";
+import { createTestTerminal, type TestTerminal } from "@tests/support/terminal";
+import * as publicApi from "@/index";
+import { type MountedTui, mountTui } from "@/render";
+import type { TranscriptEntry, TuiHandlers } from "@/types";
+
+const COLUMNS = 80;
+const ROWS = 24;
+
+const TASK = "Sửa test đang lỗi trong src/math.ts";
+
+// Rendering never calls a handler; input arrives in a later ticket.
+function unexpectedHandlerCall(): never {
+  throw new Error("The TUI called a handler while rendering");
+}
+const handlers: TuiHandlers = {
+  onSubmit: unexpectedHandlerCall,
+  onCancel: unexpectedHandlerCall,
+  onApproval: unexpectedHandlerCall,
+};
+
+const mounted: { tui: MountedTui; terminal: TestTerminal }[] = [];
+
+function mount(
+  transcript: readonly TranscriptEntry[],
+  terminal = createTestTerminal(COLUMNS, ROWS),
+) {
+  const tui = mountTui({ model: { transcript }, handlers }, terminal.streams);
+  mounted.push({ tui, terminal });
+  return { tui, terminal };
+}
+
+// The whole visible screen: the given rows, then empty rows to the bottom.
+function screenOf(...rows: string[]): string[] {
+  return [...rows, ...Array.from({ length: ROWS - rows.length }, () => "")];
+}
+
+afterEach(async () => {
+  for (const { tui, terminal } of mounted.splice(0)) {
+    await tui.unmount();
+    terminal.dispose();
+  }
+});
+
+describe("renderTui", () => {
+  it("draws user messages, assistant text, Tool Calls and Tool Results", async () => {
+    const { tui, terminal } = mount([
+      { kind: "user", id: "task", text: TASK },
+      {
+        kind: "assistant",
+        id: "message-1",
+        text: "I'll read the file first.",
+        status: "completed",
+      },
+      {
+        kind: "tool_call",
+        id: "call-1",
+        toolName: "read",
+        summary: "src/math.ts",
+        status: "succeeded",
+        result: {
+          content: "1 | export const add = (a: number, b: number) => a - b;",
+          isError: false,
+        },
+      },
+      { kind: "tool_call", id: "call-2", toolName: "bash", summary: "bun test", status: "queued" },
+    ]);
+    await tui.flush();
+
+    expect(terminal.screen()).toEqual(
+      screenOf(
+        `> ${TASK}`,
+        "",
+        "assistant [completed]",
+        "I'll read the file first.",
+        "",
+        "read src/math.ts [succeeded]",
+        "  1 | export const add = (a: number, b: number) => a - b;",
+        "",
+        "bash bun test [queued]",
+      ),
+    );
+  });
+
+  it("shows every status, Tool Result, error code and truncation as text", async () => {
+    const { tui, terminal } = mount([
+      { kind: "assistant", id: "a-1", text: "Reading", status: "streaming" },
+      { kind: "assistant", id: "a-2", text: "Stopped", status: "cancelled" },
+      { kind: "assistant", id: "a-3", text: "Provider error", status: "failed" },
+      { kind: "tool_call", id: "t-1", toolName: "bash", summary: "bun test", status: "executing" },
+      {
+        kind: "tool_call",
+        id: "t-2",
+        toolName: "bash",
+        summary: "bun test",
+        status: "failed",
+        result: { content: "1 fail", isError: true, errorCode: "NON_ZERO_EXIT", truncated: true },
+      },
+      {
+        kind: "tool_call",
+        id: "t-3",
+        toolName: "write",
+        summary: "src/math.ts",
+        status: "denied",
+        result: { content: "Approval denied", isError: true, errorCode: "APPROVAL_DENIED" },
+      },
+      { kind: "tool_call", id: "t-4", toolName: "edit", summary: "src/math.ts", status: "skipped" },
+      { kind: "tool_call", id: "t-5", toolName: "bash", summary: "sleep 60", status: "cancelled" },
+    ]);
+    await tui.flush();
+
+    expect(terminal.screen()).toEqual(
+      screenOf(
+        "assistant [streaming]",
+        "Reading",
+        "",
+        "assistant [cancelled]",
+        "Stopped",
+        "",
+        "assistant [failed]",
+        "Provider error",
+        "",
+        "bash bun test [executing]",
+        "",
+        "bash bun test [failed, NON_ZERO_EXIT, truncated]",
+        "  1 fail",
+        "",
+        "write src/math.ts [denied, APPROVAL_DENIED]",
+        "  Approval denied",
+        "",
+        "edit src/math.ts [skipped]",
+        "",
+        "bash sleep 60 [cancelled]",
+      ),
+    );
+  });
+
+  it("redraws in place on every update without duplicating content", async () => {
+    const task: TranscriptEntry = { kind: "user", id: "task", text: TASK };
+    const { tui, terminal } = mount([task]);
+    await tui.flush();
+    expect(terminal.screen()).toEqual(screenOf(`> ${TASK}`));
+
+    // Updates between two frames collapse into one frame showing the latest model.
+    for (const text of ["I'll", "I'll read", "I'll read the file first."]) {
+      tui.update({
+        transcript: [task, { kind: "assistant", id: "m-1", text, status: "streaming" }],
+      });
+    }
+    await tui.flush();
+    expect(terminal.screen()).toEqual(
+      screenOf(`> ${TASK}`, "", "assistant [streaming]", "I'll read the file first."),
+    );
+
+    const message: Extract<TranscriptEntry, { kind: "assistant" }> = {
+      kind: "assistant",
+      id: "m-1",
+      text: "I'll read the file first.",
+      status: "completed",
+    };
+    const read = {
+      kind: "tool_call",
+      id: "c-1",
+      toolName: "read",
+      summary: "src/math.ts",
+    } as const;
+    const steps: { transcript: TranscriptEntry[]; screen: string[] }[] = [
+      {
+        transcript: [task, message, { ...read, status: "queued" }],
+        screen: screenOf(
+          `> ${TASK}`,
+          "",
+          "assistant [completed]",
+          "I'll read the file first.",
+          "",
+          "read src/math.ts [queued]",
+        ),
+      },
+      {
+        transcript: [task, message, { ...read, status: "executing" }],
+        screen: screenOf(
+          `> ${TASK}`,
+          "",
+          "assistant [completed]",
+          "I'll read the file first.",
+          "",
+          "read src/math.ts [executing]",
+        ),
+      },
+      {
+        transcript: [
+          task,
+          message,
+          {
+            ...read,
+            status: "succeeded",
+            result: { content: "1 | export const add = (a, b) => a - b;", isError: false },
+          },
+        ],
+        screen: screenOf(
+          `> ${TASK}`,
+          "",
+          "assistant [completed]",
+          "I'll read the file first.",
+          "",
+          "read src/math.ts [succeeded]",
+          "  1 | export const add = (a, b) => a - b;",
+        ),
+      },
+      {
+        // Shorter lines and fewer rows must not leave characters from the previous frame behind.
+        transcript: [task, { ...message, text: "Done.", status: "failed" }],
+        screen: screenOf(`> ${TASK}`, "", "assistant [failed]", "Done."),
+      },
+    ];
+    for (const step of steps) {
+      tui.update({ transcript: step.transcript });
+      await tui.flush();
+      expect(terminal.screen()).toEqual(step.screen);
+    }
+
+    expect(terminal.terminal.buffer.active.type).toBe("alternate");
+    expect(terminal.terminal.buffer.active.baseY).toBe(0);
+  });
+
+  it("restores the main screen and shows the cursor after unmount", async () => {
+    const terminal = createTestTerminal(COLUMNS, ROWS);
+    await terminal.print("$ coding-agent\n");
+    const { tui } = mount([{ kind: "user", id: "task", text: TASK }], terminal);
+    await tui.flush();
+    expect(terminal.terminal.buffer.active.type).toBe("alternate");
+    expect(await terminal.isCursorVisible()).toBe(false);
+
+    await tui.unmount();
+
+    expect(terminal.terminal.buffer.active.type).toBe("normal");
+    expect(await terminal.isCursorVisible()).toBe(true);
+    expect(terminal.screen()).toEqual(screenOf("$ coding-agent"));
+    expect(terminal.terminal.buffer.active.cursorY).toBe(1);
+  });
+
+  it("starts the transcript on the first row when the shell left the cursor lower", async () => {
+    const terminal = createTestTerminal(COLUMNS, ROWS);
+    const shellOutput = Array.from({ length: 10 }, (_, index) => `shell line ${index + 1}`);
+    await terminal.print(`${shellOutput.join("\n")}\n`);
+    expect(terminal.terminal.buffer.active.cursorY).toBe(10);
+
+    const { tui } = mount([{ kind: "user", id: "task", text: TASK }], terminal);
+    await tui.flush();
+
+    expect(terminal.terminal.buffer.active.type).toBe("alternate");
+    expect(terminal.screen()).toEqual(screenOf(`> ${TASK}`));
+
+    await tui.unmount();
+    expect(terminal.screen()).toEqual(screenOf(...shellOutput));
+    expect(terminal.terminal.buffer.active.cursorY).toBe(10);
+  });
+
+  it("draws Vietnamese text on the expected row and columns", async () => {
+    // Precomposed characters, one cell each.
+    expect(TASK.normalize("NFC")).toBe(TASK);
+    const result = "Đã sửa: hàm add() trả về a + b";
+    const { tui, terminal } = mount([
+      { kind: "user", id: "task", text: TASK },
+      {
+        kind: "tool_call",
+        id: "c-1",
+        toolName: "edit",
+        summary: "src/math.ts",
+        status: "succeeded",
+        result: { content: result, isError: false },
+      },
+    ]);
+    await tui.flush();
+
+    expect(terminal.screen()[0]).toBe(`> ${TASK}`);
+    expect(terminal.cell(0, 2)).toBe("S");
+    expect(terminal.cell(0, 3)).toBe("ử");
+    expect(terminal.cell(0, 2 + TASK.length - 1)).toBe("s");
+    expect(terminal.cell(0, 2 + TASK.length)).toBe("");
+
+    expect(terminal.screen()[3]).toBe(`  ${result}`);
+    expect(terminal.cell(3, 2)).toBe("Đ");
+    expect(terminal.cell(3, 3)).toBe("ã");
+    expect(terminal.cell(3, 2 + result.length - 1)).toBe("b");
+  });
+
+  it("replaces control characters that would move the cursor", async () => {
+    const call = {
+      kind: "tool_call",
+      id: "c-1",
+      toolName: "bash",
+      summary: "cat notes.txt",
+      status: "succeeded",
+      result: { content: "name\tvalue\r\nbell\u0007 and back\bspace", isError: false },
+    } as const;
+    const { tui, terminal } = mount([call]);
+    await tui.flush();
+    const expected = ["bash cat notes.txt [succeeded]", "  name    value", "  bell and backspace"];
+    expect(terminal.screen()).toEqual(screenOf(...expected));
+
+    tui.update({ transcript: [call, { kind: "user", id: "next", text: "Thanks" }] });
+    await tui.flush();
+    expect(terminal.screen()).toEqual(screenOf(...expected, "", "> Thanks"));
+  });
+
+  it("ignores updates after unmount and unmounts once", async () => {
+    const { tui, terminal } = mount([{ kind: "user", id: "task", text: TASK }]);
+    await tui.flush();
+
+    const unmounted = tui.unmount();
+    expect(tui.unmount()).toBe(unmounted);
+    await unmounted;
+    tui.update({ transcript: [{ kind: "user", id: "late", text: "Too late" }] });
+    await tui.flush();
+
+    expect(terminal.terminal.buffer.active.type).toBe("normal");
+    expect(terminal.screen()).toEqual(screenOf());
+  });
+
+  it("leaves no beforeExit listener behind", async () => {
+    const listeners = process.listenerCount("beforeExit");
+    const { tui } = mount([{ kind: "user", id: "task", text: TASK }]);
+    await tui.unmount();
+    expect(process.listenerCount("beforeExit")).toBe(listeners);
+  });
+
+  it("exports only renderTui at runtime", () => {
+    expect(Object.keys(publicApi)).toEqual(["renderTui"]);
+  });
+});
