@@ -1,13 +1,26 @@
 import { afterAll, beforeAll, describe, expect, it, spyOn } from "bun:test";
 import Anthropic from "@anthropic-ai/sdk";
 import { collectTurnEndEvent } from "@tests/test-utils";
-import { mapAnthropicFinishReason, stream } from "@/api/anthropic-responses";
-import type { Context, Model } from "@/types";
+import { Type } from "typebox";
+import {
+  buildParams,
+  buildTools,
+  mapAnthropicFinishReason,
+  stream,
+} from "@/api/anthropic-responses";
+import type { Context, Model, ToolDeclaration } from "@/types";
 
 type AnthropicStreamChunk =
   | {
       type: "message_start";
-      message: { usage: { input_tokens: number; output_tokens?: number } };
+      message: {
+        usage: {
+          input_tokens: number;
+          output_tokens?: number;
+          cache_read_input_tokens?: number | null;
+          cache_creation_input_tokens?: number | null;
+        };
+      };
     }
   | {
       type: "content_block_start";
@@ -23,7 +36,9 @@ type AnthropicStreamChunk =
   | {
       type: "content_block_delta";
       index: number;
-      delta: { type: "text_delta"; text: string };
+      delta:
+        | { type: "text_delta"; text: string }
+        | { type: "input_json_delta"; partial_json: string };
     }
   | {
       type: "content_block_stop";
@@ -32,7 +47,11 @@ type AnthropicStreamChunk =
   | {
       type: "message_delta";
       delta: { stop_reason: string | null; stop_sequence: string | null };
-      usage?: { output_tokens: number };
+      usage?: {
+        output_tokens: number;
+        cache_read_input_tokens?: number | null;
+        cache_creation_input_tokens?: number | null;
+      };
     }
   | {
       type: "message_stop";
@@ -42,6 +61,7 @@ let mockEvents: AnthropicStreamChunk[] = [];
 let mockCreateError: Error | null = null;
 let lastClientOptions: { maxRetries?: number } | undefined;
 let lastCreateOptions: { signal?: AbortSignal } | undefined;
+let lastCreateBody: unknown | undefined;
 
 describe("mapAnthropicFinishReason", () => {
   it("maps max_tokens to max_output_tokens", () => {
@@ -95,6 +115,321 @@ describe("mapAnthropicFinishReason", () => {
   });
 });
 
+describe("buildTools", () => {
+  it("returns undefined when tools is undefined or empty", () => {
+    expect(buildTools(undefined)).toBeUndefined();
+    expect(buildTools([])).toBeUndefined();
+  });
+
+  it("maps ToolDeclaration to Anthropic tool schema", () => {
+    const tools: ToolDeclaration[] = [
+      {
+        name: "get_weather",
+        description: "Get weather for a city",
+        parameters: Type.Object({
+          city: Type.String({ description: "City name" }),
+        }),
+      },
+    ];
+
+    const result = buildTools(tools);
+    expect(result).toBeDefined();
+    expect(result).toHaveLength(1);
+    expect(result?.[0]?.name).toBe("get_weather");
+    expect(result?.[0]?.description).toBe("Get weather for a city");
+    expect(result?.[0]?.input_schema).toBeDefined();
+  });
+});
+
+describe("buildParams", () => {
+  it("maps user string message to Anthropic message param", () => {
+    const context: Context = {
+      messages: [{ role: "user", content: "Hello Anthropic" }],
+    };
+    const params = buildParams(context);
+    expect(params).toEqual([{ role: "user", content: "Hello Anthropic" }]);
+  });
+
+  it("maps user text blocks to Anthropic text block params", () => {
+    const context: Context = {
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "text", text: "Hello part 1" },
+            { type: "text", text: " and part 2" },
+          ],
+        },
+      ],
+    };
+    const params = buildParams(context);
+    expect(params).toEqual([
+      {
+        role: "user",
+        content: [
+          { type: "text", text: "Hello part 1" },
+          { type: "text", text: " and part 2" },
+        ],
+      },
+    ]);
+  });
+
+  it("throws when user message contains tool_result (deferred to CDA-43)", () => {
+    const context: Context = {
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "text", text: "check result" },
+            { type: "tool_result", toolCallId: "call_1", content: "success", isError: false },
+          ],
+        },
+      ],
+    };
+    expect(() => buildParams(context)).toThrow(
+      "tool_result history is not supported by the Anthropic adapter yet (CDA-43)",
+    );
+  });
+
+  it("maps assistant message containing text and tool_call", () => {
+    const context: Context = {
+      messages: [
+        {
+          role: "assistant",
+          content: [
+            { type: "text", text: "Let me check the weather." },
+            {
+              type: "tool_call",
+              toolCallId: "call_weather_1",
+              name: "get_weather",
+              arguments: '{"city":"Tokyo"}',
+            },
+          ],
+          model: "claude-haiku-4-5",
+          finishReason: { reason: "tool_call", rawReason: "tool_use" },
+        },
+      ],
+    };
+    const params = buildParams(context);
+    expect(params).toEqual([
+      {
+        role: "assistant",
+        content: [
+          { type: "text", text: "Let me check the weather." },
+          {
+            type: "tool_use",
+            id: "call_weather_1",
+            name: "get_weather",
+            input: { city: "Tokyo" },
+          },
+        ],
+      },
+    ]);
+  });
+
+  it("handles malformed JSON arguments in assistant tool_call gracefully", () => {
+    const context: Context = {
+      messages: [
+        {
+          role: "assistant",
+          content: [
+            {
+              type: "tool_call",
+              toolCallId: "call_bad",
+              name: "bad_tool",
+              arguments: "{broken-json",
+            },
+          ],
+          model: "claude-haiku-4-5",
+          finishReason: { reason: "tool_call", rawReason: "tool_use" },
+        },
+      ],
+    };
+    const params = buildParams(context);
+    expect(params).toEqual([
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "tool_use",
+            id: "call_bad",
+            name: "bad_tool",
+            input: {},
+          },
+        ],
+      },
+    ]);
+  });
+
+  it("handles non-object JSON values in assistant tool_call arguments gracefully", () => {
+    const context: Context = {
+      messages: [
+        {
+          role: "assistant",
+          content: [
+            {
+              type: "tool_call",
+              toolCallId: "call_null",
+              name: "null_tool",
+              arguments: "null",
+            },
+            {
+              type: "tool_call",
+              toolCallId: "call_num",
+              name: "num_tool",
+              arguments: "123",
+            },
+            {
+              type: "tool_call",
+              toolCallId: "call_arr",
+              name: "arr_tool",
+              arguments: "[1, 2]",
+            },
+          ],
+          model: "claude-haiku-4-5",
+          finishReason: { reason: "tool_call", rawReason: "tool_use" },
+        },
+      ],
+    };
+    const params = buildParams(context);
+    expect(params).toEqual([
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "tool_use",
+            id: "call_null",
+            name: "null_tool",
+            input: {},
+          },
+          {
+            type: "tool_use",
+            id: "call_num",
+            name: "num_tool",
+            input: {},
+          },
+          {
+            type: "tool_use",
+            id: "call_arr",
+            name: "arr_tool",
+            input: {},
+          },
+        ],
+      },
+    ]);
+  });
+
+  it("throws when user message has empty content array", () => {
+    const context: Context = {
+      messages: [{ role: "user", content: [] }],
+    };
+    expect(() => buildParams(context)).toThrow(
+      "Anthropic messages require at least one content block (role: user)",
+    );
+  });
+
+  it("throws when user message has empty string content", () => {
+    const context: Context = {
+      messages: [{ role: "user", content: "   " }],
+    };
+    expect(() => buildParams(context)).toThrow(
+      "Anthropic messages require non-empty text content (role: user)",
+    );
+  });
+
+  it("throws when assistant message has empty content array", () => {
+    const context: Context = {
+      messages: [
+        {
+          role: "assistant",
+          content: [],
+          model: "claude-haiku-4-5",
+          finishReason: { reason: "end_turn", rawReason: "end_turn" },
+        },
+      ],
+    };
+    expect(() => buildParams(context)).toThrow(
+      "Anthropic messages require at least one content block (role: assistant)",
+    );
+  });
+
+  it("throws when message contains only empty text blocks", () => {
+    const context: Context = {
+      messages: [
+        {
+          role: "user",
+          content: [{ type: "text", text: "" }],
+        },
+      ],
+    };
+    expect(() => buildParams(context)).toThrow(
+      "Anthropic messages require at least one content block (role: user)",
+    );
+  });
+
+  it("throws when message contains only whitespace text blocks", () => {
+    const context: Context = {
+      messages: [
+        {
+          role: "user",
+          content: [{ type: "text", text: "   \t\n  " }],
+        },
+      ],
+    };
+    expect(() => buildParams(context)).toThrow(
+      "Anthropic messages require at least one content block (role: user)",
+    );
+  });
+
+  it("filters out empty or whitespace-only text blocks when message has valid content blocks", () => {
+    const context: Context = {
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "text", text: "valid text" },
+            { type: "text", text: "" },
+            { type: "text", text: "   " },
+          ],
+        },
+        {
+          role: "assistant",
+          content: [
+            { type: "text", text: "" },
+            { type: "text", text: " \n " },
+            {
+              type: "tool_call",
+              toolCallId: "call_1",
+              name: "my_tool",
+              arguments: "{}",
+            },
+          ],
+          model: "claude-haiku-4-5",
+          finishReason: { reason: "tool_call", rawReason: "tool_use" },
+        },
+      ],
+    };
+    const params = buildParams(context);
+    expect(params).toEqual([
+      {
+        role: "user",
+        content: [{ type: "text", text: "valid text" }],
+      },
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "tool_use",
+            id: "call_1",
+            name: "my_tool",
+            input: {},
+          },
+        ],
+      },
+    ]);
+  });
+});
+
 describe("Anthropic stream finishReason handling", () => {
   let messagesCreateSpy: { mockRestore: () => void };
 
@@ -111,7 +446,7 @@ describe("Anthropic stream finishReason handling", () => {
       }
     ).mockImplementation(async function (
       this: { _client: { maxRetries?: number } },
-      _body: unknown,
+      body: unknown,
       options?: { signal?: AbortSignal },
     ) {
       if (mockCreateError) {
@@ -119,6 +454,7 @@ describe("Anthropic stream finishReason handling", () => {
       }
       lastClientOptions = { maxRetries: this._client.maxRetries };
       lastCreateOptions = options;
+      lastCreateBody = body;
       return (async function* () {
         for (const event of mockEvents) {
           yield event;
@@ -232,7 +568,46 @@ describe("Anthropic stream finishReason handling", () => {
     expect(turnEndEvent.message.usage).toEqual({
       inputTokens: 42,
       outputTokens: 18,
+      raw: {
+        input_tokens: 42,
+        output_tokens: 18,
+      },
     });
+  });
+
+  it("captures cachedInputTokens from cache_read_input_tokens and preserves raw usage", async () => {
+    mockEvents = [
+      {
+        type: "message_start",
+        message: {
+          usage: {
+            input_tokens: 100,
+            output_tokens: 0,
+            cache_read_input_tokens: 40,
+            cache_creation_input_tokens: 20,
+          },
+        },
+      },
+      { type: "content_block_start", index: 0, content_block: { type: "text" } },
+      {
+        type: "content_block_delta",
+        index: 0,
+        delta: { type: "text_delta", text: "Cached prompt response" },
+      },
+      { type: "content_block_stop", index: 0 },
+      {
+        type: "message_delta",
+        delta: { stop_reason: "end_turn", stop_sequence: null },
+        usage: { output_tokens: 15 },
+      },
+      { type: "message_stop" },
+    ];
+
+    const turnEndEvent = await collectTurnEndEvent(stream(model, context, { apiKey: "test-key" }));
+    expect(turnEndEvent.message.usage?.inputTokens).toBe(100);
+    expect(turnEndEvent.message.usage?.outputTokens).toBe(15);
+    expect(turnEndEvent.message.usage?.cachedInputTokens).toBe(40);
+    expect(turnEndEvent.message.usage?.raw?.cache_creation_input_tokens).toBe(20);
   });
 
   it("handles multi-block responses — tool_use block emits start/stop and populates turn_end content", async () => {
@@ -269,6 +644,44 @@ describe("Anthropic stream finishReason handling", () => {
       expect(textBlocks.length).toBe(1);
       expect(toolCallBlocks.length).toBe(1);
       expect(toolCallBlocks[0]?.type === "tool_call" && toolCallBlocks[0].name).toBe("my_tool");
+    }
+  });
+
+  it("accumulates multiple input_json_delta fragments into complete raw tool_call arguments", async () => {
+    mockEvents = [
+      {
+        type: "content_block_start",
+        index: 0,
+        content_block: { type: "tool_use", id: "toolu_multi_delta", name: "fetch_city", input: {} },
+      },
+      {
+        type: "content_block_delta",
+        index: 0,
+        delta: { type: "input_json_delta", partial_json: '{"city":' },
+      },
+      {
+        type: "content_block_delta",
+        index: 0,
+        delta: { type: "input_json_delta", partial_json: ' "Ho Chi Minh' },
+      },
+      {
+        type: "content_block_delta",
+        index: 0,
+        delta: { type: "input_json_delta", partial_json: ' City"}' },
+      },
+      { type: "content_block_stop", index: 0 },
+      { type: "message_delta", delta: { stop_reason: "tool_use", stop_sequence: null } },
+      { type: "message_stop" },
+    ];
+
+    const turnEndEvent = await collectTurnEndEvent(stream(model, context, { apiKey: "test-key" }));
+    expect(turnEndEvent.message.content).toHaveLength(1);
+    const block = turnEndEvent.message.content[0];
+    expect(block?.type).toBe("tool_call");
+    if (block?.type === "tool_call") {
+      expect(block.toolCallId).toBe("toolu_multi_delta");
+      expect(block.name).toBe("fetch_city");
+      expect(block.arguments).toBe('{"city": "Ho Chi Minh City"}');
     }
   });
 
@@ -365,7 +778,7 @@ describe("Anthropic stream finishReason handling", () => {
     }
   });
 
-  it("emits error event and rejects result() when context contains tool_call/tool_result", async () => {
+  it("emits error event and rejects result() when context contains tool_result (CDA-43)", async () => {
     const contextWithToolResult: Context = {
       messages: [
         {
@@ -387,12 +800,47 @@ describe("Anthropic stream finishReason handling", () => {
     expect(events[0]?.type).toBe("error");
     if (events[0]?.type === "error") {
       expect(events[0].error.message).toContain(
-        "tool_call/tool_result content is not supported by this adapter yet",
+        "tool_result history is not supported by the Anthropic adapter yet (CDA-43)",
       );
     }
     await expect(streamObj.result()).rejects.toThrow(
-      "tool_call/tool_result content is not supported by this adapter yet",
+      "tool_result history is not supported by the Anthropic adapter yet (CDA-43)",
     );
+  });
+
+  it("passes tools to client.messages.create when context.tools is provided", async () => {
+    const contextWithTools: Context = {
+      messages: [{ role: "user", content: "Hello with tools" }],
+      tools: [
+        {
+          name: "calculate",
+          description: "Perform math calculation",
+          parameters: Type.Object({
+            expression: Type.String(),
+          }),
+        },
+      ],
+    };
+
+    mockEvents = [
+      { type: "content_block_start", index: 0, content_block: { type: "text" } },
+      { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "Result" } },
+      { type: "content_block_stop", index: 0 },
+      { type: "message_delta", delta: { stop_reason: "end_turn", stop_sequence: null } },
+      { type: "message_stop" },
+    ];
+
+    await collectTurnEndEvent(
+      stream(model, contextWithTools, {
+        apiKey: "test-key",
+      }),
+    );
+
+    const body = lastCreateBody as { tools?: Array<{ name: string; description: string }> };
+    expect(body.tools).toBeDefined();
+    expect(body.tools).toHaveLength(1);
+    expect(body.tools?.[0]?.name).toBe("calculate");
+    expect(body.tools?.[0]?.description).toBe("Perform math calculation");
   });
 
   it("emits error event and rejects result() when messages.create throws an error", async () => {
