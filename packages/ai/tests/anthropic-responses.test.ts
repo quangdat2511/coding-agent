@@ -367,7 +367,21 @@ describe("buildParams", () => {
     );
   });
 
-  it("filters out empty text blocks when message has valid content blocks", () => {
+  it("throws when message contains only whitespace text blocks", () => {
+    const context: Context = {
+      messages: [
+        {
+          role: "user",
+          content: [{ type: "text", text: "   \t\n  " }],
+        },
+      ],
+    };
+    expect(() => buildParams(context)).toThrow(
+      "Anthropic messages require at least one content block (role: user)",
+    );
+  });
+
+  it("filters out empty or whitespace-only text blocks when message has valid content blocks", () => {
     const context: Context = {
       messages: [
         {
@@ -375,12 +389,14 @@ describe("buildParams", () => {
           content: [
             { type: "text", text: "valid text" },
             { type: "text", text: "" },
+            { type: "text", text: "   " },
           ],
         },
         {
           role: "assistant",
           content: [
             { type: "text", text: "" },
+            { type: "text", text: " \n " },
             {
               type: "tool_call",
               toolCallId: "call_1",

@@ -90,7 +90,7 @@ export function buildParams(context: Context): Anthropic.MessageParam[] {
         const parts: Anthropic.TextBlockParam[] = [];
         for (const block of msg.content) {
           if (block.type === "text") {
-            if (block.text.length > 0) {
+            if (block.text.trim().length > 0) {
               parts.push({ type: "text", text: block.text });
             }
           } else if (block.type === "tool_result") {
@@ -109,7 +109,7 @@ export function buildParams(context: Context): Anthropic.MessageParam[] {
 
       for (const block of msg.content) {
         if (block.type === "text") {
-          if (block.text.length > 0) {
+          if (block.text.trim().length > 0) {
             parts.push({ type: "text", text: block.text });
           }
         } else if (block.type === "tool_call") {
