@@ -319,20 +319,25 @@ describe("buildParams", () => {
     ]);
   });
 
-  it("handles empty content array in user message with safe fallback", () => {
+  it("throws when user message has empty content array", () => {
     const context: Context = {
       messages: [{ role: "user", content: [] }],
     };
-    const params = buildParams(context);
-    expect(params).toEqual([
-      {
-        role: "user",
-        content: [{ type: "text", text: "" }],
-      },
-    ]);
+    expect(() => buildParams(context)).toThrow(
+      "Anthropic messages require at least one content block (role: user)",
+    );
   });
 
-  it("handles empty content array in assistant message with safe fallback", () => {
+  it("throws when user message has empty string content", () => {
+    const context: Context = {
+      messages: [{ role: "user", content: "   " }],
+    };
+    expect(() => buildParams(context)).toThrow(
+      "Anthropic messages require non-empty text content (role: user)",
+    );
+  });
+
+  it("throws when assistant message has empty content array", () => {
     const context: Context = {
       messages: [
         {
@@ -343,11 +348,67 @@ describe("buildParams", () => {
         },
       ],
     };
+    expect(() => buildParams(context)).toThrow(
+      "Anthropic messages require at least one content block (role: assistant)",
+    );
+  });
+
+  it("throws when message contains only empty text blocks", () => {
+    const context: Context = {
+      messages: [
+        {
+          role: "user",
+          content: [{ type: "text", text: "" }],
+        },
+      ],
+    };
+    expect(() => buildParams(context)).toThrow(
+      "Anthropic messages require at least one content block (role: user)",
+    );
+  });
+
+  it("filters out empty text blocks when message has valid content blocks", () => {
+    const context: Context = {
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "text", text: "valid text" },
+            { type: "text", text: "" },
+          ],
+        },
+        {
+          role: "assistant",
+          content: [
+            { type: "text", text: "" },
+            {
+              type: "tool_call",
+              toolCallId: "call_1",
+              name: "my_tool",
+              arguments: "{}",
+            },
+          ],
+          model: "claude-haiku-4-5",
+          finishReason: { reason: "tool_call", rawReason: "tool_use" },
+        },
+      ],
+    };
     const params = buildParams(context);
     expect(params).toEqual([
       {
+        role: "user",
+        content: [{ type: "text", text: "valid text" }],
+      },
+      {
         role: "assistant",
-        content: [{ type: "text", text: "" }],
+        content: [
+          {
+            type: "tool_use",
+            id: "call_1",
+            name: "my_tool",
+            input: {},
+          },
+        ],
       },
     ]);
   });

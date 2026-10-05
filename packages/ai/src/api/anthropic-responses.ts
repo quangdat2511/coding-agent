@@ -66,12 +66,22 @@ function mergeUsageMetadata(container: UsageMetadataContainer, wireUsage: unknow
   };
 }
 
+function ensureNonEmptyContent<T>(parts: T[], role: "user" | "assistant"): T[] {
+  if (parts.length === 0) {
+    throw new Error(`Anthropic messages require at least one content block (role: ${role})`);
+  }
+  return parts;
+}
+
 export function buildParams(context: Context): Anthropic.MessageParam[] {
   const messages: Anthropic.MessageParam[] = [];
 
   for (const msg of context.messages) {
     if (msg.role === "user") {
       if (typeof msg.content === "string") {
+        if (msg.content.trim().length === 0) {
+          throw new Error("Anthropic messages require non-empty text content (role: user)");
+        }
         messages.push({
           role: "user",
           content: msg.content,
@@ -80,7 +90,9 @@ export function buildParams(context: Context): Anthropic.MessageParam[] {
         const parts: Anthropic.TextBlockParam[] = [];
         for (const block of msg.content) {
           if (block.type === "text") {
-            parts.push({ type: "text", text: block.text });
+            if (block.text.length > 0) {
+              parts.push({ type: "text", text: block.text });
+            }
           } else if (block.type === "tool_result") {
             throw new Error(
               "tool_result history is not supported by the Anthropic adapter yet (CDA-43)",
@@ -89,18 +101,17 @@ export function buildParams(context: Context): Anthropic.MessageParam[] {
         }
         messages.push({
           role: "user",
-          content: parts.length > 0 ? parts : [{ type: "text", text: "" }],
+          content: ensureNonEmptyContent(parts, "user"),
         });
       }
     } else {
       const parts: Array<Anthropic.TextBlockParam | Anthropic.ToolUseBlockParam> = [];
-      const contentList = Array.isArray(msg.content)
-        ? msg.content
-        : [{ type: "text" as const, text: String(msg.content) }];
 
-      for (const block of contentList) {
+      for (const block of msg.content) {
         if (block.type === "text") {
-          parts.push({ type: "text", text: block.text });
+          if (block.text.length > 0) {
+            parts.push({ type: "text", text: block.text });
+          }
         } else if (block.type === "tool_call") {
           let args: Record<string, unknown> = {};
           try {
@@ -121,7 +132,7 @@ export function buildParams(context: Context): Anthropic.MessageParam[] {
       }
       messages.push({
         role: "assistant",
-        content: parts.length > 0 ? parts : [{ type: "text", text: "" }],
+        content: ensureNonEmptyContent(parts, "assistant"),
       });
     }
   }
