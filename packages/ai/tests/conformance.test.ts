@@ -52,7 +52,7 @@ import {
 //   - fixtureFamily: which fixture directory to use ("anthropic" | "openai")
 // ---------------------------------------------------------------------------
 
-type AdapterFamily = "anthropic" | "google" | "openai" | "xai";
+type AdapterFamily = "anthropic" | "google" | "openai" | "openrouter" | "xai";
 
 interface ProviderEntry {
   id: string;
@@ -102,7 +102,7 @@ const PROVIDERS: ProviderEntry[] = [
     model: { id: "openai/gpt-4o-mini", name: "GPT-4o mini (OpenRouter)", provider: "openrouter" },
     capabilities: OPENROUTER_CHAT_COMPLETIONS_CAPABILITIES,
     streamFn: openaiStream,
-    fixtureFamily: "openai",
+    fixtureFamily: "openrouter",
   },
   // --- xAI (Chat Completions-compatible) ---
   {

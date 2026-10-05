@@ -1,0 +1,9 @@
+data: {"id":"gen-openrouter-usage-01","object":"chat.completion.chunk","created":1700000003,"model":"openai/gpt-4o-mini","choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":null}]}
+
+data: {"id":"gen-openrouter-usage-01","object":"chat.completion.chunk","created":1700000003,"model":"openai/gpt-4o-mini","choices":[{"index":0,"delta":{"content":"Done."},"finish_reason":null}]}
+
+data: {"id":"gen-openrouter-usage-01","object":"chat.completion.chunk","created":1700000003,"model":"openai/gpt-4o-mini","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
+
+data: {"id":"gen-openrouter-usage-01","object":"chat.completion.chunk","created":1700000003,"model":"openai/gpt-4o-mini","choices":[],"usage":{"prompt_tokens":100,"completion_tokens":42,"total_tokens":142}}
+
+data: [DONE]

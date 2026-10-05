@@ -1,0 +1,13 @@
+data: {"id":"gen-openrouter-text-01","object":"chat.completion.chunk","created":1700000000,"model":"openai/gpt-4o-mini","choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":null}]}
+
+data: {"id":"gen-openrouter-text-01","object":"chat.completion.chunk","created":1700000000,"model":"openai/gpt-4o-mini","choices":[{"index":0,"delta":{"content":"Hello"},"finish_reason":null}]}
+
+data: {"id":"gen-openrouter-text-01","object":"chat.completion.chunk","created":1700000000,"model":"openai/gpt-4o-mini","choices":[{"index":0,"delta":{"content":", world"},"finish_reason":null}]}
+
+data: {"id":"gen-openrouter-text-01","object":"chat.completion.chunk","created":1700000000,"model":"openai/gpt-4o-mini","choices":[{"index":0,"delta":{"content":"!"},"finish_reason":null}]}
+
+data: {"id":"gen-openrouter-text-01","object":"chat.completion.chunk","created":1700000000,"model":"openai/gpt-4o-mini","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
+
+data: {"id":"gen-openrouter-text-01","object":"chat.completion.chunk","created":1700000000,"model":"openai/gpt-4o-mini","choices":[],"usage":{"prompt_tokens":10,"completion_tokens":3,"total_tokens":13}}
+
+data: [DONE]

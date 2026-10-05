@@ -8,11 +8,11 @@ import type {
   StreamOptions,
   TextBlock,
   ToolCallBlock,
+  ToolDeclaration,
   Usage,
 } from "../types.ts";
 
 import { createModelEventStream } from "../utils/event-stream.ts";
-import { flattenMessageContent } from "../utils/messages.ts";
 import { sanitizeMaxRetries } from "../utils/retry.ts";
 
 export type OpenAIRawFinishReason =
@@ -40,6 +40,20 @@ export function mapOpenAIFinishReason(
   }
 }
 
+export function buildTools(
+  tools?: readonly ToolDeclaration[],
+): OpenAI.Chat.Completions.ChatCompletionTool[] | undefined {
+  if (!tools || tools.length === 0) return undefined;
+  return tools.map((t) => ({
+    type: "function",
+    function: {
+      name: t.name,
+      description: t.description,
+      parameters: t.parameters as Record<string, unknown>,
+    },
+  }));
+}
+
 export function buildParams(
   context: Context,
 ): OpenAI.Chat.Completions.ChatCompletionMessageParam[] {
@@ -50,10 +64,48 @@ export function buildParams(
   }
 
   for (const msg of context.messages) {
-    messages.push({
-      role: msg.role,
-      content: flattenMessageContent(msg),
-    });
+    if (msg.role === "user") {
+      if (typeof msg.content === "string") {
+        messages.push({ role: "user", content: msg.content });
+      } else {
+        const textParts: string[] = [];
+        for (const block of msg.content) {
+          if (block.type === "text") {
+            textParts.push(block.text);
+          } else if (block.type === "tool_result") {
+            throw new Error("tool_result history is not supported by this adapter yet (CDA-43)");
+          }
+        }
+        messages.push({ role: "user", content: textParts.join("") });
+      }
+    } else {
+      const textParts: string[] = [];
+      const toolCalls: OpenAI.Chat.Completions.ChatCompletionMessageToolCall[] = [];
+
+      for (const block of msg.content) {
+        if (block.type === "text") {
+          textParts.push(block.text);
+        } else if (block.type === "tool_call") {
+          toolCalls.push({
+            id: block.toolCallId,
+            type: "function",
+            function: {
+              name: block.name,
+              arguments: block.arguments,
+            },
+          });
+        }
+      }
+
+      const text = textParts.join("");
+      const content = toolCalls.length > 0 && text.length === 0 ? null : text;
+
+      messages.push({
+        role: "assistant",
+        content,
+        ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {}),
+      });
+    }
   }
 
   return messages;
@@ -99,11 +151,13 @@ export function stream(model: Model, context: Context, options?: StreamOptions):
         fetch: (url, init) => globalThis.fetch(url, init),
       });
       const messages = buildParams(context);
+      const tools = buildTools(context.tools);
 
       const response = await client.chat.completions.create(
         {
           model: model.id,
           messages: messages,
+          ...(tools ? { tools } : {}),
           temperature: options?.temperature,
           max_tokens: options?.maxTokens,
           stream: true,
@@ -229,9 +283,24 @@ export function stream(model: Model, context: Context, options?: StreamOptions):
         }
 
         if (chunk.usage) {
+          const rawUsage = chunk.usage as unknown as Record<string, unknown>;
+          const promptDetails = rawUsage.prompt_tokens_details as
+            | { cached_tokens?: number }
+            | undefined;
+          const completionDetails = rawUsage.completion_tokens_details as
+            | { reasoning_tokens?: number }
+            | undefined;
+
           usage = {
             inputTokens: chunk.usage.prompt_tokens,
             outputTokens: chunk.usage.completion_tokens,
+            ...(typeof promptDetails?.cached_tokens === "number"
+              ? { cachedInputTokens: promptDetails.cached_tokens }
+              : {}),
+            ...(typeof completionDetails?.reasoning_tokens === "number"
+              ? { reasoningTokens: completionDetails.reasoning_tokens }
+              : {}),
+            raw: rawUsage,
           };
         }
       }
