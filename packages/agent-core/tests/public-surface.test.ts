@@ -18,6 +18,9 @@ import type {
   OpenSessionConfig,
   OpenSessionResult,
   PathResolution,
+  PrepareContext,
+  PreparedCall,
+  PrepareOutcome,
   RepoPath,
   SessionCommand,
   SessionEvent,
@@ -101,6 +104,15 @@ describe("tool ports", () => {
     },
   };
 
+  const prepareContext: PrepareContext = {
+    workspace: {
+      repoRoot: asRepoPath("/repo"),
+      resolveExisting: async () => ({ ok: false, code: "NOT_FOUND", message: "none" }),
+      resolveForCreate: async () => ({ ok: false, code: "NOT_FOUND", message: "none" }),
+    },
+    signal: new AbortController().signal,
+  };
+
   it("lets a tool with a concrete schema live in the registry", async () => {
     const registry: ToolRegistry = {
       get: (name) => (name === echo.name ? echo : undefined),
@@ -109,20 +121,19 @@ describe("tool ports", () => {
     const tool = registry.get("echo");
     if (!tool) throw new Error("expected echo to be registered");
 
-    const prepared = await tool.prepare(
-      { text: "hi" },
-      {
-        workspace: {
-          repoRoot: asRepoPath("/repo"),
-          resolveExisting: async () => ({ ok: false, code: "NOT_FOUND", message: "none" }),
-          resolveForCreate: async () => ({ ok: false, code: "NOT_FOUND", message: "none" }),
-        },
-        signal: new AbortController().signal,
-      },
-    );
+    const prepared = await tool.prepare({ text: "hi" }, prepareContext);
 
     expect(prepared.ok).toBe(true);
     expect(registry.list()).toHaveLength(1);
+  });
+
+  it("names a registry tool's prepared call without a schema argument (compile-time)", async () => {
+    const tool: ExecutableTool = echo;
+    const outcome: PrepareOutcome = await tool.prepare({ text: "hi" }, prepareContext);
+    if (!outcome.ok) throw new Error("expected echo to prepare");
+    const pending: PreparedCall = outcome.prepared;
+
+    expect(pending.summary).toBe("echo hi");
   });
 
   it("declares the thirteen tool error codes", () => {

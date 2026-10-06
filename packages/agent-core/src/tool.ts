@@ -14,13 +14,13 @@ export interface ExecuteContext extends PrepareContext {
   onProgress(update: ToolProgress): void;
 }
 
-export interface PreparedCall<S extends TSchema> {
+export interface PreparedCall<S extends TSchema = TSchema> {
   readonly input: Static<S>;
   readonly paths: readonly RepoPath[];
   readonly summary: string;
 }
 
-export type PrepareOutcome<S extends TSchema> =
+export type PrepareOutcome<S extends TSchema = TSchema> =
   | { readonly ok: true; readonly prepared: PreparedCall<S> }
   | { readonly ok: false; readonly code: ToolErrorCode; readonly message: string };
 
