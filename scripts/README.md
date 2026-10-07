@@ -9,7 +9,9 @@ imports, and requires (including Bun's `__require` helper). A resolver plugin ke
 specifier external, `@coding-agent/*` included, because bundling third-party code fails on optional
 peers that are not installed, such as Ink's `react-devtools-core`. The plugin replaces
 `--packages external`, which also externalizes the package's own `#src/` imports; the bundle then
-holds every file the entry point reaches, so a sibling import in any of them is caught.
+holds every file the entry point reaches, so a sibling import in any of them is caught. An import
+starting with `#` left in the bundle also fails the check, because the files behind it were never
+inspected.
 The `coding-agent` composition root is intentionally excluded. Type-only imports disappear
 from the bundles. Build or parse errors also fail the command.
 

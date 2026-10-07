@@ -32,12 +32,18 @@ for (const name of ["ai", "agent-core", "tools", "tui"]) {
 
   const code = await output.text();
   const source = parse(code, { ecmaVersion: "latest", sourceType: "module" });
-  let hasSiblingImport = false;
+  let hasFinding = false;
+  function report(message: string): void {
+    console.error(`@coding-agent/${name}: ${message}`);
+    hasFinding = true;
+    failed = true;
+  }
   function check(value: unknown, start: number, end: number): void {
-    if (typeof value === "string" && value.startsWith("@coding-agent/")) {
-      console.error(`@coding-agent/${name}: forbidden runtime import: ${code.slice(start, end)}`);
-      hasSiblingImport = true;
-      failed = true;
+    if (typeof value !== "string") return;
+    const statement = code.slice(start, end);
+    if (value.startsWith("@coding-agent/")) report(`forbidden runtime import: ${statement}`);
+    if (value.startsWith("#")) {
+      report(`subpath import left unresolved, so its files were not checked: ${statement}`);
     }
   }
   simple(source, {
@@ -65,7 +71,7 @@ for (const name of ["ai", "agent-core", "tools", "tui"]) {
       }
     },
   });
-  if (!hasSiblingImport) {
+  if (!hasFinding) {
     console.log(`@coding-agent/${name}: no runtime sibling imports`);
   }
 }
