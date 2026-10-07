@@ -894,4 +894,80 @@ describe("OpenAI stream finishReason handling", () => {
     expect(turnEndEvent.message.usage?.reasoningTokens).toBe(15);
     expect(turnEndEvent.message.usage?.raw).toBeDefined();
   });
+
+  it("defaults token counts to 0 when prompt_tokens or completion_tokens are missing", async () => {
+    mockChunks = [
+      {
+        choices: [{ delta: { content: "Missing counts" }, finish_reason: "stop" }],
+        usage: {} as unknown as { prompt_tokens: number; completion_tokens: number },
+      },
+    ];
+
+    const turnEndEvent = await collectTurnEndEvent(stream(model, context, { apiKey: "test-key" }));
+    expect(turnEndEvent.message.usage?.inputTokens).toBe(0);
+    expect(turnEndEvent.message.usage?.outputTokens).toBe(0);
+  });
+
+  it("normalizes finishReason to tool_call when tool calls are present but wire finish_reason is stop", async () => {
+    mockChunks = [
+      {
+        choices: [
+          {
+            delta: {
+              tool_calls: [
+                {
+                  index: 0,
+                  id: "call_1",
+                  type: "function",
+                  function: { name: "get_weather", arguments: '{"city":"Hanoi"}' },
+                },
+              ],
+            },
+            finish_reason: null,
+          },
+        ],
+      },
+      {
+        choices: [{ delta: {}, finish_reason: "stop" }],
+      },
+    ];
+
+    const turnEndEvent = await collectTurnEndEvent(stream(model, context, { apiKey: "test-key" }));
+    expect(turnEndEvent.message.finishReason).toEqual({
+      reason: "tool_call",
+      rawReason: "stop",
+    });
+  });
+
+  it("assigns a fallback tool call ID when initial chunk has missing or empty id", async () => {
+    mockChunks = [
+      {
+        choices: [
+          {
+            delta: {
+              tool_calls: [
+                {
+                  index: 0,
+                  function: { name: "calc", arguments: "1+1" },
+                },
+              ],
+            },
+            finish_reason: null,
+          },
+        ],
+      },
+      {
+        choices: [{ delta: {}, finish_reason: "tool_calls" }],
+      },
+    ];
+
+    const turnEndEvent = await collectTurnEndEvent(stream(model, context, { apiKey: "test-key" }));
+    expect(turnEndEvent.message.content).toHaveLength(1);
+    expect(turnEndEvent.message.content[0]?.type).toBe("tool_call");
+    if (turnEndEvent.message.content[0]?.type === "tool_call") {
+      expect(turnEndEvent.message.content[0].name).toBe("calc");
+      expect(turnEndEvent.message.content[0].arguments).toBe("1+1");
+      expect(turnEndEvent.message.content[0].toolCallId).toBeTruthy();
+    }
+  });
 });
