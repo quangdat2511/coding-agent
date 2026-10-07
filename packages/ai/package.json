@@ -7,6 +7,12 @@
   "exports": {
     ".": "./src/index.ts"
   },
+  "imports": {
+    "#src/*.json": "./src/*.json",
+    "#src/*": "./src/*.ts",
+    "#tests/*": "./tests/*.ts",
+    "#examples/*": "./examples/*.ts"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",

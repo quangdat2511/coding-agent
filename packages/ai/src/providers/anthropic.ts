@@ -1,9 +1,9 @@
-import { stream } from "@/api/anthropic-responses";
-import { apiKeyFromEnv } from "@/auth/helpers";
-import { ANTHROPIC_MESSAGES_CAPABILITIES, applyCapabilities } from "@/capabilities";
-import { type BaseProviderOptions, defineProvider, type Provider } from "@/models";
-import ANTHROPIC_MODELS from "@/providers/anthropic.models.json";
-import type { ModelCapabilities } from "@/types";
+import { stream } from "#src/api/anthropic-responses";
+import { apiKeyFromEnv } from "#src/auth/helpers";
+import { ANTHROPIC_MESSAGES_CAPABILITIES, applyCapabilities } from "#src/capabilities";
+import { type BaseProviderOptions, defineProvider, type Provider } from "#src/models";
+import ANTHROPIC_MODELS from "#src/providers/anthropic.models.json";
+import type { ModelCapabilities } from "#src/types";
 
 /** API variants supported by the Anthropic provider. */
 export type AnthropicVariant = "messages";

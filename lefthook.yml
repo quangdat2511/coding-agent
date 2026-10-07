@@ -13,9 +13,18 @@ pre-commit:
         errors=0
         for f in {staged_files}; do
           if grep -qE 'from\s+"\.{1,2}/|from\s+'\''\.{1,2}/' "$f"; then
-            echo "ERROR: $f - use @/ alias instead of relative imports"
+            echo "ERROR: $f - use #src/ imports instead of relative imports"
             errors=$((errors + 1))
           fi
+          case "$f" in
+            packages/tui/prototype/*) ;;
+            *)
+              if grep -qE '["'\'']@(tests|examples)?/' "$f"; then
+                echo "ERROR: $f - use #src/, #tests/ or #examples/ instead of @/ aliases"
+                errors=$((errors + 1))
+              fi
+              ;;
+          esac
         done
         [ "$errors" -eq 0 ]
     typecheck:

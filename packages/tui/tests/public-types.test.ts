@@ -67,11 +67,11 @@ function moduleSpecifiers(declarations: string): string[] {
   );
 }
 
-// The path a local specifier points to, or undefined for another package. tsc keeps path
-// aliases in declaration files, so "@/render" still names src/render and is resolved against
-// the emitted declarations here.
+// The path a local specifier points to, or undefined for another package. tsc keeps subpath
+// imports in declaration files, so "#src/render.tsx" still names src/render and is resolved
+// against the emitted declarations here.
 function localPath(specifier: string, importer: string, outDir: string): string | undefined {
-  if (specifier.startsWith("@/")) return join(outDir, specifier.slice(2));
+  if (specifier.startsWith("#src/")) return join(outDir, specifier.slice("#src/".length));
   if (specifier.startsWith("./") || specifier.startsWith("../")) {
     return resolve(dirname(importer), specifier);
   }
@@ -122,7 +122,7 @@ describe("public declarations", () => {
       const { reachable, violations } = await inspectPublicDeclarations(
         await emitDeclarations(directory),
       );
-      // index.d.ts reaches these only through "@/" aliases, so they prove the walk follows them.
+      // index.d.ts reaches these only through "#src/" imports, so they prove the walk follows them.
       expect(reachable).toContain("render.d.ts");
       expect(reachable).toContain("types.d.ts");
       expect(violations).toEqual([]);

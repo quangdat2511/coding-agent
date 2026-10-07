@@ -1,8 +1,8 @@
-import { stream } from "@/api/openai-responses";
-import { apiKeyFromEnv } from "@/auth/helpers";
-import { defineProvider, type Provider } from "@/models";
-import OPENCODE_MODELS from "@/providers/opencode.models.json";
-import type { Model } from "@/types";
+import { stream } from "#src/api/openai-responses";
+import { apiKeyFromEnv } from "#src/auth/helpers";
+import { defineProvider, type Provider } from "#src/models";
+import OPENCODE_MODELS from "#src/providers/opencode.models.json";
+import type { Model } from "#src/types";
 
 export function createOpencodeProvider(): Provider {
   return defineProvider({

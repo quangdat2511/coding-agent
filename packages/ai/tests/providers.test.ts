@@ -13,8 +13,8 @@ import {
   OPENAI_CHAT_COMPLETIONS_CAPABILITIES,
   OPENROUTER_CHAT_COMPLETIONS_CAPABILITIES,
   XAI_CHAT_COMPLETIONS_CAPABILITIES,
-} from "@/index";
-import type { ApiVariant, ModelCapabilities } from "@/types";
+} from "#src/index";
+import type { ApiVariant, ModelCapabilities } from "#src/types";
 
 describe("Built-in Providers & Registry", () => {
   it("should register all 6 built-in providers in defaultProviders()", () => {
@@ -36,7 +36,7 @@ describe("Built-in Providers & Registry", () => {
   });
 
   it("should keep EventStream helpers internal and unexported from index", async () => {
-    const indexExports = await import("@/index");
+    const indexExports = await import("#src/index");
     expect((indexExports as Record<string, unknown>).EventStream).toBeUndefined();
     expect((indexExports as Record<string, unknown>).AssistantMessageEventStream).toBeUndefined();
     expect(

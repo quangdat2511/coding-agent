@@ -1,6 +1,6 @@
 import type { AssistantMessage } from "@coding-agent/ai";
-import type { JsonValue } from "@/json";
-import type { VerificationSummary } from "@/verification";
+import type { JsonValue } from "#src/json";
+import type { VerificationSummary } from "#src/verification";
 
 export interface UsageTotals {
   readonly inputTokens: number;

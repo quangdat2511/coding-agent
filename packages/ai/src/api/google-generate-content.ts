@@ -26,10 +26,10 @@ import type {
   TextBlock,
   ToolCallBlock,
   Usage,
-} from "@/types";
+} from "#src/types";
 
-import { createModelEventStream } from "@/utils/event-stream";
-import { sanitizeMaxRetries } from "@/utils/retry";
+import { createModelEventStream } from "#src/utils/event-stream";
+import { sanitizeMaxRetries } from "#src/utils/retry";
 
 // ---------------------------------------------------------------------------
 // Google-specific types (subset of GenerateContentResponse)

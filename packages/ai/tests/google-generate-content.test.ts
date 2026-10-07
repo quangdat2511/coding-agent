@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
-import { buildRequestBody, mapGoogleFinishReason, stream } from "@/api/google-generate-content";
-import type { Context, Model } from "@/types";
+import { buildRequestBody, mapGoogleFinishReason, stream } from "#src/api/google-generate-content";
+import type { Context, Model } from "#src/types";
 
 const TEST_MODEL: Model = {
   id: "gemini-2.0-flash-lite",
@@ -221,7 +221,7 @@ describe("stream finishReason and usage normalization", () => {
 
   it("normalizes finishReason to tool_call when tool calls are present in the response", async () => {
     const { loadFixture, sseResponse, withFixtureFetch } = await import(
-      "@tests/fixtures/fixture-fetch"
+      "#tests/fixtures/fixture-fetch"
     );
     const fixture = sseResponse(loadFixture("google/tool-call.txt"));
 
@@ -240,7 +240,7 @@ describe("stream finishReason and usage normalization", () => {
   });
 
   it("extracts cachedContentTokenCount into usage.cachedInputTokens and strips models/ prefix", async () => {
-    const { sseResponse, withFixtureFetch } = await import("@tests/fixtures/fixture-fetch");
+    const { sseResponse, withFixtureFetch } = await import("#tests/fixtures/fixture-fetch");
     const rawSse =
       'data: {"candidates":[{"content":{"parts":[{"text":"Cached response"}]},"finishReason":"STOP","index":0}],"usageMetadata":{"promptTokenCount":100,"candidatesTokenCount":20,"totalTokenCount":120,"cachedContentTokenCount":80}}\n\n';
     const fixture = sseResponse(rawSse);
@@ -265,7 +265,7 @@ describe("stream finishReason and usage normalization", () => {
 
   it("generates unique synthetic toolCallId across turns with google-fc- prefix", async () => {
     const { loadFixture, sseResponse, withFixtureFetch } = await import(
-      "@tests/fixtures/fixture-fetch"
+      "#tests/fixtures/fixture-fetch"
     );
     const makeFixture = () => sseResponse(loadFixture("google/tool-call.txt"));
 
@@ -298,7 +298,7 @@ describe("stream finishReason and usage normalization", () => {
   });
 
   it("ignores malformed SSE data lines gracefully in stream", async () => {
-    const { sseResponse, withFixtureFetch } = await import("@tests/fixtures/fixture-fetch");
+    const { sseResponse, withFixtureFetch } = await import("#tests/fixtures/fixture-fetch");
     const rawSse =
       'data: {"candidates":[{"content":{"parts":[{"text":"Hello"}]},"index":0}],"modelVersion":"gemini-2.0-flash-lite"}\n\n' +
       "data: {malformed json chunk}\n\n" +
@@ -318,7 +318,7 @@ describe("stream finishReason and usage normalization", () => {
 
   it("normalizes baseURL without trailing slash", async () => {
     const { sseResponse, withCapturingFixtureFetch } = await import(
-      "@tests/fixtures/fixture-fetch"
+      "#tests/fixtures/fixture-fetch"
     );
     const rawSse =
       'data: {"candidates":[{"content":{"parts":[{"text":"OK"}]},"finishReason":"STOP","index":0}],"modelVersion":"gemini-2.0-flash-lite"}\n\n';

@@ -2,7 +2,7 @@
 
 Status: accepted
 
-Date: 2026-09-13
+Date: 2026-09-13 (Amended: 2026-10-07)
 
 ## Context
 
@@ -555,11 +555,32 @@ package. Biome's `noEnum` rule enforces the enum corollary. Biome already runs i
 so these rules need no separate script.
 
 Biome cannot express "allowed, but only as a type import". That rule is checked against build
-output: CI bundles each leaf package's entry point with `bun build --external '@coding-agent/*'`
-and fails if the output still imports or requires a `@coding-agent/*` package. Bun removes
-type-only imports, so any remaining import is a runtime edge. CI is authoritative because hooks can
-be skipped. This replaces "tests pass with siblings absent", which Bun workspaces cannot
-demonstrate: every sibling is linked, and `bun test` does not typecheck.
+output: CI bundles each leaf package's entry point with `Bun.build`, inlining the package's own files
+and keeping every bare specifier external, and fails if the output still imports or requires a
+`@coding-agent/*` package. Bun removes type-only imports, so any remaining import is a runtime edge.
+CI is authoritative because hooks can be skipped. This replaces "tests pass with siblings absent",
+which Bun workspaces cannot demonstrate: every sibling is linked, and `bun test` does not typecheck.
+
+Each package imports its own files through the `imports` field of its `package.json` (`#src/*`,
+plus `#tests/*` and `#examples/*` where used), not through tsconfig `paths`. `tsc` applies the
+compiling package's `paths` to every file it reads, including a sibling's source, so an `@/` alias
+inside `agent-core` resolved against `tools` when `tools` typechecked an import of `agent-core`. A
+subpath import resolves against the `package.json` nearest the importing file, so a package's
+sources resolve the same way from every package. Typechecking against built `.d.ts` files was
+rejected: it adds a build before every typecheck, and the manifests export source. Lefthook and CI
+reject relative imports and `@/` aliases in workspace packages.
+
+### 10. Amendments
+
+On 2026-10-07, the package-scoped imports change
+([CDA-98](https://datn-fit-hcmus.atlassian.net/browse/CDA-98)) amended this record:
+
+- **Package-scoped imports** (§9): packages import their own files through `package.json` subpath
+  imports instead of the tsconfig `@/` alias, which resolved a sibling's source against the wrong
+  package.
+- **Runtime-import check** (§9): the bundle keeps bare specifiers external through a resolver
+  plugin, because Bun's `--packages external` also externalizes `#src/` imports and left the check
+  reading only each entry point.
 
 ## Consequences
 

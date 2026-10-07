@@ -29,16 +29,16 @@
  */
 
 import { describe, expect, it } from "bun:test";
+import { stream as anthropicStream } from "#src/api/anthropic-responses";
+import { stream as googleStream } from "#src/api/google-generate-content";
+import { stream as openaiStream } from "#src/api/openai-responses";
+import type { Context, Model, ModelCapabilities, ModelStream } from "#src/types";
 import {
   loadFixture,
   sseResponse,
   withCapturingFixtureFetch,
   withFixtureFetch,
-} from "@tests/fixtures/fixture-fetch";
-import { stream as anthropicStream } from "@/api/anthropic-responses";
-import { stream as googleStream } from "@/api/google-generate-content";
-import { stream as openaiStream } from "@/api/openai-responses";
-import type { Context, Model, ModelCapabilities, ModelStream } from "@/types";
+} from "#tests/fixtures/fixture-fetch";
 
 // ---------------------------------------------------------------------------
 // Provider registry
@@ -74,7 +74,7 @@ import {
   OPENAI_CHAT_COMPLETIONS_CAPABILITIES,
   OPENROUTER_CHAT_COMPLETIONS_CAPABILITIES,
   XAI_CHAT_COMPLETIONS_CAPABILITIES,
-} from "@/capabilities";
+} from "#src/capabilities";
 
 const PROVIDERS: ProviderEntry[] = [
   // --- Anthropic (Messages API) ---

@@ -1,11 +1,11 @@
-import type { SessionEvent } from "@/events";
-import type { ApprovalPolicy, Clock, IdSource, ModelPort, SessionLimits } from "@/ports";
-import type { AgentResult } from "@/result";
-import type { AgentState } from "@/state";
-import type { CodingTask } from "@/task";
-import type { ToolRegistry } from "@/tool";
-import type { VerificationPolicy } from "@/verification";
-import type { WorkspaceResolver } from "@/workspace";
+import type { SessionEvent } from "#src/events";
+import type { ApprovalPolicy, Clock, IdSource, ModelPort, SessionLimits } from "#src/ports";
+import type { AgentResult } from "#src/result";
+import type { AgentState } from "#src/state";
+import type { CodingTask } from "#src/task";
+import type { ToolRegistry } from "#src/tool";
+import type { VerificationPolicy } from "#src/verification";
+import type { WorkspaceResolver } from "#src/workspace";
 
 export type SessionCommand =
   | { readonly type: "start"; readonly task: CodingTask }

@@ -1,6 +1,6 @@
 import type { AssistantMessage, Model } from "@coding-agent/ai";
-import type { SessionLimits } from "@/ports";
-import type { AgentFailure, AgentFailureCode, AgentResult, UsageTotals } from "@/result";
+import type { SessionLimits } from "#src/ports";
+import type { AgentFailure, AgentFailureCode, AgentResult, UsageTotals } from "#src/result";
 import type {
   AssistantMessageRef,
   CancellablePhase,
@@ -9,16 +9,16 @@ import type {
   NormalizedToolCall,
   PendingApproval,
   VerificationRun,
-} from "@/state";
-import type { CodingTask } from "@/task";
-import type { ToolMutation } from "@/tool";
-import type { ApprovalDecider, ApprovalStatus, ToolProgress, ToolResult } from "@/tool-result";
+} from "#src/state";
+import type { CodingTask } from "#src/task";
+import type { ToolMutation } from "#src/tool";
+import type { ApprovalDecider, ApprovalStatus, ToolProgress, ToolResult } from "#src/tool-result";
 import type {
   VerificationEvidence,
   VerificationFeedback,
   VerificationOutcome,
   VerificationProgress,
-} from "@/verification";
+} from "#src/verification";
 
 export interface SessionEventEnvelope<TType extends string, TData> {
   readonly sessionId: string;

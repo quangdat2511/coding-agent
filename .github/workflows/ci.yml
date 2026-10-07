@@ -64,8 +64,13 @@ jobs:
         shell: bash
         run: |
           if relative_imports=$(git grep -nE "from[[:space:]]+[\"']\\.{1,2}/" -- '*.ts' '*.tsx'); then
-            echo "Relative imports are not allowed; use the @/ alias instead:"
+            echo "Relative imports are not allowed; use #src/ imports instead:"
             echo "$relative_imports"
+            exit 1
+          fi
+          if alias_imports=$(git grep -nE "[\"']@(tests|examples)?/" -- '*.ts' '*.tsx' ':!packages/tui/prototype'); then
+            echo "@/ aliases are not allowed; use #src/, #tests/ or #examples/ instead:"
+            echo "$alias_imports"
             exit 1
           fi
 

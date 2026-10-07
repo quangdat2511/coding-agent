@@ -1,4 +1,4 @@
-import type { Message } from "@/types";
+import type { Message } from "#src/types";
 
 export function flattenMessageContent(msg: Message): string {
   if (msg.role === "user") {

@@ -1,9 +1,9 @@
-import { stream } from "@/api/openai-responses";
-import { apiKeyFromEnv } from "@/auth/helpers";
-import { applyCapabilities, XAI_CHAT_COMPLETIONS_CAPABILITIES } from "@/capabilities";
-import { type BaseProviderOptions, defineProvider, type Provider } from "@/models";
-import XAI_MODELS from "@/providers/xai.models.json";
-import type { ModelCapabilities } from "@/types";
+import { stream } from "#src/api/openai-responses";
+import { apiKeyFromEnv } from "#src/auth/helpers";
+import { applyCapabilities, XAI_CHAT_COMPLETIONS_CAPABILITIES } from "#src/capabilities";
+import { type BaseProviderOptions, defineProvider, type Provider } from "#src/models";
+import XAI_MODELS from "#src/providers/xai.models.json";
+import type { ModelCapabilities } from "#src/types";
 
 /** API variants supported by the xAI provider. */
 export type XaiVariant = "chat_completions";

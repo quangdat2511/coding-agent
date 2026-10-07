@@ -10,10 +10,10 @@ import type {
   ToolCallBlock,
   ToolDeclaration,
   Usage,
-} from "@/types";
+} from "#src/types";
 
-import { createModelEventStream } from "@/utils/event-stream";
-import { sanitizeMaxRetries } from "@/utils/retry";
+import { createModelEventStream } from "#src/utils/event-stream";
+import { sanitizeMaxRetries } from "#src/utils/retry";
 
 export type AnthropicRawStopReason =
   | Anthropic.RawMessageDeltaEvent.Delta["stop_reason"]

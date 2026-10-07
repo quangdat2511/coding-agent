@@ -1,10 +1,10 @@
-import { type Provider, ProviderDirectory } from "@/models";
-import { createAnthropicProvider } from "@/providers/anthropic";
-import { createGoogleProvider } from "@/providers/google";
-import { createOpenAIProvider } from "@/providers/openai";
-import { createOpencodeProvider } from "@/providers/opencode";
-import { createOpenRouterProvider } from "@/providers/openrouter";
-import { createXaiProvider } from "@/providers/xai";
+import { type Provider, ProviderDirectory } from "#src/models";
+import { createAnthropicProvider } from "#src/providers/anthropic";
+import { createGoogleProvider } from "#src/providers/google";
+import { createOpenAIProvider } from "#src/providers/openai";
+import { createOpencodeProvider } from "#src/providers/opencode";
+import { createOpenRouterProvider } from "#src/providers/openrouter";
+import { createXaiProvider } from "#src/providers/xai";
 
 export function defaultProviders(): Provider[] {
   return [

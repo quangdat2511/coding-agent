@@ -1,5 +1,5 @@
-import { loadRootEnv } from "@examples/utils/env";
-import { createProviderDirectory } from "@/index";
+import { loadRootEnv } from "#examples/utils/env";
+import { createProviderDirectory } from "#src/index";
 
 async function main(): Promise<void> {
   loadRootEnv();

@@ -1,5 +1,5 @@
 import { Box, Text } from "ink";
-import type { TranscriptEntry, TuiModel } from "@/types";
+import type { TranscriptEntry, TuiModel } from "#src/types";
 
 type Entry<Kind extends TranscriptEntry["kind"]> = Extract<TranscriptEntry, { kind: Kind }>;
 

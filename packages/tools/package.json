@@ -7,6 +7,10 @@
   "exports": {
     ".": "./src/index.ts"
   },
+  "imports": {
+    "#src/*.json": "./src/*.json",
+    "#src/*": "./src/*.ts"
+  },
   "scripts": {
     "typecheck": "tsc --noEmit"
   },

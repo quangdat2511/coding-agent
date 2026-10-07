@@ -1,4 +1,4 @@
-import type { ProviderCredentials } from "@/auth/types";
+import type { ProviderCredentials } from "#src/auth/types";
 import type {
   ApiVariant,
   Context,
@@ -6,7 +6,7 @@ import type {
   ModelCapabilities,
   ModelStream,
   StreamOptions,
-} from "@/types";
+} from "#src/types";
 
 /**
  * Shared base for all provider-specific options interfaces.

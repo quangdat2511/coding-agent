@@ -1,4 +1,4 @@
-import type { ModelStreamEvent } from "@/types";
+import type { ModelStreamEvent } from "#src/types";
 
 export async function collectTurnEndEvent(
   eventStream: AsyncIterable<ModelStreamEvent>,

@@ -32,8 +32,8 @@ import type {
   VerificationDecision,
   VerificationPolicy,
   WorkspaceResolver,
-} from "@/index";
-import * as surface from "@/index";
+} from "#src/index";
+import * as surface from "#src/index";
 
 const asRepoPath = (path: string): RepoPath => path as RepoPath;
 

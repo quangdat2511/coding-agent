@@ -1,4 +1,4 @@
-import type { ToolErrorCode } from "@/tool-result";
+import type { ToolErrorCode } from "#src/tool-result";
 
 export type RepoPath = string & { readonly __brand: "RepoPath" };
 

@@ -1,7 +1,7 @@
 import type { Message } from "@coding-agent/ai";
-import type { ApprovalPolicy } from "@/ports";
-import type { CancelledResult, FailedResult, SucceededResult, UsageTotals } from "@/result";
-import type { CodingTask } from "@/task";
+import type { ApprovalPolicy } from "#src/ports";
+import type { CancelledResult, FailedResult, SucceededResult, UsageTotals } from "#src/result";
+import type { CodingTask } from "#src/task";
 
 export interface NormalizedToolCall {
   readonly id: string;
