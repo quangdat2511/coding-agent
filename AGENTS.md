@@ -61,7 +61,8 @@ There is no build step defined yet.
   declares them. Import `.tsx` and `.json` files with their extension (`#src/render.tsx`). The
   nearest `package.json` resolves each specifier, so a sibling's source still resolves against its
   own package, which tsconfig `paths` cannot do. Lefthook and CI reject relative imports and `@/`
-  aliases in workspace packages.
+  aliases in workspace packages. Import a directory through its index (`#src/providers/index`). A
+  new package or top-level folder gets its own key in `imports`; tsconfig `paths` stays empty.
 - **TypeScript config**: strict mode, `noUncheckedIndexedAccess`, `noImplicitOverride`,
   `verbatimModuleSyntax` (use `import type` for type-only imports — Biome's `useImportType` rule
   also enforces this), ESNext target/lib, bundler module resolution, no emit (Bun runs TS
