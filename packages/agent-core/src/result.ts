@@ -1,0 +1,51 @@
+import type { AssistantMessage } from "@coding-agent/ai";
+import type { JsonValue } from "@/json";
+import type { VerificationSummary } from "@/verification";
+
+export interface UsageTotals {
+  readonly inputTokens: number;
+  readonly outputTokens: number;
+  readonly cachedInputTokens?: number;
+  readonly reasoningTokens?: number;
+}
+
+export type AgentFailureCode =
+  | "MODEL_FAILURE"
+  | "MODEL_PROTOCOL_ERROR"
+  | "LIMIT_EXCEEDED"
+  | "VERIFICATION_FAILED"
+  | "CANCELLATION_TIMEOUT"
+  | "INTERNAL_ERROR";
+
+export interface AgentFailure {
+  readonly code: AgentFailureCode;
+  readonly message: string;
+  readonly details?: Readonly<Record<string, JsonValue>>;
+}
+
+interface AgentResultBase {
+  readonly finalMessage?: AssistantMessage;
+  readonly usage: UsageTotals;
+  readonly verification?: VerificationSummary;
+  readonly workspaceChanged: boolean;
+  readonly partialChangesPossible: boolean;
+  readonly lastSequence: number;
+}
+
+export interface SucceededResult extends AgentResultBase {
+  readonly outcome: "succeeded";
+  readonly finalMessage: AssistantMessage;
+  readonly verification: VerificationSummary;
+}
+
+export interface FailedResult extends AgentResultBase {
+  readonly outcome: "failed";
+  readonly failure: AgentFailure;
+}
+
+export interface CancelledResult extends AgentResultBase {
+  readonly outcome: "cancelled";
+  readonly cancellation: { readonly reason?: string };
+}
+
+export type AgentResult = SucceededResult | FailedResult | CancelledResult;

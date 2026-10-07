@@ -17,6 +17,7 @@
       "name": "@coding-agent/agent-core",
       "dependencies": {
         "@coding-agent/ai": "workspace:*",
+        "typebox": "^1.0.0",
       },
     },
     "packages/ai": {
