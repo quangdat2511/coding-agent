@@ -16,8 +16,8 @@ import type {
   ToolDeclaration,
   ToolResultBlock,
   UserMessage,
-} from "@/index";
-import { flattenMessageContent } from "@/utils/messages";
+} from "../src/index.ts";
+import { flattenMessageContent } from "../src/utils/messages.ts";
 
 describe("ADR 0004 Model Interaction Contract", () => {
   it("supports ToolDeclaration with TypeBox 1.x schema", () => {

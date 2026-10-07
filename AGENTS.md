@@ -56,9 +56,14 @@ There is no build step defined yet.
   extending the root `tsconfig.base.json`.
 - **`packages/ai`**: the first (and currently only) package (`@coding-agent/ai`). Entry point is
   `src/index.ts`.
-- **Path aliasing**: within a package, import from `@/*` (mapped to `./src/*` in that package's
-  `tsconfig.json`) instead of relative `../` imports. This is enforced by a pre-commit hook (see
-  below) that greps staged `.ts`/`.tsx` files for `from "./"` or `from "../"` and fails the commit.
+- **Imports**: within a package, import its own files by relative path with the source extension
+  (`./types.ts`, `../api/openai-responses.ts`, `./render.tsx`, `./anthropic.models.json`); import
+  another package only by its `@coding-agent/*` name. Keep workspace packages' `tsconfig.json`
+  free of `paths` aliases: `tsc` applies the compiling package's `paths` to every sibling source
+  it reads, so an alias inside one package breaks typechecking in the packages that import it.
+  Biome's `useImportExtensions` enforces the extension, `rewriteRelativeImportExtensions` turns it
+  into `.js` in built output, and `bun run check:import-boundaries` rejects `@/`, `@tests/` and
+  `@examples/` aliases and any relative import that resolves outside its own package.
 - **TypeScript config**: strict mode, `noUncheckedIndexedAccess`, `noImplicitOverride`,
   `verbatimModuleSyntax` (use `import type` for type-only imports — Biome's `useImportType` rule
   also enforces this), ESNext target/lib, bundler module resolution, no emit (Bun runs TS
@@ -72,7 +77,7 @@ There is no build step defined yet.
   are allowed (`noDefaultExport: off`). Double quotes, semicolons, trailing commas, 100-char line
   width, 2-space indent.
 - **Git hooks (lefthook)**: pre-commit runs, in order: Biome check --write on staged files, the
-  `@/` import-alias check described above, and `bun run typecheck` — all scoped to staged files
+  import boundary check described above, and `bun run typecheck` — all scoped to staged files
   where applicable. Expect commits to fail if any of these fail.
 - **Env vars**: see `.env.example` for LLM provider config (`OPENAI_API_KEY` /
   `OPENCODE_API_KEY` / `OPENROUTER_API_KEY`, `AGENT_PROVIDER`). Never commit `.env`.

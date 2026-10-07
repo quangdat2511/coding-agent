@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
-import { defineProvider, ProviderDirectory } from "@/models";
-import type { Context, Model, StreamOptions } from "@/types";
-import { createModelEventStream } from "@/utils/event-stream";
+import { defineProvider, ProviderDirectory } from "../src/models.ts";
+import type { Context, Model, StreamOptions } from "../src/types.ts";
+import { createModelEventStream } from "../src/utils/event-stream.ts";
 
 describe("ProviderDirectory", () => {
   const dummyModel: Model = {

@@ -270,7 +270,7 @@ Mục đích: mỗi lần reviewer được gọi vào là một lần PR thực
 
 - **Tất cả reviewer** của PR phải approve, kể cả người không trực tiếp phụ trách task nhưng chủ động yêu cầu được review.
 - **Tất cả conversation trên PR phải được resolve** (xem [Bước 7](#bước-7-review)).
-- CI pass toàn bộ. Repo hiện có các check **PR title, Biome, import alias, typecheck, test và build**.
+- CI pass toàn bộ. Repo hiện có các check **PR title, Biome, import boundary, typecheck, test và build**.
 - Nhánh phải được **rebase lên `main` mới nhất** trước khi merge (xem [Bước 5](#bước-5-đồng-bộ-với-main)).
 
 ### Ai được merge

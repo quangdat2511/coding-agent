@@ -1,4 +1,4 @@
-import type { ProviderCredentials } from "@/auth/types";
+import type { ProviderCredentials } from "./auth/types.ts";
 import type {
   ApiVariant,
   Context,
@@ -6,7 +6,7 @@ import type {
   ModelCapabilities,
   ModelStream,
   StreamOptions,
-} from "@/types";
+} from "./types.ts";
 
 /**
  * Shared base for all provider-specific options interfaces.

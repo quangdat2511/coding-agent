@@ -1,9 +1,9 @@
-import { stream } from "@/api/google-generate-content";
-import { apiKeyFromEnv } from "@/auth/helpers";
-import { applyCapabilities, GOOGLE_GENERATE_CONTENT_CAPABILITIES } from "@/capabilities";
-import { type BaseProviderOptions, defineProvider, type Provider } from "@/models";
-import GOOGLE_MODELS from "@/providers/google.models.json";
-import type { ModelCapabilities } from "@/types";
+import { stream } from "../api/google-generate-content.ts";
+import { apiKeyFromEnv } from "../auth/helpers.ts";
+import { applyCapabilities, GOOGLE_GENERATE_CONTENT_CAPABILITIES } from "../capabilities.ts";
+import { type BaseProviderOptions, defineProvider, type Provider } from "../models.ts";
+import type { ModelCapabilities } from "../types.ts";
+import GOOGLE_MODELS from "./google.models.json";
 
 /** API variants supported by the Google provider. */
 export type GoogleVariant = "generate_content";

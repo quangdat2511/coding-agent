@@ -1,6 +1,6 @@
 import { render } from "ink";
-import { Transcript } from "@/transcript";
-import type { TuiHandle, TuiHandlers, TuiModel } from "@/types";
+import { Transcript } from "./transcript.tsx";
+import type { TuiHandle, TuiHandlers, TuiModel } from "./types.ts";
 
 // The terminal the TUI draws on: the process's own streams in renderTui, streams backed by
 // @xterm/headless in tests. Node's stream types keep Ink out of this signature.

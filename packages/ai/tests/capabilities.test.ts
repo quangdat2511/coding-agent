@@ -7,8 +7,8 @@ import {
   OPENROUTER_CHAT_COMPLETIONS_CAPABILITIES,
   withModelOverrides,
   XAI_CHAT_COMPLETIONS_CAPABILITIES,
-} from "@/capabilities";
-import type { ModelCapabilities } from "@/types";
+} from "../src/capabilities.ts";
+import type { ModelCapabilities } from "../src/types.ts";
 
 describe("Model Capabilities Constants", () => {
   const allCapConstants: { name: string; caps: ModelCapabilities }[] = [

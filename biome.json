@@ -27,7 +27,8 @@
     "rules": {
       "preset": "recommended",
       "correctness": {
-        "noUnusedVariables": "error"
+        "noUnusedVariables": "error",
+        "useImportExtensions": "error"
       },
       "suspicious": {
         "noExplicitAny": "error"
@@ -148,6 +149,16 @@
                 ]
               }
             }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["packages/tui/prototype/**"],
+      "linter": {
+        "rules": {
+          "correctness": {
+            "useImportExtensions": "off"
           }
         }
       }

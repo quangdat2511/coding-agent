@@ -1,4 +1,4 @@
-import type { ApiKeySource } from "@/auth/types";
+import type { ApiKeySource } from "./types.ts";
 
 export function apiKeyFromEnv(name: string, envVars: readonly string[]): ApiKeySource {
   return {

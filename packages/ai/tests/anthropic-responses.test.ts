@@ -1,14 +1,14 @@
 import { afterAll, beforeAll, describe, expect, it, spyOn } from "bun:test";
 import Anthropic from "@anthropic-ai/sdk";
-import { collectTurnEndEvent } from "@tests/test-utils";
 import { Type } from "typebox";
 import {
   buildParams,
   buildTools,
   mapAnthropicFinishReason,
   stream,
-} from "@/api/anthropic-responses";
-import type { Context, Model, ToolDeclaration } from "@/types";
+} from "../src/api/anthropic-responses.ts";
+import type { Context, Model, ToolDeclaration } from "../src/types.ts";
+import { collectTurnEndEvent } from "./test-utils.ts";
 
 type AnthropicStreamChunk =
   | {

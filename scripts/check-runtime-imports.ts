@@ -13,7 +13,7 @@ try {
     const output = join(outputDirectory, `${name}.js`);
     // Third-party packages stay unbundled: only the package's own code can import a sibling, and
     // bundling dependencies fails on optional peers that are not installed, such as Ink's
-    // react-devtools-core. The @/ aliases still resolve to the package's own files.
+    // react-devtools-core. Relative imports are still bundled, so every package file is checked.
     const build = Bun.spawnSync(
       [
         process.execPath,

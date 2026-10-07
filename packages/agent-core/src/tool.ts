@@ -1,7 +1,7 @@
 import type { ToolDeclaration } from "@coding-agent/ai";
 import type { Static, TSchema } from "typebox";
-import type { ToolError, ToolErrorCode, ToolProgress } from "@/tool-result";
-import type { RepoPath, WorkspaceResolver } from "@/workspace";
+import type { ToolError, ToolErrorCode, ToolProgress } from "./tool-result.ts";
+import type { RepoPath, WorkspaceResolver } from "./workspace.ts";
 
 export type ToolMutation = "read_only" | "mutating";
 

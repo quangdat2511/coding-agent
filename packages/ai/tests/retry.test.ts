@@ -1,8 +1,8 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it, spyOn } from "bun:test";
-import { stream as anthropicStream } from "@/api/anthropic-responses";
-import { stream as openaiStream } from "@/api/openai-responses";
-import type { Context, Model, ModelStream, ModelStreamEvent, StreamOptions } from "@/types";
-import { sanitizeMaxRetries } from "@/utils/retry";
+import { stream as anthropicStream } from "../src/api/anthropic-responses.ts";
+import { stream as openaiStream } from "../src/api/openai-responses.ts";
+import type { Context, Model, ModelStream, ModelStreamEvent, StreamOptions } from "../src/types.ts";
+import { sanitizeMaxRetries } from "../src/utils/retry.ts";
 
 type FetchHandler = (url: string | URL | Request, init?: RequestInit) => Promise<Response>;
 
