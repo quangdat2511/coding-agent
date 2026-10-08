@@ -1,9 +1,9 @@
-import { stream } from "@/api/openai-responses";
-import { apiKeyFromEnv } from "@/auth/helpers";
-import { applyCapabilities, OPENROUTER_CHAT_COMPLETIONS_CAPABILITIES } from "@/capabilities";
-import { type BaseProviderOptions, defineProvider, type Provider } from "@/models";
-import OPENROUTER_MODELS from "@/providers/openrouter.models.json";
-import type { ModelCapabilities } from "@/types";
+import { stream } from "../api/openai-responses.ts";
+import { apiKeyFromEnv } from "../auth/helpers.ts";
+import { applyCapabilities, OPENROUTER_CHAT_COMPLETIONS_CAPABILITIES } from "../capabilities.ts";
+import { type BaseProviderOptions, defineProvider, type Provider } from "../models.ts";
+import type { ModelCapabilities } from "../types.ts";
+import OPENROUTER_MODELS from "./openrouter.models.json";
 
 /** API variants supported by the OpenRouter provider. */
 export type OpenRouterVariant = "chat_completions";

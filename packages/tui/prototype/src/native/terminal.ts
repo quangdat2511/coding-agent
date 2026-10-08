@@ -1,4 +1,4 @@
-import type { SpikeKey } from "@/controller";
+import type { SpikeKey } from "../controller.ts";
 
 const ALT_SCREEN_ON = "\x1b[?1049h";
 const ALT_SCREEN_OFF = "\x1b[?1049l";

@@ -1,9 +1,4 @@
 {
   "extends": "./tsconfig.base.json",
-  "include": ["*.ts", "scripts/**/*.ts"],
-  "references": [
-    {
-      "path": "./packages/ai"
-    }
-  ]
+  "include": ["*.ts", "scripts/**/*.ts"]
 }

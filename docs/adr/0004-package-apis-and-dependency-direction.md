@@ -561,6 +561,27 @@ type-only imports, so any remaining import is a runtime edge. CI is authoritativ
 be skipped. This replaces "tests pass with siblings absent", which Bun workspaces cannot
 demonstrate: every sibling is linked, and `bun test` does not typecheck.
 
+A package imports its own files by relative path, keeping the source extension, and a sibling only
+by its package name. Packages declare no `paths` aliases: `tsc` applies the compiling package's
+`paths` to every sibling source it reads, so an alias inside one package breaks typechecking in the
+packages that import it. A relative path can still reach into a sibling's `src/` and bypass its
+`exports`. Neither check above sees that: `noRestrictedImports` matches only `@coding-agent/*`
+names, and the bundle inlines the sibling's source. `bun run check:import-boundaries` resolves every
+relative specifier in workspace package sources, including dynamic `import()`, and fails when one
+lands outside the importing file's package; it also rejects `@/`, `@tests/` and `@examples/`
+aliases. Lefthook and CI both run it.
+
+### 10. Amendments
+
+On 2026-10-07,
+[Replace the @/ import alias with relative imports](https://datn-fit-hcmus.atlassian.net/browse/CDA-99)
+amended this record:
+
+- **Import boundaries** (§9): packages import their own files by relative path instead of a `@/`
+  alias, and `check:import-boundaries` rejects aliases and relative imports that leave their
+  package. This replaces the Lefthook and CI rule, noted in Context, that rejected relative
+  imports.
+
 ## Consequences
 
 - `ai` tests against recorded provider fixtures with no other package present. Agent Core tests use

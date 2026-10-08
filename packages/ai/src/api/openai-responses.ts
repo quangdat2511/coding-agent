@@ -9,11 +9,11 @@ import type {
   TextBlock,
   ToolCallBlock,
   Usage,
-} from "@/types";
+} from "../types.ts";
 
-import { createModelEventStream } from "@/utils/event-stream";
-import { flattenMessageContent } from "@/utils/messages";
-import { sanitizeMaxRetries } from "@/utils/retry";
+import { createModelEventStream } from "../utils/event-stream.ts";
+import { flattenMessageContent } from "../utils/messages.ts";
+import { sanitizeMaxRetries } from "../utils/retry.ts";
 
 export type OpenAIRawFinishReason =
   | OpenAI.Chat.Completions.ChatCompletionChunk.Choice["finish_reason"]

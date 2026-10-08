@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
-import type { AssistantMessage } from "@/types";
-import { createModelEventStream, EventStream } from "@/utils/event-stream";
+import type { AssistantMessage } from "../src/types.ts";
+import { createModelEventStream, EventStream } from "../src/utils/event-stream.ts";
 
 describe("EventStream", () => {
   it("should yield events as they are pushed", async () => {

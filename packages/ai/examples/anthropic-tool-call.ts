@@ -1,5 +1,5 @@
-import { loadRootEnv } from "@examples/utils/env";
-import { createProviderDirectory } from "@/index";
+import { createProviderDirectory } from "../src/index.ts";
+import { loadRootEnv } from "./utils/env.ts";
 
 async function main(): Promise<void> {
   loadRootEnv();

@@ -1,4 +1,4 @@
-import type { ApprovalDecision, ApprovalRequest, SessionEvent, Summary } from "@/session/events";
+import type { ApprovalDecision, ApprovalRequest, SessionEvent, Summary } from "./events.ts";
 
 class Cancelled extends Error {}
 

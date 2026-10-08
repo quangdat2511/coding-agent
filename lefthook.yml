@@ -7,17 +7,9 @@ pre-commit:
       glob: "**/*.{ts,tsx,js,json}"
       run: bunx biome check --write {staged_files}
       stage_fixed: true
-    import-alias:
+    import-boundaries:
       glob: "**/*.{ts,tsx}"
-      run: |
-        errors=0
-        for f in {staged_files}; do
-          if grep -qE 'from\s+"\.{1,2}/|from\s+'\''\.{1,2}/' "$f"; then
-            echo "ERROR: $f - use @/ alias instead of relative imports"
-            errors=$((errors + 1))
-          fi
-        done
-        [ "$errors" -eq 0 ]
+      run: bun run check:import-boundaries {staged_files}
     typecheck:
       glob: "**/*.{ts,tsx}"
       run: bun run typecheck

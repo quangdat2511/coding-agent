@@ -1,9 +1,9 @@
-import { stream } from "@/api/openai-responses";
-import { apiKeyFromEnv } from "@/auth/helpers";
-import { applyCapabilities, OPENAI_CHAT_COMPLETIONS_CAPABILITIES } from "@/capabilities";
-import { type BaseProviderOptions, defineProvider, type Provider } from "@/models";
-import OPENAI_MODELS from "@/providers/openai.models.json";
-import type { ModelCapabilities } from "@/types";
+import { stream } from "../api/openai-responses.ts";
+import { apiKeyFromEnv } from "../auth/helpers.ts";
+import { applyCapabilities, OPENAI_CHAT_COMPLETIONS_CAPABILITIES } from "../capabilities.ts";
+import { type BaseProviderOptions, defineProvider, type Provider } from "../models.ts";
+import type { ModelCapabilities } from "../types.ts";
+import OPENAI_MODELS from "./openai.models.json";
 
 /** API variants supported by the OpenAI provider. */
 export type OpenAIVariant = "chat_completions";

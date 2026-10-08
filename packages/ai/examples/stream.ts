@@ -1,11 +1,11 @@
-import { loadRootEnv } from "@examples/utils/env";
 import {
   type AssistantMessage,
   type Context,
   createProviderDirectory,
   type Model,
   type ProviderDirectory,
-} from "@/index";
+} from "../src/index.ts";
+import { loadRootEnv } from "./utils/env.ts";
 
 export const DEFAULT_MODELS: Record<string, string> = {
   google: "gemini-3.6-flash",

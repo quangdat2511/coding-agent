@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { PROVIDER_CREDENTIAL_ENV_VARS, type ProviderCredentialEnvVar } from "@/credentials";
+import { PROVIDER_CREDENTIAL_ENV_VARS, type ProviderCredentialEnvVar } from "../src/credentials.ts";
 
 describe("PROVIDER_CREDENTIAL_ENV_VARS", () => {
   it("contains exactly the 6 MVP provider credential variable names", () => {

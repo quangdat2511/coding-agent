@@ -60,14 +60,8 @@ jobs:
       - name: Check formatting and lint rules
         run: bun run ci:check
 
-      - name: Enforce import aliases
-        shell: bash
-        run: |
-          if relative_imports=$(git grep -nE "from[[:space:]]+[\"']\\.{1,2}/" -- '*.ts' '*.tsx'); then
-            echo "Relative imports are not allowed; use the @/ alias instead:"
-            echo "$relative_imports"
-            exit 1
-          fi
+      - name: Check import boundaries
+        run: bun run check:import-boundaries
 
       - name: Typecheck
         run: bun run typecheck

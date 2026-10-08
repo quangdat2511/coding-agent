@@ -1,6 +1,6 @@
 import { PassThrough, Writable } from "node:stream";
 import { Terminal } from "@xterm/headless";
-import type { TuiStreams } from "@/render";
+import type { TuiStreams } from "../../src/render.tsx";
 
 export interface TestTerminal {
   readonly terminal: Terminal;

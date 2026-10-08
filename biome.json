@@ -27,7 +27,8 @@
     "rules": {
       "preset": "recommended",
       "correctness": {
-        "noUnusedVariables": "error"
+        "noUnusedVariables": "error",
+        "useImportExtensions": "error"
       },
       "suspicious": {
         "noExplicitAny": "error"

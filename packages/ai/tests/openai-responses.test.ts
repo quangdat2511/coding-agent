@@ -1,8 +1,8 @@
 import { afterAll, beforeAll, describe, expect, it, spyOn } from "bun:test";
-import { collectTurnEndEvent } from "@tests/test-utils";
 import OpenAI from "openai";
-import { mapOpenAIFinishReason, stream } from "@/api/openai-responses";
-import type { Context, Model } from "@/types";
+import { mapOpenAIFinishReason, stream } from "../src/api/openai-responses.ts";
+import type { Context, Model } from "../src/types.ts";
+import { collectTurnEndEvent } from "./test-utils.ts";
 
 type OpenAIStreamChunk = {
   choices: Array<{

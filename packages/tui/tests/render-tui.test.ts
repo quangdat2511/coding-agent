@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it } from "bun:test";
-import { createTestTerminal, type TestTerminal } from "@tests/support/terminal";
-import * as publicApi from "@/index";
-import { type MountedTui, mountTui } from "@/render";
-import type { TranscriptEntry, TuiHandlers } from "@/types";
+import * as publicApi from "../src/index.ts";
+import { type MountedTui, mountTui } from "../src/render.tsx";
+import type { TranscriptEntry, TuiHandlers } from "../src/types.ts";
+import { createTestTerminal, type TestTerminal } from "./support/terminal.ts";
 
 const COLUMNS = 80;
 const ROWS = 24;

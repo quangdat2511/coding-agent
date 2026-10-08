@@ -1,7 +1,7 @@
 import { type Component, ProcessTerminal, ScrollView, TuiAltScreen } from "@earendil-works/pi-tui";
-import type { SpikeController, SpikeKey } from "@/controller";
-import { approvalPanel, statusStrip, transcriptDocument } from "@/view/document";
-import { A, pad, paint } from "@/view/theme";
+import type { SpikeController, SpikeKey } from "../controller.ts";
+import { approvalPanel, statusStrip, transcriptDocument } from "../view/document.ts";
+import { A, pad, paint } from "../view/theme.ts";
 
 class TranscriptComponent implements Component {
   constructor(private readonly controller: SpikeController) {}

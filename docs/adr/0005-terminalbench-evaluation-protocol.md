@@ -558,7 +558,7 @@ them and decides neither.
 - `coding-agent run`'s flags, exit codes, and three files become a versioned external contract. A
   change to them changes the adapter in the same pull request.
 - The repository gains its first Python project. CI needs a job that runs the adapter's tests with
-  `uv`; Biome, the import-alias hook, and `bun --filter` do not cover it.
+  `uv`; Biome, the import-boundary hook, and `bun --filter` do not cover it.
 - Each recorded job costs Modal compute for 66 task environments, three with an H100 GPU, plus model
   usage bounded by 250 Model Turns per task. The oracle job adds compute without model usage.
 - Evaluation results describe the `terminalbench` Evaluation Profile, not the shipped defaults.

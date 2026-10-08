@@ -1,4 +1,4 @@
-import type { ModelCapabilities } from "@/types";
+import type { ModelCapabilities } from "./types.ts";
 
 // ---------------------------------------------------------------------------
 // Default capabilities per (Provider × API Variant)
