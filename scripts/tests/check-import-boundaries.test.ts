@@ -116,6 +116,14 @@ describe("findImportViolations", () => {
     expect(await findImportViolations(root)).toEqual([]);
   });
 
+  it("skips build output", async () => {
+    const root = await repository({
+      "packages/tools/dist/index.d.ts": 'export * from "../../agent-core/src/events.ts";\n',
+    });
+
+    expect(await findImportViolations(root)).toEqual([]);
+  });
+
   it("checks only the given files that belong to a workspace package", async () => {
     const root = await repository({
       "packages/tui/package.json": "{}",

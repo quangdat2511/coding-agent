@@ -6,8 +6,8 @@ Run `bun run check:import-boundaries` from the repository root. Lefthook runs it
 and `.tsx` files; CI runs it with no arguments, which checks every workspace package.
 
 The check reads each `.ts` and `.tsx` file whose nearest `package.json` is a workspace package,
-skipping `node_modules`, and finds the specifiers of `from` clauses, side-effect imports, dynamic
-`import()`, and `require()`. It fails on a `@/`, `@tests/`, or `@examples/` path alias, and on a
+skipping `node_modules` and `dist`, and finds the specifiers of `from` clauses, side-effect
+imports, dynamic `import()`, and `require()`. It fails on a `@/`, `@tests/`, or `@examples/` path alias, and on a
 relative specifier that resolves outside the file's own package. A nested directory with its own
 `package.json` is not a workspace package, so its files are not checked. The scan is textual: a
 matching specifier inside a comment or string also fails, and a template literal with a `${}`

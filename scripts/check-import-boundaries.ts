@@ -8,6 +8,7 @@ const SPECIFIERS = [
   /\brequire\s*\(\s*["'`]([^"'`\n]+)["'`]/g,
 ];
 const PATH_ALIAS = /^@(?:tests|examples)?\//;
+const SKIPPED_DIRECTORIES = new Set(["node_modules", "dist"]);
 
 async function workspacePackages(root: string): Promise<string[]> {
   const { workspaces } = (await Bun.file(join(root, "package.json")).json()) as {
@@ -26,7 +27,7 @@ async function sourceFiles(root: string, directory: string): Promise<string[]> {
   for (const entry of await readdir(join(root, directory), { withFileTypes: true })) {
     const path = join(directory, entry.name);
     if (entry.isDirectory()) {
-      if (entry.name !== "node_modules") files.push(...(await sourceFiles(root, path)));
+      if (!SKIPPED_DIRECTORIES.has(entry.name)) files.push(...(await sourceFiles(root, path)));
     } else if (/\.tsx?$/.test(entry.name)) {
       files.push(path);
     }
