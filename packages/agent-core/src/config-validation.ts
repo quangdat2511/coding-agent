@@ -1,21 +1,46 @@
-import type { SessionLimits } from "./ports.ts";
-import type { OpenSessionConfig } from "./session.ts";
-import type { ExecutableTool, ToolRegistry } from "./tool.ts";
+import type { ApprovalPolicy, IdSource, ModelPort, SessionLimits } from "./ports.ts";
+import type { OpenSessionConfig, OpenSessionResult } from "./session.ts";
+import type { ExecutableTool, ToolMutation, ToolRegistry } from "./tool.ts";
 
-export interface ConfigProblem {
-  readonly field?: string;
-  readonly message: string;
-}
+export type ConfigProblem = Pick<Extract<OpenSessionResult, { ok: false }>, "field" | "message">;
 
 type Fields = Readonly<Record<string, unknown>>;
 type Check = (value: unknown) => ConfigProblem | undefined;
+
+const cancellationModes = {
+  client_abort_only: true,
+  native_in_flight: true,
+} satisfies Record<ModelPort["capabilities"]["cancellation"], true>;
+
+const toolMutations = { read_only: true, mutating: true } satisfies Record<ToolMutation, true>;
+
+const approvalPolicies = { ask: true, "auto-approve": true } satisfies Record<ApprovalPolicy, true>;
+
+const limitNames = {
+  maxModelTurns: true,
+  maxToolCalls: true,
+  maxDurationMs: true,
+  maxConsecutiveRecoverableFailures: true,
+  cancellationGraceMs: true,
+} satisfies Record<keyof SessionLimits, true>;
 
 const isObject = (value: unknown): value is Fields => typeof value === "object" && value !== null;
 
 const isNonEmptyString = (value: unknown): value is string =>
   typeof value === "string" && value !== "";
 
+const isOneOf = (options: object, value: unknown): boolean =>
+  typeof value === "string" && Object.hasOwn(options, value);
+
+const isAbsolutePath = (value: unknown): boolean =>
+  typeof value === "string" && /^(?:\/|[A-Za-z]:[\\/])/.test(value);
+
+const oneOf = (options: object): string => Object.keys(options).join(", ");
+
 const problem = (field: string, message: string): ConfigProblem => ({ field, message });
+
+const threw = (field: string, error: unknown): ConfigProblem =>
+  problem(field, `${field} threw: ${error instanceof Error ? error.message : String(error)}`);
 
 function checkPort(
   field: string,
@@ -29,8 +54,10 @@ function checkPort(
     : problem(`${field}.${missing}`, `${field}.${missing} must be a function`);
 }
 
-function checkModel(model: Fields): ConfigProblem | undefined {
-  const { identity, capabilities } = model;
+function checkModel(value: unknown): ConfigProblem | undefined {
+  const missing = checkPort("model", value, ["stream"]);
+  if (missing) return missing;
+  const { identity, capabilities } = value as Fields;
   if (
     !isObject(identity) ||
     !["id", "name", "provider"].every((key) => isNonEmptyString(identity[key]))
@@ -40,12 +67,11 @@ function checkModel(model: Fields): ConfigProblem | undefined {
   if (
     !isObject(capabilities) ||
     typeof capabilities.parallelToolCallControl !== "boolean" ||
-    (capabilities.cancellation !== "client_abort_only" &&
-      capabilities.cancellation !== "native_in_flight")
+    !isOneOf(cancellationModes, capabilities.cancellation)
   ) {
     return problem(
       "model.capabilities",
-      "model.capabilities must declare parallelToolCallControl and a known cancellation mode",
+      `model.capabilities must declare parallelToolCallControl and a cancellation of ${oneOf(cancellationModes)}`,
     );
   }
   return undefined;
@@ -61,10 +87,10 @@ function checkTool(field: string, tool: unknown): ConfigProblem | undefined {
   if (!isObject(parameters)) {
     return problem(`${field}.parameters`, `${field}.parameters of "${name}" must be a schema`);
   }
-  if (mutation !== "read_only" && mutation !== "mutating") {
+  if (!isOneOf(toolMutations, mutation)) {
     return problem(
       `${field}.mutation`,
-      `${field}.mutation of "${name}" must be "read_only" or "mutating"`,
+      `${field}.mutation of "${name}" must be one of ${oneOf(toolMutations)}`,
     );
   }
   return checkPort(field, tool, ["prepare", "execute"]);
@@ -74,7 +100,13 @@ function checkTools(value: unknown): ConfigProblem | undefined {
   const missing = checkPort("tools", value, ["get", "list"]);
   if (missing) return missing;
   const registry = value as ToolRegistry;
-  const listed: unknown = registry.list();
+
+  let listed: unknown;
+  try {
+    listed = registry.list();
+  } catch (error) {
+    return threw("tools.list", error);
+  }
   if (!Array.isArray(listed)) return problem("tools.list", "tools.list() must return an array");
 
   const names = new Set<string>();
@@ -86,28 +118,27 @@ function checkTools(value: unknown): ConfigProblem | undefined {
     names.add(name);
   }
 
-  const unreachable = (listed as ExecutableTool[]).find((tool) => registry.get(tool.name) !== tool);
-  return unreachable === undefined
-    ? undefined
-    : problem("tools.get", `tools.get("${unreachable.name}") must return the listed tool`);
+  for (const name of names) {
+    let found: ExecutableTool | undefined;
+    try {
+      found = registry.get(name);
+    } catch (error) {
+      return threw("tools.get", error);
+    }
+    if (found?.name !== name) {
+      return problem("tools.get", `tools.get("${name}") must return the listed tool "${name}"`);
+    }
+  }
+  return undefined;
 }
 
 function checkWorkspace(value: unknown): ConfigProblem | undefined {
   const missing = checkPort("workspace", value, ["resolveExisting", "resolveForCreate"]);
   if (missing) return missing;
-  const { repoRoot } = value as Fields;
-  return typeof repoRoot === "string" && /^(?:\/|[A-Za-z]:[\\/])/.test(repoRoot)
+  return isAbsolutePath((value as Fields).repoRoot)
     ? undefined
     : problem("workspace.repoRoot", "workspace.repoRoot must be an absolute path");
 }
-
-const limitNames = {
-  maxModelTurns: true,
-  maxToolCalls: true,
-  maxDurationMs: true,
-  maxConsecutiveRecoverableFailures: true,
-  cancellationGraceMs: true,
-} satisfies Record<keyof SessionLimits, true>;
 
 function checkLimits(limits: unknown): ConfigProblem | undefined {
   if (!isObject(limits)) return problem("limits", "limits is required");
@@ -121,7 +152,7 @@ function checkLimits(limits: unknown): ConfigProblem | undefined {
 }
 
 const checks = {
-  model: (value) => checkPort("model", value, ["stream"]) ?? checkModel(value as Fields),
+  model: checkModel,
   systemPrompt: (value) =>
     typeof value === "string"
       ? undefined
@@ -129,9 +160,9 @@ const checks = {
   tools: checkTools,
   workspace: checkWorkspace,
   approvalPolicy: (value) =>
-    value === "ask" || value === "auto-approve"
+    isOneOf(approvalPolicies, value)
       ? undefined
-      : problem("approvalPolicy", 'approvalPolicy must be "ask" or "auto-approve"'),
+      : problem("approvalPolicy", `approvalPolicy must be one of ${oneOf(approvalPolicies)}`),
   verification: (value) => checkPort("verification", value, ["verify"]),
   limits: checkLimits,
   clock: (value) => checkPort("clock", value, ["now", "monotonicMs"]),
@@ -145,4 +176,16 @@ export function findConfigProblem(config: unknown): ConfigProblem | undefined {
     if (found) return found;
   }
   return undefined;
+}
+
+export function issueSessionId(ids: IdSource): string | ConfigProblem {
+  let sessionId: unknown;
+  try {
+    sessionId = ids.next("session");
+  } catch (error) {
+    return threw("ids", error);
+  }
+  return isNonEmptyString(sessionId)
+    ? sessionId
+    : problem("ids", 'ids.next("session") must return a non-empty string');
 }

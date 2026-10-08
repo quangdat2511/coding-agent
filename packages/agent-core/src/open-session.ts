@@ -1,20 +1,19 @@
-import { findConfigProblem } from "./config-validation.ts";
+import { type ConfigProblem, findConfigProblem, issueSessionId } from "./config-validation.ts";
 import type { AgentSession, OpenSessionConfig, OpenSessionResult } from "./session.ts";
 import type { ReadyState } from "./state.ts";
 
+const refuse = (problem: ConfigProblem): OpenSessionResult => ({
+  ok: false,
+  code: "INVALID_CONFIGURATION",
+  ...problem,
+});
+
 export function openAgentSession(config: OpenSessionConfig): OpenSessionResult {
   const problem = findConfigProblem(config);
-  if (problem) return { ok: false, code: "INVALID_CONFIGURATION", ...problem };
+  if (problem) return refuse(problem);
 
-  const sessionId: unknown = config.ids.next("session");
-  if (typeof sessionId !== "string" || sessionId === "") {
-    return {
-      ok: false,
-      code: "INVALID_CONFIGURATION",
-      field: "ids",
-      message: 'ids.next("session") must return a non-empty string',
-    };
-  }
+  const sessionId = issueSessionId(config.ids);
+  if (typeof sessionId !== "string") return refuse(sessionId);
 
   const state: ReadyState = {
     phase: "ready",

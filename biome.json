@@ -129,7 +129,9 @@
                   "fetch": "ADR 0004 §3: Agent Core performs no terminal, filesystem, or network I/O. Inject a port instead.",
                   "WebSocket": "ADR 0004 §3: Agent Core performs no terminal, filesystem, or network I/O. Inject a port instead.",
                   "XMLHttpRequest": "ADR 0004 §3: Agent Core performs no terminal, filesystem, or network I/O. Inject a port instead.",
-                  "EventSource": "ADR 0004 §3: Agent Core performs no terminal, filesystem, or network I/O. Inject a port instead."
+                  "EventSource": "ADR 0004 §3: Agent Core performs no terminal, filesystem, or network I/O. Inject a port instead.",
+                  "globalThis": "ADR 0004 §3: Agent Core performs no terminal, filesystem, or network I/O. Inject a port instead.",
+                  "require": "ADR 0004 §3: Agent Core performs no terminal, filesystem, or network I/O. Inject a port instead."
                 }
               }
             }

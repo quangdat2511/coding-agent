@@ -1,10 +1,9 @@
 import { describe, expect, it } from "bun:test";
-import { type OpenSessionConfig, openAgentSession } from "../src/index.ts";
+import { type OpenSessionConfig, openAgentSession, type RepoPath } from "../src/index.ts";
 import {
   abortIgnoringTool,
   createTestKit,
   fakeTool,
-  fakeWorkspace,
   throwingTool,
   toolRegistry,
 } from "./kit/index.ts";
@@ -15,6 +14,7 @@ describe("opening an Agent Session", () => {
       tools: [
         fakeTool({ name: "read" }),
         throwingTool({ name: "write", mutation: "mutating" }),
+        throwingTool({ name: "edit", mutation: "mutating", failure: "reject" }),
         abortIgnoringTool({ name: "bash" }),
       ],
     });
@@ -36,9 +36,26 @@ describe("opening an Agent Session", () => {
   });
 
   it("accepts a Windows drive as the repository root", () => {
-    const { config } = createTestKit({ workspace: fakeWorkspace({ repoRoot: "C:\\repo" }) });
+    const { config } = createTestKit();
 
-    expect(openAgentSession(config).ok).toBe(true);
+    const opened = openAgentSession({
+      ...config,
+      workspace: { ...config.workspace, repoRoot: "C:\\repo" as RepoPath },
+    });
+
+    expect(opened.ok).toBe(true);
+  });
+
+  it("accepts a registry that hands out wrappers of its listed tools", () => {
+    const { config } = createTestKit();
+    const read = fakeTool({ name: "read" });
+
+    const opened = openAgentSession({
+      ...config,
+      tools: { get: (name) => (name === "read" ? { ...read } : undefined), list: () => [read] },
+    });
+
+    expect(opened.ok).toBe(true);
   });
 
   it("accepts limits of one", () => {
@@ -59,7 +76,7 @@ describe("opening an Agent Session", () => {
 describe("refusing an invalid configuration", () => {
   type Change = (config: OpenSessionConfig) => object;
 
-  const expectRefusal = (change: Change, field: string | undefined) => {
+  const expectRefusal = (change: Change, field: string) => {
     const kit = createTestKit();
     const config = { ...kit.config, ...change(kit.config) } as unknown as OpenSessionConfig;
 
@@ -68,15 +85,13 @@ describe("refusing an invalid configuration", () => {
     expect(opened).toEqual({
       ok: false,
       code: "INVALID_CONFIGURATION",
-      message: expect.stringContaining(field ?? "configuration"),
+      message: expect.stringContaining(field),
       field,
     });
     expect(kit.portCalls).toEqual([]);
   };
 
   it("refuses a configuration that is not an object, naming no field", () => {
-    const kit = createTestKit();
-
     const opened = openAgentSession(null as unknown as OpenSessionConfig);
 
     expect(opened).toEqual({
@@ -84,7 +99,6 @@ describe("refusing an invalid configuration", () => {
       code: "INVALID_CONFIGURATION",
       message: expect.stringContaining("configuration"),
     });
-    expect(kit.portCalls).toEqual([]);
   });
 
   it.each([
@@ -255,4 +269,29 @@ describe("refusing an invalid configuration", () => {
 
   it("refuses an id source that issues an empty session id, naming ids", () =>
     expectRefusal(() => ({ ids: { next: () => "" } }), "ids"));
+
+  const fail = () => {
+    throw new Error("broken port");
+  };
+
+  it.each([
+    {
+      problem: "a registry whose list throws",
+      field: "tools.list",
+      change: (config) => ({ tools: { ...config.tools, list: fail } }),
+    },
+    {
+      problem: "a registry whose get throws",
+      field: "tools.get",
+      change: (config) => ({ tools: { ...config.tools, get: fail } }),
+    },
+    {
+      problem: "an id source that throws",
+      field: "ids",
+      change: () => ({ ids: { next: fail } }),
+    },
+  ] satisfies { problem: string; field: string; change: Change }[])(
+    "refuses $problem instead of throwing, naming $field",
+    ({ field, change }) => expectRefusal(change, field),
+  );
 });

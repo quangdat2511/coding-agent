@@ -33,14 +33,20 @@ export function fakeTool({
 
 export function throwingTool({
   phase = "execute",
+  failure = "throw",
   ...options
 }: Omit<FakeToolOptions, "outcome"> & {
   readonly phase?: "prepare" | "execute";
+  readonly failure?: "throw" | "reject";
 } = {}): ExecutableTool {
   const tool = fakeTool({ name: "explode", ...options });
-  const fail = async (): Promise<never> => {
-    throw new Error(`${tool.name} threw during ${phase}`);
-  };
+  const error = () => new Error(`${tool.name} failed during ${phase}`);
+  const fail =
+    failure === "throw"
+      ? (): Promise<never> => {
+          throw error();
+        }
+      : (): Promise<never> => Promise.reject(error());
   return phase === "prepare" ? { ...tool, prepare: fail } : { ...tool, execute: fail };
 }
 
