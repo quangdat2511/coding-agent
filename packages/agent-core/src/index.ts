@@ -1,5 +1,6 @@
 export type * from "./events.ts";
 export type * from "./json.ts";
+export { openAgentSession } from "./open-session.ts";
 export type * from "./ports.ts";
 export type * from "./result.ts";
 export type * from "./session.ts";
