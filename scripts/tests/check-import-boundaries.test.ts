@@ -124,13 +124,19 @@ describe("findImportViolations", () => {
     expect(await findImportViolations(root)).toEqual([]);
   });
 
-  it("skips given files that no longer exist", async () => {
+  it("reports given files that do not exist", async () => {
     const root = await repository({
       "packages/tools/src/index.ts": 'import { a } from "@/a";\n',
     });
 
-    const files = ["packages/tools/src/deleted.ts", "packages/tools/src/index.ts"];
+    const files = [
+      "packages/tools/src/deleted.ts",
+      "packages/tols/src/index.ts",
+      "packages/tools/src/index.ts",
+    ];
     expect(await findImportViolations(root, files)).toEqual([
+      "packages/tools/src/deleted.ts: file not found",
+      "packages/tols/src/index.ts: file not found",
       'packages/tools/src/index.ts:1: "@/a" is a path alias; use a relative import',
     ]);
   });
