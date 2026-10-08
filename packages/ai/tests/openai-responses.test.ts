@@ -1,7 +1,13 @@
 import { afterAll, beforeAll, describe, expect, it, spyOn } from "bun:test";
 import OpenAI from "openai";
-import { mapOpenAIFinishReason, stream } from "../src/api/openai-responses.ts";
-import type { Context, Model } from "../src/types.ts";
+import { Type } from "typebox";
+import {
+  buildParams,
+  buildTools,
+  mapOpenAIFinishReason,
+  stream,
+} from "../src/api/openai-responses.ts";
+import type { Context, Model, ToolDeclaration } from "../src/types.ts";
 import { collectTurnEndEvent } from "./test-utils.ts";
 
 type OpenAIStreamChunk = {
@@ -26,7 +32,13 @@ type OpenAIStreamChunk = {
 let mockChunks: OpenAIStreamChunk[] = [];
 let mockCreateError: Error | null = null;
 let lastClientOptions: { maxRetries?: number } | undefined;
-let lastCreateBody: { stream_options?: { include_usage?: boolean } } | undefined;
+let lastCreateBody:
+  | {
+      model?: string;
+      tools?: Array<{ type: string; function: { name: string; description?: string } }>;
+      stream_options?: { include_usage?: boolean };
+    }
+  | undefined;
 let lastCreateOptions: { signal?: AbortSignal } | undefined;
 
 describe("mapOpenAIFinishReason", () => {
@@ -79,6 +91,196 @@ describe("mapOpenAIFinishReason", () => {
       reason: "other",
       rawReason: "custom_reason",
     });
+  });
+});
+
+describe("buildTools", () => {
+  it("returns undefined when tools is undefined or empty", () => {
+    expect(buildTools(undefined)).toBeUndefined();
+    expect(buildTools([])).toBeUndefined();
+  });
+
+  it("maps tool declarations to OpenAI function tool definitions", () => {
+    const tools: ToolDeclaration[] = [
+      {
+        name: "get_weather",
+        description: "Get the current weather",
+        parameters: Type.Object({
+          city: Type.String({ description: "City name" }),
+        }),
+      },
+    ];
+
+    const result = buildTools(tools);
+    expect(result).toBeDefined();
+    expect(result).toHaveLength(1);
+    expect(result?.[0]).toEqual({
+      type: "function",
+      function: {
+        name: "get_weather",
+        description: "Get the current weather",
+        parameters: tools[0]?.parameters as Record<string, unknown>,
+      },
+    });
+  });
+});
+
+describe("buildParams", () => {
+  it("maps systemPrompt to system role message", () => {
+    const context: Context = {
+      systemPrompt: "You are a coding assistant.",
+      messages: [{ role: "user", content: "Hello" }],
+    };
+    const params = buildParams(context);
+    expect(params).toEqual([
+      { role: "system", content: "You are a coding assistant." },
+      { role: "user", content: "Hello" },
+    ]);
+  });
+
+  it("maps user text blocks to string content", () => {
+    const context: Context = {
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "text", text: "Hello part 1" },
+            { type: "text", text: " and part 2" },
+          ],
+        },
+      ],
+    };
+    const params = buildParams(context);
+    expect(params).toEqual([{ role: "user", content: "Hello part 1 and part 2" }]);
+  });
+
+  it("throws when user message contains tool_result (deferred to CDA-43)", () => {
+    const context: Context = {
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "text", text: "check result" },
+            { type: "tool_result", toolCallId: "call_1", content: "success", isError: false },
+          ],
+        },
+      ],
+    };
+    expect(() => buildParams(context)).toThrow(
+      "tool_result history is not supported by this adapter yet (CDA-43)",
+    );
+  });
+
+  it("maps assistant message containing text and tool_call", () => {
+    const context: Context = {
+      messages: [
+        {
+          role: "assistant",
+          content: [
+            { type: "text", text: "Let me check the weather." },
+            {
+              type: "tool_call",
+              toolCallId: "call_weather_1",
+              name: "get_weather",
+              arguments: '{"city":"Tokyo"}',
+            },
+          ],
+          model: "openai/gpt-4o-mini",
+          finishReason: { reason: "tool_call", rawReason: "tool_calls" },
+        },
+      ],
+    };
+    const params = buildParams(context);
+    expect(params).toEqual([
+      {
+        role: "assistant",
+        content: "Let me check the weather.",
+        tool_calls: [
+          {
+            id: "call_weather_1",
+            type: "function",
+            function: {
+              name: "get_weather",
+              arguments: '{"city":"Tokyo"}',
+            },
+          },
+        ],
+      },
+    ]);
+  });
+
+  it("maps assistant message containing only tool_call with content null", () => {
+    const context: Context = {
+      messages: [
+        {
+          role: "assistant",
+          content: [
+            {
+              type: "tool_call",
+              toolCallId: "call_weather_2",
+              name: "get_weather",
+              arguments: '{"city":"Paris"}',
+            },
+          ],
+          model: "openai/gpt-4o-mini",
+          finishReason: { reason: "tool_call", rawReason: "tool_calls" },
+        },
+      ],
+    };
+    const params = buildParams(context);
+    expect(params).toEqual([
+      {
+        role: "assistant",
+        content: null,
+        tool_calls: [
+          {
+            id: "call_weather_2",
+            type: "function",
+            function: {
+              name: "get_weather",
+              arguments: '{"city":"Paris"}',
+            },
+          },
+        ],
+      },
+    ]);
+  });
+
+  it("handles malformed JSON arguments in assistant tool_call gracefully without throwing", () => {
+    const context: Context = {
+      messages: [
+        {
+          role: "assistant",
+          content: [
+            {
+              type: "tool_call",
+              toolCallId: "call_bad",
+              name: "bad_tool",
+              arguments: "{broken-json",
+            },
+          ],
+          model: "openai/gpt-4o-mini",
+          finishReason: { reason: "tool_call", rawReason: "tool_calls" },
+        },
+      ],
+    };
+    const params = buildParams(context);
+    expect(params).toEqual([
+      {
+        role: "assistant",
+        content: null,
+        tool_calls: [
+          {
+            id: "call_bad",
+            type: "function",
+            function: {
+              name: "bad_tool",
+              arguments: "{broken-json",
+            },
+          },
+        ],
+      },
+    ]);
   });
 });
 
@@ -186,6 +388,7 @@ describe("OpenAI stream finishReason handling", () => {
     expect(turnEndEvent.message.usage).toEqual({
       inputTokens: 10,
       outputTokens: 5,
+      raw: { prompt_tokens: 10, completion_tokens: 5 },
     });
   });
 
@@ -255,10 +458,11 @@ describe("OpenAI stream finishReason handling", () => {
     expect(turnEndEvent.message.usage).toEqual({
       inputTokens: 25,
       outputTokens: 12,
+      raw: { prompt_tokens: 25, completion_tokens: 12 },
     });
   });
 
-  it("emits error event and rejects result() when context contains tool_call/tool_result", async () => {
+  it("emits error event and rejects result() when context contains tool_result (CDA-43)", async () => {
     const contextWithToolResult: Context = {
       messages: [
         {
@@ -280,11 +484,11 @@ describe("OpenAI stream finishReason handling", () => {
     expect(events[0]?.type).toBe("error");
     if (events[0]?.type === "error") {
       expect(events[0].error.message).toContain(
-        "tool_call/tool_result content is not supported by this adapter yet",
+        "tool_result history is not supported by this adapter yet (CDA-43)",
       );
     }
     await expect(streamObj.result()).rejects.toThrow(
-      "tool_call/tool_result content is not supported by this adapter yet",
+      "tool_result history is not supported by this adapter yet (CDA-43)",
     );
   });
 
@@ -621,6 +825,149 @@ describe("OpenAI stream finishReason handling", () => {
           arguments: '{"step":1,"step":2}',
         },
       ]);
+    }
+  });
+
+  it("passes tools to client.chat.completions.create when context.tools is provided", async () => {
+    const contextWithTools: Context = {
+      messages: [{ role: "user", content: "Hello with tools" }],
+      tools: [
+        {
+          name: "calculate",
+          description: "Perform math calculation",
+          parameters: Type.Object({
+            expression: Type.String(),
+          }),
+        },
+      ],
+    };
+
+    mockChunks = [{ choices: [{ delta: { content: "Result" }, finish_reason: "stop" }] }];
+
+    await collectTurnEndEvent(
+      stream(model, contextWithTools, {
+        apiKey: "test-key",
+      }),
+    );
+
+    expect(lastCreateBody?.tools).toBeDefined();
+    expect(lastCreateBody?.tools).toHaveLength(1);
+    expect(lastCreateBody?.tools?.[0]?.type).toBe("function");
+    expect(lastCreateBody?.tools?.[0]?.function.name).toBe("calculate");
+    expect(lastCreateBody?.tools?.[0]?.function.description).toBe("Perform math calculation");
+  });
+
+  it("preserves model identifiers containing a slash end-to-end (e.g. openai/gpt-4o-mini)", async () => {
+    const slashModel: Model = {
+      id: "openai/gpt-4o-mini",
+      name: "GPT-4o mini (OpenRouter)",
+      provider: "openrouter",
+    };
+    mockChunks = [{ choices: [{ delta: { content: "Preserved" }, finish_reason: "stop" }] }];
+
+    const turnEndEvent = await collectTurnEndEvent(
+      stream(slashModel, context, { apiKey: "test-key" }),
+    );
+
+    expect(lastCreateBody?.model).toBe("openai/gpt-4o-mini");
+    expect(turnEndEvent.message.model).toBe("openai/gpt-4o-mini");
+  });
+
+  it("captures cachedInputTokens from prompt_tokens_details and reasoningTokens from completion_tokens_details", async () => {
+    mockChunks = [
+      { choices: [{ delta: { content: "Cached and reasoned" }, finish_reason: null }] },
+      {
+        choices: [{ delta: {}, finish_reason: "stop" }],
+        usage: {
+          prompt_tokens: 120,
+          completion_tokens: 45,
+          prompt_tokens_details: { cached_tokens: 30 },
+          completion_tokens_details: { reasoning_tokens: 15 },
+        } as unknown as { prompt_tokens: number; completion_tokens: number },
+      },
+    ];
+
+    const turnEndEvent = await collectTurnEndEvent(stream(model, context, { apiKey: "test-key" }));
+    expect(turnEndEvent.message.usage?.inputTokens).toBe(120);
+    expect(turnEndEvent.message.usage?.outputTokens).toBe(45);
+    expect(turnEndEvent.message.usage?.cachedInputTokens).toBe(30);
+    expect(turnEndEvent.message.usage?.reasoningTokens).toBe(15);
+    expect(turnEndEvent.message.usage?.raw).toBeDefined();
+  });
+
+  it("defaults token counts to 0 when prompt_tokens or completion_tokens are missing", async () => {
+    mockChunks = [
+      {
+        choices: [{ delta: { content: "Missing counts" }, finish_reason: "stop" }],
+        usage: {} as unknown as { prompt_tokens: number; completion_tokens: number },
+      },
+    ];
+
+    const turnEndEvent = await collectTurnEndEvent(stream(model, context, { apiKey: "test-key" }));
+    expect(turnEndEvent.message.usage?.inputTokens).toBe(0);
+    expect(turnEndEvent.message.usage?.outputTokens).toBe(0);
+  });
+
+  it("normalizes finishReason to tool_call when tool calls are present but wire finish_reason is stop", async () => {
+    mockChunks = [
+      {
+        choices: [
+          {
+            delta: {
+              tool_calls: [
+                {
+                  index: 0,
+                  id: "call_1",
+                  type: "function",
+                  function: { name: "get_weather", arguments: '{"city":"Hanoi"}' },
+                },
+              ],
+            },
+            finish_reason: null,
+          },
+        ],
+      },
+      {
+        choices: [{ delta: {}, finish_reason: "stop" }],
+      },
+    ];
+
+    const turnEndEvent = await collectTurnEndEvent(stream(model, context, { apiKey: "test-key" }));
+    expect(turnEndEvent.message.finishReason).toEqual({
+      reason: "tool_call",
+      rawReason: "stop",
+    });
+  });
+
+  it("assigns a fallback tool call ID when initial chunk has missing or empty id", async () => {
+    mockChunks = [
+      {
+        choices: [
+          {
+            delta: {
+              tool_calls: [
+                {
+                  index: 0,
+                  function: { name: "calc", arguments: "1+1" },
+                },
+              ],
+            },
+            finish_reason: null,
+          },
+        ],
+      },
+      {
+        choices: [{ delta: {}, finish_reason: "tool_calls" }],
+      },
+    ];
+
+    const turnEndEvent = await collectTurnEndEvent(stream(model, context, { apiKey: "test-key" }));
+    expect(turnEndEvent.message.content).toHaveLength(1);
+    expect(turnEndEvent.message.content[0]?.type).toBe("tool_call");
+    if (turnEndEvent.message.content[0]?.type === "tool_call") {
+      expect(turnEndEvent.message.content[0].name).toBe("calc");
+      expect(turnEndEvent.message.content[0].arguments).toBe("1+1");
+      expect(turnEndEvent.message.content[0].toolCallId).toBeTruthy();
     }
   });
 });
