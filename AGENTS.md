@@ -58,9 +58,9 @@ There is no build step defined yet.
   `src/index.ts`.
 - **Imports**: within a package, import its own files by relative path with the source extension
   (`./types.ts`, `../api/openai-responses.ts`, `./render.tsx`, `./anthropic.models.json`); import
-  another package only by its `@coding-agent/*` name. Keep workspace packages' `tsconfig.json`
-  free of `paths` aliases: `tsc` applies the compiling package's `paths` to every sibling source
-  it reads, so an alias inside one package breaks typechecking in the packages that import it.
+  another package only by its `@coding-agent/*` name. Keep `tsconfig.json` free of `paths`
+  aliases: `tsc` applies the compiling package's `paths` to every sibling source it reads, so an
+  alias inside one package breaks typechecking in the packages that import it.
   Biome's `useImportExtensions` enforces the extension, `rewriteRelativeImportExtensions` turns it
   into `.js` in built output, and `bun run check:import-boundaries` rejects `@/`, `@tests/` and
   `@examples/` aliases and any relative import that resolves outside its own package.

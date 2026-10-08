@@ -1,14 +1,14 @@
 import { Box, render, Text, useApp, useInput, useStdout } from "ink";
 import { useEffect, useRef, useState } from "react";
-import type { SpikeController, SpikeKey } from "@/controller";
+import type { SpikeController, SpikeKey } from "../controller.ts";
 import {
   approvalPanel,
   helpPanel,
   railDocument,
   statusStrip,
   transcriptDocument,
-} from "@/view/document";
-import { A, paint, truncate } from "@/view/theme";
+} from "../view/document.ts";
+import { A, paint, truncate } from "../view/theme.ts";
 
 const FRAME_INTERVAL_MS = 16;
 

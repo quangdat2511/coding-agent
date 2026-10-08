@@ -5,11 +5,11 @@ import {
   type Layout,
   type RunConfig,
   SpikeController,
-} from "@/controller";
-import { runInk } from "@/ink/renderer";
-import { countStdout, percentile, type RunMetrics } from "@/metrics";
-import { runNative } from "@/native/renderer";
-import { runPi } from "@/pi/renderer";
+} from "./src/controller.ts";
+import { runInk } from "./src/ink/renderer.tsx";
+import { countStdout, percentile, type RunMetrics } from "./src/metrics.ts";
+import { runNative } from "./src/native/renderer.ts";
+import { runPi } from "./src/pi/renderer.ts";
 
 const RENDERERS: Record<Impl, (controller: SpikeController) => Promise<void>> = {
   ink: runInk,

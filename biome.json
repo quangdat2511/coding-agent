@@ -152,16 +152,6 @@
           }
         }
       }
-    },
-    {
-      "includes": ["packages/tui/prototype/**"],
-      "linter": {
-        "rules": {
-          "correctness": {
-            "useImportExtensions": "off"
-          }
-        }
-      }
     }
   ]
 }

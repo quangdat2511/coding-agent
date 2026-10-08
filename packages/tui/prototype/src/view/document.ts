@@ -1,5 +1,5 @@
-import type { SessionViewModel, ToolCallView } from "@/session/view-model";
-import { A, checkGlyph, paint, riskColor, toolGlyph, truncate, wrap } from "@/view/theme";
+import type { SessionViewModel, ToolCallView } from "../session/view-model.ts";
+import { A, checkGlyph, paint, riskColor, toolGlyph, truncate, wrap } from "./theme.ts";
 
 const TOOL_OUTPUT_TAIL = 12;
 

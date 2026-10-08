@@ -1,6 +1,6 @@
-import type { SpikeController } from "@/controller";
-import { NativeTerminal } from "@/native/terminal";
-import { composeScreen } from "@/view/screen";
+import type { SpikeController } from "../controller.ts";
+import { composeScreen } from "../view/screen.ts";
+import { NativeTerminal } from "./terminal.ts";
 
 const FRAME_INTERVAL_MS = 16;
 

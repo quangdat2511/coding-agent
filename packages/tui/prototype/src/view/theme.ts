@@ -1,4 +1,4 @@
-import type { CheckStatus, ToolCallStatus } from "@/session/events";
+import type { CheckStatus, ToolCallStatus } from "../session/events.ts";
 
 export const A = {
   reset: "\x1b[0m",

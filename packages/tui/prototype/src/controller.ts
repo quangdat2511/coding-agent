@@ -1,7 +1,7 @@
-import { Metrics } from "@/metrics";
-import type { ApprovalDecision } from "@/session/events";
-import { ScriptedSession } from "@/session/script";
-import { SessionViewModel } from "@/session/view-model";
+import { Metrics } from "./metrics.ts";
+import type { ApprovalDecision } from "./session/events.ts";
+import { ScriptedSession } from "./session/script.ts";
+import { SessionViewModel } from "./session/view-model.ts";
 
 export type Impl = "ink" | "native" | "pi";
 export type Layout = "inline" | "split" | "overlay";

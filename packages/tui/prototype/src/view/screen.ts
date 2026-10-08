@@ -1,12 +1,12 @@
-import type { SpikeController } from "@/controller";
+import type { SpikeController } from "../controller.ts";
 import {
   approvalPanel,
   helpPanel,
   railDocument,
   statusStrip,
   transcriptDocument,
-} from "@/view/document";
-import { A, ansiPrefix, pad, paint, truncate, visibleWidth } from "@/view/theme";
+} from "./document.ts";
+import { A, ansiPrefix, pad, paint, truncate, visibleWidth } from "./theme.ts";
 
 const HEADER_HEIGHT = 1;
 const FOOTER_HEIGHT = 2;

@@ -7,7 +7,7 @@ import type {
   SessionPhase,
   Summary,
   ToolCallStatus,
-} from "@/session/events";
+} from "./events.ts";
 
 export interface ToolCallView {
   id: string;
