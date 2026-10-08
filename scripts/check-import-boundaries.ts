@@ -78,7 +78,9 @@ export async function findImportViolations(root: string, files?: string[]): Prom
   for (const file of candidates) {
     const packageDirectory = await owningPackage(root, file);
     if (!packages.includes(packageDirectory)) continue;
-    const source = await Bun.file(join(root, file)).text();
+    const sourceFile = Bun.file(join(root, file));
+    if (!(await sourceFile.exists())) continue;
+    const source = await sourceFile.text();
     found.push(...violations(root, file, packageDirectory, source));
   }
   return found;

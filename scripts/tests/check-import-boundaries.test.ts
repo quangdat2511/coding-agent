@@ -124,6 +124,17 @@ describe("findImportViolations", () => {
     expect(await findImportViolations(root)).toEqual([]);
   });
 
+  it("skips given files that no longer exist", async () => {
+    const root = await repository({
+      "packages/tools/src/index.ts": 'import { a } from "@/a";\n',
+    });
+
+    const files = ["packages/tools/src/deleted.ts", "packages/tools/src/index.ts"];
+    expect(await findImportViolations(root, files)).toEqual([
+      'packages/tools/src/index.ts:1: "@/a" is a path alias; use a relative import',
+    ]);
+  });
+
   it("checks only the given files that belong to a workspace package", async () => {
     const root = await repository({
       "packages/tui/package.json": "{}",
