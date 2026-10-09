@@ -89,8 +89,50 @@
                       "@coding-agent/coding-agent/**"
                     ],
                     "message": "ADR 0004 §1 forbids this dependency from agent-core. Wire collaborators through coding-agent instead."
+                  },
+                  {
+                    "group": [
+                      "node:*",
+                      "node:*/**",
+                      "fs",
+                      "fs/**",
+                      "child_process",
+                      "net",
+                      "http",
+                      "http2",
+                      "https",
+                      "tls",
+                      "dgram",
+                      "dns",
+                      "dns/**",
+                      "readline",
+                      "readline/**",
+                      "tty",
+                      "process",
+                      "worker_threads",
+                      "bun",
+                      "bun:ffi",
+                      "bun:sqlite"
+                    ],
+                    "message": "ADR 0004 §3: Agent Core performs no terminal, filesystem, or network I/O. Inject a port instead."
                   }
                 ]
+              }
+            },
+            "noRestrictedGlobals": {
+              "level": "error",
+              "options": {
+                "deniedGlobals": {
+                  "Bun": "ADR 0004 §3: Agent Core performs no terminal, filesystem, or network I/O. Inject a port instead.",
+                  "process": "ADR 0004 §3: Agent Core performs no terminal, filesystem, or network I/O. Inject a port instead.",
+                  "console": "ADR 0004 §3: Agent Core performs no terminal, filesystem, or network I/O. Inject a port instead.",
+                  "fetch": "ADR 0004 §3: Agent Core performs no terminal, filesystem, or network I/O. Inject a port instead.",
+                  "WebSocket": "ADR 0004 §3: Agent Core performs no terminal, filesystem, or network I/O. Inject a port instead.",
+                  "XMLHttpRequest": "ADR 0004 §3: Agent Core performs no terminal, filesystem, or network I/O. Inject a port instead.",
+                  "EventSource": "ADR 0004 §3: Agent Core performs no terminal, filesystem, or network I/O. Inject a port instead.",
+                  "globalThis": "ADR 0004 §3: Agent Core performs no terminal, filesystem, or network I/O. Inject a port instead.",
+                  "require": "ADR 0004 §3: Agent Core performs no terminal, filesystem, or network I/O. Inject a port instead."
+                }
               }
             }
           }

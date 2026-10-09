@@ -830,7 +830,7 @@ describe("session events", () => {
 });
 
 describe("public runtime surface", () => {
-  it("exports types only, so the reducer and the tool call scheduler stay internal", () => {
-    expect(Object.keys(surface)).toEqual([]);
+  it("exports only openAgentSession, so the reducer and the tool call scheduler stay internal", () => {
+    expect(Object.keys(surface)).toEqual(["openAgentSession"]);
   });
 });
