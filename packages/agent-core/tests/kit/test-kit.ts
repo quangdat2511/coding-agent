@@ -87,8 +87,8 @@ export function createTestKit(options: TestKitOptions = {}): TestKit {
       },
       limits: { ...testLimits, ...options.limits },
       clock: {
-        now: () => record("clock.now()", clock.now),
-        monotonicMs: () => record("clock.monotonicMs()", clock.monotonicMs),
+        now: () => record("clock.now()", () => clock.now()),
+        monotonicMs: () => record("clock.monotonicMs()", () => clock.monotonicMs()),
       },
       ids: { next: (kind) => record(`ids.next(${kind})`, () => ids.next(kind)) },
     },
