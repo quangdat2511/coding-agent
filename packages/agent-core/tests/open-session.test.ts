@@ -252,6 +252,14 @@ describe("refusing an invalid configuration", () => {
       field: "tools.get",
       tools: () => ({ get: () => undefined, list: () => [fakeTool({ name: "read" })] }),
     },
+    {
+      problem: "a registry whose get returns a copy that cannot execute",
+      field: 'tools.get("read").execute',
+      tools: () => {
+        const read = fakeTool({ name: "read" });
+        return { get: () => ({ ...read, execute: undefined }), list: () => [read] };
+      },
+    },
   ])("refuses $problem, naming $field", ({ field, tools }) =>
     expectRefusal(() => ({ tools: tools() }), field),
   );

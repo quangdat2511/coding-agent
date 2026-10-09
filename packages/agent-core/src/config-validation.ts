@@ -111,8 +111,8 @@ function checkTools(value: unknown): ConfigProblem | undefined {
 
   const names = new Set<string>();
   for (const [index, tool] of listed.entries()) {
-    const found = checkTool(`tools[${index}]`, tool);
-    if (found) return found;
+    const toolProblem = checkTool(`tools[${index}]`, tool);
+    if (toolProblem) return toolProblem;
     const { name } = tool as ExecutableTool;
     if (names.has(name)) return problem("tools", `tools lists more than one tool named "${name}"`);
     names.add(name);
@@ -128,6 +128,8 @@ function checkTools(value: unknown): ConfigProblem | undefined {
     if (found?.name !== name) {
       return problem("tools.get", `tools.get("${name}") must return the listed tool "${name}"`);
     }
+    const toolProblem = checkTool(`tools.get("${name}")`, found);
+    if (toolProblem) return toolProblem;
   }
   return undefined;
 }
