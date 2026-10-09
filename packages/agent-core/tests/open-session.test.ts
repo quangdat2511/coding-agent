@@ -71,6 +71,17 @@ describe("opening an Agent Session", () => {
 
     expect(openAgentSession(config).ok).toBe(true);
   });
+
+  it("accepts a model that cancels in flight and cannot control parallel tool calls", () => {
+    const { config } = createTestKit({
+      model: {
+        capabilities: { cancellation: "native_in_flight", parallelToolCallControl: false },
+      },
+    });
+
+    expect(config.model.capabilities.cancellation).toBe("native_in_flight");
+    expect(openAgentSession(config).ok).toBe(true);
+  });
 });
 
 describe("refusing an invalid configuration", () => {

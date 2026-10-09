@@ -20,9 +20,15 @@ export interface FakeModel extends ModelPort {
   readonly requests: readonly ModelRequest[];
 }
 
-const identity: Model = { id: "fake-model", name: "Fake Model", provider: "fake" };
+export interface FakeModelOptions {
+  readonly turns?: readonly ScriptedTurn[];
+  readonly identity?: Model;
+  readonly capabilities?: Partial<ModelCapabilities>;
+}
 
-const capabilities: ModelCapabilities = {
+const defaultIdentity: Model = { id: "fake-model", name: "Fake Model", provider: "fake" };
+
+const defaultCapabilities: ModelCapabilities = {
   parallelToolCallControl: true,
   cancellation: "client_abort_only",
   toolArgumentDelivery: "whole",
@@ -32,13 +38,17 @@ const capabilities: ModelCapabilities = {
 
 const usage = { inputTokens: 10, outputTokens: 5 };
 
-export function fakeModel(turns: readonly ScriptedTurn[] = []): FakeModel {
+export function fakeModel({
+  turns = [],
+  identity = defaultIdentity,
+  capabilities,
+}: FakeModelOptions = {}): FakeModel {
   const remaining = [...turns];
   const requests: ModelRequest[] = [];
 
   return {
     identity,
-    capabilities,
+    capabilities: { ...defaultCapabilities, ...capabilities },
     requests,
     stream(context, { signal }) {
       requests.push({ context, signal });
@@ -73,7 +83,7 @@ export function textTurn(text: string): ScriptedTurn {
   const message: AssistantMessage = {
     role: "assistant",
     content: [{ type: "text", text }],
-    model: identity.id,
+    model: defaultIdentity.id,
     finishReason: { reason: "end_turn", rawReason: "stop" },
     usage,
   };
@@ -99,7 +109,7 @@ export function toolCallTurn(
   const message: AssistantMessage = {
     role: "assistant",
     content: blocks,
-    model: identity.id,
+    model: defaultIdentity.id,
     finishReason: { reason: "tool_call", rawReason: "tool_use" },
     usage,
   };

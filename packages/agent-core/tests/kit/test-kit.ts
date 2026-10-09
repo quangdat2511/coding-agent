@@ -8,13 +8,13 @@ import type {
 } from "../../src/index.ts";
 import { type ManualClock, manualClock } from "./clock.ts";
 import { sequentialIds } from "./ids.ts";
-import { type FakeModel, fakeModel, type ScriptedTurn } from "./model.ts";
+import { type FakeModel, type FakeModelOptions, fakeModel } from "./model.ts";
 import { fakeTool, toolRegistry } from "./tools.ts";
 import { type FakeVerification, fakeVerification } from "./verification.ts";
 import { fakeWorkspace } from "./workspace.ts";
 
 export interface TestKitOptions {
-  readonly turns?: readonly ScriptedTurn[];
+  readonly model?: FakeModelOptions;
   readonly tools?: readonly ExecutableTool[];
   readonly workspace?: WorkspaceResolver;
   readonly approvalPolicy?: ApprovalPolicy;
@@ -45,7 +45,7 @@ export function createTestKit(options: TestKitOptions = {}): TestKit {
     return effect();
   };
 
-  const model = fakeModel(options.turns);
+  const model = fakeModel(options.model);
   const verification = fakeVerification(options.verification);
   const workspace = options.workspace ?? fakeWorkspace();
   const clock = manualClock();
