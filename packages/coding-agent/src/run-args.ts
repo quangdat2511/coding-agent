@@ -2,7 +2,7 @@
  * Parses the `coding-agent run` command line pinned by ADR 0005 §3.
  *
  * This module is pure and imports nothing: a usage error must be decided before anything reads
- * the filesystem, the environment, or opens an Agent Session. Values are carried verbatim — no
+ * the filesystem, the environment, or opens an Agent Session. Values are carried verbatim: no
  * path is resolved, no file is read, no credential is looked up, and no model is checked against
  * its provider. Resolving a valid invocation into session configuration is CDA-59 (D1.2).
  */
