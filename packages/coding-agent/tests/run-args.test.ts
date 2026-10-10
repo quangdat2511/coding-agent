@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import * as surface from "../src/index.ts";
-import { type Profile, type Provider, parseRunArgs, type RunArgs, USAGE } from "../src/run-args.ts";
+import { parseRunArgs, type RunArgs, USAGE } from "../src/run-args.ts";
 
 const cwd = "/workspace";
 
@@ -30,11 +30,11 @@ const without = (flag: string): string[] => [
   ...required.filter(([name]) => name !== flag).flat(),
 ];
 
-const usageError = (flag: string | undefined) => ({
+const usageError = (flag: string | undefined, message: string) => ({
   ok: false as const,
   code: "USAGE_ERROR" as const,
   ...(flag === undefined ? {} : { flag }),
-  message: expect.stringContaining(flag ?? ""),
+  message,
 });
 
 describe("parsing a documented invocation", () => {
@@ -76,10 +76,10 @@ describe("parsing a documented invocation", () => {
     });
   });
 
-  it("accepts a value that begins with two dashes through the = form", () => {
-    expect(parseRunArgs([...without("--model"), "--model=--odd"], cwd)).toMatchObject({
+  it.each(["--odd", "-"])("accepts the dash-prefixed value %s through the = form", (model) => {
+    expect(parseRunArgs([...without("--model"), `--model=${model}`], cwd)).toMatchObject({
       ok: true,
-      args: { model: "--odd" },
+      args: { model },
     });
   });
 
@@ -96,62 +96,111 @@ describe("parsing a documented invocation", () => {
 
 describe("refusing a bad invocation", () => {
   it.each([
-    { name: "no arguments at all", argv: [], flag: undefined },
-    { name: "an unknown command", argv: ["serve", ...required.flat()], flag: undefined },
+    { name: "no arguments at all", argv: [], message: "a command is required" },
+    {
+      name: "an unknown command",
+      argv: ["serve", ...required.flat()],
+      message: 'unknown command "serve"',
+    },
     {
       name: "a bare positional argument",
       argv: ["run", "task.md", ...required.flat()],
-      flag: undefined,
+      message: 'unexpected argument "task.md"',
     },
-    { name: "an unknown flag", argv: [...valid, "--verbose"], flag: "--verbose" },
-    { name: "an unknown flag in the = form", argv: [...valid, "--verbose=1"], flag: "--verbose" },
+    {
+      name: "an unknown flag",
+      argv: [...valid, "--verbose"],
+      flag: "--verbose",
+      message: 'unknown flag "--verbose"',
+    },
+    {
+      name: "an unknown flag in the = form",
+      argv: [...valid, "--verbose=1"],
+      flag: "--verbose",
+      message: 'unknown flag "--verbose"',
+    },
     {
       name: "a flag whose case does not match",
       argv: [...without("--provider"), "--Provider", "anthropic"],
       flag: "--Provider",
+      message: 'unknown flag "--Provider"',
     },
-    { name: "--help, which ADR 0005 §3 does not list", argv: ["run", "--help"], flag: "--help" },
+    {
+      name: "--help, which ADR 0005 §3 does not list",
+      argv: ["run", "--help"],
+      flag: "--help",
+      message: 'unknown flag "--help"',
+    },
     {
       name: "an unknown provider",
       argv: [...without("--provider"), "--provider", "mistral"],
       flag: "--provider",
+      message:
+        '--provider must be one of anthropic, openrouter, openai, google, xai, not "mistral"',
     },
-    { name: "an unknown profile", argv: [...valid, "--profile", "fast"], flag: "--profile" },
+    {
+      name: "an unknown profile",
+      argv: [...valid, "--profile", "fast"],
+      flag: "--profile",
+      message: '--profile must be one of default, terminalbench, not "fast"',
+    },
     {
       name: "an approval policy of ask",
       argv: [...without("--approval-policy"), "--approval-policy", "ask"],
       flag: "--approval-policy",
+      message: '--approval-policy must be "auto-approve", not "ask"',
     },
     {
       name: "an approval policy that is merely misspelt",
       argv: [...without("--approval-policy"), "--approval-policy", "auto_approve"],
       flag: "--approval-policy",
+      message: '--approval-policy must be "auto-approve", not "auto_approve"',
     },
     {
       name: "a flag left without a value at the end",
       argv: [...without("--provider"), "--provider"],
       flag: "--provider",
+      message: "--provider requires a value",
     },
     {
       name: "a flag followed by the next flag",
       argv: ["run", "--provider", "--model", "m"],
       flag: "--provider",
+      message: "--provider requires a value",
+    },
+    {
+      name: "a flag followed by a single-dash token",
+      argv: [...without("--model"), "--model", "-p", "anthropic"],
+      flag: "--model",
+      message: "--model requires a value",
     },
     {
       name: "a flag given an empty value",
       argv: [...without("--provider"), "--provider="],
       flag: "--provider",
+      message: "--provider requires a value",
     },
-    { name: "a flag given twice", argv: [...valid, "--model", "other"], flag: "--model" },
-  ] satisfies { name: string; argv: string[]; flag: string | undefined }[])(
+    {
+      name: "a flag given a blank value",
+      argv: [...without("--model"), "--model", "  "],
+      flag: "--model",
+      message: "--model requires a value",
+    },
+    {
+      name: "a flag given twice",
+      argv: [...valid, "--model", "other"],
+      flag: "--model",
+      message: "--model was given more than once",
+    },
+  ] satisfies { name: string; argv: string[]; flag?: string; message: string }[])(
     "exits with a usage error on $name",
-    ({ argv, flag }) => {
-      expect(parseRunArgs(argv, cwd)).toEqual(usageError(flag));
+    ({ argv, flag, message }) => {
+      expect(parseRunArgs(argv, cwd)).toStrictEqual(usageError(flag, message));
     },
   );
 
   it.each(required.map(([flag]) => flag))("exits with a usage error when %s is missing", (flag) => {
-    expect(parseRunArgs(without(flag), cwd)).toEqual(usageError(flag));
+    expect(parseRunArgs(without(flag), cwd)).toStrictEqual(usageError(flag, `${flag} is required`));
   });
 });
 
@@ -162,19 +211,6 @@ describe("the ADR 0005 §3 contract", () => {
     const refused: RunArgs["approvalPolicy"] = "ask";
     expect(allowed).toBe("auto-approve");
     expect(String(refused)).toBe("ask");
-  });
-
-  it("offers five providers and two profiles", () => {
-    const providers = {
-      anthropic: true,
-      openrouter: true,
-      openai: true,
-      google: true,
-      xai: true,
-    } satisfies Record<Provider, true>;
-    const profiles = { default: true, terminalbench: true } satisfies Record<Profile, true>;
-    expect(Object.keys(providers)).toHaveLength(5);
-    expect(Object.keys(profiles)).toHaveLength(2);
   });
 
   it("documents every flag it accepts, so the usage text cannot drift", () => {

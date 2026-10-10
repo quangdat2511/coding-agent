@@ -7,14 +7,14 @@
  * its provider. Resolving a valid invocation into session configuration is CDA-59 (D1.2).
  */
 
-export type Provider = "anthropic" | "openrouter" | "openai" | "google" | "xai";
+export type ProviderId = "anthropic" | "openrouter" | "openai" | "google" | "xai";
 
 export type Profile = "default" | "terminalbench";
 
 /** A `coding-agent run` invocation whose shape ADR 0005 §3 accepts. */
 export interface RunArgs {
   readonly taskFile: string;
-  readonly provider: Provider;
+  readonly provider: ProviderId;
   readonly model: string;
   /**
    * ADR 0005 §3 accepts exactly one value. The literal type carries that rule forward, so the
@@ -43,7 +43,7 @@ const providers = {
   openai: true,
   google: true,
   xai: true,
-} satisfies Record<Provider, true>;
+} satisfies Record<ProviderId, true>;
 
 const profiles = { default: true, terminalbench: true } satisfies Record<Profile, true>;
 
@@ -83,7 +83,8 @@ export const USAGE = `usage: coding-agent ${command} ${flagOf.taskFile} <path> $
   ${flagOf.profile} <name>                optional  ${Object.keys(profiles).join(" | ")} (default: default)
   ${flagOf.repoRoot} <dir>               optional  defaults to the working directory`;
 
-const problem = (flag: string | undefined, message: string): UsageProblem => ({ flag, message });
+const problem = (flag: string | undefined, message: string): UsageProblem =>
+  flag === undefined ? { message } : { flag, message };
 
 const fail = (found: UsageProblem): ParseRunArgsResult => ({
   ok: false,
@@ -112,14 +113,13 @@ function requireOneOf<T extends string>(
  * `findConfigProblem` does in Agent Core.
  */
 export function parseRunArgs(argv: readonly string[], cwd: string): ParseRunArgsResult {
-  const [given, ...rest] = argv;
+  const [given, ...tokens] = argv;
   if (given === undefined) return fail(problem(undefined, "a command is required"));
   if (given !== command) return fail(problem(undefined, `unknown command "${given}"`));
 
   const raw: Partial<Record<keyof RunArgs, string>> = {};
-  const tokens = [...rest];
-  while (tokens.length > 0) {
-    const token = tokens.shift();
+  for (let index = 0; index < tokens.length; index++) {
+    const token = tokens[index];
     if (token === undefined) break;
 
     const separator = token.startsWith("--") ? token.indexOf("=") : -1;
@@ -135,13 +135,16 @@ export function parseRunArgs(argv: readonly string[], cwd: string): ParseRunArgs
     if (raw[field] !== undefined) return fail(problem(flag, `${flag} was given more than once`));
 
     let value = separator === -1 ? undefined : token.slice(separator + 1);
-    if (separator === -1) {
-      const next = tokens[0];
-      // A `--` prefix is the next flag, never this flag's value. `--task-file=--odd` passes a
-      // value that genuinely starts with two dashes.
-      if (next !== undefined && !next.startsWith("--")) value = tokens.shift();
+    const next = tokens[index + 1];
+    // A `-` prefix is a flag, never this flag's value, the same rule that classifies unknown
+    // tokens above. `--task-file=-odd` passes a value that genuinely starts with a dash.
+    if (separator === -1 && next !== undefined && !next.startsWith("-")) {
+      value = next;
+      index++;
     }
-    if (value === undefined || value === "") return fail(problem(flag, `${flag} requires a value`));
+    if (value === undefined || value.trim() === "") {
+      return fail(problem(flag, `${flag} requires a value`));
+    }
     raw[field] = value;
   }
 
