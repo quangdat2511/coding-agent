@@ -1,10 +1,6 @@
 #!/usr/bin/env -S bun --no-env-file --config=/dev/null
-// The `coding-agent` executable (ADR 0004 §6). ADR 0005 §3 makes exit 2 an invalid invocation
-// with no Agent Session opened and nothing written, so nothing above the `parsed.ok` check may
-// touch the filesystem, the environment, or Agent Core. CDA-59 (D1.2) must preserve that ordering
-// when it adds configuration resolution here. The shebang keeps Bun from loading `.env` and
-// `bunfig.toml` from the working directory, the repository under task, matching the autoload
-// flags ADR 0005 §2 sets for the compiled artifact.
+// CDA-59 (D1.2): exit 2 means no Agent Session was opened and nothing was written (ADR 0005 §3),
+// so keep every file, environment, and Agent Core access below the `parsed.ok` check.
 import { parseRunArgs, USAGE } from "./run-args.ts";
 
 function main(argv: readonly string[], cwd: string): number {
@@ -13,8 +9,8 @@ function main(argv: readonly string[], cwd: string): number {
     process.stderr.write(`coding-agent: ${parsed.message}\n\n${USAGE}\n`);
     return 2;
   }
-  // Temporary: CDA-59 (D1.2) resolves the configuration and CDA-75 (D3.1) returns the real
-  // exit codes 0, 1 and 130. Until then a valid invocation has nothing to run.
+  // Temporary: CDA-59 (D1.2) resolves the configuration, CDA-75 (D3.1) returns exit codes 0 and 1,
+  // and CDA-78 (D3.2) returns 130. Until then a valid invocation has nothing to run.
   process.stderr.write(
     "coding-agent: run is not implemented yet; configuration resolution and the Agent Session " +
       "land in CDA-59 (D1.2)\n",
@@ -22,9 +18,8 @@ function main(argv: readonly string[], cwd: string): number {
   return 70;
 }
 
-// `process.exitCode` rather than `process.exit()`: exiting outright can truncate a buffered
-// stderr write to a pipe, which is exactly what the smoke tests read.
-// An unexpected throw would otherwise exit 1, which ADR 0005 §3 reserves for a failed Agent Result.
+// CDA-75 (D3.1), CDA-78 (D3.2): set `process.exitCode`, since `process.exit()` can truncate piped
+// stderr, and keep the 70 fallback, since an uncaught throw exits 1, a failed Agent Result.
 try {
   process.exitCode = main(process.argv.slice(2), process.cwd());
 } catch (error) {

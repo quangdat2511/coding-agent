@@ -1,25 +1,15 @@
-/**
- * Parses the `coding-agent run` command line pinned by ADR 0005 §3.
- *
- * This module is pure and imports nothing: a usage error must be decided before anything reads
- * the filesystem, the environment, or opens an Agent Session. Values are carried verbatim: no
- * path is resolved, no file is read, no credential is looked up, and no model is checked against
- * its provider. Resolving a valid invocation into session configuration is CDA-59 (D1.2).
- */
+// CDA-59 (D1.2): keep this module import-free so usage errors are decided before any I/O. Values
+// stay verbatim; resolving paths, reading the task file, and checking credentials or models
+// belong in CDA-59, after the `parsed.ok` check in cli.ts.
 
 export type ProviderId = "anthropic" | "openrouter" | "openai" | "google" | "xai";
 
 export type Profile = "default" | "terminalbench";
 
-/** A `coding-agent run` invocation whose shape ADR 0005 §3 accepts. */
 export interface RunArgs {
   readonly taskFile: string;
   readonly provider: ProviderId;
   readonly model: string;
-  /**
-   * ADR 0005 §3 accepts exactly one value. The literal type carries that rule forward, so the
-   * headless path cannot be handed `"ask"` by accident (ADR 0001 §4).
-   */
   readonly approvalPolicy: "auto-approve";
   readonly outputDir: string;
   readonly profile: Profile;
@@ -49,7 +39,6 @@ const profiles = { default: true, terminalbench: true } satisfies Record<Profile
 
 const approvalPolicies = { "auto-approve": true } satisfies Record<RunArgs["approvalPolicy"], true>;
 
-/** The single source of flag spellings. Keyed by field, so a field without a flag is a type error. */
 const flagOf = {
   taskFile: "--task-file",
   provider: "--provider",
@@ -107,11 +96,6 @@ function requireOneOf<T extends string>(
     : problem(flag, `${flag} must be ${oneOf(options)}, not "${raw}"`);
 }
 
-/**
- * Reads the argument vector after the program name, including the `run` token itself, and the
- * working directory that `--repo-root` defaults to. Reports the first problem it finds, the way
- * `findConfigProblem` does in Agent Core.
- */
 export function parseRunArgs(argv: readonly string[], cwd: string): ParseRunArgsResult {
   const [given, ...tokens] = argv;
   if (given === undefined) return fail(problem(undefined, "a command is required"));
@@ -136,8 +120,6 @@ export function parseRunArgs(argv: readonly string[], cwd: string): ParseRunArgs
 
     let value = separator === -1 ? undefined : token.slice(separator + 1);
     const next = tokens[index + 1];
-    // A `-` prefix is a flag, never this flag's value, the same rule that classifies unknown
-    // tokens above. `--task-file=-odd` passes a value that genuinely starts with a dash.
     if (separator === -1 && next !== undefined && !next.startsWith("-")) {
       value = next;
       index++;
@@ -162,7 +144,6 @@ export function parseRunArgs(argv: readonly string[], cwd: string): ParseRunArgs
     raw.profile === undefined ? "default" : requireOneOf(flagOf.profile, raw.profile, profiles);
   if (typeof profile !== "string") return fail(profile);
 
-  // This literal is the completeness proof: a missing RunArgs field is a type error.
   return {
     ok: true,
     args: {

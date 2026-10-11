@@ -24,7 +24,6 @@ const required = [
 
 const valid = ["run", ...required.flat()];
 
-/** The documented invocation with one required flag and its value removed. */
 const without = (flag: string): string[] => [
   "run",
   ...required.filter(([name]) => name !== flag).flat(),

@@ -28,7 +28,6 @@ const required = [
   "/tmp/out",
 ];
 
-/** Executes the declared bin entry through its shebang, and reads both streams to completion. */
 async function run(args: readonly string[], cwd = packageRoot) {
   const child = Bun.spawn([bin, ...args], { cwd, stdout: "pipe", stderr: "pipe" });
   const [exitCode, stdout, stderr] = await Promise.all([
@@ -39,7 +38,6 @@ async function run(args: readonly string[], cwd = packageRoot) {
   return { exitCode, stdout, stderr };
 }
 
-/** The diagnostic line itself; every usage error also prints USAGE, which names every flag. */
 const firstLine = (stderr: string): string => stderr.split("\n")[0] ?? "";
 
 async function withTemporaryDirectory(body: (directory: string) => Promise<void>): Promise<void> {
@@ -52,31 +50,35 @@ async function withTemporaryDirectory(body: (directory: string) => Promise<void>
 }
 
 describe("the coding-agent executable", () => {
-  it("is declared as an executable bin entry that runs from a checkout", () => {
+  it("is declared as an executable bin entry whose shebang disables Bun's autoload", async () => {
     expect(existsSync(bin)).toBe(true);
     expect(statSync(bin).mode & 0o111).not.toBe(0);
+    const source = await Bun.file(bin).text();
+    expect(source.split("\n")[0]).toBe("#!/usr/bin/env -S bun --no-env-file --config=/dev/null");
   });
 
-  it("ignores .env and bunfig.toml in the working directory", async () => {
+  it("ignores a bunfig.toml preload in the working directory", async () => {
     await withTemporaryDirectory(async (directory) => {
       await Bun.write(join(directory, "bunfig.toml"), 'preload = ["./preload.ts"]\n');
       await Bun.write(join(directory, "preload.ts"), 'process.stderr.write("preloaded\\n");\n');
-      await Bun.write(join(directory, ".env"), "CODING_AGENT_DOTENV_PROBE=loaded\n");
 
       const { exitCode, stderr } = await run(["run", "--nope"], directory);
       expect(exitCode).toBe(2);
       expect(stderr).not.toContain("preloaded");
     });
-    const source = await Bun.file(bin).text();
-    expect(source.split("\n")[0]).toBe("#!/usr/bin/env -S bun --no-env-file --config=/dev/null");
   });
 
   it.each([
     { name: "no arguments", args: [], expected: "a command is required" },
     {
-      name: "a missing required flag",
+      name: "a missing --task-file",
       args: ["run", ...required.slice(2)],
       expected: "--task-file is required",
+    },
+    {
+      name: "a missing --approval-policy",
+      args: ["run", ...required.slice(0, 6), ...required.slice(8)],
+      expected: "--approval-policy is required",
     },
     {
       name: "an unknown flag",
@@ -110,8 +112,8 @@ describe("the coding-agent executable", () => {
     },
   );
 
-  // Temporary: CDA-59 (D1.2) replaces this with a resolved configuration, and CDA-75 (D3.1)
-  // replaces exit 70 with the real exit codes. Nothing should come to depend on 70 here.
+  // Temporary: CDA-59 (D1.2) replaces this with a resolved configuration, and CDA-75 (D3.1) and
+  // CDA-78 (D3.2) replace exit 70 with the real exit codes. Nothing should come to depend on 70.
   it("exits 70 on a valid invocation, because the run itself is not implemented yet", async () => {
     const { exitCode, stderr } = await run(["run", ...required]);
     expect(exitCode).toBe(70);
@@ -119,8 +121,6 @@ describe("the coding-agent executable", () => {
   });
 
   it("writes nothing and opens no Agent Session before it refuses or defers", async () => {
-    // The working directory is the temporary directory, so a write relative to it (the default
-    // repository root, or the relative paths below) would show up in the listing.
     await withTemporaryDirectory(async (directory) => {
       const refused = await run(
         ["run", "--output-dir", "out", "--provider", "anthropic"],
@@ -145,8 +145,7 @@ describe("the coding-agent executable", () => {
 
       expect(refused.exitCode).toBe(2);
       expect(deferred.exitCode).toBe(70);
-      // The output directory is never created and the unreadable task file is never opened:
-      // creating one and reading the other is CDA-59's work, not this ticket's.
+      // CDA-59 (D1.2) will create the output directory and read the task file on a valid run.
       expect(await readdir(directory)).toEqual([]);
     });
   });
