@@ -43,7 +43,7 @@ describe("dispatching commands", () => {
       command: { type: "resolve_approval", approvalId: "approval-1", decision: "allow" },
     },
     { name: "cancel before start", command: { type: "cancel" } },
-  ])("rejects $name as INVALID_STATE and emits nothing", async ({ command }) => {
+  ])("rejects $name as INVALID_STATE and emits no Session Event", async ({ command }) => {
     const { session } = openTestSession();
 
     expect(await session.dispatch(command)).toEqual({
@@ -54,7 +54,7 @@ describe("dispatching commands", () => {
     expect(session.snapshot()).toMatchObject({ phase: "ready", lastSequence: 0 });
   });
 
-  it("rejects cancel after the session settles as ALREADY_SETTLED and emits nothing", async () => {
+  it("rejects cancel after the Agent Session settles as ALREADY_SETTLED and emits no Session Event", async () => {
     const { session } = openTestSession();
     await session.dispatch({ type: "start", task });
     const { lastSequence } = await session.result();

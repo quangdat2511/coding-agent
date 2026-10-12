@@ -20,7 +20,7 @@ type EventDraft = {
 export function createAgentSession(config: OpenSessionConfig, initial: ReadyState): AgentSession {
   const log = createEventLog();
   let state: AgentState = initial;
-  let commands: Promise<unknown> = Promise.resolve();
+  let queueTail: Promise<unknown> = Promise.resolve();
   const settled = Promise.withResolvers<AgentResult>();
 
   function commit(next: AgentState, event: EventDraft): number {
@@ -70,8 +70,8 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
 
   return {
     dispatch(command) {
-      const handled = commands.then(() => handle(command));
-      commands = handled.catch(() => {});
+      const handled = queueTail.then(() => handle(command));
+      queueTail = handled.catch(() => {});
       return handled;
     },
     snapshot: () => state,

@@ -10,9 +10,9 @@ describe("observing an Agent Session", () => {
     clock.advance(1_500);
 
     await session.dispatch({ type: "start", task });
-    const first = await session.events()[Symbol.asyncIterator]().next();
+    const [first] = await collect(session.events());
 
-    expect(first.value).toEqual({
+    expect(first).toEqual({
       sessionId: "session-1",
       sequence: 1,
       occurredAt: "2026-10-01T00:00:01.500Z",
@@ -50,7 +50,7 @@ describe("observing an Agent Session", () => {
     });
   });
 
-  it("follows live events from a subscription made before start, ending after session_settled", async () => {
+  it("follows live Session Events from a subscription made before start, ending after session_settled", async () => {
     const { session } = openTestSession();
     const live = collect(session.events());
 
@@ -62,7 +62,18 @@ describe("observing an Agent Session", () => {
     expect(events.map((event) => event.sequence)).toEqual(events.map((_, index) => index + 1));
   });
 
-  it("replays exactly the events after any attach point, with no gap and no duplicate", async () => {
+  it("follows live Session Events from a nonzero sequence subscribed before start", async () => {
+    const { session } = openTestSession();
+    const live = collect(session.events(1));
+
+    await session.dispatch({ type: "start", task });
+    const sequences = (await live).map((event) => event.sequence);
+
+    expect(sequences[0]).toBe(2);
+    expect(sequences.at(-1)).toBe((await session.result()).lastSequence);
+  });
+
+  it("replays exactly the Session Events after any attach point, with no gap and no duplicate", async () => {
     const { session } = openTestSession();
     await session.dispatch({ type: "start", task });
     const { lastSequence } = await session.result();
@@ -75,7 +86,7 @@ describe("observing an Agent Session", () => {
     }
   });
 
-  it("keeps snapshot() at least as new as every event already delivered", async () => {
+  it("keeps snapshot() at least as new as every Session Event already delivered", async () => {
     const { session } = openTestSession();
     const observed: { event: SessionEvent; state: AgentState }[] = [];
     const live = (async () => {
@@ -111,7 +122,7 @@ describe("observing an Agent Session", () => {
     expect((await healthy).at(-1)).toMatchObject({ type: "session_settled", data: { result } });
   });
 
-  it("never waits for a consumer that stops pulling events", async () => {
+  it("never waits for a consumer that stops pulling Session Events", async () => {
     const { session } = openTestSession();
     void (async () => {
       for await (const _ of session.events()) await new Promise(() => {});
