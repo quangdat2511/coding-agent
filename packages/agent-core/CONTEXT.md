@@ -41,6 +41,14 @@ _Avoid_: Exit code, final message, summary
 The bounded runtime constraints (model turns, tool calls, active execution duration, and consecutive recoverable failures) enforced on an Agent Session to guarantee termination.
 _Avoid_: Quotas, timeouts, guardrails
 
+**Repository Root**:
+The canonical directory of the selected code repository, to which every filesystem action of a tool is confined.
+_Avoid_: cwd, workspace, project dir
+
+**Path Jail**:
+The rule that accepts a model-supplied path only when it stays inside the Repository Root and passes through no symbolic link.
+_Avoid_: Sandbox, chroot
+
 **Tool Call**:
 A model request to invoke one controlled agent capability.
 _Avoid_: Function call, command
