@@ -229,6 +229,55 @@ describe("Built-in Providers & Registry", () => {
     });
   });
 
+  describe("createOpenAIProvider", () => {
+    it("should initialize OpenAI provider with correct metadata and base URL", () => {
+      const provider = createOpenAIProvider();
+
+      expect(provider.id).toBe("openai");
+      expect(provider.name).toBe("OpenAI");
+      expect(provider.baseUrl).toBe("https://api.openai.com/v1");
+      expect(provider.variant).toBe("chat_completions");
+    });
+
+    it("should accept variant option explicitly", () => {
+      const provider = createOpenAIProvider({ variant: "chat_completions" });
+      expect(provider.variant).toBe("chat_completions");
+    });
+
+    it("should resolve API key from OPENAI_API_KEY", async () => {
+      const originalKey = process.env.OPENAI_API_KEY;
+      try {
+        process.env.OPENAI_API_KEY = "test-openai-key-456";
+        const provider = createOpenAIProvider();
+        expect(await provider.auth.apiKey?.resolve()).toBe("test-openai-key-456");
+      } finally {
+        if (originalKey === undefined) {
+          delete process.env.OPENAI_API_KEY;
+        } else {
+          process.env.OPENAI_API_KEY = originalKey;
+        }
+      }
+    });
+
+    it("should contain OpenAI models with default capabilities", () => {
+      const provider = createOpenAIProvider();
+      const models = provider.getModels();
+
+      expect(models.length).toBeGreaterThan(0);
+      for (const model of models) {
+        expect(model.id).toBeTruthy();
+        expect(model.name).toBeTruthy();
+        expect(model.provider).toBe("openai");
+        expect(model.capabilities).toEqual(OPENAI_CHAT_COMPLETIONS_CAPABILITIES);
+      }
+
+      const modelIds = new Set(models.map((m) => m.id));
+      expect(modelIds.has("gpt-4o")).toBe(true);
+      expect(modelIds.has("gpt-4o-mini")).toBe(true);
+      expect(modelIds.has("o1")).toBe(true);
+    });
+  });
+
   describe("createProviderDirectory registry", () => {
     it("should find models across providers", () => {
       const models = createProviderDirectory();
