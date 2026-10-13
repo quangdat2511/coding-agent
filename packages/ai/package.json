@@ -10,7 +10,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
-    "example": "bun run examples/stream.ts"
+    "example": "bun run examples/stream.ts",
+    "example:custom": "bun run examples/custom-provider.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.33.1",

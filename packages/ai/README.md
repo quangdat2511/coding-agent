@@ -174,6 +174,10 @@ bun run example
 # Or specify provider, model, and custom prompt
 bun run example google gemini-3.6-flash "Explain TypeScript advantages"
 bun run example openai gpt-4o "Explain monorepo architecture"
+
+# Run custom provider example (e.g. local Ollama / vLLM / custom proxy)
+bun run example:custom
+bun run example:custom http://localhost:11434/v1 llama3 "Explain event loop"
 ```
 
 ## Conformance Test Suite & Fixture Recording

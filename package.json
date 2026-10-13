@@ -13,6 +13,7 @@
     "typecheck": "bun --filter '*' typecheck && tsc -p scripts/tsconfig.json",
     "build": "bun run --filter '@coding-agent/*' build",
     "example:ai": "bun run packages/ai/examples/stream.ts",
+    "example:custom": "bun run packages/ai/examples/custom-provider.ts",
     "check": "biome check .",
     "ci:check": "biome ci .",
     "check:import-boundaries": "bun run scripts/check-import-boundaries.ts",
