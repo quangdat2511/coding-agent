@@ -10,6 +10,10 @@ A service that fulfills model requests. The MVP providers are Anthropic, OpenRou
 Google, xAI, and OpenCode (OpenCode Zen).
 _Avoid_: LLM vendor, backend
 
+**Custom Provider**:
+A Model Provider instantiated dynamically at runtime from declarative configuration rather than built-in defaults.
+_Avoid_: Dynamic provider, ad-hoc provider, user provider, plugin provider
+
 **Model Interaction**:
 A provider-neutral exchange that may produce streamed output or request a controlled Tool Call.
 _Avoid_: API call, completion
