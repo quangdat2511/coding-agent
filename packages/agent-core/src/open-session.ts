@@ -1,5 +1,6 @@
+import { createAgentSession } from "./agent-session.ts";
 import { type ConfigProblem, findConfigProblem, issueSessionId } from "./config-validation.ts";
-import type { AgentSession, OpenSessionConfig, OpenSessionResult } from "./session.ts";
+import type { OpenSessionConfig, OpenSessionResult } from "./session.ts";
 import type { ReadyState } from "./state.ts";
 
 const refuse = (problem: ConfigProblem): OpenSessionResult => ({
@@ -27,21 +28,5 @@ export function openAgentSession(config: OpenSessionConfig): OpenSessionResult {
     lastSequence: 0,
   };
 
-  const notImplemented = (operation: keyof AgentSession) =>
-    new Error(`AgentSession.${operation} is not implemented yet`);
-
-  const session: AgentSession = {
-    dispatch: async () => {
-      throw notImplemented("dispatch");
-    },
-    snapshot: () => state,
-    events: () => {
-      throw notImplemented("events");
-    },
-    result: async () => {
-      throw notImplemented("result");
-    },
-  };
-
-  return { ok: true, session };
+  return { ok: true, session: createAgentSession(config, state) };
 }
