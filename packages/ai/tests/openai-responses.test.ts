@@ -601,6 +601,80 @@ describe("OpenAI stream finishReason handling", () => {
     }
   });
 
+  it("streams a tool call with whole argument delivery in a single chunk (xAI whole delivery pattern)", async () => {
+    mockChunks = [
+      {
+        choices: [
+          {
+            delta: {
+              tool_calls: [
+                {
+                  index: 0,
+                  id: "call-xai-1",
+                  type: "function",
+                  function: { name: "get_weather", arguments: '{"city":"Tokyo"}' },
+                },
+              ],
+            },
+            finish_reason: null,
+          },
+        ],
+      },
+      { choices: [{ delta: {}, finish_reason: "tool_calls" }] },
+    ];
+
+    const streamObj = stream(model, context, { apiKey: "test-key" });
+    const events = [];
+    for await (const ev of streamObj) {
+      events.push(ev);
+    }
+
+    const startEvent = events.find((e) => e.type === "content_block_start");
+    expect(startEvent).toBeDefined();
+    if (startEvent?.type === "content_block_start") {
+      expect(startEvent.index).toBe(0);
+      expect(startEvent.block).toEqual({
+        type: "tool_call",
+        toolCallId: "call-xai-1",
+        name: "get_weather",
+        arguments: "",
+      });
+    }
+
+    const stopEvent = events.find((e) => e.type === "content_block_stop");
+    expect(stopEvent).toBeDefined();
+    if (stopEvent?.type === "content_block_stop") {
+      expect(stopEvent.index).toBe(0);
+    }
+
+    const turnEndEvent = events.find((e) => e.type === "turn_end");
+    expect(turnEndEvent).toBeDefined();
+    if (turnEndEvent?.type === "turn_end") {
+      expect(turnEndEvent.message.content).toEqual([
+        {
+          type: "tool_call",
+          toolCallId: "call-xai-1",
+          name: "get_weather",
+          arguments: '{"city":"Tokyo"}',
+        },
+      ]);
+    }
+
+    const result = await streamObj.result();
+    expect(result.content).toEqual([
+      {
+        type: "tool_call",
+        toolCallId: "call-xai-1",
+        name: "get_weather",
+        arguments: '{"city":"Tokyo"}',
+      },
+    ]);
+    expect(result.finishReason).toEqual({
+      reason: "tool_call",
+      rawReason: "tool_calls",
+    });
+  });
+
   it("preserves chronological ordering and contiguous 0-indexed indices when text is followed by tool call", async () => {
     mockChunks = [
       { choices: [{ delta: { content: "Thinking..." }, finish_reason: null }] },

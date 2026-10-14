@@ -133,6 +133,24 @@ describe("Built-in Providers & Registry", () => {
       const other = models.find((m) => m.id !== "claude-sonnet-4-5");
       expect(other?.capabilities).toEqual(ANTHROPIC_MESSAGES_CAPABILITIES);
     });
+
+    it("createXaiProvider accepts modelOverrides option", () => {
+      const provider = createXaiProvider({
+        modelOverrides: {
+          "grok-4.3": { parallelToolCallControl: false, serverSideTools: true },
+        },
+      });
+      expect(provider.variant).toBe("chat_completions");
+      const models = provider.getModels();
+      const grok43 = models.find((m) => m.id === "grok-4.3");
+      expect(grok43).toBeDefined();
+      expect(grok43?.capabilities?.parallelToolCallControl).toBe(false);
+      expect(grok43?.capabilities?.serverSideTools).toBe(true);
+      expect(grok43?.capabilities?.toolArgumentDelivery).toBe("whole");
+
+      const other = models.find((m) => m.id !== "grok-4.3");
+      expect(other?.capabilities).toEqual(XAI_CHAT_COMPLETIONS_CAPABILITIES);
+    });
   });
 
   describe("opencode is not an MVP provider", () => {
@@ -278,6 +296,55 @@ describe("Built-in Providers & Registry", () => {
     });
   });
 
+  describe("createXaiProvider", () => {
+    it("should initialize xAI provider with correct metadata and base URL", () => {
+      const provider = createXaiProvider();
+
+      expect(provider.id).toBe("xai");
+      expect(provider.name).toBe("xAI (Grok)");
+      expect(provider.baseUrl).toBe("https://api.x.ai/v1");
+      expect(provider.variant).toBe("chat_completions");
+    });
+
+    it("should accept variant option explicitly", () => {
+      const provider = createXaiProvider({ variant: "chat_completions" });
+      expect(provider.variant).toBe("chat_completions");
+    });
+
+    it("should resolve API key from XAI_API_KEY", async () => {
+      const originalKey = process.env.XAI_API_KEY;
+      try {
+        process.env.XAI_API_KEY = "test-xai-key-789";
+        const provider = createXaiProvider();
+        expect(await provider.auth.apiKey?.resolve()).toBe("test-xai-key-789");
+      } finally {
+        if (originalKey === undefined) {
+          delete process.env.XAI_API_KEY;
+        } else {
+          process.env.XAI_API_KEY = originalKey;
+        }
+      }
+    });
+
+    it("should contain xAI models with default capabilities", () => {
+      const provider = createXaiProvider();
+      const models = provider.getModels();
+
+      expect(models.length).toBeGreaterThan(0);
+      for (const model of models) {
+        expect(model.id).toBeTruthy();
+        expect(model.name).toBeTruthy();
+        expect(model.provider).toBe("xai");
+        expect(model.capabilities).toEqual(XAI_CHAT_COMPLETIONS_CAPABILITIES);
+      }
+
+      const modelIds = new Set(models.map((m) => m.id));
+      expect(modelIds.has("grok-4.3")).toBe(true);
+      expect(modelIds.has("grok-build-0.1")).toBe(true);
+      expect(modelIds.has("grok-4.5")).toBe(true);
+    });
+  });
+
   describe("createProviderDirectory registry", () => {
     it("should find models across providers", () => {
       const models = createProviderDirectory();
@@ -294,6 +361,9 @@ describe("Built-in Providers & Registry", () => {
 
       const openrouterModel = models.getModel("openrouter", "openai/gpt-4o");
       expect(openrouterModel).toBeDefined();
+
+      const xaiModel = models.getModel("xai", "grok-4.3");
+      expect(xaiModel).toBeDefined();
     });
   });
 });
