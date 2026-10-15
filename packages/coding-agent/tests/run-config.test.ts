@@ -3,7 +3,7 @@ import { chmod, mkdir, mkdtemp, readdir, realpath, rm, symlink } from "node:fs/p
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { RunArgs } from "../src/run-args.ts";
-import { resolveRunConfig } from "../src/run-config.ts";
+import { MAX_TASK_FILE_BYTES, resolveRunConfig } from "../src/run-config.ts";
 
 const secret = "sk-test-credential-value";
 
@@ -67,6 +67,7 @@ describe("resolving a valid invocation", () => {
     expect(config.objective).toBe("Add a failing test, then make it pass.\n");
     expect(config.taskFile).toBe(join(directory, "task.md"));
     expect(config.repoRoot).toBe(join(directory, "repo"));
+    expect(config.givenRepoRoot).toBe(join(directory, "repo"));
     expect(config.outputDir).toBe(join(directory, "out"));
     expect(config.approvalPolicy).toBe("auto-approve");
     expect(config.profile).toBe("default");
@@ -86,9 +87,9 @@ describe("resolving a valid invocation", () => {
 describe("selecting the provider and model", () => {
   it("refuses a model the provider directory does not list for a known provider", async () => {
     await expectRefused(
-      await resolveWith({ model: "claude-sonnet-4" }),
+      await resolveWith({ model: "no-such-model" }),
       "--model",
-      '--model "claude-sonnet-4" is not a known anthropic model',
+      '--model "no-such-model" is not a known anthropic model',
     );
   });
 });
@@ -130,6 +131,21 @@ describe("reading the provider credential", () => {
     expect(resolved.config.credential.variable).toBe("GEMINI_API_KEY");
     expect(resolved.config.credential.reveal()).toBe(secret);
   });
+
+  it("skips a blank variable the way the provider adapters do, so Google falls back to GEMINI_API_KEY", async () => {
+    const resolved = await resolveWith(
+      { provider: "google", model: "gemini-2.5-flash" },
+      { GOOGLE_API_KEY: " ", GEMINI_API_KEY: secret },
+    );
+    if (!resolved.ok) throw new Error(`expected a configuration, got: ${resolved.message}`);
+    expect(resolved.config.credential.variable).toBe("GEMINI_API_KEY");
+  });
+
+  it("trims the credential, so a CRLF env file still yields a usable key", async () => {
+    const resolved = await resolveWith({}, { ANTHROPIC_API_KEY: ` ${secret}\r\n` });
+    if (!resolved.ok) throw new Error(`expected a configuration, got: ${resolved.message}`);
+    expect(resolved.config.credential.reveal()).toBe(secret);
+  });
 });
 
 describe("configuring the verification command", () => {
@@ -163,6 +179,22 @@ describe("resolving the repository root", () => {
     const resolved = await resolveWith({ repoRoot: "link" });
     if (!resolved.ok) throw new Error(`expected a configuration, got: ${resolved.message}`);
     expect(resolved.config.repoRoot).toBe(join(directory, "repo"));
+    expect(resolved.config.givenRepoRoot).toBe(join(directory, "link"));
+  });
+
+  it("names the working directory when --repo-root was omitted", async () => {
+    const gone = join(directory, "gone");
+    expect(
+      await resolveRunConfig(argsWith({ repoRoot: gone }), {
+        cwd: gone,
+        env: { ANTHROPIC_API_KEY: secret },
+      }),
+    ).toStrictEqual(
+      refusal(
+        "--repo-root",
+        `the working directory "${gone}" (the default --repo-root) does not exist`,
+      ),
+    );
   });
 
   it("refuses a root that does not exist", async () => {
@@ -193,6 +225,15 @@ describe("resolving the repository root", () => {
       await chmod(join(directory, "repo"), 0o755);
     }
   });
+
+  it.skipIf(asRoot)("refuses a root that is not writable", async () => {
+    await chmod(join(directory, "repo"), 0o555);
+    try {
+      await expectRefused(await resolveWith(), "--repo-root", '--repo-root "repo" is not writable');
+    } finally {
+      await chmod(join(directory, "repo"), 0o755);
+    }
+  });
 });
 
 describe("reading the task file", () => {
@@ -215,13 +256,18 @@ describe("reading the task file", () => {
     },
     { name: "an empty file", content: "", expected: "is blank" },
     { name: "a whitespace-only file", content: " \n\t\n", expected: "is blank" },
+    {
+      name: "a file larger than the limit",
+      content: "x".repeat(MAX_TASK_FILE_BYTES + 1),
+      expected: "is larger than 1 MiB",
+    },
   ])("refuses $name", async ({ content, expected }) => {
     await Bun.write(join(directory, "task.md"), content);
     await expectRefused(await resolveWith(), "--task-file", `--task-file "task.md" ${expected}`);
   });
 
   it("refuses a named pipe instead of waiting for a writer", async () => {
-    Bun.spawnSync(["mkfifo", join(directory, "pipe")]);
+    expect(Bun.spawnSync(["mkfifo", join(directory, "pipe")]).exitCode).toBe(0);
     expect(await resolveWith({ taskFile: "pipe" })).toStrictEqual(
       refusal("--task-file", '--task-file "pipe" is not a regular file'),
     );
@@ -280,24 +326,62 @@ describe("preparing the output directory", () => {
       refusal("--output-dir", '--output-dir "out" is not writable'),
     );
   });
+
+  // A umask that drops the owner's write bit creates directories this run cannot write into.
+  describe.skipIf(asRoot)("under a umask that makes new directories read-only", () => {
+    let previous: number;
+    beforeEach(() => {
+      previous = process.umask(0o222);
+    });
+    afterEach(() => {
+      process.umask(previous);
+    });
+
+    it.each([
+      { name: "it created but cannot write", outputDir: "out", expected: "is not writable" },
+      {
+        name: "it only partly created",
+        outputDir: "logs/agent/out",
+        expected: "cannot be created: permission denied",
+      },
+    ])("removes an output directory $name", async ({ outputDir, expected }) => {
+      await expectRefused(
+        await resolveWith({ outputDir }),
+        "--output-dir",
+        `--output-dir "${outputDir}" ${expected}`,
+      );
+    });
+  });
 });
 
 // Temporary: CDA-79 (D3.3) resolves terminalbench to the ADR 0005 §5 limits.
 describe("selecting the terminalbench profile before its limits exist", () => {
+  const notImplemented = {
+    ok: false,
+    code: "NOT_IMPLEMENTED",
+    field: "--profile",
+    message: "--profile terminalbench is not implemented yet; CDA-79 (D3.3) adds its limits",
+  } as const;
+
   it("reports the profile as not implemented once every configuration check has passed", async () => {
-    expect(await resolveWith({ profile: "terminalbench" })).toStrictEqual({
-      ok: false,
-      code: "NOT_IMPLEMENTED",
-      field: "--profile",
-      message: "--profile terminalbench is not implemented yet; CDA-79 (D3.3) adds its limits",
-    });
+    expect(await resolveWith({ profile: "terminalbench", outputDir: "logs/out" })).toStrictEqual(
+      notImplemented,
+    );
+    // Nothing runs, so the output directory it created is removed again.
+    expect((await readdir(directory)).sort()).toEqual(["repo", "task.md"]);
+  });
+
+  it("leaves an output directory that already existed in place", async () => {
+    await mkdir(join(directory, "out"));
+    expect(await resolveWith({ profile: "terminalbench" })).toStrictEqual(notImplemented);
+    expect(await readdir(join(directory, "out"))).toEqual([]);
   });
 
   it("still refuses a configuration error first", async () => {
     await expectRefused(
-      await resolveWith({ profile: "terminalbench", model: "claude-sonnet-4" }),
+      await resolveWith({ profile: "terminalbench", model: "no-such-model" }),
       "--model",
-      '--model "claude-sonnet-4" is not a known anthropic model',
+      '--model "no-such-model" is not a known anthropic model',
     );
   });
 });

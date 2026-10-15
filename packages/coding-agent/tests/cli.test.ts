@@ -145,8 +145,8 @@ describe("the coding-agent executable", () => {
   it.each<ConfigurationErrorCase>([
     {
       name: "an unknown model",
-      flags: { "--model": "claude-sonnet-4" },
-      expected: '--model "claude-sonnet-4" is not a known anthropic model',
+      flags: { "--model": "no-such-model" },
+      expected: '--model "no-such-model" is not a known anthropic model',
     },
     {
       name: "a missing credential",
@@ -205,6 +205,26 @@ describe("the coding-agent executable", () => {
       // The output directory is the one thing a resolved configuration writes.
       expect((await readdir(directory)).sort()).toEqual(["out", "task.md"]);
       expect(await readdir(join(directory, "out"))).toEqual([]);
+    });
+  });
+
+  // Temporary: CDA-79 (D3.3) gives terminalbench its limits. Until then it is not a configuration
+  // error, so it must not exit 2, which Harbor reads as an invalid invocation.
+  it("exits 70 on --profile terminalbench without leaving an output directory behind", async () => {
+    await withTemporaryDirectory(async (directory) => {
+      await Bun.write(join(directory, "task.md"), "Add a failing test, then make it pass.\n");
+      const { exitCode, stdout, stderr } = await run(
+        validRun({ "--profile": "terminalbench" }),
+        directory,
+        { ANTHROPIC_API_KEY: secret },
+      );
+
+      expect(exitCode).toBe(70);
+      expect(firstLine(stderr)).toBe(
+        "coding-agent: --profile terminalbench is not implemented yet; CDA-79 (D3.3) adds its limits",
+      );
+      expect(stdout).toBe("");
+      expect(await readdir(directory)).toEqual(["task.md"]);
     });
   });
 

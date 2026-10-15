@@ -14,8 +14,8 @@
  * The environment variable names each MVP provider reads its API credential
  * from, in lookup order: the first one set wins.
  *
- * The composition root reads a selected provider's credential from these
- * names, and each provider adapter resolves its own key from the same list.
+ * The composition root and each provider adapter read a provider's credential
+ * from these names with `readEnvCredential`, so both pick the same variable.
  */
 export const PROVIDER_CREDENTIAL_ENV_VARS_BY_PROVIDER = Object.freeze({
   anthropic: Object.freeze(["ANTHROPIC_API_KEY"] as const),
