@@ -1,6 +1,7 @@
 import { stream } from "../api/openai-responses.ts";
 import { apiKeyFromEnv } from "../auth/helpers.ts";
 import { applyCapabilities, OPENAI_CHAT_COMPLETIONS_CAPABILITIES } from "../capabilities.ts";
+import { PROVIDER_CREDENTIAL_ENV_VARS_BY_PROVIDER } from "../credentials.ts";
 import { type BaseProviderOptions, defineProvider, type Provider } from "../models.ts";
 import type { ModelCapabilities } from "../types.ts";
 import OPENAI_MODELS from "./openai.models.json";
@@ -28,7 +29,9 @@ export function createOpenAIProvider(options?: OpenAIProviderOptions): Provider 
     name: "OpenAI",
     variant,
     baseUrl: "https://api.openai.com/v1",
-    auth: { apiKey: apiKeyFromEnv("OpenAI API key", ["OPENAI_API_KEY"]) },
+    auth: {
+      apiKey: apiKeyFromEnv("OpenAI API key", PROVIDER_CREDENTIAL_ENV_VARS_BY_PROVIDER.openai),
+    },
     models: applyCapabilities(OPENAI_MODELS, defaultCaps, options?.modelOverrides),
     api: { stream },
   });

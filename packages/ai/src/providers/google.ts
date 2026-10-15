@@ -1,6 +1,7 @@
 import { stream } from "../api/google-generate-content.ts";
 import { apiKeyFromEnv } from "../auth/helpers.ts";
 import { applyCapabilities, GOOGLE_GENERATE_CONTENT_CAPABILITIES } from "../capabilities.ts";
+import { PROVIDER_CREDENTIAL_ENV_VARS_BY_PROVIDER } from "../credentials.ts";
 import { type BaseProviderOptions, defineProvider, type Provider } from "../models.ts";
 import type { ModelCapabilities } from "../types.ts";
 import GOOGLE_MODELS from "./google.models.json";
@@ -28,7 +29,9 @@ export function createGoogleProvider(options?: GoogleProviderOptions): Provider 
     name: "Google (Gemini)",
     variant,
     baseUrl: "https://generativelanguage.googleapis.com/v1beta/",
-    auth: { apiKey: apiKeyFromEnv("Google API key", ["GOOGLE_API_KEY", "GEMINI_API_KEY"]) },
+    auth: {
+      apiKey: apiKeyFromEnv("Google API key", PROVIDER_CREDENTIAL_ENV_VARS_BY_PROVIDER.google),
+    },
     models: applyCapabilities(GOOGLE_MODELS, defaultCaps, options?.modelOverrides),
     api: { stream },
   });

@@ -1,6 +1,7 @@
 import { stream } from "../api/openai-responses.ts";
 import { apiKeyFromEnv } from "../auth/helpers.ts";
 import { applyCapabilities, XAI_CHAT_COMPLETIONS_CAPABILITIES } from "../capabilities.ts";
+import { PROVIDER_CREDENTIAL_ENV_VARS_BY_PROVIDER } from "../credentials.ts";
 import { type BaseProviderOptions, defineProvider, type Provider } from "../models.ts";
 import type { ModelCapabilities } from "../types.ts";
 import XAI_MODELS from "./xai.models.json";
@@ -28,7 +29,7 @@ export function createXaiProvider(options?: XaiProviderOptions): Provider {
     name: "xAI (Grok)",
     variant,
     baseUrl: "https://api.x.ai/v1",
-    auth: { apiKey: apiKeyFromEnv("xAI API key", ["XAI_API_KEY"]) },
+    auth: { apiKey: apiKeyFromEnv("xAI API key", PROVIDER_CREDENTIAL_ENV_VARS_BY_PROVIDER.xai) },
     models: applyCapabilities(XAI_MODELS, defaultCaps, options?.modelOverrides),
     api: { stream },
   });

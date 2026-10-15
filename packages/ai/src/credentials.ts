@@ -11,19 +11,29 @@
 // ---------------------------------------------------------------------------
 
 /**
+ * The environment variable names each MVP provider reads its API credential
+ * from, in lookup order: the first one set wins.
+ *
+ * The composition root reads a selected provider's credential from these
+ * names, and each provider adapter resolves its own key from the same list.
+ */
+export const PROVIDER_CREDENTIAL_ENV_VARS_BY_PROVIDER = Object.freeze({
+  anthropic: Object.freeze(["ANTHROPIC_API_KEY"] as const),
+  google: Object.freeze(["GOOGLE_API_KEY", "GEMINI_API_KEY"] as const),
+  openai: Object.freeze(["OPENAI_API_KEY"] as const),
+  openrouter: Object.freeze(["OPENROUTER_API_KEY"] as const),
+  xai: Object.freeze(["XAI_API_KEY"] as const),
+});
+
+/**
  * The complete, frozen list of environment variable names that carry
  * provider API credentials for the MVP providers.
  *
  * Consumers that need to strip credentials from a child process environment
  * (ADR 0001 §8 rule 1) should remove exactly these keys and no others.
  */
-export const PROVIDER_CREDENTIAL_ENV_VARS = Object.freeze([
-  "ANTHROPIC_API_KEY",
-  "GOOGLE_API_KEY",
-  "GEMINI_API_KEY",
-  "OPENAI_API_KEY",
-  "OPENROUTER_API_KEY",
-  "XAI_API_KEY",
-] as const);
+export const PROVIDER_CREDENTIAL_ENV_VARS = Object.freeze(
+  Object.values(PROVIDER_CREDENTIAL_ENV_VARS_BY_PROVIDER).flat(),
+);
 
 export type ProviderCredentialEnvVar = (typeof PROVIDER_CREDENTIAL_ENV_VARS)[number];

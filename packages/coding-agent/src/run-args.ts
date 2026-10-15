@@ -1,6 +1,6 @@
-// CDA-59 (D1.2): keep this module import-free so usage errors are decided before any I/O. Values
-// stay verbatim; resolving paths, reading the task file, and checking credentials or models
-// belong in CDA-59, after the `parsed.ok` check in cli.ts.
+// Keep this module import-free so usage errors are decided before any I/O. Values stay verbatim;
+// resolving paths, reading the task file, and checking credentials or models belong in
+// run-config.ts, after the `parsed.ok` check in cli.ts.
 
 export type ProviderId = "anthropic" | "openrouter" | "openai" | "google" | "xai";
 
