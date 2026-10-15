@@ -78,7 +78,12 @@ async function resolvePath(jail: Jail, input: string, mode: Mode): Promise<PathR
       return notDirectory(input, walked.existing.join("/"));
     }
     // Every component was checked with lstat, so the canonical form of the deepest existing one is
-    // itself; anything else means a symbolic link appeared after the walk.
+    // itself; anything else means a symbolic link appeared after the walk. Comparing for equality
+    // also refuses an input whose case differs from the name on disk on a case-insensitive
+    // filesystem such as macOS's default, which is accepted as stricter than needed.
+    // This narrows but does not close the race: the filesystem can still change between
+    // resolution and the tool opening the path, since tools do not open with O_NOFOLLOW or openat
+    // relative to a held directory. ADR 0004 has execute re-resolve to keep that window small.
     const reached = join(jail.root, ...walked.existing);
     if ((await jail.fs.realpath(reached)) !== reached) {
       return outside(
@@ -105,7 +110,9 @@ function locate(jail: Jail, input: string): Located {
     path = join(jail.root, relative(jail.given, path));
   }
   if (!within(jail.root, path)) return outsideRoot(input);
-  // A trailing "/" or "/." asks for a directory, as it does in a POSIX path.
+  // A trailing "/" or "/." asks for a directory, as it does in a POSIX path. The returned path drops
+  // it, so resolveForCreate cannot tell a file to create from a directory to create; a tool that
+  // needs that distinction must extend the port rather than rely on the resolved path.
   return { ok: true, path: path as RepoPath, directory: /\/\.?$/.test(input) };
 }
 

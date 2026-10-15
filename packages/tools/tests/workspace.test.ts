@@ -176,6 +176,30 @@ describe("resolving an existing path", () => {
   });
 });
 
+describe("a sibling of the Repository Root sharing its name as a prefix", () => {
+  // relative() puts it at "../repo-xau/...", which a string prefix check on the root would accept.
+  it.each([
+    [
+      "resolveExisting",
+      (workspace: WorkspaceResolver, input: string) => workspace.resolveExisting(input),
+    ],
+    [
+      "resolveForCreate",
+      (workspace: WorkspaceResolver, input: string) => workspace.resolveForCreate(input),
+    ],
+  ])("%s rejects it as outside the repository", async (_, resolve) => {
+    const repo = await makeRepo();
+    await mkdir(`${repo}-xau`);
+    await writeFile(`${repo}-xau/file.txt`, "");
+    const workspace = await resolverFor(repo);
+
+    expect(await resolve(workspace, `${repo}-xau/file.txt`)).toMatchObject({
+      ok: false,
+      code: "PATH_OUTSIDE_REPO",
+    });
+  });
+});
+
 describe("resolving a path that cannot be reached", () => {
   it.each([
     ["a missing file", "missing.ts", '"missing.ts" does not exist'],
@@ -340,12 +364,18 @@ describe("the Path Jail and symbolic links", () => {
     ["a symbolic link pointing outside the root", "leak", "leak"],
     ["a file reached through a symbolic-link directory", "linked/secret.txt", "linked"],
     ["a symbolic link pointing inside the root", "docs/latest", "docs/latest"],
+    [
+      "a file reached through a symbolic link pointing inside the root",
+      "docs/latest/guide.md",
+      "docs/latest",
+    ],
     ["a symbolic link reached by an absolute path", "/leak", "leak"],
   ])("rejects %s and names the link", async (_, input, link) => {
     const repo = await makeRepo();
     await mkdir(join(sandbox, "private"));
     await writeFile(join(sandbox, "private/secret.txt"), "");
     await mkdir(join(repo, "docs/v2"), { recursive: true });
+    await writeFile(join(repo, "docs/v2/guide.md"), "");
     await symlink(join(sandbox, "private/secret.txt"), join(repo, "leak"));
     await symlink(join(sandbox, "private"), join(repo, "linked"));
     await symlink(join(repo, "docs/v2"), join(repo, "docs/latest"));
