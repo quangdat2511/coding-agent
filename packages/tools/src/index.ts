@@ -1,1 +1,1 @@
-export {};
+export { createWorkspaceResolver } from "./workspace.ts";
