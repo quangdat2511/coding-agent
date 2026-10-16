@@ -1,0 +1,224 @@
+import { afterEach, describe, expect, it } from "bun:test";
+import { type MountedTui, mountTui } from "../src/render.tsx";
+import type { TranscriptEntry, TuiHandlers } from "../src/types.ts";
+import { createTestTerminal, type TestTerminal } from "./support/terminal.ts";
+
+const COLUMNS = 40;
+const ROWS = 10;
+
+// ESC[2J clears the screen and ESC[3J the scrollback: Ink sends both whenever a frame is taller than
+// the screen, so neither may appear while the viewport keeps frames within it.
+const CLEAR_SCREEN = "\u001b[2J";
+const CLEAR_SCROLLBACK = "\u001b[3J";
+
+// Rendering never calls a handler; input arrives in a later ticket.
+function unexpectedHandlerCall(): never {
+  throw new Error("The TUI called a handler while rendering");
+}
+const handlers: TuiHandlers = {
+  onSubmit: unexpectedHandlerCall,
+  onCancel: unexpectedHandlerCall,
+  onApproval: unexpectedHandlerCall,
+};
+
+const mounted: { tui: MountedTui; terminal: TestTerminal }[] = [];
+
+function mount(transcript: readonly TranscriptEntry[], columns = COLUMNS, rows = ROWS) {
+  const terminal = createTestTerminal(columns, rows);
+  const tui = mountTui({ model: { transcript }, handlers }, terminal.streams);
+  mounted.push({ tui, terminal });
+  return { tui, terminal };
+}
+
+afterEach(async () => {
+  for (const { tui, terminal } of mounted.splice(0)) {
+    await tui.unmount();
+    terminal.dispose();
+  }
+});
+
+// "line first" through "line last", one per row.
+function lines(first: number, last: number): string[] {
+  return Array.from({ length: last - first + 1 }, (_, index) => `line ${first + index}`);
+}
+
+// An assistant message of `count` short lines: its header row, then "line 1" to "line count".
+function message(id: string, count: number, status: "streaming" | "completed" = "completed") {
+  return { kind: "assistant", id, text: lines(1, count).join("\n"), status } as const;
+}
+
+describe("transcript viewport", () => {
+  it("shows the last screenful and scrolls up and down through the rest", async () => {
+    // 31 rows: the header, then line 1 to line 30.
+    const { tui, terminal } = mount([message("m-1", 30)]);
+    await tui.flush();
+    expect(terminal.screen()).toEqual(lines(21, 30));
+
+    tui.scrollBy(-5);
+    await tui.flush();
+    expect(terminal.screen()).toEqual(lines(16, 25));
+
+    // Scrolling stops at the first row.
+    tui.scrollBy(-100);
+    await tui.flush();
+    expect(terminal.screen()).toEqual(["assistant [completed]", ...lines(1, 9)]);
+
+    tui.scrollBy(3);
+    await tui.flush();
+    expect(terminal.screen()).toEqual(lines(3, 12));
+
+    // ...and at the last.
+    tui.scrollBy(100);
+    await tui.flush();
+    expect(terminal.screen()).toEqual(lines(21, 30));
+  });
+
+  it("does not scroll a transcript that fits on the screen", async () => {
+    const { tui, terminal } = mount([message("m-1", 3)]);
+    await tui.flush();
+    const screen = ["assistant [completed]", ...lines(1, 3), ...Array(6).fill("")];
+    expect(terminal.screen()).toEqual(screen);
+
+    tui.scrollBy(-2);
+    await tui.flush();
+    expect(terminal.screen()).toEqual(screen);
+  });
+
+  it("follows new content at the bottom and holds still while scrolled up", async () => {
+    const { tui, terminal } = mount([message("m-1", 30, "streaming")]);
+    await tui.flush();
+    expect(terminal.screen()).toEqual(lines(21, 30));
+
+    // At the bottom, the view follows the message as it streams.
+    tui.update({ transcript: [message("m-1", 33, "streaming")] });
+    await tui.flush();
+    expect(terminal.screen()).toEqual(lines(24, 33));
+
+    tui.scrollBy(-5);
+    await tui.flush();
+    expect(terminal.screen()).toEqual(lines(19, 28));
+
+    // Scrolled up, neither a longer message nor a new entry moves the view.
+    tui.update({ transcript: [message("m-1", 40)] });
+    await tui.flush();
+    expect(terminal.screen()).toEqual(lines(19, 28));
+
+    const call = { kind: "tool_call", id: "c-1", toolName: "bash", summary: "bun test" } as const;
+    tui.update({ transcript: [message("m-1", 40), { ...call, status: "queued" }] });
+    await tui.flush();
+    expect(terminal.screen()).toEqual(lines(19, 28));
+
+    // Back at the bottom, it follows again.
+    tui.scrollBy(100);
+    await tui.flush();
+    expect(terminal.screen()).toEqual([...lines(33, 40), "", "bash bun test [queued]"]);
+
+    tui.update({
+      transcript: [
+        message("m-1", 40),
+        { ...call, status: "succeeded", result: { content: "2 pass", isError: false } },
+      ],
+    });
+    await tui.flush();
+    expect(terminal.screen()).toEqual([
+      ...lines(34, 40),
+      "",
+      "bash bun test [succeeded]",
+      "  2 pass",
+    ]);
+  });
+
+  it("redraws in place without clearing the screen or the scrollback", async () => {
+    const { tui, terminal } = mount([message("m-1", 30, "streaming")]);
+    await tui.flush();
+    terminal.takeOutput();
+
+    const steps: { act: () => void; screen: string[] }[] = [
+      ...[31, 32, 33].map((count) => ({
+        act: () => tui.update({ transcript: [message("m-1", count, "streaming")] }),
+        screen: lines(count - 9, count),
+      })),
+      { act: () => tui.scrollBy(-20), screen: lines(4, 13) },
+      { act: () => tui.update({ transcript: [message("m-1", 50)] }), screen: lines(4, 13) },
+      { act: () => tui.scrollBy(100), screen: lines(41, 50) },
+      { act: () => tui.update({ transcript: [message("m-1", 3)] }), screen: shortScreen() },
+    ];
+    for (const step of steps) {
+      step.act();
+      await tui.flush();
+      expect(terminal.screen()).toEqual(step.screen);
+      const output = terminal.takeOutput();
+      expect(output).not.toContain(CLEAR_SCREEN);
+      expect(output).not.toContain(CLEAR_SCROLLBACK);
+    }
+    expect(terminal.terminal.buffer.active.type).toBe("alternate");
+    expect(terminal.terminal.buffer.active.baseY).toBe(0);
+
+    function shortScreen() {
+      return ["assistant [completed]", ...lines(1, 3), ...Array(6).fill("")];
+    }
+  });
+
+  it("wraps a long user message under its text", async () => {
+    const { tui, terminal } = mount(
+      [{ kind: "user", id: "task", text: "Sửa test đang lỗi trong src/math.ts" }],
+      20,
+      4,
+    );
+    await tui.flush();
+    expect(terminal.screen()).toEqual(["> Sửa test đang lỗi", "  trong src/math.ts", "", ""]);
+  });
+
+  it("keeps the same entry at the top and the tail in view across a resize", async () => {
+    // Six messages of 60 identical digits: two rows each at 40 columns, three at 25.
+    const transcript = [1, 2, 3, 4, 5, 6].map((digit) => ({
+      kind: "assistant" as const,
+      id: `m-${digit}`,
+      text: String(digit).repeat(60),
+      status: "completed" as const,
+    }));
+    const header = "assistant [completed]";
+    const at40 = (digit: number) => [header, String(digit).repeat(40), String(digit).repeat(20)];
+    const at25 = (digit: number) => [
+      header,
+      String(digit).repeat(25),
+      String(digit).repeat(25),
+      String(digit).repeat(10),
+    ];
+    const { tui, terminal } = mount(transcript);
+    await tui.flush();
+    expect(terminal.screen()).toEqual([...at40(4).slice(1), "", ...at40(5), "", ...at40(6)]);
+
+    // Rows 4 to 13: message 2 starts the view.
+    tui.scrollBy(-9);
+    await tui.flush();
+    const scrolled = [...at40(2), "", ...at40(3), "", ...at40(4).slice(0, 2)];
+    expect(terminal.screen()).toEqual(scrolled);
+
+    terminal.takeOutput();
+    terminal.resize(25, ROWS);
+    await tui.flush();
+    expect(terminal.screen()).toEqual([...at25(2), "", ...at25(3), ""]);
+
+    terminal.resize(COLUMNS, ROWS);
+    await tui.flush();
+    expect(terminal.screen()).toEqual(scrolled);
+
+    // Following the tail, a narrower terminal still ends on the last row.
+    tui.scrollBy(100);
+    terminal.resize(25, ROWS);
+    await tui.flush();
+    expect(terminal.screen()).toEqual(["", ...at25(5), "", ...at25(6)]);
+
+    // A width change redraws in place.
+    const output = terminal.takeOutput();
+    expect(output).not.toContain(CLEAR_SCREEN);
+    expect(output).not.toContain(CLEAR_SCROLLBACK);
+
+    // A shorter terminal also ends on the last row. Ink redraws it in full, clearing the screen,
+    // because the previous frame is taller than the screen and the cursor cannot reach its top.
+    terminal.resize(25, 6);
+    await tui.flush();
+    expect(terminal.screen()).toEqual([String(5).repeat(10), "", ...at25(6)]);
+  });
+});
