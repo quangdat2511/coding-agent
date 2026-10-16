@@ -11,6 +11,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@coding-agent/agent-core": "workspace:*"
+    "@coding-agent/agent-core": "workspace:*",
+    "typebox": "^1.0.0"
   }
 }
