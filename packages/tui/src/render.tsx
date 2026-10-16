@@ -1,6 +1,8 @@
 import { render } from "ink";
+import { transcriptRows } from "./rows.ts";
 import { Transcript } from "./transcript.tsx";
 import type { TuiHandle, TuiHandlers, TuiModel } from "./types.ts";
+import { FOLLOWING, positionAt, type ScrollPosition, topRow } from "./viewport.ts";
 
 // The terminal the TUI draws on: the process's own streams in renderTui, streams backed by
 // @xterm/headless in tests. Node's stream types keep Ink out of this signature.
@@ -13,6 +15,9 @@ export interface MountedTui extends TuiHandle {
   // Resolves once every frame requested so far has been written to stdout. Ink throttles frames,
   // so the frame for an update() may still be pending when update() returns.
   flush(): Promise<void>;
+  // Moves the viewport by `rows` terminal rows: negative toward older entries, positive toward the
+  // newest. Scroll keys arrive with input routing (CDA-54); until then tests scroll through here.
+  scrollBy(rows: number): void;
 }
 
 // Ink's alternateScreen sends only ESC[?1049h, which leaves the cursor on the row where the shell
@@ -28,6 +33,31 @@ export function mountTui(
   props: { model: TuiModel; handlers: TuiHandlers },
   streams: TuiStreams,
 ): MountedTui {
+  let model = props.model;
+  let position: ScrollPosition = FOLLOWING;
+  let unmounted: Promise<void> | undefined;
+
+  // Lays the transcript out for the current terminal size, moves the viewport by `scroll` rows and
+  // draws only the rows that fit, so the frame is never taller than the screen.
+  function draw(scroll = 0) {
+    // Ink would mount the tree again if it rendered after unmount.
+    if (unmounted !== undefined) {
+      return;
+    }
+    // Ink also assumes 80x24 when the stream reports no size.
+    const columns = streams.stdout.columns || 80;
+    const height = streams.stdout.rows || 24;
+    const rows = transcriptRows(model.transcript, columns);
+    position = positionAt(rows, height, topRow(rows, height, position) + scroll);
+    const top = topRow(rows, height, position);
+    instance.rerender(<Transcript rows={rows.slice(top, top + height)} height={height} />);
+  }
+
+  // Added before render() so that it runs before Ink's own resize listener, which redraws the
+  // current tree: rows sized for the old terminal could be wider or taller than the new screen.
+  const redraw = () => draw();
+  streams.stdout.on("resize", redraw);
+
   // Left to itself, Ink treats any CI environment as non-interactive and draws nothing until
   // unmount. Deciding from isTTY alone renders the same way whether or not CI is set.
   const interactive = Boolean(streams.stdout.isTTY);
@@ -44,18 +74,19 @@ export function mountTui(
   if (interactive) {
     streams.stdout.write(CURSOR_HOME);
   }
-  instance.rerender(<Transcript model={props.model} />);
+  draw();
 
-  let unmounted: Promise<void> | undefined;
   return {
-    update(model) {
-      // Ink would mount the tree again if it rendered after unmount.
-      if (unmounted === undefined) {
-        instance.rerender(<Transcript model={model} />);
-      }
+    update(next) {
+      model = next;
+      draw();
+    },
+    scrollBy(rows) {
+      draw(rows);
     },
     unmount() {
       unmounted ??= (async () => {
+        streams.stdout.off("resize", redraw);
         // waitUntilExit() adds a beforeExit listener that only unmount() removes, so it goes first.
         const exited = instance.waitUntilExit();
         instance.unmount();
