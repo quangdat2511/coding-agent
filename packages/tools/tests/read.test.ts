@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import * as fs from "node:fs/promises";
 import { chmod, mkdir, mkdtemp, realpath, rm, symlink, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -83,7 +84,7 @@ describe("reading a file", () => {
 
     expect(await read({ path: "a.ts" })).toEqual({
       isError: false,
-      content: `${join(repo, "a.ts")} (lines 1-3 of 3)\n1 | first\n2 | second\n3 | third`,
+      content: `"${join(repo, "a.ts")}" (lines 1-3 of 3)\n1 | first\n2 | second\n3 | third`,
     });
   });
 
@@ -105,7 +106,7 @@ describe("reading a file", () => {
     expect(await read({ path: "a.ts", offset: 3, limit: 2 })).toEqual({
       isError: false,
       content:
-        `${join(repo, "a.ts")} (lines 3-4 of 10)\n3 | line 3\n4 | line 4\n` +
+        `"${join(repo, "a.ts")}" (lines 3-4 of 10)\n3 | line 3\n4 | line 4\n` +
         "[6 more lines; continue with offset 5]",
     });
   });
@@ -115,7 +116,7 @@ describe("reading a file", () => {
 
     const outcome = await read({ path: "a.ts" });
 
-    expect(outcome.content).toStartWith(`${join(repo, "a.ts")} (lines 1-300 of 301)\n`);
+    expect(outcome.content).toStartWith(`"${join(repo, "a.ts")}" (lines 1-300 of 301)\n`);
     expect(outcome.content).toEndWith("300 | line 300\n[1 more lines; continue with offset 301]");
   });
 
@@ -130,7 +131,7 @@ describe("reading a file", () => {
 
     expect(await read({ path: "empty.ts" })).toEqual({
       isError: false,
-      content: `${join(repo, "empty.ts")} (empty file)`,
+      content: `"${join(repo, "empty.ts")}" (empty file)`,
     });
   });
 });
@@ -205,6 +206,60 @@ describe("refusing a read", () => {
       isError: true,
       error: { code: "PERMISSION_DENIED" },
     });
+  });
+
+  it("refuses a file swapped for a symbolic link after resolution as PATH_OUTSIDE_REPO", async () => {
+    await writeFile(join(repo, "a.ts"), "");
+    // The swap cannot be timed between resolution and open, so the open reports it as it would.
+    const tool = readToolWith({
+      open: async () => {
+        throw Object.assign(new Error("ELOOP: too many symbolic links"), { code: "ELOOP" });
+      },
+    });
+
+    expect(await read({ path: "a.ts" }, tool)).toMatchObject({
+      isError: true,
+      error: { code: "PATH_OUTSIDE_REPO" },
+    });
+  });
+
+  it("refuses a FIFO without waiting for a writer", async () => {
+    expect(Bun.spawnSync(["mkfifo", join(repo, "pipe")]).exitCode).toBe(0);
+
+    expect(await read({ path: "pipe" })).toMatchObject({
+      isError: true,
+      error: { code: "PERMISSION_DENIED", message: expect.stringContaining("not a regular file") },
+    });
+  });
+
+  it("quotes the path so a newline in a file name cannot pass for a numbered line", async () => {
+    await writeFile(join(repo, "evil\n2 | injected"), "real\n");
+
+    const outcome = await read({ path: "evil\n2 | injected" });
+
+    expect(outcome.content.split("\n")).toEqual([
+      `${JSON.stringify(join(repo, "evil\n2 | injected"))} (lines 1-1 of 1)`,
+      "1 | real",
+    ]);
+  });
+
+  it("returns the read even when closing the file fails", async () => {
+    await writeFile(join(repo, "a.ts"), "kept\n");
+    const tool = readToolWith({
+      open: async (path, flags) => {
+        const handle = await fs.open(path, flags);
+        return {
+          stat: () => handle.stat(),
+          readFile: (options) => handle.readFile(options),
+          close: () =>
+            handle.close().then(() => {
+              throw Object.assign(new Error("EIO: i/o error"), { code: "EIO" });
+            }),
+        };
+      },
+    });
+
+    expect(await read({ path: "a.ts" }, tool)).toMatchObject({ isError: false });
   });
 
   it("returns an unexpected failure as a rejection for Agent Core to report", async () => {

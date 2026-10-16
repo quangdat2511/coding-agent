@@ -7,6 +7,7 @@ import type {
   RepoPath,
   WorkspaceResolver,
 } from "@coding-agent/agent-core";
+import { errnoOf } from "./errno.ts";
 
 // The same failure shape openAgentSession reports, narrowed to the one field this factory checks.
 export type CreateWorkspaceResult =
@@ -179,10 +180,6 @@ function unreachable(input: string, error: unknown): PathResolution {
     default:
       throw error;
   }
-}
-
-function errnoOf(error: unknown): string | undefined {
-  return (error as NodeJS.ErrnoException | undefined)?.code;
 }
 
 // Paths come from the model, so messages bound how much of one they echo back into the context.

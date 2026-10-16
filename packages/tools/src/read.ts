@@ -1,3 +1,4 @@
+import { constants } from "node:fs";
 import * as nodeFs from "node:fs/promises";
 import { relative } from "node:path";
 import type {
@@ -8,6 +9,7 @@ import type {
   ToolOutcome,
 } from "@coding-agent/agent-core";
 import { type Static, Type } from "typebox";
+import { errnoOf } from "./errno.ts";
 
 // ADR 0001's read default: the number of lines returned when the model gives no limit.
 const DEFAULT_LIMIT = 300;
@@ -30,8 +32,18 @@ type ReadInput = Static<typeof ReadParams>;
 // The filesystem operation the tool needs. Not exported from the package: it lets tests simulate
 // failures, such as EACCES, that a process running as root cannot produce.
 export interface ReadFileSystem {
-  open(path: RepoPath, flags: "r"): Promise<Pick<nodeFs.FileHandle, "stat" | "readFile" | "close">>;
+  open(path: RepoPath, flags: number): Promise<ReadHandle>;
 }
+
+interface ReadHandle {
+  stat(): Promise<{ isDirectory(): boolean; isFile(): boolean }>;
+  readFile(options: { encoding: "utf8"; signal: AbortSignal }): Promise<string>;
+  close(): Promise<void>;
+}
+
+// O_NOFOLLOW refuses a final component swapped for a symbolic link after resolution, and
+// O_NONBLOCK keeps opening a FIFO from waiting for a writer that never comes.
+const OPEN_FLAGS = constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK;
 
 export function readTool(): ExecutableTool<typeof ReadParams> {
   return readToolWith(nodeFs);
@@ -48,7 +60,7 @@ export function readToolWith(fs: ReadFileSystem): ExecutableTool<typeof ReadPara
 
     async prepare(input, { workspace }): Promise<PrepareOutcome<typeof ReadParams>> {
       const invalid = checkWindow(input);
-      if (invalid !== undefined) return failure("SCHEMA_VIOLATION", invalid);
+      if (invalid !== undefined) return prepareFailure("SCHEMA_VIOLATION", invalid);
       const resolved = await workspace.resolveExisting(input.path);
       if (!resolved.ok) return resolved;
       const first = input.offset ?? 1;
@@ -67,9 +79,9 @@ export function readToolWith(fs: ReadFileSystem): ExecutableTool<typeof ReadPara
     // Re-resolves the path, since the filesystem may have changed since prepare.
     async execute({ input }, { workspace, signal }): Promise<ToolOutcome> {
       const resolved = await workspace.resolveExisting(input.path);
-      if (!resolved.ok) return error(resolved.code, resolved.message);
+      if (!resolved.ok) return toolError(resolved.code, resolved.message);
       const text = await readText(fs, resolved.path, signal);
-      if (typeof text !== "string") return error(text.code, text.message);
+      if (typeof text !== "string") return toolError(text.code, text.message);
       return render(resolved.path, text, input);
     },
   };
@@ -92,42 +104,64 @@ interface ReadFailure {
   readonly message: string;
 }
 
-// Opens before checking for a directory, so the check applies to the file actually read. The
+// Opens before checking the file's type, so the check applies to the file actually read. The
 // resolver does not check readability, so EACCES and EPERM from the open itself are mapped here.
 async function readText(
   fs: ReadFileSystem,
   path: RepoPath,
   signal: AbortSignal,
 ): Promise<string | ReadFailure> {
-  let handle: Awaited<ReturnType<ReadFileSystem["open"]>>;
+  let handle: ReadHandle;
   try {
-    handle = await fs.open(path, "r");
+    handle = await fs.open(path, OPEN_FLAGS);
   } catch (cause) {
     return openFailure(path, cause);
   }
   try {
-    if ((await handle.stat()).isDirectory()) {
-      return { code: "IS_DIRECTORY", message: `${path} is a directory` };
+    const stats = await handle.stat();
+    if (stats.isDirectory()) return isDirectory(path);
+    if (!stats.isFile()) {
+      return { code: "PERMISSION_DENIED", message: `${quote(path)} is not a regular file` };
     }
     return await handle.readFile({ encoding: "utf8", signal });
   } finally {
-    await handle.close();
+    // The file was only read, so a failure to close it must not replace the outcome.
+    await handle.close().catch(() => undefined);
   }
 }
 
 // Anything other than the expected failures is rethrown so Agent Core reports TOOL_INTERNAL_ERROR.
 function openFailure(path: RepoPath, cause: unknown): ReadFailure {
-  switch ((cause as NodeJS.ErrnoException | undefined)?.code) {
+  switch (errnoOf(cause)) {
     case "ENOENT":
-      return { code: "NOT_FOUND", message: `${path} does not exist` };
+    case "ENOTDIR":
+      return { code: "NOT_FOUND", message: `${quote(path)} does not exist` };
     case "EISDIR":
-      return { code: "IS_DIRECTORY", message: `${path} is a directory` };
+      return isDirectory(path);
+    case "ELOOP":
+      return {
+        code: "PATH_OUTSIDE_REPO",
+        message: `${quote(path)} is a symbolic link; symbolic links are not followed`,
+      };
     case "EACCES":
     case "EPERM":
-      return { code: "PERMISSION_DENIED", message: `${path} cannot be read: permission denied` };
+      return {
+        code: "PERMISSION_DENIED",
+        message: `${quote(path)} cannot be read: permission denied`,
+      };
     default:
       throw cause;
   }
+}
+
+function isDirectory(path: RepoPath): ReadFailure {
+  return { code: "IS_DIRECTORY", message: `${quote(path)} is a directory` };
+}
+
+// The canonical path can hold any character but "/" and NUL, so it is quoted to keep a name with
+// a newline from passing for a numbered line.
+function quote(path: RepoPath): string {
+  return JSON.stringify(path);
 }
 
 function render(
@@ -136,11 +170,11 @@ function render(
   { offset = 1, limit = DEFAULT_LIMIT }: ReadInput,
 ): ToolOutcome {
   const all = splitLines(text);
-  if (all.length === 0 && offset === 1) return success(`${path} (empty file)`);
+  if (all.length === 0 && offset === 1) return success(`${quote(path)} (empty file)`);
   if (offset > all.length) {
-    return error(
+    return toolError(
       "SCHEMA_VIOLATION",
-      `offset ${offset} is past the end of ${path}, which has ${all.length} lines`,
+      `offset ${offset} is past the end of ${quote(path)}, which has ${all.length} lines`,
     );
   }
   const shown = all.slice(offset - 1, offset - 1 + limit);
@@ -152,7 +186,7 @@ function render(
   const remaining = all.length - last;
   const more = remaining > 0 ? [`[${remaining} more lines; continue with offset ${last + 1}]`] : [];
   return success(
-    [`${path} (lines ${offset}-${last} of ${all.length})`, ...numbered, ...more].join("\n"),
+    [`${quote(path)} (lines ${offset}-${last} of ${all.length})`, ...numbered, ...more].join("\n"),
   );
 }
 
@@ -168,10 +202,10 @@ function success(content: string): ToolOutcome {
   return { isError: false, content };
 }
 
-function error(code: ToolErrorCode, message: string): ToolOutcome {
+function toolError(code: ToolErrorCode, message: string): ToolOutcome {
   return { isError: true, content: message, error: { code, message } };
 }
 
-function failure(code: ToolErrorCode, message: string): PrepareOutcome<typeof ReadParams> {
+function prepareFailure(code: ToolErrorCode, message: string): PrepareOutcome<typeof ReadParams> {
   return { ok: false, code, message };
 }
