@@ -3,14 +3,13 @@ import type {
   ExecutableTool,
   OpenSessionConfig,
   SessionLimits,
-  VerificationDecision,
   WorkspaceResolver,
 } from "../../src/index.ts";
 import { type ManualClock, manualClock } from "./clock.ts";
 import { sequentialIds } from "./ids.ts";
 import { type FakeModel, type FakeModelOptions, fakeModel } from "./model.ts";
 import { fakeTool, toolRegistry } from "./tools.ts";
-import { type FakeVerification, fakeVerification } from "./verification.ts";
+import { type FakeVerification, fakeVerification, type ScriptedDecision } from "./verification.ts";
 import { fakeWorkspace } from "./workspace.ts";
 
 export interface TestKitOptions {
@@ -18,7 +17,7 @@ export interface TestKitOptions {
   readonly tools?: readonly ExecutableTool[];
   readonly workspace?: WorkspaceResolver;
   readonly approvalPolicy?: ApprovalPolicy;
-  readonly verification?: readonly VerificationDecision[];
+  readonly verification?: readonly ScriptedDecision[];
   readonly limits?: Partial<SessionLimits>;
 }
 
