@@ -1,6 +1,15 @@
 import { constants, type Stats } from "node:fs";
-import { access, chmod, mkdir, open, realpath, rmdir, stat } from "node:fs/promises";
-import { dirname, join, relative, resolve, sep } from "node:path";
+import {
+  access,
+  chmod,
+  type FileHandle,
+  mkdir,
+  open,
+  realpath,
+  rmdir,
+  stat,
+} from "node:fs/promises";
+import { dirname, resolve } from "node:path";
 import type { SessionLimits } from "@coding-agent/agent-core";
 import {
   createProviderDirectory,
@@ -28,7 +37,7 @@ export const DEFAULT_SESSION_LIMITS: SessionLimits = Object.freeze({
 export const VERIFICATION_COMMAND_ENV_VAR = "CODING_AGENT_VERIFICATION_COMMAND";
 
 // An objective is a prompt, not a data file. A larger task file is almost certainly the wrong path,
-// and reading it whole would exhaust memory long before a model could take it.
+// so no more than one byte past this limit is ever read, whatever size the file system reports.
 export const MAX_TASK_FILE_BYTES = 1024 * 1024;
 
 const tooLarge = `is larger than ${MAX_TASK_FILE_BYTES / (1024 * 1024)} MiB`;
@@ -153,6 +162,18 @@ function unfitTaskFile(found: Stats): string | undefined {
   return undefined;
 }
 
+// Reads from the start of the file until it ends or `limit` bytes have arrived.
+async function readAtMost(handle: FileHandle, limit: number): Promise<Uint8Array> {
+  const buffer = new Uint8Array(limit);
+  let length = 0;
+  while (length < limit) {
+    const { bytesRead } = await handle.read(buffer, length, limit - length, length);
+    if (bytesRead === 0) break;
+    length += bytesRead;
+  }
+  return buffer.subarray(0, length);
+}
+
 const utf8 = new TextDecoder("utf-8", { fatal: true });
 
 interface Task {
@@ -174,14 +195,15 @@ async function readObjective(cwd: string, given: string): Promise<Checked<Task>>
     try {
       const reopened = unfitTaskFile(await handle.stat());
       if (reopened) return refuse(flag, `${flag} "${given}" ${reopened}`);
-      bytes = await handle.readFile();
+      bytes = await readAtMost(handle, MAX_TASK_FILE_BYTES + 1);
     } finally {
       await handle.close();
     }
   } catch (error) {
     return refuse(flag, `${flag} "${given}" ${unusable(error, "read")}`);
   }
-  // The file may have grown after it was checked.
+  // The size checks above trust the file system. A file that grew after them, or one under /proc
+  // or a FUSE mount that reports the wrong size, is caught here, after one byte too many.
   if (bytes.byteLength > MAX_TASK_FILE_BYTES) {
     return refuse(flag, `${flag} "${given}" ${tooLarge}`);
   }
@@ -196,64 +218,74 @@ async function readObjective(cwd: string, given: string): Promise<Checked<Task>>
     : pass({ path, objective });
 }
 
-// The shallowest directory that creating `path` would add, or undefined when `path` exists or
-// cannot be created at all.
-async function firstMissingDirectory(path: string): Promise<string | undefined> {
-  let missing: string | undefined;
-  for (let dir = path; missing !== dir; dir = dirname(dir)) {
+// The directories that creating `path` would add, shallowest first: empty when `path` exists, or
+// when a component above it is not a directory.
+async function missingDirectories(path: string): Promise<string[]> {
+  const missing: string[] = [];
+  for (let dir = path; missing[0] !== dir; dir = dirname(dir)) {
     try {
       await stat(dir);
       break;
     } catch (error) {
       if (errnoOf(error) !== "ENOENT") break;
-      missing = dir;
+      missing.unshift(dir);
     }
   }
   return missing;
 }
 
-// Removes the directories from `created` down to `path`, deepest first, so a run that is refused
-// after creating them leaves nothing behind. They belong to this process, so each is first made
-// writable in case the umask created it read-only. rmdir never removes a directory something else
-// has filled, and a failure leaves the rest in place: the refusal is what the caller reports.
-async function removeCreated(created: string, path: string): Promise<void> {
-  const chain = [created];
-  let dir = created;
-  for (const segment of relative(created, path).split(sep)) {
-    if (segment === "") continue;
-    dir = join(dir, segment);
-    chain.push(dir);
+// Removes the directories this run created, deepest first, so a run that is refused after creating
+// them leaves nothing behind. They are this run's own, so each first gets owner rwx back in case
+// the umask created it read-only. rmdir never removes a directory something else has filled, and a
+// failure leaves the rest in place: the refusal is what the caller reports.
+async function removeCreated(created: readonly string[]): Promise<void> {
+  for (const dir of created) {
+    await stat(dir)
+      .then(({ mode }) => chmod(dir, (mode & 0o7777) | 0o700))
+      .catch(() => undefined);
   }
-  for (const each of chain) await chmod(each, 0o700).catch(() => undefined);
-  for (const each of chain.reverse()) await rmdir(each).catch(() => undefined);
+  for (const dir of [...created].reverse()) await rmdir(dir).catch(() => undefined);
 }
 
 interface OutputDir {
   readonly path: string;
-  // The shallowest directory this run created, or undefined when the directory already existed.
-  readonly created: string | undefined;
+  // The directories this run created, shallowest first; empty when the directory already existed.
+  readonly created: readonly string[];
 }
 
 async function prepareOutputDir(cwd: string, given: string): Promise<Checked<OutputDir>> {
   const flag = "--output-dir";
   const path = resolve(cwd, given);
-  const created = await firstMissingDirectory(path);
+  // One level at a time, and never recursive: a directory is this run's only when its own mkdir
+  // succeeded. EEXIST means something else made it first, so it is never removed.
+  const created: string[] = [];
   const refuseAndRemove = async (reason: string): Promise<Refusal> => {
-    if (created !== undefined) await removeCreated(created, path);
+    await removeCreated(created);
     return refuse(flag, `${flag} "${given}" ${reason}`);
   };
+  let found: Stats;
   try {
-    await mkdir(path, { recursive: true });
+    for (const dir of await missingDirectories(path)) {
+      try {
+        await mkdir(dir);
+        created.push(dir);
+      } catch (error) {
+        if (errnoOf(error) !== "EEXIST") throw error;
+      }
+    }
+    found = await stat(path);
   } catch (error) {
     switch (errnoOf(error)) {
-      case "EEXIST":
-        return refuseAndRemove("is not a directory");
       case "ENOTDIR":
         return refuseAndRemove("cannot be created: a parent is not a directory");
+      // A dangling symbolic link: mkdir finds the name taken, and stat finds nothing behind it.
+      case "ENOENT":
+        return refuseAndRemove("is not a directory");
       default:
         return refuseAndRemove(unusable(error, "created"));
     }
   }
+  if (!found.isDirectory()) return refuseAndRemove("is not a directory");
   try {
     await access(path, constants.W_OK | constants.X_OK);
   } catch {
@@ -300,8 +332,7 @@ export async function resolveRunConfig(
   // Checked last so that a terminalbench run still reports every configuration error as one. No
   // session runs, so the output directory it created is removed again.
   if (args.profile === "terminalbench") {
-    const { path, created } = outputDir.value;
-    if (created !== undefined) await removeCreated(created, path);
+    await removeCreated(outputDir.value.created);
     return {
       ok: false,
       code: "NOT_IMPLEMENTED",

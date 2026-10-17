@@ -1,5 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { chmod, mkdir, mkdtemp, readdir, realpath, rm, symlink } from "node:fs/promises";
+import {
+  chmod,
+  lstat,
+  mkdir,
+  mkdtemp,
+  readdir,
+  realpath,
+  rm,
+  stat,
+  symlink,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { RunArgs } from "../src/run-args.ts";
@@ -266,6 +276,13 @@ describe("reading the task file", () => {
     await expectRefused(await resolveWith(), "--task-file", `--task-file "task.md" ${expected}`);
   });
 
+  it("accepts a task file of exactly the limit", async () => {
+    await Bun.write(join(directory, "task.md"), "x".repeat(MAX_TASK_FILE_BYTES));
+    const resolved = await resolveWith();
+    if (!resolved.ok) throw new Error(`expected a configuration, got: ${resolved.message}`);
+    expect(resolved.config.objective).toHaveLength(MAX_TASK_FILE_BYTES);
+  });
+
   it("refuses a named pipe instead of waiting for a writer", async () => {
     expect(Bun.spawnSync(["mkfifo", join(directory, "pipe")]).exitCode).toBe(0);
     expect(await resolveWith({ taskFile: "pipe" })).toStrictEqual(
@@ -351,6 +368,30 @@ describe("preparing the output directory", () => {
         `--output-dir "${outputDir}" ${expected}`,
       );
     });
+
+    it("removes only what it created, leaving a parent that already existed as it was", async () => {
+      const logs = join(directory, "logs");
+      await mkdir(logs);
+      await chmod(logs, 0o755);
+      expect(await resolveWith({ outputDir: "logs/agent/out" })).toStrictEqual(
+        refusal(
+          "--output-dir",
+          '--output-dir "logs/agent/out" cannot be created: permission denied',
+        ),
+      );
+      expect(await readdir(logs)).toEqual([]);
+      expect((await stat(logs)).mode & 0o777).toBe(0o755);
+    });
+  });
+
+  // mkdir reports EEXIST for a name something else already holds, so nothing is recorded as this
+  // run's, and nothing of the other owner's is removed.
+  it("refuses a dangling symbolic link and leaves it in place", async () => {
+    await symlink(join(directory, "nowhere"), join(directory, "out"));
+    expect(await resolveWith()).toStrictEqual(
+      refusal("--output-dir", '--output-dir "out" is not a directory'),
+    );
+    expect((await lstat(join(directory, "out"))).isSymbolicLink()).toBe(true);
   });
 });
 
