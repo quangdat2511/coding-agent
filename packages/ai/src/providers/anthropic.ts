@@ -1,6 +1,7 @@
 import { stream } from "../api/anthropic-responses.ts";
 import { apiKeyFromEnv } from "../auth/helpers.ts";
 import { ANTHROPIC_MESSAGES_CAPABILITIES, applyCapabilities } from "../capabilities.ts";
+import { PROVIDER_CREDENTIAL_ENV_VARS_BY_PROVIDER } from "../credentials.ts";
 import { type BaseProviderOptions, defineProvider, type Provider } from "../models.ts";
 import type { ModelCapabilities } from "../types.ts";
 import ANTHROPIC_MODELS from "./anthropic.models.json";
@@ -27,7 +28,12 @@ export function createAnthropicProvider(options?: AnthropicProviderOptions): Pro
     id: "anthropic",
     name: "Anthropic",
     variant,
-    auth: { apiKey: apiKeyFromEnv("Anthropic API key", ["ANTHROPIC_API_KEY"]) },
+    auth: {
+      apiKey: apiKeyFromEnv(
+        "Anthropic API key",
+        PROVIDER_CREDENTIAL_ENV_VARS_BY_PROVIDER.anthropic,
+      ),
+    },
     models: applyCapabilities(ANTHROPIC_MODELS, defaultCaps, options?.modelOverrides),
     api: { stream },
   });

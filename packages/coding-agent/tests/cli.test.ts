@@ -21,15 +21,24 @@ const required = [
   "--provider",
   "anthropic",
   "--model",
-  "claude-sonnet-4",
+  "claude-haiku-4-5",
   "--approval-policy",
   "auto-approve",
   "--output-dir",
   "/tmp/out",
 ];
 
-async function run(args: readonly string[], cwd = packageRoot) {
-  const child = Bun.spawn([bin, ...args], { cwd, stdout: "pipe", stderr: "pipe" });
+const secret = "sk-test-credential-value";
+
+// Children get only PATH (to find bun) plus what a test adds, so a developer's own provider keys
+// never decide whether a credential is present.
+async function run(args: readonly string[], cwd = packageRoot, env: Record<string, string> = {}) {
+  const child = Bun.spawn([bin, ...args], {
+    cwd,
+    env: { PATH: process.env.PATH ?? "", ...env },
+    stdout: "pipe",
+    stderr: "pipe",
+  });
   const [exitCode, stdout, stderr] = await Promise.all([
     child.exited,
     new Response(child.stdout).text(),
@@ -47,6 +56,27 @@ async function withTemporaryDirectory(body: (directory: string) => Promise<void>
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
+}
+
+// Relative paths, resolved against the working directory each test runs in.
+const validFlags = {
+  "--task-file": "task.md",
+  "--provider": "anthropic",
+  "--model": "claude-haiku-4-5",
+  "--approval-policy": "auto-approve",
+  "--output-dir": "out",
+};
+
+const validRun = (overrides: Record<string, string> = {}): string[] => [
+  "run",
+  ...Object.entries({ ...validFlags, ...overrides }).flat(),
+];
+
+interface ConfigurationErrorCase {
+  readonly name: string;
+  readonly flags?: Record<string, string>;
+  readonly env?: Record<string, string>;
+  readonly expected: string;
 }
 
 describe("the coding-agent executable", () => {
@@ -112,40 +142,101 @@ describe("the coding-agent executable", () => {
     },
   );
 
-  // Temporary: CDA-59 (D1.2) replaces this with a resolved configuration, and CDA-75 (D3.1) and
-  // CDA-78 (D3.2) replace exit 70 with the real exit codes. Nothing should come to depend on 70.
-  it("exits 70 on a valid invocation, because the run itself is not implemented yet", async () => {
-    const { exitCode, stderr } = await run(["run", ...required]);
-    expect(exitCode).toBe(70);
-    expect(stderr).toContain("CDA-59");
+  it.each<ConfigurationErrorCase>([
+    {
+      name: "an unknown model",
+      flags: { "--model": "no-such-model" },
+      expected: '--model "no-such-model" is not a known anthropic model',
+    },
+    {
+      name: "a missing credential",
+      env: {},
+      expected: "no credential for --provider anthropic: set ANTHROPIC_API_KEY",
+    },
+    {
+      name: "a blank verification command",
+      env: { ANTHROPIC_API_KEY: secret, CODING_AGENT_VERIFICATION_COMMAND: " " },
+      expected:
+        "CODING_AGENT_VERIFICATION_COMMAND is set but blank; unset it to configure no command",
+    },
+    {
+      name: "an invalid repository root",
+      flags: { "--repo-root": "missing" },
+      expected: '--repo-root "missing" does not exist',
+    },
+    {
+      name: "an unreadable task file",
+      flags: { "--task-file": "missing.md" },
+      expected: '--task-file "missing.md" does not exist',
+    },
+    {
+      name: "an unusable output directory",
+      flags: { "--output-dir": "task.md" },
+      expected: '--output-dir "task.md" is not a directory',
+    },
+  ])(
+    "exits 2 on $name without writing anything or printing the credential",
+    async ({ flags = {}, env = { ANTHROPIC_API_KEY: secret }, expected }) => {
+      await withTemporaryDirectory(async (directory) => {
+        await Bun.write(join(directory, "task.md"), "Add a failing test, then make it pass.\n");
+        const { exitCode, stdout, stderr } = await run(validRun(flags), directory, env);
+
+        expect(exitCode).toBe(2);
+        expect(firstLine(stderr)).toBe(`coding-agent: ${expected}`);
+        expect(stdout).toBe("");
+        expect(stderr).not.toContain(secret);
+        expect(await readdir(directory)).toEqual(["task.md"]);
+      });
+    },
+  );
+
+  // Temporary: CDA-67 (Join 2) opens the Agent Session, and CDA-75 (D3.1) and CDA-78 (D3.2)
+  // replace exit 70 with the real exit codes. Nothing should come to depend on 70.
+  it("exits 70 once the configuration resolves, because the run itself is not implemented yet", async () => {
+    await withTemporaryDirectory(async (directory) => {
+      await Bun.write(join(directory, "task.md"), "Add a failing test, then make it pass.\n");
+      const { exitCode, stdout, stderr } = await run(validRun(), directory, {
+        ANTHROPIC_API_KEY: secret,
+      });
+
+      expect(exitCode).toBe(70);
+      expect(stderr).toContain("CDA-67");
+      expect(stdout + stderr).not.toContain(secret);
+      // The output directory is the one thing a resolved configuration writes.
+      expect((await readdir(directory)).sort()).toEqual(["out", "task.md"]);
+      expect(await readdir(join(directory, "out"))).toEqual([]);
+    });
   });
 
-  it("writes nothing and opens no Agent Session before it refuses or defers", async () => {
+  // Temporary: CDA-79 (D3.3) gives terminalbench its limits. Until then it is not a configuration
+  // error, so it must not exit 2, which Harbor reads as an invalid invocation.
+  it("exits 70 on --profile terminalbench without leaving an output directory behind", async () => {
+    await withTemporaryDirectory(async (directory) => {
+      await Bun.write(join(directory, "task.md"), "Add a failing test, then make it pass.\n");
+      const { exitCode, stdout, stderr } = await run(
+        validRun({ "--profile": "terminalbench" }),
+        directory,
+        { ANTHROPIC_API_KEY: secret },
+      );
+
+      expect(exitCode).toBe(70);
+      expect(firstLine(stderr)).toBe(
+        "coding-agent: --profile terminalbench is not implemented yet; CDA-79 (D3.3) adds its limits",
+      );
+      expect(stdout).toBe("");
+      expect(await readdir(directory)).toEqual(["task.md"]);
+    });
+  });
+
+  it("writes nothing before it refuses a usage error", async () => {
     await withTemporaryDirectory(async (directory) => {
       const refused = await run(
         ["run", "--output-dir", "out", "--provider", "anthropic"],
         directory,
-      );
-      const deferred = await run(
-        [
-          "run",
-          "--task-file",
-          "task.md",
-          "--provider",
-          "anthropic",
-          "--model",
-          "claude-sonnet-4",
-          "--approval-policy",
-          "auto-approve",
-          "--output-dir",
-          "out",
-        ],
-        directory,
+        { ANTHROPIC_API_KEY: secret },
       );
 
       expect(refused.exitCode).toBe(2);
-      expect(deferred.exitCode).toBe(70);
-      // CDA-59 (D1.2) will create the output directory and read the task file on a valid run.
       expect(await readdir(directory)).toEqual([]);
     });
   });
