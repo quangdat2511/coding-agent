@@ -7,6 +7,7 @@ import {
   CustomProviderConfigSchema,
   CustomProviderValidationError,
   createCustomProvider,
+  LOCAL_RUNNER_NO_AUTH_KEY,
   OPENAI_CHAT_COMPLETIONS_CAPABILITIES,
   ProviderDirectory,
 } from "../src/index.ts";
@@ -131,7 +132,6 @@ describe("Custom Provider Schema & Validation", () => {
       }),
     ).toThrow(CustomProviderValidationError);
 
-    // Model missing id
     expect(() =>
       createCustomProvider({
         id: "test",
@@ -182,9 +182,9 @@ describe("Credential Resolution", () => {
     expect(resolved).toBe("secret-key-123");
   });
 
-  it("resolves apiKeyEnv from environment variables", async () => {
+  it("resolves apiKeyEnv from environment variables and trims whitespace", async () => {
     const envKey = "TEST_CUSTOM_API_KEY_ENV";
-    process.env[envKey] = "env-secret-456";
+    process.env[envKey] = "   env-secret-456\r\n ";
 
     try {
       const provider = createCustomProvider({
@@ -245,7 +245,7 @@ describe("Credential Resolution", () => {
     });
 
     const resolved = await provider.auth.apiKey?.resolve();
-    expect(resolved).toBe("no-key");
+    expect(resolved).toBe(LOCAL_RUNNER_NO_AUTH_KEY);
   });
 });
 
@@ -295,7 +295,6 @@ describe("Model Capabilities & Directory Compatibility", () => {
     const model = provider.getModels()[0];
     expect(model?.capabilities?.toolArgumentDelivery).toBe("whole");
     expect(model?.capabilities?.serverSideTools).toBe(true);
-    // Other defaults remain unchanged
     expect(model?.capabilities?.parallelToolCallControl).toBe(
       OPENAI_CHAT_COMPLETIONS_CAPABILITIES.parallelToolCallControl,
     );

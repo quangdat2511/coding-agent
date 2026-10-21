@@ -2,18 +2,37 @@ import { type Static, Type } from "typebox";
 import { Value } from "typebox/value";
 import { stream as anthropicStream } from "../api/anthropic-responses.ts";
 import { stream as openaiStream } from "../api/openai-responses.ts";
+import { readEnvCredential } from "../auth/helpers.ts";
 import type { ProviderCredentials } from "../auth/types.ts";
 import {
   ANTHROPIC_MESSAGES_CAPABILITIES,
   OPENAI_CHAT_COMPLETIONS_CAPABILITIES,
   withModelOverrides,
 } from "../capabilities.ts";
-import { defineProvider, type Provider } from "../models.ts";
-import type { Model } from "../types.ts";
+import { defineProvider, type Provider, type ProviderApi } from "../models.ts";
+import type { Model, ModelCapabilities } from "../types.ts";
 
-/**
- * TypeBox schema for a model entry in custom provider configuration.
- */
+/** Fallback credential for unauthenticated local endpoints (Ollama, vLLM). */
+export const LOCAL_RUNNER_NO_AUTH_KEY = "no-key";
+
+export type CustomProviderVariant = "chat_completions" | "messages";
+
+interface CustomVariantDefinition {
+  readonly defaultCapabilities: ModelCapabilities;
+  readonly stream: ProviderApi["stream"];
+}
+
+const CUSTOM_VARIANT_DEFINITIONS: Record<CustomProviderVariant, CustomVariantDefinition> = {
+  chat_completions: {
+    defaultCapabilities: OPENAI_CHAT_COMPLETIONS_CAPABILITIES,
+    stream: openaiStream,
+  },
+  messages: {
+    defaultCapabilities: ANTHROPIC_MESSAGES_CAPABILITIES,
+    stream: anthropicStream,
+  },
+};
+
 export const CustomModelConfigSchema = Type.Object(
   {
     id: Type.String({ minLength: 1 }),
@@ -38,9 +57,6 @@ export const CustomModelConfigSchema = Type.Object(
 
 export type CustomModelConfig = Static<typeof CustomModelConfigSchema>;
 
-/**
- * TypeBox schema for declarative Custom Provider configuration.
- */
 export const CustomProviderConfigSchema = Type.Object(
   {
     id: Type.String({ minLength: 1 }),
@@ -57,9 +73,6 @@ export const CustomProviderConfigSchema = Type.Object(
 
 export type CustomProviderConfig = Static<typeof CustomProviderConfigSchema>;
 
-/**
- * Error thrown when a CustomProviderConfig fails schema validation.
- */
 export class CustomProviderValidationError extends Error {
   readonly errors: string[];
 
@@ -70,14 +83,7 @@ export class CustomProviderValidationError extends Error {
   }
 }
 
-/**
- * Creates a standard `Provider` instance from a declarative configuration.
- *
- * - Schema-validated via TypeBox.
- * - Supports wire variants `chat_completions` (OpenAI) and `messages` (Anthropic).
- * - Defaults model capabilities according to the wire variant with per-model overrides.
- * - Supports direct API keys, environment variable resolution, and unauthenticated local runners.
- */
+/** Creates a standard Provider instance from a declarative configuration. */
 export function createCustomProvider(config: CustomProviderConfig): Provider {
   if (!Value.Check(CustomProviderConfigSchema, config)) {
     const errorList = [...Value.Errors(CustomProviderConfigSchema, config)].map(
@@ -90,20 +96,16 @@ export function createCustomProvider(config: CustomProviderConfig): Provider {
   }
 
   const normalizedBaseUrl = config.baseUrl?.replace(/\/+$/, "");
+  const variantDefinition = CUSTOM_VARIANT_DEFINITIONS[config.variant];
 
-  const defaultCaps =
-    config.variant === "chat_completions"
-      ? OPENAI_CHAT_COMPLETIONS_CAPABILITIES
-      : ANTHROPIC_MESSAGES_CAPABILITIES;
-
-  const mappedModels: Model[] = config.models.map((m) => {
-    const capabilities = m.capabilities
-      ? withModelOverrides(defaultCaps, m.capabilities)
-      : defaultCaps;
+  const mappedModels: Model[] = config.models.map((modelConfig) => {
+    const capabilities = modelConfig.capabilities
+      ? withModelOverrides(variantDefinition.defaultCapabilities, modelConfig.capabilities)
+      : variantDefinition.defaultCapabilities;
 
     return {
-      id: m.id,
-      name: m.name ?? m.id,
+      id: modelConfig.id,
+      name: modelConfig.name ?? modelConfig.id,
       provider: config.id,
       capabilities,
     };
@@ -118,16 +120,13 @@ export function createCustomProvider(config: CustomProviderConfig): Provider {
         }
 
         if (config.apiKeyEnv !== undefined && config.apiKeyEnv !== "") {
-          return process.env[config.apiKeyEnv];
+          return readEnvCredential([config.apiKeyEnv])?.value;
         }
 
-        // No-auth mode for local unauthenticated runners (Ollama, vLLM, etc.)
-        return "no-key";
+        return LOCAL_RUNNER_NO_AUTH_KEY;
       },
     },
   };
-
-  const streamAdapter = config.variant === "chat_completions" ? openaiStream : anthropicStream;
 
   return defineProvider({
     id: config.id,
@@ -137,6 +136,6 @@ export function createCustomProvider(config: CustomProviderConfig): Provider {
     auth,
     headers: config.headers,
     models: mappedModels,
-    api: { stream: streamAdapter },
+    api: { stream: variantDefinition.stream },
   });
 }

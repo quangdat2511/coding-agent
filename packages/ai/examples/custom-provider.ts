@@ -3,23 +3,13 @@ import {
   type CustomProviderConfig,
   createCustomProvider,
   createProviderDirectory,
+  LOCAL_RUNNER_NO_AUTH_KEY,
   type Model,
 } from "../src/index.ts";
 import { loadRootEnv } from "./utils/env.ts";
 
 /**
- * Example: Custom Provider in @coding-agent/ai
- *
- * Demonstrates how to declaratively register custom LLM providers conforming to:
- * - OpenAI wire format (`variant: "chat_completions"`): Ollama, LM Studio, vLLM, DeepSeek, Groq, etc.
- * - Anthropic wire format (`variant: "messages"`): Custom Anthropic proxies or enterprise gateways.
- *
- * Key features shown:
- * 1. Declarative configuration validated via TypeBox schema.
- * 2. Unauthenticated local runners (Ollama, LM Studio) defaulting credentials to "no-key".
- * 3. Environment variable resolution (`apiKeyEnv`) and custom HTTP headers.
- * 4. Per-model capability overrides (e.g. toolArgumentDelivery, parallelToolCallControl).
- * 5. Registration and streaming via standard `ProviderDirectory`.
+ * Demonstrates registering and streaming from custom LLM providers.
  */
 
 function printUsage(): void {
@@ -61,16 +51,10 @@ async function main(): Promise<void> {
   console.log("  Demonstration: Custom Provider in @coding-agent/ai");
   console.log("==================================================\n");
 
-  // ---------------------------------------------------------------------------
-  // Step 1: Define custom provider configuration declaratively
-  // ---------------------------------------------------------------------------
-  // The configuration is validated against `CustomProviderConfigSchema` (TypeBox).
-  // Notice that if neither apiKey nor apiKeyEnv is specified, it gracefully defaults
-  // to "no-key", which is ideal for local servers like Ollama or vLLM.
   const customConfig: CustomProviderConfig = {
     id: "my-custom-provider",
     name: "Custom Local / Proxy Provider",
-    variant: "chat_completions", // or "messages" for Anthropic-compatible endpoints
+    variant: "chat_completions",
     baseUrl,
     ...(process.env.CUSTOM_API_KEY ? { apiKeyEnv: "CUSTOM_API_KEY" } : {}),
     headers: {
@@ -80,7 +64,6 @@ async function main(): Promise<void> {
       {
         id: modelId,
         name: `Custom Model (${modelId})`,
-        // Per-model capabilities can be customized or overridden if necessary:
         capabilities: {
           parallelToolCallControl: true,
           toolArgumentDelivery: "streamed",
@@ -94,9 +77,6 @@ async function main(): Promise<void> {
 
   const customProvider = createCustomProvider(customConfig);
 
-  // ---------------------------------------------------------------------------
-  // Step 2: Register the custom provider into ProviderDirectory
-  // ---------------------------------------------------------------------------
   const directory = createProviderDirectory();
   directory.setProvider(customProvider);
 
@@ -112,14 +92,11 @@ async function main(): Promise<void> {
   console.log(`   - Base URL    : ${customProvider.baseUrl}`);
   console.log(`   - Wire Format : ${customProvider.variant}`);
   console.log(
-    `   - Auth Key    : ${resolvedApiKey === "no-key" ? "no-key (local runner mode)" : "***"}`,
+    `   - Auth Key    : ${resolvedApiKey === LOCAL_RUNNER_NO_AUTH_KEY ? "no-key (local runner mode)" : "***"}`,
   );
   console.log(`   - Model ID    : ${model.id} (${model.name})`);
   console.log(`   - Cap Delivery: ${model.capabilities?.toolArgumentDelivery}`);
 
-  // ---------------------------------------------------------------------------
-  // Step 3: Stream completion using the unified stream API
-  // ---------------------------------------------------------------------------
   console.log("\n3. Sending streaming request:");
   console.log(`   Prompt: "${prompt}"\n`);
   console.log("--- [Stream Output Begin] ---");
