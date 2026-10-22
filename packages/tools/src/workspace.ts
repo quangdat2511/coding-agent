@@ -7,6 +7,7 @@ import type {
   RepoPath,
   WorkspaceResolver,
 } from "@coding-agent/agent-core";
+import { errnoOf } from "./errno.ts";
 
 // The same failure shape openAgentSession reports, narrowed to the one field this factory checks.
 export type CreateWorkspaceResult =
@@ -82,7 +83,8 @@ async function resolvePath(jail: Jail, input: string, mode: Mode): Promise<PathR
     // also refuses an input whose case differs from the name on disk on a case-insensitive
     // filesystem such as macOS's default, which is accepted as stricter than needed.
     // This narrows but does not close the race: the filesystem can still change between
-    // resolution and the tool opening the path, since tools do not open with O_NOFOLLOW or openat
+    // resolution and the tool opening the path. `read` opens the final component with O_NOFOLLOW,
+    // but a parent directory can still be swapped for a symbolic link, since tools do not openat
     // relative to a held directory. ADR 0004 has execute re-resolve to keep that window small.
     const reached = join(jail.root, ...walked.existing);
     if ((await jail.fs.realpath(reached)) !== reached) {
@@ -179,10 +181,6 @@ function unreachable(input: string, error: unknown): PathResolution {
     default:
       throw error;
   }
-}
-
-function errnoOf(error: unknown): string | undefined {
-  return (error as NodeJS.ErrnoException | undefined)?.code;
 }
 
 // Paths come from the model, so messages bound how much of one they echo back into the context.

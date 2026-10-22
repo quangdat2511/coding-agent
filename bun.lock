@@ -41,6 +41,7 @@
       "name": "@coding-agent/tools",
       "dependencies": {
         "@coding-agent/agent-core": "workspace:*",
+        "typebox": "^1.0.0",
       },
     },
     "packages/tui": {
