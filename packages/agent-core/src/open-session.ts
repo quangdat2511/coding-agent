@@ -2,6 +2,7 @@ import { createAgentSession } from "./agent-session.ts";
 import { type ConfigProblem, findConfigProblem, issueSessionId } from "./config-validation.ts";
 import type { OpenSessionConfig, OpenSessionResult } from "./session.ts";
 import type { ReadyState } from "./state.ts";
+import { noUsage } from "./usage.ts";
 
 const refuse = (problem: ConfigProblem): OpenSessionResult => ({
   ok: false,
@@ -20,7 +21,7 @@ export function openAgentSession(config: OpenSessionConfig): OpenSessionResult {
     phase: "ready",
     sessionId,
     transcript: [],
-    usage: { inputTokens: 0, outputTokens: 0 },
+    usage: noUsage,
     counters: { modelTurns: 0, toolCalls: 0, consecutiveRecoverableFailures: 0 },
     activeDurationMs: 0,
     workspaceChanged: false,

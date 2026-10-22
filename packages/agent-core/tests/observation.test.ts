@@ -1,12 +1,14 @@
 import { describe, expect, it } from "bun:test";
 import type { AgentState, SessionEvent } from "../src/index.ts";
-import { collect, openTestSession } from "./kit/index.ts";
+import { collect, openTestSession, textTurn } from "./kit/index.ts";
 
 const task = { objective: "Fix the failing test" };
 
+const answering = { model: { turns: [textTurn("Fixed it.")] } };
+
 describe("observing an Agent Session", () => {
   it("publishes session_started first, at sequence one, stamped by the injected clock", async () => {
-    const { session, clock } = openTestSession();
+    const { session, clock } = openTestSession(answering);
     clock.advance(1_500);
 
     await session.dispatch({ type: "start", task });
@@ -21,23 +23,8 @@ describe("observing an Agent Session", () => {
     });
   });
 
-  it("settles as INTERNAL_ERROR once started, because Model Turns are not implemented yet", async () => {
-    const { session } = openTestSession();
-
-    await session.dispatch({ type: "start", task });
-
-    expect(await session.result()).toEqual({
-      outcome: "failed",
-      failure: { code: "INTERNAL_ERROR", message: expect.any(String) },
-      usage: { inputTokens: 0, outputTokens: 0 },
-      workspaceChanged: false,
-      partialChangesPossible: false,
-      lastSequence: 2,
-    });
-  });
-
   it("ends with session_settled, carrying the same Agent Result that result() returns", async () => {
-    const { session } = openTestSession();
+    const { session } = openTestSession(answering);
 
     await session.dispatch({ type: "start", task });
     const result = await session.result();
@@ -51,7 +38,7 @@ describe("observing an Agent Session", () => {
   });
 
   it("follows live Session Events from a subscription made before start, ending after session_settled", async () => {
-    const { session } = openTestSession();
+    const { session } = openTestSession(answering);
     const live = collect(session.events());
 
     await session.dispatch({ type: "start", task });
@@ -63,7 +50,7 @@ describe("observing an Agent Session", () => {
   });
 
   it("follows live Session Events from a nonzero sequence subscribed before start", async () => {
-    const { session } = openTestSession();
+    const { session } = openTestSession(answering);
     const live = collect(session.events(1));
 
     await session.dispatch({ type: "start", task });
@@ -74,7 +61,7 @@ describe("observing an Agent Session", () => {
   });
 
   it("replays exactly the Session Events after any attach point, with no gap and no duplicate", async () => {
-    const { session } = openTestSession();
+    const { session } = openTestSession(answering);
     await session.dispatch({ type: "start", task });
     const { lastSequence } = await session.result();
 
@@ -87,7 +74,7 @@ describe("observing an Agent Session", () => {
   });
 
   it("keeps snapshot() at least as new as every Session Event already delivered", async () => {
-    const { session } = openTestSession();
+    const { session } = openTestSession(answering);
     const observed: { event: SessionEvent; state: AgentState }[] = [];
     const live = (async () => {
       for await (const event of session.events())
@@ -109,7 +96,7 @@ describe("observing an Agent Session", () => {
   });
 
   it("terminates only a consumer that throws, leaving other consumers and the session unaffected", async () => {
-    const { session } = openTestSession();
+    const { session } = openTestSession(answering);
     const throwing = (async () => {
       for await (const _ of session.events()) throw new Error("consumer bug");
     })();
@@ -123,7 +110,7 @@ describe("observing an Agent Session", () => {
   });
 
   it("never waits for a consumer that stops pulling Session Events", async () => {
-    const { session } = openTestSession();
+    const { session } = openTestSession(answering);
     void (async () => {
       for await (const _ of session.events()) await new Promise(() => {});
     })();
@@ -135,13 +122,13 @@ describe("observing an Agent Session", () => {
   });
 
   it.each([-1, 0.5, Number.NaN])("refuses to attach after sequence %p", (afterSequence) => {
-    const { session } = openTestSession();
+    const { session } = openTestSession(answering);
 
     expect(() => session.events(afterSequence)).toThrow(RangeError);
   });
 
   it("keeps the Coding Task it was started with when the caller later mutates it", async () => {
-    const { session } = openTestSession();
+    const { session } = openTestSession(answering);
     const mutable = { objective: "Fix the failing test" };
 
     await session.dispatch({ type: "start", task: mutable });
@@ -153,7 +140,7 @@ describe("observing an Agent Session", () => {
   });
 
   it("resolves result() only after session_settled is appended", async () => {
-    const { session } = openTestSession();
+    const { session } = openTestSession(answering);
     const atResolution = session.result().then((result) => ({ result, state: session.snapshot() }));
 
     await session.dispatch({ type: "start", task });

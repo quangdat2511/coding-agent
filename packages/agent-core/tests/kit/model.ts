@@ -9,11 +9,12 @@ import type {
 } from "@coding-agent/ai";
 import type { ModelPort } from "../../src/index.ts";
 
-export type ScriptedTurn = readonly ModelStreamEvent[];
+export type ScriptedTurn = readonly ModelStreamEvent[] | (() => ModelStream);
 
 export interface ModelRequest {
   readonly context: Context;
   readonly signal: AbortSignal;
+  readonly parallelToolCalls: false;
 }
 
 export interface FakeModel extends ModelPort {
@@ -50,48 +51,91 @@ export function fakeModel({
     identity,
     capabilities: { ...defaultCapabilities, ...capabilities },
     requests,
-    stream(context, { signal }) {
-      requests.push({ context, signal });
+    stream(context, { signal, parallelToolCalls }) {
+      requests.push({ context, signal, parallelToolCalls });
       const turn = remaining.shift();
       if (!turn) throw new Error(`fake model has no scripted turn for request ${requests.length}`);
-      return scriptedStream(turn);
+      return typeof turn === "function" ? turn() : scriptedStream(turn);
     },
   };
 }
 
-function scriptedStream(events: ScriptedTurn): ModelStream {
+function scriptedStream(events: readonly ModelStreamEvent[]): ModelStream {
   const terminal = events.findIndex((event) => event.type === "turn_end" || event.type === "error");
   const delivered = terminal === -1 ? events : events.slice(0, terminal + 1);
-  const last = delivered.at(-1);
-  const result =
-    last?.type === "turn_end"
-      ? Promise.resolve(last.message)
-      : Promise.reject(
-          new Error(last?.type === "error" ? last.error.message : "scripted turn has no turn_end"),
-        );
-  result.catch(() => {});
+  return streamOf(async function* () {
+    yield* delivered;
+  });
+}
+
+export function streamOf(source: () => AsyncIterable<ModelStreamEvent>): ModelStream {
+  const final = Promise.withResolvers<AssistantMessage>();
+  final.promise.catch(() => {});
 
   return {
     async *[Symbol.asyncIterator]() {
-      yield* delivered;
+      try {
+        for await (const event of source()) {
+          if (event.type === "turn_end") final.resolve(event.message);
+          if (event.type === "error") final.reject(new Error(event.error.message));
+          yield event;
+        }
+        final.reject(new Error("scripted turn has no turn_end"));
+      } catch (error) {
+        final.reject(error);
+        throw error;
+      }
     },
-    result: () => result,
+    result: () => final.promise,
   };
 }
 
-export function textTurn(text: string): ScriptedTurn {
-  const message: AssistantMessage = {
+export function throwingRequest(error: unknown): ScriptedTurn {
+  return () => {
+    throw error;
+  };
+}
+
+export function failingStream(events: readonly ModelStreamEvent[], error: unknown): ScriptedTurn {
+  return () =>
+    streamOf(async function* () {
+      yield* events;
+      throw error;
+    });
+}
+
+export function textMessage(text: string): AssistantMessage {
+  return {
     role: "assistant",
     content: [{ type: "text", text }],
     model: defaultIdentity.id,
     finishReason: { reason: "end_turn", rawReason: "stop" },
-    usage,
+    usage: { ...usage },
   };
+}
+
+export function withFinalMessage(
+  turn: readonly ModelStreamEvent[],
+  patch: Partial<AssistantMessage>,
+): readonly ModelStreamEvent[] {
+  return turn.map((event) =>
+    event.type === "turn_end" ? { ...event, message: { ...event.message, ...patch } } : event,
+  );
+}
+
+export function textTurn(...chunks: readonly string[]): readonly ModelStreamEvent[] {
+  const message = textMessage(chunks.join(""));
 
   return [
     { type: "stream_start" },
     { type: "content_block_start", index: 0, block: { type: "text", text: "" } },
-    { type: "content_block_delta", index: 0, delta: { type: "text_delta", text } },
+    ...chunks.map(
+      (text): ModelStreamEvent => ({
+        type: "content_block_delta",
+        index: 0,
+        delta: { type: "text_delta", text },
+      }),
+    ),
     { type: "content_block_stop", index: 0 },
     { type: "turn_end", message },
   ];
@@ -99,7 +143,7 @@ export function textTurn(text: string): ScriptedTurn {
 
 export function toolCallTurn(
   ...calls: readonly { toolCallId: string; name: string; input: unknown }[]
-): ScriptedTurn {
+): readonly ModelStreamEvent[] {
   const blocks: ToolCallBlock[] = calls.map(({ toolCallId, name, input }) => ({
     type: "tool_call",
     toolCallId,
