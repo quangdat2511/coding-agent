@@ -1,6 +1,11 @@
-import type { AssistantMessage, ToolDeclaration } from "@coding-agent/ai";
+import type {
+  AssistantMessage,
+  ToolCallBlock,
+  ToolDeclaration,
+  UserMessage,
+} from "@coding-agent/ai";
 import { createEventLog } from "./event-log.ts";
-import type { SessionEvent, SessionEventType } from "./events.ts";
+import type { SessionEvent, SessionEventType, SkipReason } from "./events.ts";
 import { messageOf } from "./guards.ts";
 import { readModelResponse } from "./model-response.ts";
 import type { AgentFailure, AgentResult, UsageTotals } from "./result.ts";
@@ -10,10 +15,14 @@ import type {
   AssistantMessageDraft,
   AssistantMessageRef,
   ModelTurnRef,
+  NormalizedToolCall,
   ReadyState,
+  SessionCounters,
   StreamingModelState,
 } from "./state.ts";
 import type { CodingTask } from "./task.ts";
+import { preflightToolCall } from "./tool-call-preflight.ts";
+import type { ToolResult } from "./tool-result.ts";
 import { addUsage, usageOf } from "./usage.ts";
 import type { VerificationDecision } from "./verification.ts";
 
@@ -43,6 +52,13 @@ interface Candidate extends AssistantMessageRef {
   readonly message: AssistantMessage;
 }
 
+type QueuedToolCall = NormalizedToolCall & { readonly providerId: string };
+
+const toolResultMessage = (providerId: string, { content, isError }: ToolResult): UserMessage => ({
+  role: "user",
+  content: [{ type: "tool_result", toolCallId: providerId, content, isError }],
+});
+
 function withoutPhase(state: AgentState): StateWithoutPhase {
   return {
     sessionId: state.sessionId,
@@ -67,6 +83,12 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
   const tools: readonly ToolDeclaration[] = config.tools
     .list()
     .map(({ name, description, parameters }) => ({ name, description, parameters }));
+  const preflightContext = {
+    tools: config.tools,
+    toolNames: tools.map(({ name }) => name),
+    workspace: config.workspace,
+    signal: abortEffects.signal,
+  };
 
   function commit(next: AgentState, event: EventDraft): number {
     const occurredAt = config.clock.now();
@@ -110,6 +132,11 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
     return { ...withoutPhase(state), phase: "streaming_model", modelTurn, assistantMessage };
   }
 
+  const incremented = (counter: keyof SessionCounters): SessionCounters => ({
+    ...state.counters,
+    [counter]: state.counters[counter] + 1,
+  });
+
   function partialMessage(draft: AssistantMessageDraft, failure: AgentFailure): AssistantMessage {
     return {
       role: "assistant",
@@ -119,7 +146,82 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
     };
   }
 
-  async function runModelTurn(): Promise<Candidate | "settled"> {
+  function queueToolCalls(
+    modelTurn: ModelTurnRef,
+    draft: AssistantMessageDraft,
+    blocks: readonly ToolCallBlock[],
+  ): readonly QueuedToolCall[] {
+    return blocks.map((block, queueIndex) => {
+      const toolCall: QueuedToolCall = {
+        id: config.ids.next("tool_call"),
+        providerId: block.toolCallId,
+        name: block.name,
+        arguments: block.arguments,
+      };
+      commit(
+        { ...streaming(modelTurn, draft), counters: incremented("toolCalls") },
+        {
+          type: "tool_call_queued",
+          data: { modelTurnId: modelTurn.modelTurnId, queueIndex, toolCall },
+        },
+      );
+      return toolCall;
+    });
+  }
+
+  function skipToolCalls(
+    modelTurn: ModelTurnRef,
+    draft: AssistantMessageDraft,
+    unstarted: readonly QueuedToolCall[],
+    reason: SkipReason,
+  ): void {
+    for (const { id } of unstarted) {
+      commit(streaming(modelTurn, draft), {
+        type: "tool_call_completed",
+        data: { toolCallId: id, outcome: "skipped", reason },
+      });
+    }
+  }
+
+  async function resolveToolCalls(
+    modelTurn: ModelTurnRef,
+    draft: AssistantMessageDraft,
+    queue: readonly QueuedToolCall[],
+  ): Promise<AgentFailure | undefined> {
+    for (const [index, toolCall] of queue.entries()) {
+      const outcome = await preflightToolCall(toolCall, preflightContext);
+      if (outcome.ok) {
+        const failure: AgentFailure = {
+          code: "INTERNAL_ERROR",
+          message: "executing Tool Calls is not implemented yet",
+        };
+        skipToolCalls(modelTurn, draft, queue.slice(index), failure.code);
+        return failure;
+      }
+      const { error } = outcome;
+      const result: ToolResult = {
+        toolCallId: toolCall.id,
+        toolName: toolCall.name,
+        content: error.message,
+        isError: true,
+        error,
+      };
+      commit(
+        {
+          ...streaming(modelTurn, draft),
+          transcript: [...state.transcript, toolResultMessage(toolCall.providerId, result)],
+          counters: incremented("consecutiveRecoverableFailures"),
+        },
+        {
+          type: "tool_call_completed",
+          data: { toolCallId: toolCall.id, outcome: "failed", result },
+        },
+      );
+    }
+    return undefined;
+  }
+
+  async function runModelTurn(): Promise<Candidate | "continue" | "settled"> {
     const modelTurn: ModelTurnRef = {
       modelTurnId: config.ids.next("model_turn"),
       index: state.counters.modelTurns,
@@ -129,10 +231,7 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
     let draft: AssistantMessageDraft = { messageId, blocks: [] };
 
     commit(
-      {
-        ...streaming(modelTurn, draft),
-        counters: { ...state.counters, modelTurns: state.counters.modelTurns + 1 },
-      },
+      { ...streaming(modelTurn, draft), counters: incremented("modelTurns") },
       { type: "model_turn_started", data: { ...modelTurn, model } },
     );
     commit(streaming(modelTurn, draft), {
@@ -190,13 +289,15 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
       { ...streaming(modelTurn, draft), transcript: [...state.transcript, message] },
       { type: "assistant_message_completed", data: { messageId, outcome: "completed", message } },
     );
-    if (message.content.some((block) => block.type === "tool_call")) {
-      const failure: AgentFailure = {
-        code: "INTERNAL_ERROR",
-        message: "Tool Calls are not implemented yet",
-      };
+    const toolCalls = message.content.filter((block) => block.type === "tool_call");
+    if (toolCalls.length > 0) {
+      const failure = await resolveToolCalls(
+        modelTurn,
+        draft,
+        queueToolCalls(modelTurn, draft, toolCalls),
+      );
       completeTurn(usageOf(message), failure);
-      return fail(failure);
+      return failure === undefined ? "continue" : fail(failure);
     }
     commit(streaming(modelTurn, draft), {
       type: "candidate_completion_detected",
@@ -269,8 +370,9 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
 
   async function run(): Promise<void> {
     for (;;) {
-      const candidate = await runModelTurn();
-      if (candidate === "settled" || (await verifyCandidate(candidate)) === "settled") return;
+      const turn = await runModelTurn();
+      if (turn === "settled") return;
+      if (turn !== "continue" && (await verifyCandidate(turn)) === "settled") return;
     }
   }
 

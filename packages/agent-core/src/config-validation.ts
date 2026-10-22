@@ -1,4 +1,4 @@
-import { type Fields, isNonEmptyString, isRecord, messageOf } from "./guards.ts";
+import { type Fields, isNonEmptyString, isOneOf, isRecord, messageOf } from "./guards.ts";
 import type { ApprovalPolicy, IdSource, ModelPort, SessionLimits } from "./ports.ts";
 import type { OpenSessionConfig, OpenSessionResult } from "./session.ts";
 import type { ExecutableTool, ToolMutation, ToolRegistry } from "./tool.ts";
@@ -23,9 +23,6 @@ const limitNames = {
   maxConsecutiveRecoverableFailures: true,
   cancellationGraceMs: true,
 } satisfies Record<keyof SessionLimits, true>;
-
-const isOneOf = (options: object, value: unknown): boolean =>
-  typeof value === "string" && Object.hasOwn(options, value);
 
 const isAbsolutePath = (value: unknown): boolean =>
   typeof value === "string" && /^(?:\/|[A-Za-z]:[\\/])/.test(value);
