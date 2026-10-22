@@ -106,6 +106,8 @@ interface ReadFailure {
 
 // Opens before checking the file's type, so the check applies to the file actually read. The
 // resolver does not check readability, so EACCES and EPERM from the open itself are mapped here.
+// A FIFO reaches the stat below because O_NONBLOCK makes the open succeed; a socket does not,
+// because the kernel refuses to open it with ENXIO.
 async function readText(
   fs: ReadFileSystem,
   path: RepoPath,
@@ -120,9 +122,7 @@ async function readText(
   try {
     const stats = await handle.stat();
     if (stats.isDirectory()) return isDirectory(path);
-    if (!stats.isFile()) {
-      return { code: "PERMISSION_DENIED", message: `${quote(path)} is not a regular file` };
-    }
+    if (!stats.isFile()) return notRegularFile(path);
     return await handle.readFile({ encoding: "utf8", signal });
   } finally {
     // The file was only read, so a failure to close it must not replace the outcome.
@@ -138,6 +138,9 @@ function openFailure(path: RepoPath, cause: unknown): ReadFailure {
       return { code: "NOT_FOUND", message: `${quote(path)} does not exist` };
     case "EISDIR":
       return isDirectory(path);
+    case "ENXIO":
+      // The kernel reports a socket this way; like a FIFO, it is not a regular file.
+      return notRegularFile(path);
     case "ELOOP":
       return {
         code: "PATH_OUTSIDE_REPO",
@@ -156,6 +159,10 @@ function openFailure(path: RepoPath, cause: unknown): ReadFailure {
 
 function isDirectory(path: RepoPath): ReadFailure {
   return { code: "IS_DIRECTORY", message: `${quote(path)} is a directory` };
+}
+
+function notRegularFile(path: RepoPath): ReadFailure {
+  return { code: "PERMISSION_DENIED", message: `${quote(path)} is not a regular file` };
 }
 
 // The canonical path can hold any character but "/" and NUL, so it is quoted to keep a name with

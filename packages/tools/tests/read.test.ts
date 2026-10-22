@@ -1,6 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import * as fs from "node:fs/promises";
-import { chmod, mkdir, mkdtemp, realpath, rm, symlink, unlink, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  mkdir,
+  mkdtemp,
+  realpath,
+  rename,
+  rm,
+  symlink,
+  unlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type {
@@ -134,6 +144,18 @@ describe("reading a file", () => {
       content: `"${join(repo, "empty.ts")}" (empty file)`,
     });
   });
+
+  it("keeps CRLF line endings in the numbered output", async () => {
+    await writeFile(join(repo, "crlf.ts"), "first\r\nsecond\r\n");
+
+    const outcome = await read({ path: "crlf.ts" });
+
+    expect(outcome.content.split("\n")).toEqual([
+      `"${join(repo, "crlf.ts")}" (lines 1-2 of 2)`,
+      "1 | first\r",
+      "2 | second\r",
+    ]);
+  });
 });
 
 describe("refusing a read", () => {
@@ -157,6 +179,15 @@ describe("refusing a read", () => {
     expect(await read({ path: "a.ts", offset: 4 })).toMatchObject({
       isError: true,
       error: { code: "SCHEMA_VIOLATION", message: expect.stringContaining("3 lines") },
+    });
+  });
+
+  it("refuses an offset past the end of an empty file as a schema violation", async () => {
+    await writeFile(join(repo, "empty.ts"), "");
+
+    expect(await read({ path: "empty.ts", offset: 2 })).toMatchObject({
+      isError: true,
+      error: { code: "SCHEMA_VIOLATION", message: expect.stringContaining("0 lines") },
     });
   });
 
@@ -232,6 +263,21 @@ describe("refusing a read", () => {
     });
   });
 
+  it("refuses a socket as PERMISSION_DENIED", async () => {
+    const server = Bun.listen({ unix: join(repo, "socket"), socket: { data() {} } });
+    try {
+      expect(await read({ path: "socket" })).toMatchObject({
+        isError: true,
+        error: {
+          code: "PERMISSION_DENIED",
+          message: expect.stringContaining("not a regular file"),
+        },
+      });
+    } finally {
+      server.stop();
+    }
+  });
+
   it("quotes the path so a newline in a file name cannot pass for a numbered line", async () => {
     await writeFile(join(repo, "evil\n2 | injected"), "real\n");
 
@@ -293,7 +339,7 @@ describe("the two phases", () => {
     });
   });
 
-  it("re-validates the path when it executes", async () => {
+  it("refuses a file swapped for a symbolic link between prepare and execute", async () => {
     await writeFile(join(repo, "a.ts"), "inside\n");
     await writeFile(join(sandbox, "outside.ts"), "secret\n");
     const tool = readTool();
@@ -302,6 +348,26 @@ describe("the two phases", () => {
 
     await unlink(join(repo, "a.ts"));
     await symlink(join(sandbox, "outside.ts"), join(repo, "a.ts"));
+
+    expect(await tool.execute(prepared.prepared, context())).toMatchObject({
+      isError: true,
+      error: { code: "PATH_OUTSIDE_REPO" },
+    });
+  });
+
+  it("re-resolves a parent directory swapped for a symbolic link when it executes", async () => {
+    await mkdir(join(repo, "sub"));
+    await writeFile(join(repo, "sub", "a.ts"), "inside\n");
+    await mkdir(join(sandbox, "outside"));
+    await writeFile(join(sandbox, "outside", "a.ts"), "secret\n");
+    const tool = readTool();
+    const prepared = await tool.prepare({ path: "sub/a.ts" }, context());
+    if (!prepared.ok) throw new Error(`expected a prepared call, got: ${prepared.message}`);
+
+    // O_NOFOLLOW only guards the final component, so a stale prepared path would still read
+    // outside the repository through the swapped parent. Only resolving the input again refuses it.
+    await rename(join(repo, "sub"), join(sandbox, "moved"));
+    await symlink(join(sandbox, "outside"), join(repo, "sub"));
 
     expect(await tool.execute(prepared.prepared, context())).toMatchObject({
       isError: true,
