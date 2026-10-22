@@ -39,16 +39,19 @@ export const CustomModelConfigSchema = Type.Object(
     name: Type.Optional(Type.String({ minLength: 1 })),
     capabilities: Type.Optional(
       Type.Partial(
-        Type.Object({
-          parallelToolCallControl: Type.Boolean(),
-          cancellation: Type.Union([
-            Type.Literal("client_abort_only"),
-            Type.Literal("native_in_flight"),
-          ]),
-          toolArgumentDelivery: Type.Union([Type.Literal("streamed"), Type.Literal("whole")]),
-          usageTiming: Type.Union([Type.Literal("incremental"), Type.Literal("final")]),
-          serverSideTools: Type.Boolean(),
-        }),
+        Type.Object(
+          {
+            parallelToolCallControl: Type.Boolean(),
+            cancellation: Type.Union([
+              Type.Literal("client_abort_only"),
+              Type.Literal("native_in_flight"),
+            ]),
+            toolArgumentDelivery: Type.Union([Type.Literal("streamed"), Type.Literal("whole")]),
+            usageTiming: Type.Union([Type.Literal("incremental"), Type.Literal("final")]),
+            serverSideTools: Type.Boolean(),
+          },
+          { additionalProperties: false },
+        ),
       ),
     ),
   },
@@ -98,25 +101,28 @@ export function createCustomProvider(config: CustomProviderConfig): Provider {
   const normalizedBaseUrl = config.baseUrl?.replace(/\/+$/, "");
   const variantDefinition = CUSTOM_VARIANT_DEFINITIONS[config.variant];
 
-  const mappedModels: Model[] = config.models.map((modelConfig) => {
-    const capabilities = modelConfig.capabilities
-      ? withModelOverrides(variantDefinition.defaultCapabilities, modelConfig.capabilities)
-      : variantDefinition.defaultCapabilities;
+  const mappedModels: readonly Model[] = Object.freeze(
+    config.models.map((modelConfig) => {
+      const capabilities = modelConfig.capabilities
+        ? withModelOverrides(variantDefinition.defaultCapabilities, modelConfig.capabilities)
+        : variantDefinition.defaultCapabilities;
 
-    return {
-      id: modelConfig.id,
-      name: modelConfig.name ?? modelConfig.id,
-      provider: config.id,
-      capabilities,
-    };
-  });
+      return Object.freeze({
+        id: modelConfig.id,
+        name: modelConfig.name ?? modelConfig.id,
+        provider: config.id,
+        capabilities,
+      });
+    }),
+  );
 
   const auth: ProviderCredentials = {
     apiKey: {
       name: `${config.id} API key`,
       resolve: async () => {
-        if (config.apiKey !== undefined && config.apiKey !== "") {
-          return config.apiKey;
+        const explicitKey = config.apiKey?.trim();
+        if (explicitKey !== undefined && explicitKey !== "") {
+          return explicitKey;
         }
 
         if (config.apiKeyEnv !== undefined && config.apiKeyEnv !== "") {

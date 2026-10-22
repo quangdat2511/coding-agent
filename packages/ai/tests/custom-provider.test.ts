@@ -139,6 +139,22 @@ describe("Custom Provider Schema & Validation", () => {
         models: [{ id: "" }],
       }),
     ).toThrow(CustomProviderValidationError);
+
+    expect(() =>
+      createCustomProvider({
+        id: "test",
+        variant: "chat_completions",
+        models: [
+          {
+            id: "m1",
+            capabilities: {
+              // @ts-expect-error test unknown capability property
+              unknownField: true,
+            },
+          },
+        ],
+      }),
+    ).toThrow(CustomProviderValidationError);
   });
 
   it("instantiates provider with valid minimal config", () => {
@@ -170,11 +186,11 @@ describe("Custom Provider Schema & Validation", () => {
 });
 
 describe("Credential Resolution", () => {
-  it("resolves explicit apiKey directly", async () => {
+  it("resolves explicit apiKey directly and trims whitespace", async () => {
     const provider = createCustomProvider({
       id: "custom-auth",
       variant: "chat_completions",
-      apiKey: "secret-key-123",
+      apiKey: "  secret-key-123\r\n  ",
       models: [{ id: "m1" }],
     });
 
@@ -315,6 +331,18 @@ describe("Model Capabilities & Directory Compatibility", () => {
     expect(lookedUpModel).toBeDefined();
     expect(lookedUpModel?.id).toBe("qwen-coder");
     expect(lookedUpModel?.provider).toBe("directory-custom");
+  });
+
+  it("freezes model objects and the models catalog defensively", () => {
+    const provider = createCustomProvider({
+      id: "frozen-test",
+      variant: "chat_completions",
+      models: [{ id: "m1" }],
+    });
+
+    const models = provider.getModels();
+    expect(Object.isFrozen(models)).toBe(true);
+    expect(Object.isFrozen(models[0])).toBe(true);
   });
 });
 
