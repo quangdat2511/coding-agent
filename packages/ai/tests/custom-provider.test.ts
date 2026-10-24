@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it, spyOn } from "bun:test";
+import { afterAll, afterEach, beforeAll, describe, expect, it, spyOn } from "bun:test";
 import Anthropic from "@anthropic-ai/sdk";
 import OpenAI from "openai";
 import {
@@ -91,6 +91,13 @@ beforeAll(() => {
   });
 });
 
+afterEach(() => {
+  mockOpenAIChunks = [];
+  lastOpenAIClientOptions = undefined;
+  mockAnthropicEvents = [];
+  lastAnthropicClientOptions = undefined;
+});
+
 afterAll(() => {
   openAISpy?.mockRestore();
   anthropicSpy?.mockRestore();
@@ -137,6 +144,16 @@ describe("Custom Provider Schema & Validation", () => {
         id: "test",
         variant: "chat_completions",
         models: [{ id: "" }],
+      }),
+    ).toThrow(CustomProviderValidationError);
+
+    // Empty apiKey
+    expect(() =>
+      createCustomProvider({
+        id: "test",
+        variant: "chat_completions",
+        apiKey: "",
+        models: [{ id: "m1" }],
       }),
     ).toThrow(CustomProviderValidationError);
 
