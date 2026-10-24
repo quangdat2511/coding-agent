@@ -7,7 +7,6 @@ import {
   CustomProviderConfigSchema,
   CustomProviderValidationError,
   createCustomProvider,
-  LOCAL_RUNNER_NO_AUTH_KEY,
   OPENAI_CHAT_COMPLETIONS_CAPABILITIES,
   ProviderDirectory,
 } from "../src/index.ts";
@@ -278,7 +277,7 @@ describe("Credential Resolution", () => {
     });
 
     const resolved = await provider.auth.apiKey?.resolve();
-    expect(resolved).toBe(LOCAL_RUNNER_NO_AUTH_KEY);
+    expect(resolved).toBe("no-key");
   });
 });
 
@@ -348,18 +347,6 @@ describe("Model Capabilities & Directory Compatibility", () => {
     expect(lookedUpModel).toBeDefined();
     expect(lookedUpModel?.id).toBe("qwen-coder");
     expect(lookedUpModel?.provider).toBe("directory-custom");
-  });
-
-  it("freezes model objects and the models catalog defensively", () => {
-    const provider = createCustomProvider({
-      id: "frozen-test",
-      variant: "chat_completions",
-      models: [{ id: "m1" }],
-    });
-
-    const models = provider.getModels();
-    expect(Object.isFrozen(models)).toBe(true);
-    expect(Object.isFrozen(models[0])).toBe(true);
   });
 });
 

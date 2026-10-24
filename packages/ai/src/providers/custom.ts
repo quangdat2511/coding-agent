@@ -13,7 +13,7 @@ import { defineProvider, type Provider, type ProviderApi } from "../models.ts";
 import type { Model, ModelCapabilities } from "../types.ts";
 
 /** Fallback credential for unauthenticated local endpoints (Ollama, vLLM). */
-export const LOCAL_RUNNER_NO_AUTH_KEY = "no-key";
+const LOCAL_RUNNER_NO_AUTH_KEY = "no-key";
 
 export type CustomProviderVariant = "chat_completions" | "messages";
 
@@ -102,20 +102,18 @@ export function createCustomProvider(config: CustomProviderConfig): Provider {
   const normalizedBaseUrl = config.baseUrl?.replace(/\/+$/, "");
   const variantDefinition = CUSTOM_VARIANT_DEFINITIONS[config.variant];
 
-  const mappedModels: readonly Model[] = Object.freeze(
-    config.models.map((modelConfig) => {
-      const capabilities = modelConfig.capabilities
-        ? withModelOverrides(variantDefinition.defaultCapabilities, modelConfig.capabilities)
-        : variantDefinition.defaultCapabilities;
+  const mappedModels: readonly Model[] = config.models.map((modelConfig) => {
+    const capabilities = modelConfig.capabilities
+      ? withModelOverrides(variantDefinition.defaultCapabilities, modelConfig.capabilities)
+      : variantDefinition.defaultCapabilities;
 
-      return Object.freeze({
-        id: modelConfig.id,
-        name: modelConfig.name ?? modelConfig.id,
-        provider: config.id,
-        capabilities,
-      });
-    }),
-  );
+    return {
+      id: modelConfig.id,
+      name: modelConfig.name ?? modelConfig.id,
+      provider: config.id,
+      capabilities,
+    };
+  });
 
   const auth: ProviderCredentials = {
     apiKey: {

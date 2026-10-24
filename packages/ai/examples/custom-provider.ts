@@ -3,7 +3,6 @@ import {
   type CustomProviderConfig,
   createCustomProvider,
   createProviderDirectory,
-  LOCAL_RUNNER_NO_AUTH_KEY,
   type Model,
 } from "../src/index.ts";
 import { loadRootEnv } from "./utils/env.ts";
@@ -92,7 +91,7 @@ async function main(): Promise<void> {
   console.log(`   - Base URL    : ${customProvider.baseUrl}`);
   console.log(`   - Wire Format : ${customProvider.variant}`);
   console.log(
-    `   - Auth Key    : ${resolvedApiKey === LOCAL_RUNNER_NO_AUTH_KEY ? "no-key (local runner mode)" : "***"}`,
+    `   - Auth Key    : ${resolvedApiKey === "no-key" ? "no-key (local runner mode)" : "***"}`,
   );
   console.log(`   - Model ID    : ${model.id} (${model.name})`);
   console.log(`   - Cap Delivery: ${model.capabilities?.toolArgumentDelivery}`);
