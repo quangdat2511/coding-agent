@@ -1,18 +1,13 @@
 import { describe, expect, it } from "bun:test";
 import type { Message, UserMessage } from "@coding-agent/ai";
 import { Type } from "typebox";
-import type {
-  ExecutableTool,
-  PrepareOutcome,
-  SessionEvent,
-  ToolErrorCode,
-  ToolResult,
-} from "../src/index.ts";
+import type { ExecutableTool, PrepareOutcome, ToolErrorCode, ToolResult } from "../src/index.ts";
 import {
   collect,
   fakeTool,
   fakeWriteTool,
   openTestSession,
+  resultOf,
   type ScriptedToolCall,
   textTurn,
   throwingTool,
@@ -36,19 +31,6 @@ const errorResult = (toolName: string, code: ToolErrorCode, message: string): To
   isError: true,
   error: { code, message },
 });
-
-const resultOf = (events: readonly SessionEvent[], toolCallId: string): ToolResult | undefined => {
-  for (const event of events) {
-    if (
-      event.type === "tool_call_completed" &&
-      event.data.toolCallId === toolCallId &&
-      event.data.outcome !== "skipped"
-    ) {
-      return event.data.result;
-    }
-  }
-  return undefined;
-};
 
 const unknownCalls = toolCallTurn(
   { toolCallId: "call-1", name: "frobnicate", input: {} },
@@ -401,7 +383,7 @@ describe("resolving Tool Calls in preflight", () => {
     expect(session.snapshot().counters.consecutiveRecoverableFailures).toBe(3);
   });
 
-  it("prepares only the calls that pass Schema Validation and executes none of them", async () => {
+  it("prepares only the calls that pass Schema Validation and executes only those that pass preflight", async () => {
     const { session, portCalls } = openTestSession({
       tools: [fakeTool(), fakeWriteTool(), throwingTool({ phase: "prepare" })],
       model: {
@@ -415,6 +397,7 @@ describe("resolving Tool Calls in preflight", () => {
             { toolCallId: "call-6", name: "echo", input: {} },
             { toolCallId: "call-7", name: "echo", input: {} },
           ),
+          textTurn("Fixed it."),
         ],
       },
       limits: { maxConsecutiveRecoverableFailures: 10 },
@@ -427,16 +410,20 @@ describe("resolving Tool Calls in preflight", () => {
       "tool.prepare(write)",
       "tool.prepare(explode)",
       "tool.prepare(echo)",
+      "tool.execute(echo)",
+      "tool.prepare(echo)",
+      "tool.execute(echo)",
     ]);
   });
 
-  it("settles INTERNAL_ERROR once a call passes preflight, skipping it and the calls queued behind it, since executing Tool Calls is not supported yet", async () => {
-    const { session, verification } = openTestSession({
+  it("settles INTERNAL_ERROR once a mutating call passes preflight under the ask policy, skipping it and the calls queued behind it, since awaiting Approval is not supported yet", async () => {
+    const { session, verification, portCalls } = openTestSession({
+      tools: [fakeTool(), fakeWriteTool()],
       model: {
         turns: [
           toolCallTurn(
             { toolCallId: "call-1", name: "frobnicate", input: {} },
-            { toolCallId: "call-2", name: "echo", input: {} },
+            { toolCallId: "call-2", name: "write", input: { path: "src/a.ts" } },
             { toolCallId: "call-3", name: "echo", input: {} },
           ),
         ],
@@ -471,7 +458,12 @@ describe("resolving Tool Calls in preflight", () => {
       },
       { type: "session_settled", data: { result } },
     ]);
-    expect(result).toMatchObject({ outcome: "failed", failure: { code: "INTERNAL_ERROR" } });
+    expect(result).toMatchObject({
+      outcome: "failed",
+      failure: { code: "INTERNAL_ERROR" },
+      workspaceChanged: false,
+    });
     expect(verification.candidates).toEqual([]);
+    expect(portCalls.filter((call) => call.startsWith("tool.execute"))).toEqual([]);
   });
 });

@@ -1,4 +1,9 @@
-import { type AgentSession, openAgentSession } from "../../src/index.ts";
+import {
+  type AgentSession,
+  openAgentSession,
+  type SessionEvent,
+  type ToolResult,
+} from "../../src/index.ts";
 import { createTestKit, type TestKit, type TestKitOptions } from "./test-kit.ts";
 
 export interface TestSession extends TestKit {
@@ -17,3 +22,19 @@ export async function collect<T>(iterable: AsyncIterable<T>): Promise<T[]> {
   for await (const item of iterable) items.push(item);
   return items;
 }
+
+export const resultOf = (
+  events: readonly SessionEvent[],
+  toolCallId: string,
+): ToolResult | undefined => {
+  for (const event of events) {
+    if (
+      event.type === "tool_call_completed" &&
+      event.data.toolCallId === toolCallId &&
+      event.data.outcome !== "skipped"
+    ) {
+      return event.data.result;
+    }
+  }
+  return undefined;
+};
