@@ -163,6 +163,34 @@ export interface StreamOptions {
 models.stream(model, context, { temperature: 0.7, maxTokens: 1000 });
 ```
 
+### 6. Custom Providers & Declarative Config Loader
+
+You can instantiate custom endpoints (Ollama, vLLM, DeepSeek, Google OpenAI proxy) programmatically or via JSON configuration:
+
+```typescript
+import {
+  createCustomProvider,
+  loadCustomProvidersFromFile,
+  registerCustomProvidersFromFile,
+} from "@coding-agent/ai";
+
+// Programmatic creation with $ENV_VAR and wildcard model support
+const customProvider = createCustomProvider({
+  id: "my-proxy",
+  variant: "chat_completions",
+  baseUrl: "https://api.deepseek.com",
+  apiKey: "$DEEPSEEK_API_KEY", // auto-resolved from process.env.DEEPSEEK_API_KEY
+  models: [
+    { id: "*" } // wildcard: any model ID is resolved dynamically on-the-fly
+  ],
+});
+
+// Or load directly from a JSON configuration file (array or Pi-style { providers: { ... } })
+const providers = loadCustomProvidersFromFile("~/.coding-agent/models.json");
+registerCustomProvidersFromFile(directory, "./custom-models.json");
+```
+
+
 ## Running Examples
 
 A runnable streaming example is available under `examples/stream.ts`. It demonstrates real-time completions across supported providers:

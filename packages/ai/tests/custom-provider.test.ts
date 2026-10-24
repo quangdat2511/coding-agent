@@ -233,6 +233,40 @@ describe("Credential Resolution", () => {
     }
   });
 
+  it("resolves $ENV_VAR syntax in apiKey from environment variables", async () => {
+    const envKey = "TEST_DOLLAR_ENV_KEY";
+    process.env[envKey] = "   dollar-secret-789\r\n ";
+
+    try {
+      const provider = createCustomProvider({
+        id: "custom-dollar-env",
+        variant: "chat_completions",
+        apiKey: `$${envKey}`,
+        models: [{ id: "m1" }],
+      });
+
+      const resolved = await provider.auth.apiKey?.resolve();
+      expect(resolved).toBe("dollar-secret-789");
+    } finally {
+      delete process.env[envKey];
+    }
+  });
+
+  it("resolves to undefined when $ENV_VAR in apiKey is absent from environment", async () => {
+    const missingEnv = "NON_EXISTENT_DOLLAR_KEY_999";
+    delete process.env[missingEnv];
+
+    const provider = createCustomProvider({
+      id: "custom-missing-dollar-env",
+      variant: "chat_completions",
+      apiKey: `$${missingEnv}`,
+      models: [{ id: "m1" }],
+    });
+
+    const resolved = await provider.auth.apiKey?.resolve();
+    expect(resolved).toBeUndefined();
+  });
+
   it("resolves to undefined when apiKeyEnv is specified but absent from environment", async () => {
     const missingEnv = "NON_EXISTENT_AI_KEY_789";
     delete process.env[missingEnv];
@@ -347,6 +381,30 @@ describe("Model Capabilities & Directory Compatibility", () => {
     expect(lookedUpModel).toBeDefined();
     expect(lookedUpModel?.id).toBe("qwen-coder");
     expect(lookedUpModel?.provider).toBe("directory-custom");
+  });
+
+  it("resolves dynamic on-the-fly models when provider registers wildcard model '*'", () => {
+    const directory = new ProviderDirectory();
+    const provider = createCustomProvider({
+      id: "ollama-local",
+      variant: "chat_completions",
+      models: [
+        {
+          id: "*",
+          name: "Default Local Model",
+          capabilities: { toolArgumentDelivery: "whole" },
+        },
+      ],
+    });
+
+    directory.setProvider(provider);
+
+    const dynamicModel = directory.getModel("ollama-local", "llama3:latest");
+    expect(dynamicModel).toBeDefined();
+    expect(dynamicModel?.id).toBe("llama3:latest");
+    expect(dynamicModel?.name).toBe("llama3:latest");
+    expect(dynamicModel?.provider).toBe("ollama-local");
+    expect(dynamicModel?.capabilities?.toolArgumentDelivery).toBe("whole");
   });
 });
 

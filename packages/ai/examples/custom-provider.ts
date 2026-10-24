@@ -65,7 +65,7 @@ async function main(): Promise<void> {
     name: "Custom Local / Proxy Provider",
     variant: "chat_completions",
     baseUrl,
-    ...(resolvedApiKeyEnv ? { apiKeyEnv: resolvedApiKeyEnv } : {}),
+    ...(resolvedApiKeyEnv ? { apiKey: `$${resolvedApiKeyEnv}` } : {}),
     headers: {
       "X-Client-Application": "coding-agent-example",
     },
@@ -77,6 +77,10 @@ async function main(): Promise<void> {
           parallelToolCallControl: true,
           toolArgumentDelivery: "streamed",
         },
+      },
+      {
+        id: "*",
+        name: "Wildcard Fallback Model",
       },
     ],
   };

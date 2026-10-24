@@ -121,6 +121,12 @@ export function createCustomProvider(config: CustomProviderConfig): Provider {
       resolve: async () => {
         const explicitKey = config.apiKey?.trim();
         if (explicitKey !== undefined && explicitKey !== "") {
+          if (explicitKey.startsWith("$")) {
+            const envVarName = explicitKey.slice(1).trim();
+            if (envVarName !== "") {
+              return readEnvCredential([envVarName])?.value;
+            }
+          }
           return explicitKey;
         }
 

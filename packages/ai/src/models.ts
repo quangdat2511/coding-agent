@@ -94,7 +94,21 @@ export class ProviderDirectory {
     const provider = this.getProvider(providerId);
     if (!provider) return undefined;
 
-    return provider.getModels().find((m) => m.id === modelId);
+    const models = provider.getModels();
+    const exactMatch = models.find((m) => m.id === modelId);
+    if (exactMatch) return exactMatch;
+
+    const wildcard = models.find((m) => m.id === "*");
+    if (wildcard) {
+      return {
+        id: modelId,
+        name: modelId,
+        provider: providerId,
+        capabilities: wildcard.capabilities,
+      };
+    }
+
+    return undefined;
   }
 
   stream(model: Model, context: Context, options?: StreamOptions): ModelStream {

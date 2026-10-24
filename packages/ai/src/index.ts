@@ -6,6 +6,7 @@ export * from "./models.ts";
 export * from "./providers/anthropic.ts";
 export * from "./providers/custom.ts";
 export * from "./providers/google.ts";
+export * from "./providers/loader.ts";
 export * from "./providers/openai.ts";
 export * from "./providers/opencode.ts";
 export * from "./providers/openrouter.ts";
