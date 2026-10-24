@@ -6,5 +6,8 @@ export const isRecord = (value: unknown): value is Fields =>
 export const isNonEmptyString = (value: unknown): value is string =>
   typeof value === "string" && value !== "";
 
+export const isOneOf = (options: object, value: unknown): boolean =>
+  typeof value === "string" && Object.hasOwn(options, value);
+
 export const messageOf = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);

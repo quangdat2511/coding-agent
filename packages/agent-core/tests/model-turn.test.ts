@@ -9,7 +9,6 @@ import {
   streamOf,
   textMessage,
   textTurn,
-  toolCallTurn,
   withFinalMessage,
 } from "./kit/index.ts";
 
@@ -263,23 +262,5 @@ describe("running a Model Turn", () => {
       cachedInputTokens: 60,
       reasoningTokens: 12,
     });
-  });
-
-  it("settles INTERNAL_ERROR on a response with Tool Calls, which are not supported yet", async () => {
-    const { session, verification } = openTestSession({
-      model: { turns: [toolCallTurn({ toolCallId: "call-1", name: "echo", input: {} })] },
-    });
-
-    await session.dispatch({ type: "start", task });
-    const result = await session.result();
-    const events = await collect(session.events());
-
-    expect(events.slice(-3)).toMatchObject([
-      { type: "assistant_message_completed", data: { outcome: "completed" } },
-      { type: "model_turn_completed", data: { outcome: "failed" } },
-      { type: "session_settled", data: { result } },
-    ]);
-    expect(result).toMatchObject({ outcome: "failed", failure: { code: "INTERNAL_ERROR" } });
-    expect(verification.candidates).toEqual([]);
   });
 });

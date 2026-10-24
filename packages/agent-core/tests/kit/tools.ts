@@ -1,6 +1,8 @@
 import { type TSchema, Type } from "typebox";
 import type { ExecutableTool, ToolMutation, ToolOutcome, ToolRegistry } from "../../src/index.ts";
 
+const PathParams = Type.Object({ path: Type.String() });
+
 export interface FakeToolOptions {
   readonly name?: string;
   readonly mutation?: ToolMutation;
@@ -27,6 +29,21 @@ export function fakeTool({
     },
     async execute() {
       return outcome;
+    },
+  };
+}
+
+export function fakeWriteTool(): ExecutableTool<typeof PathParams> {
+  return {
+    ...fakeTool({ name: "write", mutation: "mutating" }),
+    parameters: PathParams,
+    async prepare(input, { workspace }) {
+      const resolved = await workspace.resolveForCreate(input.path);
+      if (!resolved.ok) return resolved;
+      return {
+        ok: true,
+        prepared: { input, paths: [resolved.path], summary: `write ${input.path}` },
+      };
     },
   };
 }

@@ -141,26 +141,33 @@ export function textTurn(...chunks: readonly string[]): readonly ModelStreamEven
   ];
 }
 
-export function toolCallTurn(
-  ...calls: readonly { toolCallId: string; name: string; input: unknown }[]
-): readonly ModelStreamEvent[] {
-  const blocks: ToolCallBlock[] = calls.map(({ toolCallId, name, input }) => ({
+export type ScriptedToolCall = { readonly toolCallId: string; readonly name: string } & (
+  | { readonly input: unknown }
+  | { readonly arguments: string }
+);
+
+export function toolCallMessage(...calls: readonly ScriptedToolCall[]): AssistantMessage {
+  const blocks: ToolCallBlock[] = calls.map((call) => ({
     type: "tool_call",
-    toolCallId,
-    name,
-    arguments: JSON.stringify(input),
+    toolCallId: call.toolCallId,
+    name: call.name,
+    arguments: "arguments" in call ? call.arguments : JSON.stringify(call.input),
   }));
-  const message: AssistantMessage = {
+  return {
     role: "assistant",
     content: blocks,
     model: defaultIdentity.id,
     finishReason: { reason: "tool_call", rawReason: "tool_use" },
-    usage,
+    usage: { ...usage },
   };
+}
+
+export function toolCallTurn(...calls: readonly ScriptedToolCall[]): readonly ModelStreamEvent[] {
+  const message = toolCallMessage(...calls);
 
   return [
     { type: "stream_start" },
-    ...blocks.flatMap((block, index): ModelStreamEvent[] => [
+    ...message.content.flatMap((block, index): ModelStreamEvent[] => [
       { type: "content_block_start", index, block },
       { type: "content_block_stop", index },
     ]),
