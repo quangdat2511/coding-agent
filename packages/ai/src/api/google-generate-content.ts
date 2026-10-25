@@ -36,14 +36,34 @@ import { sanitizeMaxRetries } from "../utils/retry.ts";
 // ---------------------------------------------------------------------------
 
 interface GoogleFunctionCall {
+  id?: string;
   name: string;
   args?: Record<string, unknown> | string | null;
+}
+
+interface GoogleFunctionResponse {
+  id?: string;
+  name: string;
+  // Google documents `output` for a result and `error` for a failure.
+  response: { output: string } | { error: string };
 }
 
 interface GooglePart {
   text?: string;
   functionCall?: GoogleFunctionCall;
+  functionResponse?: GoogleFunctionResponse;
+  thoughtSignature?: string;
 }
+
+// Models before Gemini 3 issue no Tool Call id, so the adapter makes one up with this prefix. A
+// made-up id is never sent back: Google would not recognise it.
+const SYNTHETIC_ID_PREFIX = "google-fc-";
+
+const issuedId = (toolCallId: string): { id?: string } =>
+  toolCallId.startsWith(SYNTHETIC_ID_PREFIX) ? {} : { id: toolCallId };
+
+const onlyFunctionResponses = (parts: readonly GooglePart[]): boolean =>
+  parts.length > 0 && parts.every((part) => part.functionResponse !== undefined);
 
 interface GoogleContent {
   parts?: GooglePart[];
@@ -140,6 +160,9 @@ export function buildRequestBody(context: Context): GoogleRequestBody {
     };
   }
 
+  // A functionResponse must name its function, and a Tool Result carries only the call's id.
+  const toolNames = new Map<string, string>();
+
   // Messages → contents
   for (const msg of context.messages) {
     if (msg.role === "user") {
@@ -150,33 +173,60 @@ export function buildRequestBody(context: Context): GoogleRequestBody {
         for (const block of msg.content) {
           if (block.type === "text") {
             parts.push({ text: block.text });
-          } else if (block.type === "tool_result") {
-            // TODO(CDA-43): map sang functionResponse { name, response } khi Agent Core chạy multi-turn tool loop.
-            throw new Error(
-              "tool_result history is not supported by the Google adapter yet (CDA-43)",
-            );
+          } else {
+            const name = toolNames.get(block.toolCallId);
+            if (name === undefined) {
+              throw new Error(`tool_result "${block.toolCallId}" answers no earlier tool_call`);
+            }
+            parts.push({
+              functionResponse: {
+                ...issuedId(block.toolCallId),
+                name,
+                response: block.isError ? { error: block.content } : { output: block.content },
+              },
+            });
           }
         }
       }
-      body.contents.push({ role: "user", parts });
+      // A turn's functionResponse parts must share one content, as many as the turn made calls,
+      // while a Context may carry each Tool Result in its own message.
+      const previous = body.contents.at(-1);
+      if (
+        previous?.role === "user" &&
+        onlyFunctionResponses(previous.parts) &&
+        onlyFunctionResponses(parts)
+      ) {
+        previous.parts.push(...parts);
+      } else {
+        body.contents.push({ role: "user", parts });
+      }
     } else {
       // assistant → model
       const parts: GooglePart[] = [];
       for (const block of msg.content) {
         if (block.type === "text") {
-          parts.push({ text: block.text });
+          parts.push({
+            text: block.text,
+            ...(block.signature !== undefined ? { thoughtSignature: block.signature } : {}),
+          });
         } else if (block.type === "tool_call") {
+          toolNames.set(block.toolCallId, block.name);
           let args: Record<string, unknown> = {};
           try {
-            args = JSON.parse(block.arguments) as Record<string, unknown>;
+            const parsed: unknown = JSON.parse(block.arguments);
+            if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+              args = parsed as Record<string, unknown>;
+            }
           } catch {
-            // Ignore parse errors if malformed
+            // Keep empty object fallback if malformed or non-object JSON
           }
           parts.push({
             functionCall: {
+              ...issuedId(block.toolCallId),
               name: block.name,
               args,
             },
+            ...(block.signature !== undefined ? { thoughtSignature: block.signature } : {}),
           });
         }
       }
@@ -264,6 +314,8 @@ export function stream(model: Model, context: Context, options?: StreamOptions):
 
       for (let attempt = 0; attempt <= maxRetries; attempt++) {
         try {
+          // Like the SDK clients, send nothing once aborted, including after a backoff.
+          options?.signal?.throwIfAborted();
           response = await globalThis.fetch(url, {
             method: "POST",
             headers: {
@@ -281,6 +333,8 @@ export function stream(model: Model, context: Context, options?: StreamOptions):
           const status = response.status;
           if (attempt < maxRetries && (status >= 500 || status === 429)) {
             lastError = new Error(`HTTP ${status}: ${response.statusText}`);
+            // Release the connection rather than leave the unread body to garbage collection.
+            await response.body?.cancel();
             await new Promise((resolve) => setTimeout(resolve, backoffDelayMs(attempt)));
             continue;
           }
@@ -313,9 +367,16 @@ export function stream(model: Model, context: Context, options?: StreamOptions):
       let nextBlockIndex = 0;
       let activeTextBlockIndex: number | null = null;
       let currentText = "";
+      // Gemini 3 may sign a text part, often an empty last one; the signature goes back with it.
+      let currentTextSignature: string | undefined;
       let finishReason: FinishReason | undefined;
       let usage: Usage | undefined;
       const completedBlocksByIndex = new Map<number, TextBlock | ToolCallBlock>();
+      const currentTextBlock = (): TextBlock => ({
+        type: "text",
+        text: currentText,
+        ...(currentTextSignature !== undefined ? { signature: currentTextSignature } : {}),
+      });
 
       // Read the SSE stream line by line
       const reader = response.body?.getReader();
@@ -376,6 +437,7 @@ export function stream(model: Model, context: Context, options?: StreamOptions):
                 });
               }
               currentText += part.text;
+              if (part.thoughtSignature !== undefined) currentTextSignature = part.thoughtSignature;
               eventStream.push({
                 type: "content_block_delta",
                 index: activeTextBlockIndex,
@@ -388,18 +450,16 @@ export function stream(model: Model, context: Context, options?: StreamOptions):
                   type: "content_block_stop",
                   index: activeTextBlockIndex,
                 });
-                completedBlocksByIndex.set(activeTextBlockIndex, {
-                  type: "text",
-                  text: currentText,
-                });
+                completedBlocksByIndex.set(activeTextBlockIndex, currentTextBlock());
                 activeTextBlockIndex = null;
                 currentText = "";
+                currentTextSignature = undefined;
               }
 
               // Function call — arguments arrive whole (never streamed)
               const toolCallId =
-                (part.functionCall as { id?: string }).id ??
-                `google-fc-${crypto.randomUUID().slice(0, 8)}-${nextBlockIndex}`;
+                part.functionCall.id ??
+                `${SYNTHETIC_ID_PREFIX}${crypto.randomUUID().slice(0, 8)}-${nextBlockIndex}`;
               const blockIndex = nextBlockIndex++;
               const argsString =
                 typeof part.functionCall.args === "string"
@@ -413,6 +473,10 @@ export function stream(model: Model, context: Context, options?: StreamOptions):
                 toolCallId,
                 name: part.functionCall.name,
                 arguments: argsString,
+                // Gemini 3 rejects the next request unless this comes back with the call.
+                ...(part.thoughtSignature !== undefined
+                  ? { signature: part.thoughtSignature }
+                  : {}),
               };
 
               eventStream.push({
@@ -454,10 +518,7 @@ export function stream(model: Model, context: Context, options?: StreamOptions):
           type: "content_block_stop",
           index: activeTextBlockIndex,
         });
-        completedBlocksByIndex.set(activeTextBlockIndex, {
-          type: "text",
-          text: currentText,
-        });
+        completedBlocksByIndex.set(activeTextBlockIndex, currentTextBlock());
       }
 
       // Normalize finish reason if tool calls were produced:

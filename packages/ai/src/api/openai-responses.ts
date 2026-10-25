@@ -68,15 +68,26 @@ export function buildParams(
       if (typeof msg.content === "string") {
         messages.push({ role: "user", content: msg.content });
       } else {
+        // Tool messages must directly follow the assistant message that made the calls, so they go
+        // before any text. Chat Completions has no error flag on a tool message, so the content of
+        // an error Tool Result says so itself.
         const textParts: string[] = [];
+        let hasToolResults = false;
         for (const block of msg.content) {
           if (block.type === "text") {
             textParts.push(block.text);
-          } else if (block.type === "tool_result") {
-            throw new Error("tool_result history is not supported by this adapter yet (CDA-43)");
+          } else {
+            hasToolResults = true;
+            messages.push({
+              role: "tool",
+              tool_call_id: block.toolCallId,
+              content: block.isError ? `Error: ${block.content}` : block.content,
+            });
           }
         }
-        messages.push({ role: "user", content: textParts.join("") });
+        if (textParts.length > 0 || !hasToolResults) {
+          messages.push({ role: "user", content: textParts.join("") });
+        }
       }
     } else {
       const textParts: string[] = [];
@@ -158,6 +169,10 @@ export function stream(model: Model, context: Context, options?: StreamOptions):
           model: model.id,
           messages: messages,
           ...(tools ? { tools } : {}),
+          // OpenAI rejects parallel_tool_calls on a request without tools.
+          ...(tools && options?.parallelToolCalls !== undefined
+            ? { parallel_tool_calls: options.parallelToolCalls }
+            : {}),
           temperature: options?.temperature,
           max_tokens: options?.maxTokens,
           stream: true,

@@ -4,6 +4,8 @@ import type { TSchema } from "typebox";
 export interface TextBlock {
   type: "text";
   text: string;
+  // Opaque and owned by the provider, like a Tool Call's `signature`.
+  signature?: string;
 }
 
 export interface ToolCallBlock {
@@ -11,6 +13,9 @@ export interface ToolCallBlock {
   toolCallId: string;
   name: string;
   arguments: string;
+  // Opaque and owned by the provider (Gemini's `thoughtSignature`): sent back verbatim with this
+  // Tool Call on the next request, and never inspected.
+  signature?: string;
 }
 
 export interface ToolResultBlock {
@@ -116,6 +121,8 @@ export interface StreamOptions {
   headers?: Record<string, string>;
   maxRetries?: number;
   signal?: AbortSignal;
+  // `false` asks for at most one Tool Call per response. An API without that control ignores it.
+  parallelToolCalls?: boolean;
 }
 
 export type ContentBlockDelta = { type: "text_delta"; text: string };

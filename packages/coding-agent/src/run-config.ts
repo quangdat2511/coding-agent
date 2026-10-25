@@ -15,8 +15,10 @@ import {
   createProviderDirectory,
   type Model,
   PROVIDER_CREDENTIAL_ENV_VARS_BY_PROVIDER,
+  type ProviderDirectory,
   readEnvCredential,
 } from "@coding-agent/ai";
+import type { ModelSettings } from "./model-port.ts";
 import type { Profile, RunArgs } from "./run-args.ts";
 
 // The ADR 0003 §4 defaults. CDA-59 chose cancellationGraceMs: long enough for a tool or
@@ -28,6 +30,16 @@ export const DEFAULT_SESSION_LIMITS: SessionLimits = Object.freeze({
   maxDurationMs: 600_000,
   maxConsecutiveRecoverableFailures: 3,
   cancellationGraceMs: 5_000,
+});
+
+// The same for every profile (ADR 0005 §5). Sampling is left to each Model Provider, or to the `ai`
+// adapter where the API needs a value (Anthropic's max_tokens): a single value would have to suit
+// every model in the catalog, and OpenAI's reasoning models reject both `temperature` and
+// `max_tokens`. ADR 0004 §2 lets `ai` retry only before the response stream opens,
+// so two retries ride out a passing 429 or 503 and never repeat a response that has started.
+export const DEFAULT_MODEL_SETTINGS: ModelSettings = Object.freeze({
+  sampling: Object.freeze({}),
+  transportRetryBound: 2,
 });
 
 // The only way to configure a verification command, for every entry point. It is not a flag,
@@ -57,6 +69,8 @@ export interface RunConfig {
   readonly taskFile: string;
   readonly model: Model;
   readonly credential: ResolvedCredential;
+  // Bound into the ModelPort, and recorded so a run can say which settings it used.
+  readonly modelSettings: ModelSettings;
   readonly approvalPolicy: RunArgs["approvalPolicy"];
   // The canonical Repository Root.
   readonly repoRoot: string;
@@ -89,6 +103,8 @@ export type ResolveRunConfigResult =
 export interface ResolveRunConfigContext {
   readonly cwd: string;
   readonly env: Readonly<Record<string, string | undefined>>;
+  // The composition root passes the directory it also gives createModelPort.
+  readonly providers?: ProviderDirectory;
 }
 
 type Refusal = Extract<ResolveRunConfigResult, { code: "INVALID_CONFIGURATION" }>;
@@ -298,9 +314,9 @@ async function prepareOutputDir(cwd: string, given: string): Promise<Checked<Out
 // directory is created only once every other check has passed, and removed again if it is refused.
 export async function resolveRunConfig(
   args: RunArgs,
-  { cwd, env }: ResolveRunConfigContext,
+  { cwd, env, providers = createProviderDirectory() }: ResolveRunConfigContext,
 ): Promise<ResolveRunConfigResult> {
-  const model = createProviderDirectory().getModel(args.provider, args.model);
+  const model = providers.getModel(args.provider, args.model);
   if (model === undefined) {
     return refuse("--model", `--model "${args.model}" is not a known ${args.provider} model`);
   }
@@ -349,6 +365,7 @@ export async function resolveRunConfig(
       taskFile: task.value.path,
       model,
       credential: { variable, reveal: () => value },
+      modelSettings: DEFAULT_MODEL_SETTINGS,
       approvalPolicy: args.approvalPolicy,
       repoRoot: repoRoot.value.canonical,
       givenRepoRoot: repoRoot.value.given,

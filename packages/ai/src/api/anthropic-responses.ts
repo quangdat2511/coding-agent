@@ -87,21 +87,29 @@ export function buildParams(context: Context): Anthropic.MessageParam[] {
           content: msg.content,
         });
       } else {
-        const parts: Anthropic.TextBlockParam[] = [];
+        // Anthropic wants tool_result blocks before any text in a user message, so they go first.
+        // A Context may carry each Tool Result in its own message, as Agent Core does: the API
+        // combines consecutive user messages into one turn.
+        const toolResults: Anthropic.ToolResultBlockParam[] = [];
+        const texts: Anthropic.TextBlockParam[] = [];
         for (const block of msg.content) {
           if (block.type === "text") {
             if (block.text.trim().length > 0) {
-              parts.push({ type: "text", text: block.text });
+              texts.push({ type: "text", text: block.text });
             }
-          } else if (block.type === "tool_result") {
-            throw new Error(
-              "tool_result history is not supported by the Anthropic adapter yet (CDA-43)",
-            );
+          } else {
+            // An empty result is sent without content rather than as an empty string.
+            toolResults.push({
+              type: "tool_result",
+              tool_use_id: block.toolCallId,
+              ...(block.content.length > 0 ? { content: block.content } : {}),
+              is_error: block.isError,
+            });
           }
         }
         messages.push({
           role: "user",
-          content: ensureNonEmptyContent(parts, "user"),
+          content: ensureNonEmptyContent([...toolResults, ...texts], "user"),
         });
       }
     } else {
@@ -151,6 +159,10 @@ interface PendingToolBlock {
   argumentsAccumulator: string;
 }
 
+// Anthropic requires max_tokens and has no default of its own. A Model Turn that reaches it fails,
+// so this is the largest value every catalog model accepts: Claude Opus 4.1 stops at 32,000.
+const DEFAULT_MAX_TOKENS = 32_000;
+
 export function stream(model: Model, context: Context, options?: StreamOptions): ModelStream {
   const eventStream = createModelEventStream();
 
@@ -186,8 +198,17 @@ export function stream(model: Model, context: Context, options?: StreamOptions):
           messages: messages,
           system: context.systemPrompt,
           ...(tools ? { tools } : {}),
+          // tool_choice is only valid alongside tools.
+          ...(tools && options?.parallelToolCalls !== undefined
+            ? {
+                tool_choice: {
+                  type: "auto",
+                  disable_parallel_tool_use: !options.parallelToolCalls,
+                },
+              }
+            : {}),
           temperature: options?.temperature,
-          max_tokens: options?.maxTokens || 4096,
+          max_tokens: options?.maxTokens || DEFAULT_MAX_TOKENS,
           stream: true,
         },
         { signal: options?.signal },

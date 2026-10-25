@@ -83,6 +83,16 @@ Tool Call argument fragments are accumulated inside `ai` and are never exported.
 0002's preflight. Complete but malformed JSON therefore still reaches the Agent Session and becomes
 an error Tool Result instead of disappearing inside a provider adapter.
 
+[Adapt ai to the ModelPort](https://datn-fit-hcmus.atlassian.net/browse/CDA-52) adds two optional
+fields to the contract. A `tool_call` or `text` block may carry a `signature`: an opaque token
+owned by the provider, such as Gemini's `thoughtSignature`, which Gemini 3 requires back with the
+call on the next request. Callers keep it with the block and never inspect it. `StreamOptions`
+gains `parallelToolCalls`; an adapter whose API has no such control ignores it, which its
+`parallelToolCallControl` capability declares. Each adapter maps every `tool_result` block to its
+provider's wire form, whether a turn's Tool Results share one message or each has its own.
+Chat Completions has no error flag on a tool message, so there the content of an error Tool Result
+starts with `Error: `.
+
 `Provider.stream()` returns a structural type rather than the concrete `AssistantMessageEventStream`
 class. A consumer that constructs a stream — every Agent Core test with a fake model — would
 otherwise need `createAssistantMessageEventStream()` at runtime and turn the type-only edge into a
