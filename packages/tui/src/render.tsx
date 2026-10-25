@@ -1,6 +1,6 @@
 import { render } from "ink";
+import { App, FOOTER_HEIGHT } from "./app.tsx";
 import { transcriptRows } from "./rows.ts";
-import { Transcript } from "./transcript.tsx";
 import type { TuiHandle, TuiHandlers, TuiModel } from "./types.ts";
 import { FOLLOWING, positionAt, type ScrollPosition, topRow } from "./viewport.ts";
 
@@ -38,7 +38,7 @@ export function mountTui(
   let unmounted: Promise<void> | undefined;
 
   // Lays the transcript out for the current terminal size, moves the viewport by `scroll` rows and
-  // draws only the rows that fit, so the frame is never taller than the screen.
+  // draws only the rows that fit above the prompt, so the frame is never taller than the screen.
   function draw(scroll = 0) {
     // Ink would mount the tree again if it rendered after unmount.
     if (unmounted !== undefined) {
@@ -46,11 +46,13 @@ export function mountTui(
     }
     // Ink also assumes 80x24 when the stream reports no size.
     const columns = streams.stdout.columns || 80;
-    const height = streams.stdout.rows || 24;
+    const height = Math.max(1, (streams.stdout.rows || 24) - FOOTER_HEIGHT);
     const rows = transcriptRows(model.transcript, columns);
     position = positionAt(rows, height, topRow(rows, height, position) + scroll);
     const top = topRow(rows, height, position);
-    instance.rerender(<Transcript rows={rows.slice(top, top + height)} height={height} />);
+    instance.rerender(
+      <App rows={rows.slice(top, top + height)} height={height} handlers={props.handlers} />,
+    );
   }
 
   // Added before render() so that it runs before Ink's own resize listener, which redraws the

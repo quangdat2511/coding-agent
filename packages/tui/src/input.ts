@@ -46,6 +46,19 @@ export function routeKey(mode: InputMode, input: string, key: KeyPress): KeyActi
   }
 }
 
+// Text the terminal marked as pasted. Ink delivers it in one piece through usePaste, however many
+// reads it took, so a line break inside it never acts as Enter.
+export function routePaste(mode: InputMode, text: string): KeyAction {
+  switch (mode) {
+    case "prompt":
+      return insert(text);
+    default: {
+      const unhandled: never = mode;
+      throw new Error(`Unhandled input mode: ${JSON.stringify(unhandled)}`);
+    }
+  }
+}
+
 // Scroll keys go to the viewport and everything else to the prompt, so neither reaches the other.
 function routePromptKey(input: string, key: KeyPress): KeyAction {
   if (key.return) {
@@ -63,13 +76,14 @@ function routePromptKey(input: string, key: KeyPress): KeyAction {
   if (key.ctrl || key.meta) {
     return IGNORE;
   }
-  const text = promptText(input);
-  return text === "" ? IGNORE : { kind: "insert", text };
+  return insert(input);
 }
 
-// Text pasted without bracketed paste arrives as one chunk, line breaks and tabs included. The
-// prompt is one row and its text goes to onSubmit, so line breaks and tabs become spaces and other
-// control characters are dropped before the prompt keeps the text.
-function promptText(input: string): string {
-  return input.replace(/\r\n|[\r\n\t]/g, " ").replace(/\p{Cc}/gu, "");
+// Pasted text keeps its line breaks and tabs, whether it comes through usePaste or, without
+// bracketed paste, as one chunk of typed input. The prompt is one row and its text goes to
+// onSubmit, so line breaks and tabs become spaces and other control characters are dropped before
+// the prompt keeps the text.
+function insert(input: string): KeyAction {
+  const text = input.replace(/\r\n|[\r\n\t]/g, " ").replace(/\p{Cc}/gu, "");
+  return text === "" ? IGNORE : { kind: "insert", text };
 }

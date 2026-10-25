@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { routeKey } from "../src/input.ts";
+import { routeKey, routePaste } from "../src/input.ts";
 
 describe("routeKey", () => {
   it("cancels on Esc and on Ctrl+C", () => {
@@ -36,5 +36,15 @@ describe("routeKey", () => {
     expect(routeKey("prompt", "", {})).toEqual({ kind: "ignore" });
     expect(routeKey("prompt", "a", { ctrl: true })).toEqual({ kind: "ignore" });
     expect(routeKey("prompt", "a", { meta: true })).toEqual({ kind: "ignore" });
+  });
+});
+
+describe("routePaste", () => {
+  it("inserts pasted lines into the prompt as one line", () => {
+    expect(routePaste("prompt", "dong 1\rdong 2\n")).toEqual({
+      kind: "insert",
+      text: "dong 1 dong 2 ",
+    });
+    expect(routePaste("prompt", "\u0007")).toEqual({ kind: "ignore" });
   });
 });
