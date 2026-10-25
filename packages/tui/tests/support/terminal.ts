@@ -2,6 +2,24 @@ import { PassThrough, Writable } from "node:stream";
 import { Terminal } from "@xterm/headless";
 import type { TuiStreams } from "../../src/render.tsx";
 
+// The bytes a terminal sends for the keys the TUI handles.
+export const KEYS = {
+  enter: "\r",
+  backspace: "\u007f",
+  escape: "\u001b",
+  ctrlC: "\u0003",
+  up: "\u001b[A",
+  down: "\u001b[B",
+  pageUp: "\u001b[5~",
+  pageDown: "\u001b[6~",
+} as const;
+
+// Ink holds a lone ESC for 20 ms in case the rest of an escape sequence follows, and only then
+// reports the escape key.
+const ESCAPE_DELAY_MS = 30;
+// How long press() waits for Ink to read a key before deciding nothing is listening.
+const READ_TIMEOUT_MS = 1000;
+
 export interface TestTerminal {
   readonly terminal: Terminal;
   readonly streams: TuiStreams;
@@ -16,6 +34,8 @@ export interface TestTerminal {
   resize(columns: number, rows: number): void;
   // Everything written to stdout since the previous call.
   takeOutput(): string;
+  // Types each key in turn, either text or one of KEYS, and resolves once Ink has read them all.
+  press(...keys: string[]): Promise<void>;
   dispose(): void;
 }
 
@@ -42,11 +62,33 @@ class TerminalOutput extends Writable {
   }
 }
 
+// The stdin Ink reads keys from. useInput switches stdin to raw mode and refs it while a component
+// listens, and Ink throws for a stream that is not a TTY, so this one reports a TTY and accepts both
+// calls. Bytes written to it reach Ink as if they were typed.
+class TerminalInput extends PassThrough {
+  readonly isTTY = true;
+
+  setRawMode(): this {
+    return this;
+  }
+
+  ref(): this {
+    return this;
+  }
+
+  unref(): this {
+    return this;
+  }
+}
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
 export function createTestTerminal(columns: number, rows: number): TestTerminal {
   // buffer and parser are proposed API in @xterm/headless 6. convertEol turns "\n" into a new line
   // at column 0, as a pty's onlcr setting does for a real terminal.
   const terminal = new Terminal({ cols: columns, rows, allowProposedApi: true, convertEol: true });
   const stdout = new TerminalOutput(terminal);
+  const stdin = new TerminalInput();
   const print = (data: string) => new Promise<void>((resolve) => terminal.write(data, resolve));
   const line = (row: number) => {
     const buffer = terminal.buffer.active;
@@ -58,7 +100,7 @@ export function createTestTerminal(columns: number, rows: number): TestTerminal 
     // The streams implement the part of a TTY stream that Ink uses, not all of it.
     streams: {
       stdout: stdout as unknown as NodeJS.WriteStream,
-      stdin: new PassThrough() as unknown as NodeJS.ReadStream,
+      stdin: stdin as unknown as NodeJS.ReadStream,
     },
     print,
     // A line keeps cells past the right edge after the terminal narrows; only the visible columns
@@ -92,6 +134,22 @@ export function createTestTerminal(columns: number, rows: number): TestTerminal 
       const { output } = stdout;
       stdout.output = "";
       return output;
+    },
+    async press(...keys) {
+      for (const key of keys) {
+        stdin.write(key);
+        // Ink reads stdin when it emits "readable", which happens after write() returns.
+        const deadline = Date.now() + READ_TIMEOUT_MS;
+        while (stdin.readableLength > 0) {
+          if (Date.now() > deadline) {
+            throw new Error(`Ink did not read ${JSON.stringify(key)}: no component is listening`);
+          }
+          await sleep(1);
+        }
+        if (key === KEYS.escape) {
+          await sleep(ESCAPE_DELAY_MS);
+        }
+      }
     },
     dispose: () => terminal.dispose(),
   };
