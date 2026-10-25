@@ -16,7 +16,8 @@ export interface MountedTui extends TuiHandle {
   // so the frame for an update() may still be pending when update() returns.
   flush(): Promise<void>;
   // Moves the viewport by `rows` terminal rows: negative toward older entries, positive toward the
-  // newest. Scroll keys arrive with input routing (CDA-54); until then tests scroll through here.
+  // newest. Page Up and Page Down move it a page at a time along the same path; tests that need an
+  // exact number of rows scroll through here.
   scrollBy(rows: number): void;
 }
 
@@ -51,7 +52,12 @@ export function mountTui(
     position = positionAt(rows, height, topRow(rows, height, position) + scroll);
     const top = topRow(rows, height, position);
     instance.rerender(
-      <App rows={rows.slice(top, top + height)} height={height} handlers={props.handlers} />,
+      <App
+        rows={rows.slice(top, top + height)}
+        height={height}
+        handlers={props.handlers}
+        onScroll={draw}
+      />,
     );
   }
 

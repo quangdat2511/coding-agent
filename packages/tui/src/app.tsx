@@ -17,15 +17,18 @@ const graphemes = new Intl.Segmenter(undefined, { granularity: "grapheme" });
 
 // The whole frame: the transcript rows in view, the prompt and the key hint. Every key and paste
 // goes through the input policy, and this component carries out what it decides. mountTui renders
-// it again for each frame, so the prompt text, kept here, survives transcript updates.
+// it again for each frame, so the prompt text, kept here, survives transcript updates. The scroll
+// position stays with mountTui, which lays out the rows, so scrolling goes back to it as onScroll.
 export function App({
   rows,
   height,
   handlers,
+  onScroll,
 }: {
   rows: readonly TranscriptRow[];
   height: number;
   handlers: TuiHandlers;
+  onScroll(rows: number): void;
 }) {
   const [text, setText] = useState("");
 
@@ -44,8 +47,11 @@ export function App({
           setText("");
         }
         return;
-      // Not handled yet: scrolling and cancelling.
       case "scroll":
+        // A page keeps one row of the previous view, so the reader does not lose their place.
+        onScroll(action.direction * Math.max(1, height - 1));
+        return;
+      // Not handled yet: cancelling.
       case "cancel":
       case "ignore":
         return;

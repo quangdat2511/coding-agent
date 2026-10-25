@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "bun:test";
 import { FOOTER_HEIGHT } from "../src/app.tsx";
 import { type MountedTui, mountTui } from "../src/render.tsx";
 import type { TranscriptEntry, TuiHandlers } from "../src/types.ts";
-import { createTestTerminal, type TestTerminal } from "./support/terminal.ts";
+import { createTestTerminal, KEYS, type TestTerminal } from "./support/terminal.ts";
 
 const COLUMNS = 40;
 const ROWS = 10;
@@ -82,6 +82,47 @@ describe("transcript viewport", () => {
     tui.scrollBy(100);
     await tui.flush();
     expect(viewport(terminal)).toEqual(lines(21, 30));
+  });
+
+  it("moves a page at a time with Page Up and Page Down, keeping one row in view", async () => {
+    // 31 rows: the header, then line 1 to line 30.
+    const { tui, terminal } = mount([message("m-1", 30)]);
+    await tui.flush();
+    expect(viewport(terminal)).toEqual(lines(21, 30));
+
+    // A page is the viewport less one row, so line 21 stays in view.
+    await terminal.press(KEYS.pageUp);
+    await tui.flush();
+    expect(viewport(terminal)).toEqual(lines(12, 21));
+
+    await terminal.press(KEYS.pageUp, KEYS.pageUp);
+    await tui.flush();
+    expect(viewport(terminal)).toEqual(["assistant [completed]", ...lines(1, 9)]);
+
+    // Back at the bottom, the view follows new content again.
+    await terminal.press(KEYS.pageDown, KEYS.pageDown, KEYS.pageDown);
+    tui.update({ transcript: [message("m-1", 33)] });
+    await tui.flush();
+    expect(viewport(terminal)).toEqual(lines(24, 33));
+  });
+
+  it("sends typing to the prompt and scroll keys to the viewport", async () => {
+    const { tui, terminal } = mount([message("m-1", 30)]);
+    await terminal.press(KEYS.pageUp);
+    await tui.flush();
+    expect(viewport(terminal)).toEqual(lines(12, 21));
+
+    // Typing reaches the prompt and leaves the viewport where it was.
+    await terminal.press("abc");
+    await tui.flush();
+    expect(viewport(terminal)).toEqual(lines(12, 21));
+    expect(terminal.screen().at(-2)).toBe("> abc");
+
+    // A scroll key moves the viewport and leaves the prompt as it was.
+    await terminal.press(KEYS.pageDown);
+    await tui.flush();
+    expect(viewport(terminal)).toEqual(lines(21, 30));
+    expect(terminal.screen().at(-2)).toBe("> abc");
   });
 
   it("does not scroll a transcript that fits on the screen", async () => {
