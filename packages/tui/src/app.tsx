@@ -1,4 +1,4 @@
-import { Box, Text, useInput, usePaste } from "ink";
+import { Box, Text, useInput, usePaste, useStdin } from "ink";
 import { useState } from "react";
 import { type KeyAction, routeKey, routePaste } from "./input.ts";
 import type { TranscriptRow } from "./rows.ts";
@@ -65,8 +65,12 @@ export function App({
     }
   }
 
-  useInput((input, key) => perform(routeKey("prompt", input, key)));
-  usePaste((pasted) => perform(routePaste("prompt", pasted)));
+  // Ink reads keys only from a stdin it can switch to raw mode, and throws for any other. Without
+  // one, as when input is piped, the TUI still draws and takes no input. Ink's flag is stdin.isTTY,
+  // undefined on a plain stream, and the hooks treat only false as inactive.
+  const takesInput = useStdin().isRawModeSupported === true;
+  useInput((input, key) => perform(routeKey("prompt", input, key)), { isActive: takesInput });
+  usePaste((pasted) => perform(routePaste("prompt", pasted)), { isActive: takesInput });
 
   return (
     <Box flexDirection="column" height={height + FOOTER_HEIGHT}>
