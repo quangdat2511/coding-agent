@@ -51,8 +51,11 @@ export function App({
         // A page keeps one row of the previous view, so the reader does not lose their place.
         onScroll(action.direction * Math.max(1, height - 1));
         return;
-      // Not handled yet: cancelling.
+      // Whether a task is running is the host's to know: it ignores a cancel with none. The prompt
+      // keeps its text, which may be the next task.
       case "cancel":
+        handlers.onCancel();
+        return;
       case "ignore":
         return;
       default: {

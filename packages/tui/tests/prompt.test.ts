@@ -20,16 +20,19 @@ const mounted: { tui: MountedTui; terminal: TestTerminal }[] = [];
 function mount(transcript: readonly TranscriptEntry[] = [], columns = COLUMNS) {
   const terminal = createTestTerminal(columns, ROWS);
   const submitted: string[] = [];
+  const cancelled = { count: 0 };
   const handlers: TuiHandlers = {
     onSubmit(text) {
       submitted.push(text);
     },
-    onCancel: unexpectedHandlerCall,
+    onCancel() {
+      cancelled.count += 1;
+    },
     onApproval: unexpectedHandlerCall,
   };
   const tui = mountTui({ model: { transcript }, handlers }, terminal.streams);
   mounted.push({ tui, terminal });
-  return { tui, terminal, submitted };
+  return { tui, terminal, submitted, cancelled };
 }
 
 afterEach(async () => {
@@ -116,5 +119,42 @@ describe("prompt", () => {
     const narrow = mount([], 20);
     await narrow.tui.flush();
     expect(narrow.terminal.screen().at(-1)).toBe("Esc cancel · Enter …");
+  });
+});
+
+describe("cancel keys", () => {
+  it("call onCancel on Esc and leave the typed text in the prompt", async () => {
+    const { tui, terminal, cancelled } = mount();
+    await terminal.press("abc", KEYS.escape);
+    await tui.flush();
+    expect(cancelled.count).toBe(1);
+    expect(prompt(terminal)).toBe("> abc");
+  });
+
+  it("call onCancel on Ctrl+C and keep the TUI running", async () => {
+    const { tui, terminal, cancelled } = mount();
+    await terminal.press(KEYS.ctrlC, "abc");
+    await tui.flush();
+    expect(cancelled.count).toBe(1);
+    // Ink's own Ctrl+C handling would have exited and restored the main screen.
+    expect(terminal.terminal.buffer.active.type).toBe("alternate");
+    expect(prompt(terminal)).toBe("> abc");
+  });
+
+  it("cancel while scrolled up without moving the viewport", async () => {
+    // 21 rows: the header, then line 1 to line 20, in a viewport of 4 rows.
+    const text = Array.from({ length: 20 }, (_, index) => `line ${index + 1}`).join("\n");
+    const { tui, terminal, cancelled } = mount([
+      { kind: "assistant", id: "m-1", text, status: "streaming" },
+    ]);
+    await terminal.press(KEYS.pageUp);
+    await tui.flush();
+    const viewport = ["line 14", "line 15", "line 16", "line 17"];
+    expect(terminal.screen().slice(0, -2)).toEqual(viewport);
+
+    await terminal.press(KEYS.escape);
+    await tui.flush();
+    expect(cancelled.count).toBe(1);
+    expect(terminal.screen().slice(0, -2)).toEqual(viewport);
   });
 });

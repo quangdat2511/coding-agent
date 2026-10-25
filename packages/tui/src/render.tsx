@@ -78,6 +78,9 @@ export function mountTui(
     alternateScreen: true,
     incrementalRendering: true,
     maxFps: 60,
+    // Ctrl+C is a cancel key in the input policy. Left on, Ink would exit on it before the policy
+    // saw the key.
+    exitOnCtrlC: false,
   });
   if (interactive) {
     streams.stdout.write(CURSOR_HOME);
