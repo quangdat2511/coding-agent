@@ -3,48 +3,59 @@ import { routeKey, routePaste } from "../src/input.ts";
 
 describe("routeKey", () => {
   it("cancels on Esc and on Ctrl+C", () => {
-    expect(routeKey("prompt", "", { escape: true })).toEqual({ kind: "cancel" });
-    expect(routeKey("prompt", "c", { ctrl: true })).toEqual({ kind: "cancel" });
+    expect(routeKey("prompt", "", { escape: true })).toEqual([{ kind: "cancel" }]);
+    expect(routeKey("prompt", "c", { ctrl: true })).toEqual([{ kind: "cancel" }]);
   });
 
   it("submits on Enter and deletes on Backspace", () => {
-    expect(routeKey("prompt", "", { return: true })).toEqual({ kind: "submit" });
-    expect(routeKey("prompt", "", { backspace: true })).toEqual({ kind: "backspace" });
+    expect(routeKey("prompt", "", { return: true })).toEqual([{ kind: "submit" }]);
+    expect(routeKey("prompt", "", { backspace: true })).toEqual([{ kind: "backspace" }]);
   });
 
   it("sends Page Up and Page Down to the viewport, never to the prompt", () => {
-    expect(routeKey("prompt", "", { pageUp: true })).toEqual({ kind: "scroll", direction: -1 });
-    expect(routeKey("prompt", "", { pageDown: true })).toEqual({ kind: "scroll", direction: 1 });
+    expect(routeKey("prompt", "", { pageUp: true })).toEqual([{ kind: "scroll", direction: -1 }]);
+    expect(routeKey("prompt", "", { pageDown: true })).toEqual([{ kind: "scroll", direction: 1 }]);
   });
 
   it("sends typed text to the prompt, never to the viewport", () => {
-    expect(routeKey("prompt", "S", {})).toEqual({ kind: "insert", text: "S" });
+    expect(routeKey("prompt", "S", {})).toEqual([{ kind: "insert", text: "S" }]);
     // Characters that arrive together are inserted together.
-    expect(routeKey("prompt", "Sửa test", {})).toEqual({ kind: "insert", text: "Sửa test" });
+    expect(routeKey("prompt", "Sửa test", {})).toEqual([{ kind: "insert", text: "Sửa test" }]);
   });
 
-  it("turns line breaks and tabs in pasted text into spaces and drops other control characters", () => {
-    expect(routeKey("prompt", "dong 1\rdong 2\r\ndong 3\n\tx\u0007\u009b", {})).toEqual({
-      kind: "insert",
-      text: "dong 1 dong 2 dong 3  x",
-    });
-    expect(routeKey("prompt", "\u0007", {})).toEqual({ kind: "ignore" });
+  it("submits at each carriage return in text that arrives in one chunk", () => {
+    // Keys typed while the TUI is busy, Enter included.
+    expect(routeKey("prompt", "Sửa test\r", {})).toEqual([
+      { kind: "insert", text: "Sửa test" },
+      { kind: "submit" },
+    ]);
+    expect(routeKey("prompt", "dong 1\r\ndong 2", {})).toEqual([
+      { kind: "insert", text: "dong 1" },
+      { kind: "submit" },
+      { kind: "insert", text: "dong 2" },
+    ]);
   });
 
-  it("ignores named keys and other Ctrl and Meta combinations", () => {
+  it("turns line feeds and tabs in typed text into spaces and drops other control characters", () => {
+    expect(routeKey("prompt", "dong 1\ndong 2\n\tx\u0007\u009b", {})).toEqual([
+      { kind: "insert", text: "dong 1 dong 2  x" },
+    ]);
+    expect(routeKey("prompt", "\u0007", {})).toEqual([]);
+  });
+
+  it("does nothing for named keys and other Ctrl and Meta combinations", () => {
     // Ink reports an arrow, Tab, Delete, Home or End with empty input.
-    expect(routeKey("prompt", "", {})).toEqual({ kind: "ignore" });
-    expect(routeKey("prompt", "a", { ctrl: true })).toEqual({ kind: "ignore" });
-    expect(routeKey("prompt", "a", { meta: true })).toEqual({ kind: "ignore" });
+    expect(routeKey("prompt", "", {})).toEqual([]);
+    expect(routeKey("prompt", "a", { ctrl: true })).toEqual([]);
+    expect(routeKey("prompt", "a", { meta: true })).toEqual([]);
   });
 });
 
 describe("routePaste", () => {
-  it("inserts pasted lines into the prompt as one line", () => {
-    expect(routePaste("prompt", "dong 1\rdong 2\n")).toEqual({
-      kind: "insert",
-      text: "dong 1 dong 2 ",
-    });
-    expect(routePaste("prompt", "\u0007")).toEqual({ kind: "ignore" });
+  it("inserts pasted lines into the prompt as one line, without submitting", () => {
+    expect(routePaste("prompt", "dong 1\rdong 2\n")).toEqual([
+      { kind: "insert", text: "dong 1 dong 2 " },
+    ]);
+    expect(routePaste("prompt", "\u0007")).toEqual([]);
   });
 });

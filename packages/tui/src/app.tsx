@@ -1,5 +1,5 @@
 import { Box, Text, useInput, usePaste, useStdin } from "ink";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { type KeyAction, routeKey, routePaste } from "./input.ts";
 import type { TranscriptRow } from "./rows.ts";
 import { Transcript } from "./transcript.tsx";
@@ -31,38 +31,46 @@ export function App({
   onScroll(rows: number): void;
 }) {
   const [text, setText] = useState("");
+  // The text as the last action left it. Ink can deliver several key presses before React renders
+  // the state they set, as with an input method's Backspace and replacement letter in one read, so
+  // each action works on this rather than on `text`.
+  const latestText = useRef(text);
 
-  function perform(action: KeyAction) {
-    switch (action.kind) {
-      case "insert":
-        setText((current) => current + action.text);
-        return;
-      case "backspace":
-        setText(withoutLastCharacter);
-        return;
-      case "submit":
-        // An empty prompt has no Coding Task to start.
-        if (text.trim() !== "") {
-          handlers.onSubmit(text);
-          setText("");
+  function perform(actions: readonly KeyAction[]) {
+    let next = latestText.current;
+    for (const action of actions) {
+      switch (action.kind) {
+        case "insert":
+          next += action.text;
+          break;
+        case "backspace":
+          next = withoutLastCharacter(next);
+          break;
+        case "submit":
+          // An empty prompt has no Coding Task to start. Input methods may send a letter composed
+          // or as a base and combining marks; NFC sends the same text in one form.
+          if (next.trim() !== "") {
+            handlers.onSubmit(next.normalize("NFC"));
+            next = "";
+          }
+          break;
+        case "scroll":
+          // A page keeps one row of the previous view, so the reader does not lose their place.
+          onScroll(action.direction * Math.max(1, height - 1));
+          break;
+        // Whether a task is running is the host's to know: it ignores a cancel with none. The
+        // prompt keeps its text, which may be the next task.
+        case "cancel":
+          handlers.onCancel();
+          break;
+        default: {
+          const unhandled: never = action;
+          throw new Error(`Unhandled key action: ${JSON.stringify(unhandled)}`);
         }
-        return;
-      case "scroll":
-        // A page keeps one row of the previous view, so the reader does not lose their place.
-        onScroll(action.direction * Math.max(1, height - 1));
-        return;
-      // Whether a task is running is the host's to know: it ignores a cancel with none. The prompt
-      // keeps its text, which may be the next task.
-      case "cancel":
-        handlers.onCancel();
-        return;
-      case "ignore":
-        return;
-      default: {
-        const unhandled: never = action;
-        throw new Error(`Unhandled key action: ${JSON.stringify(unhandled)}`);
       }
     }
+    latestText.current = next;
+    setText(next);
   }
 
   // Ink reads keys only from a stdin it can switch to raw mode, and throws for any other. Without

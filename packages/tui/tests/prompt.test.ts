@@ -72,6 +72,31 @@ describe("prompt", () => {
     expect(prompt(terminal)).toBe(">");
   });
 
+  it("submits text that arrives in the same read as Enter", async () => {
+    const { tui, terminal, submitted } = mount();
+    // One write, as when the keys were typed while the TUI was busy.
+    await terminal.press(`Sửa test${KEYS.enter}`);
+    await tui.flush();
+    expect(submitted).toEqual(["Sửa test"]);
+    expect(prompt(terminal)).toBe(">");
+  });
+
+  it("submits the task in NFC form", async () => {
+    const { tui, terminal, submitted } = mount();
+    // "Sửa" with ử written as u, a horn and a hook above.
+    await terminal.press("Sửa", KEYS.enter);
+    await tui.flush();
+    expect(submitted).toEqual(["Sửa".normalize("NFC")]);
+  });
+
+  it("takes an input method's Backspace and replacement letter in one read", async () => {
+    const { tui, terminal, submitted } = mount();
+    // Telex "Suwra": the input method replaces u with ư, then ư with ử.
+    await terminal.press("S", "u", `${KEYS.backspace}ư`, `${KEYS.backspace}ử`, "a", KEYS.enter);
+    await tui.flush();
+    expect(submitted).toEqual(["Sửa"]);
+  });
+
   it("does not submit an empty prompt", async () => {
     const { tui, submitted, terminal } = mount();
     await terminal.press(KEYS.enter, "   ", KEYS.enter);
