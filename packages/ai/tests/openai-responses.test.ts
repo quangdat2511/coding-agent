@@ -37,6 +37,7 @@ let lastCreateBody:
       model?: string;
       tools?: Array<{ type: string; function: { name: string; description?: string } }>;
       stream_options?: { include_usage?: boolean };
+      parallel_tool_calls?: boolean;
     }
   | undefined;
 let lastCreateOptions: { signal?: AbortSignal } | undefined;
@@ -154,21 +155,41 @@ describe("buildParams", () => {
     expect(params).toEqual([{ role: "user", content: "Hello part 1 and part 2" }]);
   });
 
-  it("throws when user message contains tool_result (deferred to CDA-43)", () => {
+  it("maps each Tool Result to a tool message in order, before the user's text, marking errors", () => {
     const context: Context = {
       messages: [
         {
           role: "user",
           content: [
-            { type: "text", text: "check result" },
-            { type: "tool_result", toolCallId: "call_1", content: "success", isError: false },
+            { type: "text", text: "Both calls are done." },
+            { type: "tool_result", toolCallId: "call_1", content: "file contents", isError: false },
+            {
+              type: "tool_result",
+              toolCallId: "call_2",
+              content: "NOT_FOUND: missing.ts",
+              isError: true,
+            },
           ],
         },
       ],
     };
-    expect(() => buildParams(context)).toThrow(
-      "tool_result history is not supported by this adapter yet (CDA-43)",
-    );
+    expect(buildParams(context)).toEqual([
+      { role: "tool", tool_call_id: "call_1", content: "file contents" },
+      { role: "tool", tool_call_id: "call_2", content: "Error: NOT_FOUND: missing.ts" },
+      { role: "user", content: "Both calls are done." },
+    ]);
+  });
+
+  it("sends no user message when a message holds only Tool Results", () => {
+    const context: Context = {
+      messages: [
+        {
+          role: "user",
+          content: [{ type: "tool_result", toolCallId: "call_1", content: "ok", isError: false }],
+        },
+      ],
+    };
+    expect(buildParams(context)).toEqual([{ role: "tool", tool_call_id: "call_1", content: "ok" }]);
   });
 
   it("maps assistant message containing text and tool_call", () => {
@@ -462,34 +483,39 @@ describe("OpenAI stream finishReason handling", () => {
     });
   });
 
-  it("emits error event and rejects result() when context contains tool_result (CDA-43)", async () => {
-    const contextWithToolResult: Context = {
-      messages: [
+  describe("asking to disable parallel Tool Calls", () => {
+    const withTools: Context = {
+      messages: [{ role: "user", content: "Read the file" }],
+      tools: [
         {
-          role: "user",
-          content: [
-            { type: "text", text: "hi" },
-            { type: "tool_result", toolCallId: "call-1", content: "ok", isError: false },
-          ],
+          name: "read",
+          description: "Read a file",
+          parameters: Type.Object({ path: Type.String() }),
         },
       ],
     };
 
-    const streamObj = stream(model, contextWithToolResult, { apiKey: "test-key" });
-    const events = [];
-    for await (const ev of streamObj) {
-      events.push(ev);
-    }
-    expect(events.length).toBe(1);
-    expect(events[0]?.type).toBe("error");
-    if (events[0]?.type === "error") {
-      expect(events[0].error.message).toContain(
-        "tool_result history is not supported by this adapter yet (CDA-43)",
+    it("sends parallel_tool_calls when tools are declared", async () => {
+      mockChunks = [{ choices: [{ delta: { content: "Done" }, finish_reason: "stop" }] }];
+      await collectTurnEndEvent(
+        stream(model, withTools, { apiKey: "test-key", parallelToolCalls: false }),
       );
-    }
-    await expect(streamObj.result()).rejects.toThrow(
-      "tool_result history is not supported by this adapter yet (CDA-43)",
-    );
+      expect(lastCreateBody?.parallel_tool_calls).toBe(false);
+    });
+
+    it("leaves parallel_tool_calls out when no tools are declared, since OpenAI rejects it", async () => {
+      mockChunks = [{ choices: [{ delta: { content: "Done" }, finish_reason: "stop" }] }];
+      await collectTurnEndEvent(
+        stream(model, context, { apiKey: "test-key", parallelToolCalls: false }),
+      );
+      expect(lastCreateBody).not.toHaveProperty("parallel_tool_calls");
+    });
+
+    it("leaves the provider default when the caller does not ask", async () => {
+      mockChunks = [{ choices: [{ delta: { content: "Done" }, finish_reason: "stop" }] }];
+      await collectTurnEndEvent(stream(model, withTools, { apiKey: "test-key" }));
+      expect(lastCreateBody).not.toHaveProperty("parallel_tool_calls");
+    });
   });
 
   it("emits error event and rejects result() when create throws an error", async () => {

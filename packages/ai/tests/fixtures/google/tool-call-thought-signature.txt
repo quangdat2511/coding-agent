@@ -1,0 +1,2 @@
+data: {"candidates":[{"content":{"parts":[{"functionCall":{"id":"8f2kq1xz","name":"get_weather","args":{"city":"Tokyo"}},"thoughtSignature":"CiQB0e2Kb9xQm3VtR4nL7pYs2wHf8gZcJ1uA6kTqE5oN0dMvXyI="}],"role":"model"},"finishReason":"STOP","index":0}],"usageMetadata":{"promptTokenCount":61,"candidatesTokenCount":19,"totalTokenCount":143,"thoughtsTokenCount":63},"modelVersion":"gemini-3-flash-preview"}
+

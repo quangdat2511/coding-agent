@@ -92,6 +92,16 @@ describe("resolving a valid invocation", () => {
     expect(config.credential.variable).toBe("ANTHROPIC_API_KEY");
     expect(config.credential.reveal()).toBe(secret);
   });
+
+  it("records the model settings the ModelPort binds: provider sampling defaults, two retries", async () => {
+    const resolved = await resolveWith();
+    if (!resolved.ok) throw new Error(`expected a configuration, got: ${resolved.message}`);
+
+    expect(resolved.config.modelSettings).toEqual({ sampling: {}, transportRetryBound: 2 });
+    expect(JSON.parse(JSON.stringify(resolved.config))).toMatchObject({
+      modelSettings: { sampling: {}, transportRetryBound: 2 },
+    });
+  });
 });
 
 describe("selecting the provider and model", () => {

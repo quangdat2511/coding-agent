@@ -174,21 +174,89 @@ describe("buildParams", () => {
     ]);
   });
 
-  it("throws when user message contains tool_result (deferred to CDA-43)", () => {
+  it("maps Tool Results to tool_result blocks in the order given, keeping the error flag", () => {
     const context: Context = {
       messages: [
         {
           role: "user",
           content: [
-            { type: "text", text: "check result" },
-            { type: "tool_result", toolCallId: "call_1", content: "success", isError: false },
+            {
+              type: "tool_result",
+              toolCallId: "toolu_1",
+              content: "file contents",
+              isError: false,
+            },
+            {
+              type: "tool_result",
+              toolCallId: "toolu_2",
+              content: "NOT_FOUND: missing.ts",
+              isError: true,
+            },
+            { type: "text", text: "Both calls are done." },
           ],
         },
       ],
     };
-    expect(() => buildParams(context)).toThrow(
-      "tool_result history is not supported by the Anthropic adapter yet (CDA-43)",
-    );
+    expect(buildParams(context)).toEqual([
+      {
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "toolu_1",
+            content: "file contents",
+            is_error: false,
+          },
+          {
+            type: "tool_result",
+            tool_use_id: "toolu_2",
+            content: "NOT_FOUND: missing.ts",
+            is_error: true,
+          },
+          { type: "text", text: "Both calls are done." },
+        ],
+      },
+    ]);
+  });
+
+  it("puts Tool Results before text, which Anthropic requires", () => {
+    const context: Context = {
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "text", text: "A note first." },
+            { type: "tool_result", toolCallId: "toolu_1", content: "ok", isError: false },
+          ],
+        },
+      ],
+    };
+    expect(buildParams(context)).toEqual([
+      {
+        role: "user",
+        content: [
+          { type: "tool_result", tool_use_id: "toolu_1", content: "ok", is_error: false },
+          { type: "text", text: "A note first." },
+        ],
+      },
+    ]);
+  });
+
+  it("sends a Tool Result with empty content as a tool_result without content", () => {
+    const context: Context = {
+      messages: [
+        {
+          role: "user",
+          content: [{ type: "tool_result", toolCallId: "toolu_1", content: "", isError: false }],
+        },
+      ],
+    };
+    expect(buildParams(context)).toEqual([
+      {
+        role: "user",
+        content: [{ type: "tool_result", tool_use_id: "toolu_1", is_error: false }],
+      },
+    ]);
   });
 
   it("maps assistant message containing text and tool_call", () => {
@@ -778,34 +846,55 @@ describe("Anthropic stream finishReason handling", () => {
     }
   });
 
-  it("emits error event and rejects result() when context contains tool_result (CDA-43)", async () => {
-    const contextWithToolResult: Context = {
-      messages: [
+  describe("asking to disable parallel Tool Calls", () => {
+    const endTurn: AnthropicStreamChunk[] = [
+      { type: "content_block_start", index: 0, content_block: { type: "text" } },
+      { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "Done" } },
+      { type: "content_block_stop", index: 0 },
+      { type: "message_delta", delta: { stop_reason: "end_turn", stop_sequence: null } },
+      { type: "message_stop" },
+    ];
+    const withTools: Context = {
+      messages: [{ role: "user", content: "Read the file" }],
+      tools: [
         {
-          role: "user",
-          content: [
-            { type: "text", text: "hi" },
-            { type: "tool_result", toolCallId: "call-1", content: "ok", isError: false },
-          ],
+          name: "read",
+          description: "Read a file",
+          parameters: Type.Object({ path: Type.String() }),
         },
       ],
     };
 
-    const streamObj = stream(model, contextWithToolResult, { apiKey: "test-key" });
-    const events = [];
-    for await (const ev of streamObj) {
-      events.push(ev);
-    }
-    expect(events.length).toBe(1);
-    expect(events[0]?.type).toBe("error");
-    if (events[0]?.type === "error") {
-      expect(events[0].error.message).toContain(
-        "tool_result history is not supported by the Anthropic adapter yet (CDA-43)",
+    it("sends disable_parallel_tool_use when tools are declared", async () => {
+      mockEvents = endTurn;
+      await collectTurnEndEvent(
+        stream(model, withTools, { apiKey: "test-key", parallelToolCalls: false }),
       );
-    }
-    await expect(streamObj.result()).rejects.toThrow(
-      "tool_result history is not supported by the Anthropic adapter yet (CDA-43)",
-    );
+      expect((lastCreateBody as { tool_choice?: unknown }).tool_choice).toEqual({
+        type: "auto",
+        disable_parallel_tool_use: true,
+      });
+    });
+
+    it("sends no tool_choice when no tools are declared", async () => {
+      mockEvents = endTurn;
+      await collectTurnEndEvent(
+        stream(model, context, { apiKey: "test-key", parallelToolCalls: false }),
+      );
+      expect(lastCreateBody).not.toHaveProperty("tool_choice");
+    });
+
+    it("leaves the provider default when the caller does not ask", async () => {
+      mockEvents = endTurn;
+      await collectTurnEndEvent(stream(model, withTools, { apiKey: "test-key" }));
+      expect(lastCreateBody).not.toHaveProperty("tool_choice");
+    });
+
+    it("sends a max_tokens every catalog model accepts when the caller sets none", async () => {
+      mockEvents = endTurn;
+      await collectTurnEndEvent(stream(model, withTools, { apiKey: "test-key" }));
+      expect((lastCreateBody as { max_tokens?: number }).max_tokens).toBe(32_000);
+    });
   });
 
   it("passes tools to client.messages.create when context.tools is provided", async () => {

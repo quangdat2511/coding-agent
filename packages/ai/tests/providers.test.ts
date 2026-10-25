@@ -11,6 +11,7 @@ import {
   defaultProviders,
   GOOGLE_GENERATE_CONTENT_CAPABILITIES,
   OPENAI_CHAT_COMPLETIONS_CAPABILITIES,
+  OPENAI_MODEL_OVERRIDES,
   OPENROUTER_CHAT_COMPLETIONS_CAPABILITIES,
   XAI_CHAT_COMPLETIONS_CAPABILITIES,
 } from "../src/index.ts";
@@ -53,6 +54,7 @@ describe("Built-in Providers & Registry", () => {
       factory: () => ReturnType<typeof createAnthropicProvider>;
       expectedCapabilities: ModelCapabilities;
       expectedVariant: ApiVariant;
+      modelOverrides?: Readonly<Record<string, Partial<ModelCapabilities>>>;
     }[] = [
       {
         name: "anthropic",
@@ -71,6 +73,7 @@ describe("Built-in Providers & Registry", () => {
         factory: createOpenAIProvider,
         expectedCapabilities: OPENAI_CHAT_COMPLETIONS_CAPABILITIES,
         expectedVariant: "chat_completions",
+        modelOverrides: OPENAI_MODEL_OVERRIDES,
       },
       {
         name: "openrouter",
@@ -86,7 +89,13 @@ describe("Built-in Providers & Registry", () => {
       },
     ];
 
-    for (const { name, factory, expectedCapabilities, expectedVariant } of mvpProviders) {
+    for (const {
+      name,
+      factory,
+      expectedCapabilities,
+      expectedVariant,
+      modelOverrides,
+    } of mvpProviders) {
       it(`every ${name} model has capabilities matching its variant default and variant is ${expectedVariant}`, () => {
         const provider = factory();
         expect(provider.variant).toBe(expectedVariant);
@@ -95,7 +104,10 @@ describe("Built-in Providers & Registry", () => {
 
         for (const model of models) {
           expect(model.capabilities).toBeDefined();
-          expect(model.capabilities).toEqual(expectedCapabilities);
+          expect(model.capabilities).toEqual({
+            ...expectedCapabilities,
+            ...modelOverrides?.[model.id],
+          });
         }
       });
     }
@@ -286,13 +298,26 @@ describe("Built-in Providers & Registry", () => {
         expect(model.id).toBeTruthy();
         expect(model.name).toBeTruthy();
         expect(model.provider).toBe("openai");
-        expect(model.capabilities).toEqual(OPENAI_CHAT_COMPLETIONS_CAPABILITIES);
+        expect(model.capabilities).toEqual({
+          ...OPENAI_CHAT_COMPLETIONS_CAPABILITIES,
+          ...OPENAI_MODEL_OVERRIDES[model.id],
+        });
       }
 
       const modelIds = new Set(models.map((m) => m.id));
       expect(modelIds.has("gpt-4o")).toBe(true);
       expect(modelIds.has("gpt-4o-mini")).toBe(true);
       expect(modelIds.has("o1")).toBe(true);
+    });
+
+    it("declares no parallel Tool Call control for the o-series reasoning models", () => {
+      const models = createOpenAIProvider().getModels();
+      const control = (id: string) =>
+        models.find((m) => m.id === id)?.capabilities?.parallelToolCallControl;
+
+      expect(control("o3-mini")).toBe(false);
+      expect(control("o1")).toBe(false);
+      expect(control("gpt-4o")).toBe(true);
     });
   });
 

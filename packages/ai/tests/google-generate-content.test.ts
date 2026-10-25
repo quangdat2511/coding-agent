@@ -90,7 +90,7 @@ describe("buildRequestBody", () => {
             { type: "text", text: "Looking up weather..." },
             {
               type: "tool_call",
-              toolCallId: "call_1",
+              toolCallId: "google-fc-1a2b3c4d-1",
               name: "get_weather",
               arguments: '{"city":"Tokyo"}',
             },
@@ -123,26 +123,188 @@ describe("buildRequestBody", () => {
     });
   });
 
-  it("throws when user message contains tool_result (deferred to CDA-43)", () => {
-    const context: Context = {
-      messages: [
+  describe("replaying Tool Calls and Tool Results", () => {
+    const callTurn = (
+      ...calls: Array<{ toolCallId: string; name: string; signature?: string }>
+    ): Context["messages"][number] => ({
+      role: "assistant",
+      model: "gemini-3-flash-preview",
+      finishReason: { reason: "tool_call", rawReason: "STOP" },
+      content: calls.map((call) => ({ type: "tool_call", arguments: '{"path":"a.ts"}', ...call })),
+    });
+
+    it("maps Tool Results to functionResponse parts named after their calls", () => {
+      const body = buildRequestBody({
+        messages: [
+          callTurn({ toolCallId: "google-fc-1a2b3c4d-0", name: "read" }),
+          {
+            role: "user",
+            content: [
+              {
+                type: "tool_result",
+                toolCallId: "google-fc-1a2b3c4d-0",
+                content: "file contents",
+                isError: false,
+              },
+            ],
+          },
+        ],
+      });
+
+      expect(body.contents[1]).toEqual({
+        role: "user",
+        parts: [{ functionResponse: { name: "read", response: { output: "file contents" } } }],
+      });
+    });
+
+    it("reports an error Tool Result under the error key", () => {
+      const body = buildRequestBody({
+        messages: [
+          callTurn({ toolCallId: "google-fc-1a2b3c4d-0", name: "read" }),
+          {
+            role: "user",
+            content: [
+              {
+                type: "tool_result",
+                toolCallId: "google-fc-1a2b3c4d-0",
+                content: "NOT_FOUND: a.ts",
+                isError: true,
+              },
+            ],
+          },
+        ],
+      });
+
+      expect(body.contents[1]?.parts).toEqual([
+        { functionResponse: { name: "read", response: { error: "NOT_FOUND: a.ts" } } },
+      ]);
+    });
+
+    it("refuses a Tool Result that answers no earlier Tool Call", () => {
+      const context: Context = {
+        messages: [
+          {
+            role: "user",
+            content: [{ type: "tool_result", toolCallId: "call_9", content: "ok", isError: false }],
+          },
+        ],
+      };
+
+      expect(() => buildRequestBody(context)).toThrow(
+        'tool_result "call_9" answers no earlier tool_call',
+      );
+    });
+
+    it("sends back the ids Google issued, and never the ids the adapter made up", () => {
+      const body = buildRequestBody({
+        messages: [
+          callTurn(
+            { toolCallId: "8f2kq1xz", name: "read" },
+            { toolCallId: "google-fc-1a2b3c4d-1", name: "read" },
+          ),
+          {
+            role: "user",
+            content: [
+              { type: "tool_result", toolCallId: "8f2kq1xz", content: "one", isError: false },
+              {
+                type: "tool_result",
+                toolCallId: "google-fc-1a2b3c4d-1",
+                content: "two",
+                isError: false,
+              },
+            ],
+          },
+        ],
+      });
+
+      expect(body.contents).toEqual([
         {
-          role: "user",
-          content: [
-            {
-              type: "tool_result",
-              toolCallId: "call_1",
-              content: '{"temp": 20}',
-              isError: false,
-            },
+          role: "model",
+          parts: [
+            { functionCall: { id: "8f2kq1xz", name: "read", args: { path: "a.ts" } } },
+            { functionCall: { name: "read", args: { path: "a.ts" } } },
           ],
         },
-      ],
-    };
+        {
+          role: "user",
+          parts: [
+            { functionResponse: { id: "8f2kq1xz", name: "read", response: { output: "one" } } },
+            { functionResponse: { name: "read", response: { output: "two" } } },
+          ],
+        },
+      ]);
+    });
 
-    expect(() => buildRequestBody(context)).toThrow(
-      "tool_result history is not supported by the Google adapter yet (CDA-43)",
-    );
+    it("sends a Tool Call's signature back verbatim on its part", () => {
+      const body = buildRequestBody({
+        messages: [callTurn({ toolCallId: "8f2kq1xz", name: "read", signature: "CiQB0e2Kb9==" })],
+      });
+
+      expect(body.contents[0]?.parts).toEqual([
+        {
+          functionCall: { id: "8f2kq1xz", name: "read", args: { path: "a.ts" } },
+          thoughtSignature: "CiQB0e2Kb9==",
+        },
+      ]);
+    });
+
+    it("answers a batch of calls with one content, though each Tool Result has its own message", () => {
+      const result = (toolCallId: string, content: string): Context["messages"][number] => ({
+        role: "user",
+        content: [{ type: "tool_result", toolCallId, content, isError: false }],
+      });
+      const body = buildRequestBody({
+        messages: [
+          callTurn({ toolCallId: "fc_1", name: "read" }, { toolCallId: "fc_2", name: "read" }),
+          result("fc_1", "one"),
+          result("fc_2", "two"),
+          { role: "user", content: "Keep going." },
+        ],
+      });
+
+      expect(body.contents.slice(1)).toEqual([
+        {
+          role: "user",
+          parts: [
+            { functionResponse: { id: "fc_1", name: "read", response: { output: "one" } } },
+            { functionResponse: { id: "fc_2", name: "read", response: { output: "two" } } },
+          ],
+        },
+        { role: "user", parts: [{ text: "Keep going." }] },
+      ]);
+    });
+
+    it("replays a Tool Call whose arguments are not a JSON object with empty args", () => {
+      const body = buildRequestBody({
+        messages: [
+          {
+            role: "assistant",
+            model: "gemini-3-flash-preview",
+            finishReason: { reason: "tool_call", rawReason: "STOP" },
+            content: [{ type: "tool_call", toolCallId: "fc_1", name: "read", arguments: "[1]" }],
+          },
+        ],
+      });
+
+      expect(body.contents[0]?.parts).toEqual([
+        { functionCall: { id: "fc_1", name: "read", args: {} } },
+      ]);
+    });
+
+    it("sends a text block's signature back on its part", () => {
+      const body = buildRequestBody({
+        messages: [
+          {
+            role: "assistant",
+            model: "gemini-3-flash-preview",
+            finishReason: { reason: "end_turn", rawReason: "STOP" },
+            content: [{ type: "text", text: "Done.", signature: "Sig==" }],
+          },
+        ],
+      });
+
+      expect(body.contents[0]?.parts).toEqual([{ text: "Done.", thoughtSignature: "Sig==" }]);
+    });
   });
 
   it("handles malformed JSON arguments in assistant tool_call gracefully", () => {
@@ -299,6 +461,75 @@ describe("stream finishReason and usage normalization", () => {
     });
 
     expect(id1).not.toBe(id2);
+  });
+
+  it("keeps a Gemini 3 Tool Call's id and thought signature", async () => {
+    // Built from the documented Gemini 3 response shape rather than recorded: no Google key was
+    // available when it was added. Re-record it from a live gemini-3-flash-preview call.
+    const { loadFixture, sseResponse, withFixtureFetch } = await import(
+      "./fixtures/fixture-fetch.ts"
+    );
+    const fixture = sseResponse(loadFixture("google/tool-call-thought-signature.txt"));
+
+    await withFixtureFetch(fixture, async () => {
+      const msg = await stream(TEST_MODEL, { messages: [] }, { apiKey: "test-key" }).result();
+
+      expect(msg.content).toEqual([
+        {
+          type: "tool_call",
+          toolCallId: "8f2kq1xz",
+          name: "get_weather",
+          arguments: '{"city":"Tokyo"}',
+          signature: "CiQB0e2Kb9xQm3VtR4nL7pYs2wHf8gZcJ1uA6kTqE5oN0dMvXyI=",
+        },
+      ]);
+    });
+  });
+
+  it("keeps a thought signature that arrives on an empty last text part", async () => {
+    const { sseResponse, withFixtureFetch } = await import("./fixtures/fixture-fetch.ts");
+    const rawSse =
+      'data: {"candidates":[{"content":{"parts":[{"text":"Done."}],"role":"model"},"index":0}]}\n\n' +
+      'data: {"candidates":[{"content":{"parts":[{"text":"","thoughtSignature":"Sig=="}],"role":"model"},"finishReason":"STOP","index":0}]}\n\n';
+
+    await withFixtureFetch(sseResponse(rawSse), async () => {
+      const msg = await stream(TEST_MODEL, { messages: [] }, { apiKey: "test-key" }).result();
+
+      expect(msg.content).toEqual([{ type: "text", text: "Done.", signature: "Sig==" }]);
+    });
+  });
+
+  it("sends nothing for a request to disable parallel Tool Calls, which the API cannot honour", async () => {
+    const { loadFixture, sseResponse, withFixtureFetch } = await import(
+      "./fixtures/fixture-fetch.ts"
+    );
+    const { Type } = await import("typebox");
+    const context: Context = {
+      messages: [{ role: "user", content: "Weather in Tokyo?" }],
+      tools: [
+        {
+          name: "get_weather",
+          description: "Weather",
+          parameters: Type.Object({ city: Type.String() }),
+        },
+      ],
+    };
+    const bodies: unknown[] = [];
+    await withFixtureFetch(
+      async (request) => {
+        bodies.push(await request.json());
+        return sseResponse(loadFixture("google/tool-call.txt"));
+      },
+      async () => {
+        await stream(TEST_MODEL, context, {
+          apiKey: "test-key",
+          parallelToolCalls: false,
+        }).result();
+      },
+    );
+
+    expect(bodies).toHaveLength(1);
+    expect(Object.keys(bodies[0] as object)).toEqual(["contents", "tools"]);
   });
 
   it("ignores malformed SSE data lines gracefully in stream", async () => {
