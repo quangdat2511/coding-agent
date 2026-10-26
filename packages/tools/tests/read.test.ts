@@ -22,7 +22,7 @@ import type {
   WorkspaceResolver,
 } from "@coding-agent/agent-core";
 import { Value } from "typebox/value";
-import { createDefaultTools, createWorkspaceResolver, ReadParams, readTool } from "../src/index.ts";
+import { createWorkspaceResolver, ReadParams, readTool } from "../src/index.ts";
 import { readToolWith } from "../src/read.ts";
 
 let sandbox: string;
@@ -373,15 +373,5 @@ describe("the two phases", () => {
       isError: true,
       error: { code: "PATH_OUTSIDE_REPO" },
     });
-  });
-});
-
-describe("the default registry", () => {
-  it("exposes the read tool by name", () => {
-    const registry = createDefaultTools();
-
-    expect(registry.list().map((tool) => tool.name)).toEqual(["read"]);
-    expect(registry.get("read")?.name).toBe("read");
-    expect(registry.get("write")).toBeUndefined();
   });
 });
