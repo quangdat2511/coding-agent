@@ -12,10 +12,11 @@ import type {
 import { type Static, Type } from "typebox";
 import { errnoOf } from "./errno.ts";
 
-// A write target must name a file: it cannot end with "/", and its final component cannot be "."
-// or "..". The negative lookaheads keep this rule expressible in the JSON Schema handed to the
-// model as well as in checkInput.
-const FILE_PATH = /^(?!.*\/\.?$)(?!\.{1,2}$)(?!.*\/\.{1,2}$).+$/;
+// A write target must name a file: it cannot end with "/" or "\", and its final component cannot
+// be "." or "..". Both separators are covered so a Windows model path follows the same rule. The
+// negative lookaheads keep it expressible in the JSON Schema handed to the model as well as in
+// checkInput.
+const FILE_PATH = /^(?!.*[\\/]\.?$)(?!\.{1,2}$)(?!.*[\\/]\.{1,2}$).+$/;
 
 export const WriteParams = Type.Object({
   path: Type.String({
@@ -53,9 +54,14 @@ interface WriteHandle {
 }
 
 // O_EXCL refuses a temporary name that already exists, and O_NOFOLLOW refuses one swapped for a
-// symbolic link. The file is created in the destination directory so the rename cannot cross a
-// filesystem boundary.
-const OPEN_FLAGS = constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW;
+// symbolic link. O_NOFOLLOW is undefined on Windows, where O_EXCL and the random name still keep
+// the temporary file from replacing an existing entry. The file is created in the destination
+// directory so the rename cannot cross a filesystem boundary.
+const OPEN_FLAGS =
+  constants.O_WRONLY |
+  constants.O_CREAT |
+  constants.O_EXCL |
+  ((constants.O_NOFOLLOW as number | undefined) ?? 0);
 const DEFAULT_FILE_MODE = 0o666;
 
 export function writeTool(): ExecutableTool<typeof WriteParams> {
