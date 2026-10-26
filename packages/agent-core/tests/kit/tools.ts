@@ -45,6 +45,15 @@ export function fakeWriteTool(): ExecutableTool<typeof PathParams> {
         prepared: { input, paths: [resolved.path], summary: `write ${input.path}` },
       };
     },
+    async execute({ paths }, { workspace }) {
+      for (const path of paths) {
+        const resolved = await workspace.resolveForCreate(path);
+        if (!resolved.ok) {
+          return { isError: true, content: resolved.message, error: resolved };
+        }
+      }
+      return { isError: false, content: `wrote ${paths.join(", ")}` };
+    },
   };
 }
 

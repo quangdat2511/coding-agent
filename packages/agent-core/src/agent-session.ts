@@ -21,8 +21,9 @@ import type {
   StreamingModelState,
 } from "./state.ts";
 import type { CodingTask } from "./task.ts";
-import { preflightToolCall } from "./tool-call-preflight.ts";
-import type { ToolResult } from "./tool-result.ts";
+import { type PreflightOutcome, preflightToolCall } from "./tool-call-preflight.ts";
+import { executeTool } from "./tool-execution.ts";
+import type { ToolError, ToolResult } from "./tool-result.ts";
 import { addUsage, usageOf } from "./usage.ts";
 import type { VerificationDecision } from "./verification.ts";
 
@@ -53,6 +54,18 @@ interface Candidate extends AssistantMessageRef {
 }
 
 type QueuedToolCall = NormalizedToolCall & { readonly providerId: string };
+
+type PreflightPassed = Extract<PreflightOutcome, { ok: true }>;
+
+type Approval = NonNullable<NonNullable<ToolResult["metadata"]>["approval"]>;
+
+const rejectedResult = ({ id, name }: QueuedToolCall, error: ToolError): ToolResult => ({
+  toolCallId: id,
+  toolName: name,
+  content: error.message,
+  isError: true,
+  error,
+});
 
 const toolResultMessage = (providerId: string, { content, isError }: ToolResult): UserMessage => ({
   role: "user",
@@ -189,36 +202,102 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
     queue: readonly QueuedToolCall[],
   ): Promise<AgentFailure | undefined> {
     for (const [index, toolCall] of queue.entries()) {
-      const outcome = await preflightToolCall(toolCall, preflightContext);
-      if (outcome.ok) {
+      const preflight = await preflightToolCall(toolCall, preflightContext);
+      const mutating = preflight.ok && preflight.tool.mutation === "mutating";
+      if (mutating && config.approvalPolicy === "ask") {
         const failure: AgentFailure = {
           code: "INTERNAL_ERROR",
-          message: "executing Tool Calls is not implemented yet",
+          message: "awaiting Approval is not implemented yet",
         };
         skipToolCalls(modelTurn, draft, queue.slice(index), failure.code);
         return failure;
       }
-      const { error } = outcome;
-      const result: ToolResult = {
-        toolCallId: toolCall.id,
-        toolName: toolCall.name,
-        content: error.message,
-        isError: true,
-        error,
-      };
+      const result = preflight.ok
+        ? await executeToolCall(modelTurn, draft, toolCall, queue.slice(index + 1), preflight)
+        : rejectedResult(toolCall, preflight.error);
       commit(
         {
           ...streaming(modelTurn, draft),
           transcript: [...state.transcript, toolResultMessage(toolCall.providerId, result)],
-          counters: incremented("consecutiveRecoverableFailures"),
+          counters: result.isError
+            ? incremented("consecutiveRecoverableFailures")
+            : { ...state.counters, consecutiveRecoverableFailures: 0 },
+          partialChangesPossible: state.partialChangesPossible || (mutating && result.isError),
         },
         {
           type: "tool_call_completed",
-          data: { toolCallId: toolCall.id, outcome: "failed", result },
+          data: {
+            toolCallId: toolCall.id,
+            outcome: result.isError ? "failed" : "succeeded",
+            result,
+          },
         },
       );
     }
     return undefined;
+  }
+
+  function approveByPolicy(
+    modelTurn: ModelTurnRef,
+    draft: AssistantMessageDraft,
+    toolCallId: string,
+    summary: string,
+  ): Approval {
+    const approvalId = config.ids.next("approval");
+    const approval: Approval = { status: "auto_approved", decidedBy: "policy" };
+    commit(streaming(modelTurn, draft), {
+      type: "approval_requested",
+      data: { approvalId, toolCallId, summary, policy: config.approvalPolicy },
+    });
+    commit(streaming(modelTurn, draft), {
+      type: "approval_resolved",
+      data: { approvalId, toolCallId, ...approval },
+    });
+    return approval;
+  }
+
+  async function executeToolCall(
+    modelTurn: ModelTurnRef,
+    draft: AssistantMessageDraft,
+    toolCall: QueuedToolCall,
+    queuedToolCalls: readonly QueuedToolCall[],
+    { tool, prepared }: PreflightPassed,
+  ): Promise<ToolResult> {
+    const { mutation } = tool;
+    const approval =
+      mutation === "mutating"
+        ? approveByPolicy(modelTurn, draft, toolCall.id, prepared.summary)
+        : undefined;
+    commit(
+      {
+        ...withoutPhase(state),
+        phase: "executing_tool",
+        modelTurn,
+        toolCall,
+        queuedToolCalls,
+        workspaceChanged: state.workspaceChanged || mutation === "mutating",
+      },
+      { type: "tool_execution_started", data: { toolCallId: toolCall.id, mutation } },
+    );
+    const startedMs = config.clock.monotonicMs();
+    const outcome = await executeTool(tool, prepared, {
+      workspace: config.workspace,
+      signal: abortEffects.signal,
+      onProgress: () => {},
+    });
+    const durationMs = config.clock.monotonicMs() - startedMs;
+    return {
+      toolCallId: toolCall.id,
+      toolName: toolCall.name,
+      content: outcome.content,
+      isError: outcome.isError,
+      ...(outcome.isError ? { error: outcome.error } : {}),
+      metadata: {
+        durationMs,
+        ...(approval === undefined ? {} : { approval }),
+        ...(outcome.truncated === undefined ? {} : { truncated: outcome.truncated }),
+      },
+    };
   }
 
   async function runModelTurn(): Promise<Candidate | "continue" | "settled"> {

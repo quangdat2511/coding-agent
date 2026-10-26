@@ -35,11 +35,12 @@ const toolErrorCodes = {
   TOOL_INTERNAL_ERROR: true,
 } satisfies Record<ToolErrorCode, true>;
 
+export const isToolError = (error: unknown): error is ToolError =>
+  isRecord(error) && isOneOf(toolErrorCodes, error.code) && typeof error.message === "string";
+
 const isPrepareOutcome = (outcome: unknown): outcome is PrepareOutcome => {
   if (!isRecord(outcome)) return false;
-  if (outcome.ok === false) {
-    return isOneOf(toolErrorCodes, outcome.code) && typeof outcome.message === "string";
-  }
+  if (outcome.ok === false) return isToolError(outcome);
   const { prepared } = outcome;
   return (
     outcome.ok === true &&
