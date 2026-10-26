@@ -64,6 +64,12 @@ const OPEN_FLAGS =
   ((constants.O_NOFOLLOW as number | undefined) ?? 0);
 const DEFAULT_FILE_MODE = 0o666;
 
+// Windows can briefly refuse a rename while an antivirus scanner or the search indexer holds the
+// target; the same call usually succeeds a moment later.
+const RENAME_ATTEMPTS = 4;
+const RENAME_RETRY_MS = 20;
+const RETRYABLE_RENAME: Record<string, true> = { EACCES: true, EBUSY: true, EPERM: true };
+
 export function writeTool(): ExecutableTool<typeof WriteParams> {
   return writeToolWith(nodeFs);
 }
@@ -173,7 +179,7 @@ async function writeAtomically(
     signal.throwIfAborted();
 
     try {
-      await fs.rename(temporary, path);
+      await renameWithRetry(fs, temporary, path);
       renamed = true;
     } catch (cause) {
       const failure = renameFailure(path, cause);
@@ -182,6 +188,25 @@ async function writeAtomically(
     return success(`${quote(path)} (${Buffer.byteLength(content, "utf8")} bytes written)`);
   } finally {
     if (created && !renamed) await fs.unlink(temporary).catch(() => undefined);
+  }
+}
+
+// Retries the rename a few times on the errors a Windows scanner or indexer produces while it
+// briefly holds the target.
+async function renameWithRetry(fs: WriteFileSystem, from: RepoPath, to: RepoPath): Promise<void> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await fs.rename(from, to);
+      return;
+    } catch (cause) {
+      const code = errnoOf(cause);
+      if (attempt >= RENAME_ATTEMPTS || (code !== undefined && RETRYABLE_RENAME[code] !== true)) {
+        throw cause;
+      }
+      const { promise, resolve } = Promise.withResolvers<void>();
+      setTimeout(resolve, RENAME_RETRY_MS * attempt);
+      await promise;
+    }
   }
 }
 

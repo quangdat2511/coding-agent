@@ -17,8 +17,12 @@ import { MAX_TASK_FILE_BYTES, resolveRunConfig } from "../src/run-config.ts";
 
 const secret = "sk-test-credential-value";
 
-// Permission checks cannot fail for root, which CI containers may run as.
+// Permission checks cannot fail for root, which CI containers may run as, and Windows has no POSIX
+// permission bits to remove.
+const windows = process.platform === "win32";
 const asRoot = process.getuid?.() === 0;
+const cannotTestPermissions = windows || asRoot;
+const directoryLink: "dir" | "junction" = windows ? "junction" : "dir";
 
 let directory: string;
 
@@ -185,7 +189,7 @@ describe("configuring the verification command", () => {
 
 describe("resolving the repository root", () => {
   it("resolves a relative root against the working directory to its canonical path", async () => {
-    await symlink(join(directory, "repo"), join(directory, "link"));
+    await symlink(join(directory, "repo"), join(directory, "link"), directoryLink);
     const resolved = await resolveWith({ repoRoot: "link" });
     if (!resolved.ok) throw new Error(`expected a configuration, got: ${resolved.message}`);
     expect(resolved.config.repoRoot).toBe(join(directory, "repo"));
@@ -223,7 +227,7 @@ describe("resolving the repository root", () => {
     );
   });
 
-  it.skipIf(asRoot)("refuses a root that cannot be listed", async () => {
+  it.skipIf(cannotTestPermissions)("refuses a root that cannot be listed", async () => {
     await chmod(join(directory, "repo"), 0o300);
     try {
       await expectRefused(
@@ -236,7 +240,7 @@ describe("resolving the repository root", () => {
     }
   });
 
-  it.skipIf(asRoot)("refuses a root that is not writable", async () => {
+  it.skipIf(cannotTestPermissions)("refuses a root that is not writable", async () => {
     await chmod(join(directory, "repo"), 0o555);
     try {
       await expectRefused(await resolveWith(), "--repo-root", '--repo-root "repo" is not writable');
@@ -283,14 +287,14 @@ describe("reading the task file", () => {
     expect(resolved.config.objective).toHaveLength(MAX_TASK_FILE_BYTES);
   });
 
-  it("refuses a named pipe instead of waiting for a writer", async () => {
+  it.skipIf(windows)("refuses a named pipe instead of waiting for a writer", async () => {
     expect(Bun.spawnSync(["mkfifo", join(directory, "pipe")]).exitCode).toBe(0);
     expect(await resolveWith({ taskFile: "pipe" })).toStrictEqual(
       refusal("--task-file", '--task-file "pipe" is not a regular file'),
     );
   });
 
-  it.skipIf(asRoot)("refuses a file that cannot be read", async () => {
+  it.skipIf(cannotTestPermissions)("refuses a file that cannot be read", async () => {
     await chmod(join(directory, "task.md"), 0o000);
     await expectRefused(
       await resolveWith(),
@@ -330,63 +334,72 @@ describe("preparing the output directory", () => {
     );
   });
 
-  it.skipIf(asRoot)("refuses an output directory that cannot be created", async () => {
-    await mkdir(join(directory, "locked"), { mode: 0o555 });
-    expect(await resolveWith({ outputDir: "locked/out" })).toStrictEqual(
-      refusal("--output-dir", '--output-dir "locked/out" cannot be created: permission denied'),
-    );
-  });
+  it.skipIf(cannotTestPermissions)(
+    "refuses an output directory that cannot be created",
+    async () => {
+      await mkdir(join(directory, "locked"), { mode: 0o555 });
+      expect(await resolveWith({ outputDir: "locked/out" })).toStrictEqual(
+        refusal("--output-dir", '--output-dir "locked/out" cannot be created: permission denied'),
+      );
+    },
+  );
 
-  it.skipIf(asRoot)("refuses an existing output directory that is not writable", async () => {
-    await mkdir(join(directory, "out"), { mode: 0o555 });
-    expect(await resolveWith()).toStrictEqual(
-      refusal("--output-dir", '--output-dir "out" is not writable'),
-    );
-  });
+  it.skipIf(cannotTestPermissions)(
+    "refuses an existing output directory that is not writable",
+    async () => {
+      await mkdir(join(directory, "out"), { mode: 0o555 });
+      expect(await resolveWith()).toStrictEqual(
+        refusal("--output-dir", '--output-dir "out" is not writable'),
+      );
+    },
+  );
 
   // A umask that drops the owner's write bit creates directories this run cannot write into.
-  describe.skipIf(asRoot)("under a umask that makes new directories read-only", () => {
-    let previous: number;
-    beforeEach(() => {
-      previous = process.umask(0o222);
-    });
-    afterEach(() => {
-      process.umask(previous);
-    });
+  describe.skipIf(cannotTestPermissions)(
+    "under a umask that makes new directories read-only",
+    () => {
+      let previous: number;
+      beforeEach(() => {
+        previous = process.umask(0o222);
+      });
+      afterEach(() => {
+        process.umask(previous);
+      });
 
-    it.each([
-      { name: "it created but cannot write", outputDir: "out", expected: "is not writable" },
-      {
-        name: "it only partly created",
-        outputDir: "logs/agent/out",
-        expected: "cannot be created: permission denied",
-      },
-    ])("removes an output directory $name", async ({ outputDir, expected }) => {
-      await expectRefused(
-        await resolveWith({ outputDir }),
-        "--output-dir",
-        `--output-dir "${outputDir}" ${expected}`,
-      );
-    });
-
-    it("removes only what it created, leaving a parent that already existed as it was", async () => {
-      const logs = join(directory, "logs");
-      await mkdir(logs);
-      await chmod(logs, 0o755);
-      expect(await resolveWith({ outputDir: "logs/agent/out" })).toStrictEqual(
-        refusal(
+      it.each([
+        { name: "it created but cannot write", outputDir: "out", expected: "is not writable" },
+        {
+          name: "it only partly created",
+          outputDir: "logs/agent/out",
+          expected: "cannot be created: permission denied",
+        },
+      ])("removes an output directory $name", async ({ outputDir, expected }) => {
+        await expectRefused(
+          await resolveWith({ outputDir }),
           "--output-dir",
-          '--output-dir "logs/agent/out" cannot be created: permission denied',
-        ),
-      );
-      expect(await readdir(logs)).toEqual([]);
-      expect((await stat(logs)).mode & 0o777).toBe(0o755);
-    });
-  });
+          `--output-dir "${outputDir}" ${expected}`,
+        );
+      });
+
+      it("removes only what it created, leaving a parent that already existed as it was", async () => {
+        const logs = join(directory, "logs");
+        await mkdir(logs);
+        await chmod(logs, 0o755);
+        expect(await resolveWith({ outputDir: "logs/agent/out" })).toStrictEqual(
+          refusal(
+            "--output-dir",
+            '--output-dir "logs/agent/out" cannot be created: permission denied',
+          ),
+        );
+        expect(await readdir(logs)).toEqual([]);
+        expect((await stat(logs)).mode & 0o777).toBe(0o755);
+      });
+    },
+  );
 
   // mkdir reports EEXIST for a name something else already holds, so nothing is recorded as this
   // run's, and nothing of the other owner's is removed.
-  it("refuses a dangling symbolic link and leaves it in place", async () => {
+  it.skipIf(windows)("refuses a dangling symbolic link and leaves it in place", async () => {
     await symlink(join(directory, "nowhere"), join(directory, "out"));
     expect(await resolveWith()).toStrictEqual(
       refusal("--output-dir", '--output-dir "out" is not a directory'),

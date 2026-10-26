@@ -293,6 +293,26 @@ describe("refusing a write", () => {
     expect(await readdir(repo)).toEqual([]);
   });
 
+  it("retries a rename the filesystem briefly refuses", async () => {
+    let attempts = 0;
+    const tool = writeToolWith({
+      ...fs,
+      rename: async (from, to) => {
+        attempts += 1;
+        if (attempts < 3) {
+          throw Object.assign(new Error("EPERM: operation not permitted"), { code: "EPERM" });
+        }
+        await fs.rename(from, to);
+      },
+    });
+
+    expect(await write({ path: "a.ts", content: "new\n" }, tool)).toMatchObject({
+      isError: false,
+    });
+    expect(attempts).toBe(3);
+    expect(await readFile(join(repo, "a.ts"), "utf8")).toBe("new\n");
+  });
+
   it("leaves the original intact and removes the temporary file when the rename fails", async () => {
     await writeFile(join(repo, "a.ts"), "old\n");
     const tool = writeToolWith({
@@ -410,7 +430,7 @@ describe("the two phases", () => {
       prepared: {
         input: { path: "src/new/file.ts", content: "héllo\n" },
         paths: [join(repo, "src/new/file.ts") as RepoPath],
-        summary: "write src/new/file.ts (7 bytes)",
+        summary: `write ${join("src", "new", "file.ts")} (7 bytes)`,
       },
     });
     expect(await readdir(repo)).toEqual([]);
