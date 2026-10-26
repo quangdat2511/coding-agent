@@ -54,7 +54,7 @@ A model request to invoke one controlled agent capability.
 _Avoid_: Function call, command
 
 **Approval**:
-An explicit human decision that allows or rejects a proposed action before it executes.
+The recorded decision that allows or rejects a proposed mutating action before it executes, made by a human under the `ask` Approval Policy or by the policy itself under `auto-approve`.
 _Avoid_: Confirmation, permission flag
 
 **Approval Policy**:
