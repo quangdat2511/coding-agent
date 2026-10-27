@@ -8,6 +8,14 @@ import type { TuiHandlers } from "./types.ts";
 // The rows under the transcript: the prompt, then the key hint.
 export const FOOTER_HEIGHT = 2;
 
+// How a terminal `screenRows` tall is shared out. The prompt always shows; the key hint needs a
+// third row and the transcript a second, so a shorter terminal drops the hint, then the
+// transcript, and the frame is never taller than the screen.
+export function frameLayout(screenRows: number): { transcript: number; hint: boolean } {
+  const hint = screenRows > FOOTER_HEIGHT;
+  return { transcript: Math.max(0, screenRows - (hint ? FOOTER_HEIGHT : 1)), hint };
+}
+
 // The cancel keys come first, so a narrow terminal cuts the hint after them.
 export const KEY_HINT = "Esc/Ctrl+C cancel · Enter submit · PgUp/PgDn scroll";
 
@@ -22,11 +30,14 @@ const graphemes = new Intl.Segmenter(undefined, { granularity: "grapheme" });
 export function App({
   rows,
   height,
+  hint,
   handlers,
   onScroll,
 }: {
   rows: readonly TranscriptRow[];
   height: number;
+  // Whether the key hint fits under the prompt; see frameLayout.
+  hint: boolean;
   handlers: TuiHandlers;
   // -1 for a page toward older entries, 1 for a page toward the newest.
   onScroll(direction: -1 | 1): void;
@@ -90,7 +101,7 @@ export function App({
   usePaste((pasted) => perform(routePaste("prompt", pasted)), { isActive: takesInput });
 
   return (
-    <Box flexDirection="column" height={height + FOOTER_HEIGHT}>
+    <Box flexDirection="column" height={height + (hint ? FOOTER_HEIGHT : 1)}>
       <Transcript rows={rows} height={height} />
       {/* A task wider than the row shows its end, where the typing happens. The marker keeps its
           width, which Ink would otherwise shrink to make room for the text. */}
@@ -100,7 +111,7 @@ export function App({
         </Box>
         <Text wrap="truncate-start">{text}</Text>
       </Box>
-      <Text wrap="truncate-end">{KEY_HINT}</Text>
+      {hint ? <Text wrap="truncate-end">{KEY_HINT}</Text> : null}
     </Box>
   );
 }

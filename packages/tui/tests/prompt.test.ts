@@ -12,14 +12,19 @@ const PASTE_START = "\u001b[200~";
 const PASTE_END = "\u001b[201~";
 const CLEAR_SCREEN = "\u001b[2J";
 
+// On a Windows console Ink clears the screen for every frame that fills it (isWindowsConsole in
+// ink/build/ink.js), and this TUI's frames always fill the screen, so a check that a frame is
+// redrawn in place holds on every other platform only.
+const REDRAWS_IN_PLACE = process.platform !== "win32";
+
 function unexpectedHandlerCall(): never {
   throw new Error("The TUI called a handler these keys do not reach");
 }
 
 const mounted: { tui: MountedTui; terminal: TestTerminal }[] = [];
 
-function mount(transcript: readonly TranscriptEntry[] = [], columns = COLUMNS) {
-  const terminal = createTestTerminal(columns, ROWS);
+function mount(transcript: readonly TranscriptEntry[] = [], columns = COLUMNS, rows = ROWS) {
+  const terminal = createTestTerminal(columns, rows);
   const submitted: string[] = [];
   const cancelled = { count: 0 };
   const handlers: TuiHandlers = {
@@ -147,7 +152,26 @@ describe("prompt", () => {
     await tui.flush();
     // The 38 columns after the marker hold an ellipsis and the last 37 characters.
     expect(prompt(terminal)).toBe(`> …${task.slice(-37)}`);
-    expect(terminal.takeOutput()).not.toContain(CLEAR_SCREEN);
+    if (REDRAWS_IN_PLACE) {
+      expect(terminal.takeOutput()).not.toContain(CLEAR_SCREEN);
+    }
+  });
+
+  it("fits a terminal shorter than three rows, dropping the hint, then the transcript", async () => {
+    const transcript = [{ kind: "user", id: "task", text: "Sửa test" }] as const;
+    const twoRows = mount(transcript, COLUMNS, 2);
+    await twoRows.terminal.press("abc");
+    await twoRows.tui.flush();
+    expect(twoRows.terminal.screen()).toEqual(["> Sửa test", "> abc"]);
+
+    const oneRow = mount(transcript, COLUMNS, 1);
+    await oneRow.terminal.press("abc");
+    await oneRow.tui.flush();
+    expect(oneRow.terminal.screen()).toEqual(["> abc"]);
+    // The frame fits the screen, so typing redraws it in place.
+    if (REDRAWS_IN_PLACE) {
+      expect(oneRow.terminal.takeOutput()).not.toContain(CLEAR_SCREEN);
+    }
   });
 
   it("keeps the typed text while the transcript updates", async () => {
