@@ -46,14 +46,18 @@ export function App({
         case "backspace":
           next = withoutLastCharacter(next);
           break;
-        case "submit":
-          // An empty prompt has no Coding Task to start. Input methods may send a letter composed
-          // or as a base and combining marks; NFC sends the same text in one form.
-          if (next.trim() !== "") {
-            handlers.onSubmit(next.normalize("NFC"));
-            next = "";
+        case "submit": {
+          // Spaces around the task, such as the one a pasted line break leaves, are not part of
+          // it, and a prompt of only spaces has no Coding Task to start; Enter clears the prompt
+          // either way. Input methods may send a letter composed or as a base and combining
+          // marks; NFC sends the same text in one form.
+          const task = next.trim();
+          if (task !== "") {
+            handlers.onSubmit(task.normalize("NFC"));
           }
+          next = "";
           break;
+        }
         case "scroll":
           // A page keeps one row of the previous view, so the reader does not lose their place.
           onScroll(action.direction * Math.max(1, height - 1));

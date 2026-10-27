@@ -111,11 +111,20 @@ describe("prompt", () => {
     expect(submitted).toEqual(["Sửa"]);
   });
 
-  it("does not submit an empty prompt", async () => {
+  it("does not submit a prompt of only spaces, and clears it", async () => {
     const { tui, submitted, terminal } = mount();
     await terminal.press(KEYS.enter, "   ", KEYS.enter);
     await tui.flush();
     expect(submitted).toEqual([]);
+    expect(prompt(terminal)).toBe(">");
+  });
+
+  it("submits the task without the spaces around it", async () => {
+    const { tui, submitted, terminal } = mount();
+    // The pasted line break at the end leaves a space.
+    await terminal.press(`  ${PASTE_START}dong 1\rdong 2\n${PASTE_END}`, KEYS.enter);
+    await tui.flush();
+    expect(submitted).toEqual(["dong 1 dong 2"]);
   });
 
   it("takes pasted lines as one line without submitting them", async () => {
