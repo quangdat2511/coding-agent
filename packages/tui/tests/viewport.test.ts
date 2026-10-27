@@ -5,7 +5,8 @@ import type { TranscriptEntry, TuiHandlers } from "../src/types.ts";
 import { createTestTerminal, KEYS, type TestTerminal } from "./support/terminal.ts";
 
 const COLUMNS = 40;
-const ROWS = 10;
+// The height of the viewport. The terminal also has the prompt and the key hint under it.
+const VIEWPORT_ROWS = 10;
 
 // ESC[2J clears the screen and ESC[3J the scrollback: Ink sends both whenever a frame is taller than
 // the screen, so neither may appear while the viewport keeps frames within it.
@@ -25,7 +26,7 @@ const handlers: TuiHandlers = {
 const mounted: { tui: MountedTui; terminal: TestTerminal }[] = [];
 
 // `rows` is the height of the viewport: the terminal also has the prompt and the key hint below it.
-function mount(transcript: readonly TranscriptEntry[], columns = COLUMNS, rows = ROWS) {
+function mount(transcript: readonly TranscriptEntry[], columns = COLUMNS, rows = VIEWPORT_ROWS) {
   const terminal = createTestTerminal(columns, rows + FOOTER_HEIGHT);
   const tui = mountTui({ model: { transcript }, handlers }, terminal.streams);
   mounted.push({ tui, terminal });
@@ -123,6 +124,18 @@ describe("transcript viewport", () => {
     await tui.flush();
     expect(viewport(terminal)).toEqual(lines(21, 30));
     expect(terminal.screen().at(-2)).toBe("> abc");
+  });
+
+  it("neither scrolls nor types on the arrow keys", async () => {
+    const { tui, terminal } = mount([message("m-1", 30)]);
+    await terminal.press(KEYS.pageUp);
+    await tui.flush();
+
+    // The arrow keys are left for the prompt's own use later; for now they do nothing.
+    await terminal.press(KEYS.up, KEYS.down);
+    await tui.flush();
+    expect(viewport(terminal)).toEqual(lines(12, 21));
+    expect(terminal.screen().at(-2)).toBe(">");
   });
 
   it("does not scroll a transcript that fits on the screen", async () => {
@@ -248,17 +261,17 @@ describe("transcript viewport", () => {
     expect(viewport(terminal)).toEqual(scrolled);
 
     terminal.takeOutput();
-    resize(terminal, 25, ROWS);
+    resize(terminal, 25, VIEWPORT_ROWS);
     await tui.flush();
     expect(viewport(terminal)).toEqual([...at25(2), "", ...at25(3), ""]);
 
-    resize(terminal, COLUMNS, ROWS);
+    resize(terminal, COLUMNS, VIEWPORT_ROWS);
     await tui.flush();
     expect(viewport(terminal)).toEqual(scrolled);
 
     // Following the tail, a narrower terminal still ends on the last row.
     tui.scrollBy(100);
-    resize(terminal, 25, ROWS);
+    resize(terminal, 25, VIEWPORT_ROWS);
     await tui.flush();
     expect(viewport(terminal)).toEqual(["", ...at25(5), "", ...at25(6)]);
 
