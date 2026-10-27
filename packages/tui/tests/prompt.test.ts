@@ -180,15 +180,17 @@ describe("prompt", () => {
     expect(terminal.terminal.buffer.active.type).toBe("normal");
   });
 
-  it("shows the keys under the prompt, the cancel key first", async () => {
+  it("shows the keys under the prompt, both cancel keys first", async () => {
     const wide = mount([], 80);
     await wide.tui.flush();
-    expect(wide.terminal.screen().at(-1)).toBe("Esc cancel · Enter submit · PgUp/PgDn scroll");
+    expect(wide.terminal.screen().at(-1)).toBe(
+      "Esc/Ctrl+C cancel · Enter submit · PgUp/PgDn scroll",
+    );
 
-    // A narrow terminal cuts the hint, but not before the cancel key.
+    // A narrow terminal cuts the hint, but not before the cancel keys.
     const narrow = mount([], 20);
     await narrow.tui.flush();
-    expect(narrow.terminal.screen().at(-1)).toBe("Esc cancel · Enter …");
+    expect(narrow.terminal.screen().at(-1)).toBe("Esc/Ctrl+C cancel ·…");
   });
 });
 

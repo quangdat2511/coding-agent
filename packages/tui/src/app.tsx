@@ -8,8 +8,8 @@ import type { TuiHandlers } from "./types.ts";
 // The rows under the transcript: the prompt, then the key hint.
 export const FOOTER_HEIGHT = 2;
 
-// The cancel key comes first, so a narrow terminal cuts the hint after it.
-export const KEY_HINT = "Esc cancel · Enter submit · PgUp/PgDn scroll";
+// The cancel keys come first, so a narrow terminal cuts the hint after them.
+export const KEY_HINT = "Esc/Ctrl+C cancel · Enter submit · PgUp/PgDn scroll";
 
 const PROMPT_MARKER = "> ";
 
