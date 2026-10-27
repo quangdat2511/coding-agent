@@ -1,5 +1,5 @@
 // The input policy: what each key press or paste does in the TUI. It is the only place that
-// decides, so a new mode adds a branch here instead of key handling in another component.
+// decides, so a new mode adds an entry to MODES here instead of key handling in another component.
 
 // Which part of the TUI has the keyboard. The transcript and the prompt share the only mode today;
 // the Approval overlay (CDA-60) adds its own.
@@ -29,6 +29,18 @@ export type KeyAction =
 
 const SUBMIT: KeyAction = { kind: "submit" };
 
+// What one mode does with a key press and with pasted text.
+interface ModePolicy {
+  key(input: string, key: KeyPress): readonly KeyAction[];
+  paste(text: string): readonly KeyAction[];
+}
+
+// Every mode's rules, in one entry each. The record type makes the compiler ask for an entry for a
+// new mode, with both its key and its paste rules.
+const MODES: Record<InputMode, ModePolicy> = {
+  prompt: { key: routePromptKey, paste: insert },
+};
+
 // `input` and `key` are what Ink's useInput passes: the typed text, empty for a named key such as
 // an arrow, and the flags that name the key.
 export function routeKey(mode: InputMode, input: string, key: KeyPress): readonly KeyAction[] {
@@ -37,27 +49,13 @@ export function routeKey(mode: InputMode, input: string, key: KeyPress): readonl
   if (key.escape || (key.ctrl && input === "c")) {
     return [{ kind: "cancel" }];
   }
-  switch (mode) {
-    case "prompt":
-      return routePromptKey(input, key);
-    default: {
-      const unhandled: never = mode;
-      throw new Error(`Unhandled input mode: ${JSON.stringify(unhandled)}`);
-    }
-  }
+  return MODES[mode].key(input, key);
 }
 
 // Text the terminal marked as pasted. Ink delivers it in one piece through usePaste, however many
 // reads it took, so a line break inside it never acts as Enter.
 export function routePaste(mode: InputMode, text: string): readonly KeyAction[] {
-  switch (mode) {
-    case "prompt":
-      return insert(text);
-    default: {
-      const unhandled: never = mode;
-      throw new Error(`Unhandled input mode: ${JSON.stringify(unhandled)}`);
-    }
-  }
+  return MODES[mode].paste(text);
 }
 
 // Scroll keys go to the viewport and everything else to the prompt, so neither reaches the other.
