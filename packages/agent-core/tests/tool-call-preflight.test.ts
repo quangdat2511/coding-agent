@@ -416,54 +416,42 @@ describe("resolving Tool Calls in preflight", () => {
     ]);
   });
 
-  it("settles INTERNAL_ERROR once a mutating call passes preflight under the ask policy, skipping it and the calls queued behind it, since awaiting Approval is not supported yet", async () => {
-    const { session, verification, portCalls } = openTestSession({
-      tools: [fakeTool(), fakeWriteTool()],
+  it("enters awaiting_approval and emits approval_requested when a mutating call passes preflight under the ask policy", async () => {
+    const { session } = openTestSession({
+      tools: [fakeWriteTool()],
       model: {
         turns: [
-          toolCallTurn(
-            { toolCallId: "call-1", name: "frobnicate", input: {} },
-            { toolCallId: "call-2", name: "write", input: { path: "src/a.ts" } },
-            { toolCallId: "call-3", name: "echo", input: {} },
-          ),
+          toolCallTurn({ toolCallId: "call-1", name: "write", input: { path: "src/a.ts" } }),
+          textTurn("Fixed it."),
         ],
       },
     });
 
     await session.dispatch({ type: "start", task });
-    const result = await session.result();
-    const events = await collect(session.events());
 
-    expect(events.slice(-5).map(({ type, data }) => ({ type, data }))).toEqual([
-      {
-        type: "tool_call_completed",
-        data: { toolCallId: "tool_call-1", outcome: "failed", result: expect.any(Object) },
+    // Wait for the session to reach awaiting_approval
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    const snapshot = session.snapshot();
+    expect(snapshot.phase).toBe("awaiting_approval");
+    expect(snapshot).toMatchObject({
+      phase: "awaiting_approval",
+      toolCall: { id: "tool_call-1", name: "write" },
+      queuedToolCalls: [],
+      approval: {
+        approvalId: "approval-1",
+        summary: "write src/a.ts",
+        policy: "ask",
       },
-      {
-        type: "tool_call_completed",
-        data: { toolCallId: "tool_call-2", outcome: "skipped", reason: "INTERNAL_ERROR" },
-      },
-      {
-        type: "tool_call_completed",
-        data: { toolCallId: "tool_call-3", outcome: "skipped", reason: "INTERNAL_ERROR" },
-      },
-      {
-        type: "model_turn_completed",
-        data: {
-          modelTurnId: "model_turn-1",
-          outcome: "failed",
-          usage: { inputTokens: 10, outputTokens: 5 },
-          failure: { code: "INTERNAL_ERROR", message: expect.any(String) },
-        },
-      },
-      { type: "session_settled", data: { result } },
-    ]);
-    expect(result).toMatchObject({
-      outcome: "failed",
-      failure: { code: "INTERNAL_ERROR" },
-      workspaceChanged: false,
     });
-    expect(verification.candidates).toEqual([]);
-    expect(portCalls.filter((call) => call.startsWith("tool.execute"))).toEqual([]);
+
+    // Allow the call so the session can settle
+    await session.dispatch({
+      type: "resolve_approval",
+      approvalId: "approval-1",
+      decision: "allow",
+    });
+    const result = await session.result();
+    expect(result.outcome).toBe("succeeded");
   });
 });

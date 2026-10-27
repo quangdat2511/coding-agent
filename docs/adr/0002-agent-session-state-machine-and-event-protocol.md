@@ -175,7 +175,10 @@ cancelling
 Each queued call repeats preflight and Approval Policy evaluation before either transition. A
 mutating call can reach `executing_tool` only after an interactive allow decision or policy
 auto-approval. The `awaiting_approval` and `executing_tool` self-transitions replace the active
-phase data with the next Tool Call; they never reuse the previous call's Approval.
+phase data with the next Tool Call; they never reuse the previous call's Approval. Between
+consecutive Tool Calls in a batch, the session carries the remaining queue and advances `toolCall`
+to the next call upon completing the prior one, so preflight for the upcoming call executes while
+the snapshot reflects `executing_tool` rather than dropping back to `streaming_model`.
 
 Terminal states have no outgoing transitions. Schema Validation, repository-bound preflight,
 Approval Policy evaluation, Tool Result recording, and selection of the next queued Tool Call are
