@@ -77,12 +77,15 @@ function routePromptKey(input: string, key: KeyPress): readonly KeyAction[] {
   if (key.ctrl || key.meta) {
     return [];
   }
-  // Ink leaves a carriage return inside a chunk of text, since a paste without bracketed paste
-  // arrives the same way. Keys typed while the TUI is busy also reach it as one chunk, Enter
-  // included, so each carriage return in typed text submits what comes before it.
-  return input
-    .split(/\r\n?/)
-    .flatMap((line, index) => (index === 0 ? insert(line) : [SUBMIT, ...insert(line)]));
+  // Ink leaves a carriage return inside a chunk of text. Keys typed while the TUI is busy reach it
+  // as one chunk ending in the Enter that was pressed, so a carriage return at the end submits.
+  // Text pasted without bracketed paste arrives the same way with its line breaks, so one inside
+  // the chunk becomes a space: a chunk submits at most once and a paste never starts several tasks.
+  const enter = /\r\n?$/.exec(input);
+  if (enter === null) {
+    return insert(input);
+  }
+  return [...insert(input.slice(0, enter.index)), SUBMIT];
 }
 
 // Pasted text keeps its line breaks and tabs. The prompt is one row and its text goes to

@@ -81,6 +81,20 @@ describe("prompt", () => {
     expect(prompt(terminal)).toBe(">");
   });
 
+  it("submits pasted lines once when the terminal has no bracketed paste", async () => {
+    const { tui, terminal, submitted } = mount();
+    // Without bracketed paste, pasted lines arrive as one chunk of typed text.
+    await terminal.press("dong 1\rdong 2\rdong 3");
+    await tui.flush();
+    expect(submitted).toEqual([]);
+    expect(prompt(terminal)).toBe("> dong 1 dong 2 dong 3");
+
+    // A paste that ends in a line break submits, but only once.
+    await terminal.press(`${KEYS.backspace.repeat(20)}a\rb\r`);
+    await tui.flush();
+    expect(submitted).toEqual(["a b"]);
+  });
+
   it("submits the task in NFC form", async () => {
     const { tui, terminal, submitted } = mount();
     // "Sửa" with ử written as u, a horn and a hook above.

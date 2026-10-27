@@ -23,16 +23,24 @@ describe("routeKey", () => {
     expect(routeKey("prompt", "Sửa test", {})).toEqual([{ kind: "insert", text: "Sửa test" }]);
   });
 
-  it("submits at each carriage return in text that arrives in one chunk", () => {
+  it("submits a chunk of typed text that ends in Enter", () => {
     // Keys typed while the TUI is busy, Enter included.
     expect(routeKey("prompt", "Sửa test\r", {})).toEqual([
       { kind: "insert", text: "Sửa test" },
       { kind: "submit" },
     ]);
+  });
+
+  it("submits a chunk at most once, so a paste without bracketed paste starts one task", () => {
+    // Line breaks inside the chunk become spaces.
+    expect(routeKey("prompt", "a\rb\rc", {})).toEqual([{ kind: "insert", text: "a b c" }]);
     expect(routeKey("prompt", "dong 1\r\ndong 2", {})).toEqual([
-      { kind: "insert", text: "dong 1" },
+      { kind: "insert", text: "dong 1 dong 2" },
+    ]);
+    // Only a line break at the end acts as Enter.
+    expect(routeKey("prompt", "a\rb\r", {})).toEqual([
+      { kind: "insert", text: "a b" },
       { kind: "submit" },
-      { kind: "insert", text: "dong 2" },
     ]);
   });
 
