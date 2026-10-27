@@ -35,7 +35,7 @@ const CUSTOM_VARIANT_DEFINITIONS: Record<CustomProviderVariant, CustomVariantDef
 
 export const CustomModelConfigSchema = Type.Object(
   {
-    id: Type.String({ minLength: 1 }),
+    id: Type.String({ minLength: 1, pattern: "^\\S(?:.*\\S)?$" }),
     name: Type.Optional(Type.String({ minLength: 1 })),
     capabilities: Type.Optional(
       Type.Partial(
@@ -63,12 +63,12 @@ export type CustomModelConfig = Static<typeof CustomModelConfigSchema>;
 
 export const CustomProviderConfigSchema = Type.Object(
   {
-    id: Type.String({ minLength: 1 }),
+    id: Type.String({ minLength: 1, pattern: "^\\S(?:.*\\S)?$" }),
     name: Type.Optional(Type.String({ minLength: 1 })),
     variant: Type.Union([Type.Literal("chat_completions"), Type.Literal("messages")]),
-    baseUrl: Type.Optional(Type.String({ minLength: 1 })),
-    apiKey: Type.Optional(Type.String({ minLength: 1 })),
-    apiKeyEnv: Type.Optional(Type.String({ minLength: 1 })),
+    baseUrl: Type.Optional(Type.String({ minLength: 1, pattern: "^\\S(?:.*\\S)?$" })),
+    apiKey: Type.Optional(Type.String({ minLength: 1, pattern: "^\\S(?:.*\\S)?$" })),
+    apiKeyEnv: Type.Optional(Type.String({ minLength: 1, pattern: "^[A-Za-z_][A-Za-z0-9_]*$" })),
     headers: Type.Optional(Type.Record(Type.String(), Type.String())),
     models: Type.Array(CustomModelConfigSchema, { minItems: 1 }),
   },
@@ -78,6 +78,7 @@ export const CustomProviderConfigSchema = Type.Object(
 export type CustomProviderConfig = Static<typeof CustomProviderConfigSchema>;
 
 export class CustomProviderValidationError extends Error {
+  readonly code = "INVALID_CUSTOM_PROVIDER_CONFIG" as const;
   readonly errors: string[];
 
   constructor(message: string, errors: string[] = []) {
@@ -87,15 +88,43 @@ export class CustomProviderValidationError extends Error {
   }
 }
 
+function formatValidationErrors(
+  errors: Iterable<{ instancePath: string; message: string }>,
+): string[] {
+  return [...errors].map((err) => `${err.instancePath || "#"}: ${err.message}`);
+}
+
 /** Creates a standard Provider instance from a declarative configuration. */
 export function createCustomProvider(config: CustomProviderConfig): Provider {
   if (!Value.Check(CustomProviderConfigSchema, config)) {
-    const errorList = [...Value.Errors(CustomProviderConfigSchema, config)].map(
-      (err) => `${err.instancePath || "#"}: ${err.message}`,
-    );
+    const errorList = formatValidationErrors(Value.Errors(CustomProviderConfigSchema, config));
     throw new CustomProviderValidationError(
       `Invalid CustomProviderConfig:\n${errorList.join("\n")}`,
       errorList,
+    );
+  }
+
+  // Edge case validation: explicit whitespace-only check
+  const explicitKey = config.apiKey?.trim();
+  if (config.apiKey !== undefined && explicitKey === "") {
+    throw new CustomProviderValidationError("apiKey must not be empty or whitespace-only", [
+      "#/apiKey: Expected non-whitespace string",
+    ]);
+  }
+
+  const explicitKeyEnv = config.apiKeyEnv?.trim();
+  if (config.apiKeyEnv !== undefined && explicitKeyEnv === "") {
+    throw new CustomProviderValidationError("apiKeyEnv must not be empty or whitespace-only", [
+      "#/apiKeyEnv: Expected non-whitespace string",
+    ]);
+  }
+
+  // Unauthenticated local runner requires baseUrl
+  const isNoAuth = explicitKey === undefined && explicitKeyEnv === undefined;
+  if (isNoAuth && (!config.baseUrl || config.baseUrl.trim() === "")) {
+    throw new CustomProviderValidationError(
+      "Custom provider without apiKey or apiKeyEnv requires baseUrl for local unauthenticated endpoint (e.g. http://localhost:11434/v1)",
+      ["#/baseUrl: baseUrl is required when no authentication is configured"],
     );
   }
 
@@ -119,19 +148,12 @@ export function createCustomProvider(config: CustomProviderConfig): Provider {
     apiKey: {
       name: `${config.id} API key`,
       resolve: async () => {
-        const explicitKey = config.apiKey?.trim();
         if (explicitKey !== undefined && explicitKey !== "") {
-          if (explicitKey.startsWith("$")) {
-            const envVarName = explicitKey.slice(1).trim();
-            if (envVarName !== "") {
-              return readEnvCredential([envVarName])?.value;
-            }
-          }
           return explicitKey;
         }
 
-        if (config.apiKeyEnv !== undefined && config.apiKeyEnv !== "") {
-          return readEnvCredential([config.apiKeyEnv])?.value;
+        if (explicitKeyEnv !== undefined && explicitKeyEnv !== "") {
+          return readEnvCredential([explicitKeyEnv])?.value;
         }
 
         return LOCAL_RUNNER_NO_AUTH_KEY;

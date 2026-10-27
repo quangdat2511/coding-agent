@@ -163,31 +163,37 @@ export interface StreamOptions {
 models.stream(model, context, { temperature: 0.7, maxTokens: 1000 });
 ```
 
-### 6. Custom Providers & Declarative Config Loader
+### 6. Declarative Custom Providers
 
-You can instantiate custom endpoints (Ollama, vLLM, DeepSeek, Google OpenAI proxy) programmatically or via JSON configuration:
+You can instantiate custom endpoints (Ollama, vLLM, DeepSeek, custom OpenAI or Anthropic compatible proxies) declaratively from in-memory configuration objects:
 
 ```typescript
-import {
-  createCustomProvider,
-  loadCustomProvidersFromFile,
-  registerCustomProvidersFromFile,
-} from "@coding-agent/ai";
+import { createCustomProvider } from "@coding-agent/ai";
 
-// Programmatic creation with $ENV_VAR and wildcard model support
+// Create custom provider pointing to a proxy endpoint with environment variable resolution
 const customProvider = createCustomProvider({
-  id: "my-proxy",
+  id: "deepseek",
+  name: "DeepSeek API",
   variant: "chat_completions",
   baseUrl: "https://api.deepseek.com",
-  apiKey: "$DEEPSEEK_API_KEY", // auto-resolved from process.env.DEEPSEEK_API_KEY
+  apiKeyEnv: "DEEPSEEK_API_KEY",
   models: [
-    { id: "*" } // wildcard: any model ID is resolved dynamically on-the-fly
+    { id: "deepseek-chat", name: "DeepSeek V3" },
+    { id: "deepseek-reasoner", name: "DeepSeek R1" },
   ],
 });
 
-// Or load directly from a JSON configuration file (array or Pi-style { providers: { ... } })
-const providers = loadCustomProvidersFromFile("~/.coding-agent/models.json");
-registerCustomProvidersFromFile(directory, "./custom-models.json");
+// Or unauthenticated local runner (e.g. Ollama or vLLM)
+const localOllama = createCustomProvider({
+  id: "ollama",
+  variant: "chat_completions",
+  baseUrl: "http://localhost:11434/v1",
+  models: [{ id: "llama3" }],
+});
+
+// Register into ProviderDirectory
+directory.setProvider(customProvider);
+directory.setProvider(localOllama);
 ```
 
 

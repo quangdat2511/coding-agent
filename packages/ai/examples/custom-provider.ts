@@ -50,22 +50,16 @@ async function main(): Promise<void> {
   console.log("  Demonstration: Custom Provider in @coding-agent/ai");
   console.log("==================================================\n");
 
-  const resolvedApiKeyEnv =
-    process.env.CUSTOM_API_KEY_ENV ||
-    (process.env.CUSTOM_API_KEY ? "CUSTOM_API_KEY" : undefined) ||
-    (baseUrl.includes("googleapis.com") && process.env.GOOGLE_API_KEY
-      ? "GOOGLE_API_KEY"
-      : undefined) ||
-    (baseUrl.includes("openrouter.ai") && process.env.OPENROUTER_API_KEY
-      ? "OPENROUTER_API_KEY"
-      : undefined);
+  const explicitApiKey = process.env.CUSTOM_API_KEY?.trim();
+  const apiKeyEnv = process.env.CUSTOM_API_KEY_ENV?.trim();
 
   const customConfig: CustomProviderConfig = {
     id: "my-custom-provider",
     name: "Custom Local / Proxy Provider",
     variant: "chat_completions",
     baseUrl,
-    ...(resolvedApiKeyEnv ? { apiKey: `$${resolvedApiKeyEnv}` } : {}),
+    ...(explicitApiKey ? { apiKey: explicitApiKey } : {}),
+    ...(apiKeyEnv ? { apiKeyEnv } : {}),
     headers: {
       "X-Client-Application": "coding-agent-example",
     },
@@ -77,10 +71,6 @@ async function main(): Promise<void> {
           parallelToolCallControl: true,
           toolArgumentDelivery: "streamed",
         },
-      },
-      {
-        id: "*",
-        name: "Wildcard Fallback Model",
       },
     ],
   };
