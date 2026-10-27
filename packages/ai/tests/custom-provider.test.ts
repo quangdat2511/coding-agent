@@ -194,6 +194,59 @@ describe("Custom Provider Schema & Validation", () => {
       }),
     );
 
+    // Whitespace-only id
+    expectValidationError(() =>
+      createCustomProvider({
+        id: "   ",
+        variant: "chat_completions",
+        apiKey: "valid-key",
+        models: [{ id: "m1" }],
+      }),
+    );
+
+    // Whitespace-only baseUrl
+    expectValidationError(() =>
+      createCustomProvider({
+        id: "test",
+        variant: "chat_completions",
+        baseUrl: "   ",
+        apiKey: "valid-key",
+        models: [{ id: "m1" }],
+      }),
+    );
+
+    // Whitespace-only model id
+    expectValidationError(() =>
+      createCustomProvider({
+        id: "test",
+        variant: "chat_completions",
+        apiKey: "valid-key",
+        models: [{ id: "   " }],
+      }),
+    );
+
+    // Invalid apiKeyEnv pattern (e.g. starts with digit or has spaces)
+    expectValidationError(() =>
+      createCustomProvider({
+        id: "test",
+        variant: "chat_completions",
+        apiKeyEnv: "123_INVALID",
+        models: [{ id: "m1" }],
+      }),
+    );
+
+    // Unknown top-level property rejected by strict schema
+    expectValidationError(() =>
+      createCustomProvider({
+        id: "test",
+        variant: "chat_completions",
+        apiKey: "valid-key",
+        models: [{ id: "m1" }],
+        // @ts-expect-error test unknown top-level property
+        unknownTopLevelField: true,
+      }),
+    );
+
     // Unknown capability property rejected by strict schema
     expectValidationError(() =>
       createCustomProvider({
@@ -405,6 +458,44 @@ describe("Model Capabilities & Directory Compatibility", () => {
     expect(lookedUpModel?.id).toBe("qwen-coder");
     expect(lookedUpModel?.provider).toBe("directory-custom");
   });
+
+  it("defaults model name to model id when name is omitted", () => {
+    const provider = createCustomProvider({
+      id: "unnamed-model-provider",
+      variant: "chat_completions",
+      apiKey: "test-key",
+      models: [{ id: "model-without-name" }],
+    });
+
+    const model = provider.getModels()[0];
+    expect(model?.name).toBe("model-without-name");
+  });
+
+  it("defaults provider name to provider id when name is omitted", () => {
+    const provider = createCustomProvider({
+      id: "unnamed-provider",
+      variant: "chat_completions",
+      apiKey: "test-key",
+      models: [{ id: "m1" }],
+    });
+
+    expect(provider.name).toBe("unnamed-provider");
+  });
+
+  it("returns undefined for unknown models or unknown providers (strict exact match)", () => {
+    const directory = new ProviderDirectory();
+    const provider = createCustomProvider({
+      id: "strict-provider",
+      variant: "chat_completions",
+      apiKey: "test-key",
+      models: [{ id: "known-model" }],
+    });
+    directory.setProvider(provider);
+
+    expect(directory.getModel("strict-provider", "known-model")).toBeDefined();
+    expect(directory.getModel("strict-provider", "unknown-model")).toBeUndefined();
+    expect(directory.getModel("unknown-provider", "known-model")).toBeUndefined();
+  });
 });
 
 describe("Wire Variant Mock Streaming", () => {
@@ -597,5 +688,76 @@ describe("Wire Variant Mock Streaming", () => {
         arguments: '{"path":"src/index.ts"}',
       },
     ]);
+  });
+
+  it("maps OpenAI finish reason 'length' to 'max_output_tokens'", async () => {
+    mockOpenAIChunks = [
+      { choices: [{ delta: { content: "Truncated output" }, finish_reason: "length" }] },
+    ];
+
+    const provider = createCustomProvider({
+      id: "openai-length",
+      variant: "chat_completions",
+      baseUrl: "https://my-proxy.local/v1",
+      models: [{ id: "length-model" }],
+    });
+
+    const model = provider.getModels()[0] as Model;
+    const stream = provider.stream(model, context);
+
+    const turnEnd = await collectTurnEndEvent(stream);
+    expect(turnEnd.message.finishReason.reason).toBe("max_output_tokens");
+    expect(turnEnd.message.finishReason.rawReason).toBe("length");
+  });
+
+  it("maps Anthropic stop reason 'max_tokens' to 'max_output_tokens'", async () => {
+    mockAnthropicEvents = [
+      {
+        type: "message_start",
+        message: {
+          id: "msg_tokens",
+          role: "assistant",
+          content: [],
+          model: "sonnet-tokens",
+          usage: { input_tokens: 10, output_tokens: 0 },
+        },
+      },
+      {
+        type: "content_block_start",
+        index: 0,
+        content_block: { type: "text", text: "" },
+      },
+      {
+        type: "content_block_delta",
+        index: 0,
+        delta: { type: "text_delta", text: "Token cap" },
+      },
+      {
+        type: "content_block_stop",
+        index: 0,
+      },
+      {
+        type: "message_delta",
+        delta: { stop_reason: "max_tokens", stop_sequence: null },
+        usage: { output_tokens: 100 },
+      },
+      {
+        type: "message_stop",
+      },
+    ];
+
+    const provider = createCustomProvider({
+      id: "anthropic-max-tokens",
+      variant: "messages",
+      baseUrl: "https://anthropic-proxy.local",
+      models: [{ id: "sonnet-tokens" }],
+    });
+
+    const model = provider.getModels()[0] as Model;
+    const stream = provider.stream(model, context);
+
+    const turnEnd = await collectTurnEndEvent(stream);
+    expect(turnEnd.message.finishReason.reason).toBe("max_output_tokens");
+    expect(turnEnd.message.finishReason.rawReason).toBe("max_tokens");
   });
 });
