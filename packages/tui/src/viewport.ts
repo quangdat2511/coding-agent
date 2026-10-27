@@ -41,3 +41,9 @@ export function positionAt(
   }
   return { kind: "anchored", entryId: row.entryId, offset: row.offset };
 }
+
+// The rows one Page Up or Page Down moves a viewport `height` rows tall: one row of the previous
+// view stays in sight, so the reader does not lose their place, and a page is at least one row.
+export function pageRows(height: number): number {
+  return Math.max(1, height - 1);
+}

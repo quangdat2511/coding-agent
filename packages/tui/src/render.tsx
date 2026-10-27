@@ -2,7 +2,7 @@ import { render } from "ink";
 import { App, FOOTER_HEIGHT } from "./app.tsx";
 import { transcriptRows } from "./rows.ts";
 import type { TuiHandle, TuiHandlers, TuiModel } from "./types.ts";
-import { FOLLOWING, positionAt, type ScrollPosition, topRow } from "./viewport.ts";
+import { FOLLOWING, pageRows, positionAt, type ScrollPosition, topRow } from "./viewport.ts";
 
 // The terminal the TUI draws on: the process's own streams in renderTui, streams backed by
 // @xterm/headless in tests. Node's stream types keep Ink out of this signature.
@@ -47,7 +47,7 @@ export function mountTui(
     }
     // Ink also assumes 80x24 when the stream reports no size.
     const columns = streams.stdout.columns || 80;
-    const height = Math.max(1, (streams.stdout.rows || 24) - FOOTER_HEIGHT);
+    const height = viewportHeight();
     const rows = transcriptRows(model.transcript, columns);
     position = positionAt(rows, height, topRow(rows, height, position) + scroll);
     const top = topRow(rows, height, position);
@@ -56,9 +56,14 @@ export function mountTui(
         rows={rows.slice(top, top + height)}
         height={height}
         handlers={props.handlers}
-        onScroll={draw}
+        onScroll={(direction) => draw(direction * pageRows(viewportHeight()))}
       />,
     );
+  }
+
+  // The rows the transcript gets: the terminal's height less the prompt and the key hint.
+  function viewportHeight() {
+    return Math.max(1, (streams.stdout.rows || 24) - FOOTER_HEIGHT);
   }
 
   // Added before render() so that it runs before Ink's own resize listener, which redraws the

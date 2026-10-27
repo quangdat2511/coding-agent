@@ -28,7 +28,8 @@ export function App({
   rows: readonly TranscriptRow[];
   height: number;
   handlers: TuiHandlers;
-  onScroll(rows: number): void;
+  // -1 for a page toward older entries, 1 for a page toward the newest.
+  onScroll(direction: -1 | 1): void;
 }) {
   const [text, setText] = useState("");
   // The text as the last action left it. Ink can deliver several key presses before React renders
@@ -59,8 +60,7 @@ export function App({
           break;
         }
         case "scroll":
-          // A page keeps one row of the previous view, so the reader does not lose their place.
-          onScroll(action.direction * Math.max(1, height - 1));
+          onScroll(action.direction);
           break;
         // Whether a task is running is the host's to know: it ignores a cancel with none. The
         // prompt keeps its text, which may be the next task.
