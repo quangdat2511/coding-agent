@@ -36,6 +36,8 @@ export interface TestTerminal {
   takeOutput(): string;
   // Types each key in turn, either text or one of KEYS, and resolves once Ink has read them all.
   press(...keys: string[]): Promise<void>;
+  // Whether stdin is in raw mode, in which the terminal sends Ctrl+C as a key instead of a signal.
+  isRawMode(): boolean;
   dispose(): void;
 }
 
@@ -67,8 +69,10 @@ class TerminalOutput extends Writable {
 // calls. Bytes written to it reach Ink as if they were typed.
 class TerminalInput extends PassThrough {
   readonly isTTY = true;
+  isRaw = false;
 
-  setRawMode(): this {
+  setRawMode(enabled: boolean): this {
+    this.isRaw = enabled;
     return this;
   }
 
@@ -135,6 +139,7 @@ export function createTestTerminal(columns: number, rows: number): TestTerminal 
       stdout.output = "";
       return output;
     },
+    isRawMode: () => stdin.isRaw,
     async press(...keys) {
       for (const key of keys) {
         stdin.write(key);

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "bun:test";
-import { PassThrough } from "node:stream";
+import { PassThrough, Writable } from "node:stream";
 import { type MountedTui, mountTui } from "../src/render.tsx";
 import type { TranscriptEntry, TuiHandlers } from "../src/types.ts";
 import { createTestTerminal, KEYS, type TestTerminal } from "./support/terminal.ts";
@@ -178,6 +178,33 @@ describe("prompt", () => {
     expect(prompt(terminal)).toBe(">");
     await tui.unmount();
     expect(terminal.terminal.buffer.active.type).toBe("normal");
+  });
+
+  it("switches stdin to raw mode only while it draws on a terminal", async () => {
+    const drawn = mount();
+    await drawn.tui.flush();
+    expect(drawn.terminal.isRawMode()).toBe(true);
+
+    // Output piped, input still the terminal: nothing is drawn, so the terminal keeps its keys and
+    // Ctrl+C still stops the process.
+    const terminal = createTestTerminal(COLUMNS, ROWS);
+    const handlers: TuiHandlers = {
+      onSubmit: unexpectedHandlerCall,
+      onCancel: unexpectedHandlerCall,
+      onApproval: unexpectedHandlerCall,
+    };
+    const stdout = new Writable({
+      write(_chunk, _encoding, callback) {
+        callback();
+      },
+    }) as unknown as NodeJS.WriteStream;
+    const tui = mountTui(
+      { model: { transcript: [] }, handlers },
+      { stdout, stdin: terminal.streams.stdin },
+    );
+    mounted.push({ tui, terminal });
+    await tui.flush();
+    expect(terminal.isRawMode()).toBe(false);
   });
 
   it("shows the keys under the prompt, both cancel keys first", async () => {
