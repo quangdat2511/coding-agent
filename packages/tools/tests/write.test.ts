@@ -103,6 +103,14 @@ describe("writing a file", () => {
     expect(await readFile(join(repo, "a.ts"), "utf8")).toBe("export const a = 1;\n");
   });
 
+  it("accepts an absolute path inside the repository", async () => {
+    expect(await write({ path: join(repo, "a.ts"), content: "inside\n" })).toEqual({
+      isError: false,
+      content: `"${join(repo, "a.ts")}" (7 bytes written)`,
+    });
+    expect(await readFile(join(repo, "a.ts"), "utf8")).toBe("inside\n");
+  });
+
   it("creates missing parent directories", async () => {
     expect(await write({ path: "src/new/deeper/file.ts", content: "kept\n" })).toMatchObject({
       isError: false,
@@ -299,6 +307,29 @@ describe("refusing a write", () => {
     });
     expect(attempts).toBe(3);
     expect(await readFile(join(repo, "a.ts"), "utf8")).toBe("new\n");
+  });
+
+  it("stops retrying a rename once the write is cancelled", async () => {
+    await writeFile(join(repo, "a.ts"), "old\n");
+    const controller = new AbortController();
+    let attempts = 0;
+    const tool = writeToolWith({
+      ...fs,
+      rename: async () => {
+        attempts += 1;
+        controller.abort();
+        throw Object.assign(new Error("EPERM: operation not permitted"), { code: "EPERM" });
+      },
+    });
+    const prepared = await tool.prepare({ path: "a.ts", content: "new\n" }, context());
+    if (!prepared.ok) throw new Error(`expected a prepared call, got: ${prepared.message}`);
+
+    await expect(
+      tool.execute(prepared.prepared, { ...context(), signal: controller.signal }),
+    ).rejects.toThrow();
+    expect(attempts).toBe(1);
+    expect(await readFile(join(repo, "a.ts"), "utf8")).toBe("old\n");
+    expect(await readdir(repo)).toEqual(["a.ts"]);
   });
 
   it("leaves the original intact and removes the temporary file when the rename fails", async () => {

@@ -22,7 +22,7 @@ export const WriteParams = Type.Object({
   path: Type.String({
     pattern: FILE_PATH.source,
     description:
-      "Path of the file to write, relative to the repository root; it must name a file, not a directory",
+      "Path of the file to write, relative to the repository root or absolute inside it; it must name a file, not a directory",
   }),
   content: Type.String({ description: "Content to write to the file" }),
 });
@@ -127,6 +127,9 @@ function checkInput({ path, content }: WriteInput): string | undefined {
   return undefined;
 }
 
+// Agent Core dispatches one Tool Call at a time and never asks for parallel tool calls (ADR 0002),
+// so this tool needs no process-local mutation queue of its own; the atomic rename still keeps an
+// external concurrent writer from exposing a partial file.
 async function writeAtomically(
   fs: WriteFileSystem,
   repoRoot: RepoPath,
@@ -179,7 +182,7 @@ async function writeAtomically(
     signal.throwIfAborted();
 
     try {
-      await renameWithRetry(fs, temporary, path);
+      await renameWithRetry(fs, temporary, path, signal);
       renamed = true;
     } catch (cause) {
       const failure = renameFailure(path, cause);
@@ -193,8 +196,14 @@ async function writeAtomically(
 
 // Retries the rename a few times on the errors a Windows scanner or indexer produces while it
 // briefly holds the target.
-async function renameWithRetry(fs: WriteFileSystem, from: RepoPath, to: RepoPath): Promise<void> {
+async function renameWithRetry(
+  fs: WriteFileSystem,
+  from: RepoPath,
+  to: RepoPath,
+  signal: AbortSignal,
+): Promise<void> {
   for (let attempt = 1; ; attempt++) {
+    signal.throwIfAborted();
     try {
       await fs.rename(from, to);
       return;
