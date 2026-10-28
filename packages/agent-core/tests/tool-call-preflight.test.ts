@@ -13,6 +13,7 @@ import {
   throwingTool,
   toolCallMessage,
   toolCallTurn,
+  waitForEvent,
 } from "./kit/index.ts";
 
 const task = { objective: "Fix the failing test" };
@@ -428,9 +429,7 @@ describe("resolving Tool Calls in preflight", () => {
     });
 
     await session.dispatch({ type: "start", task });
-
-    // Wait for the session to reach awaiting_approval
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await waitForEvent(session, "approval_requested");
 
     const snapshot = session.snapshot();
     expect(snapshot.phase).toBe("awaiting_approval");

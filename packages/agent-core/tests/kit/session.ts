@@ -38,3 +38,14 @@ export const resultOf = (
   }
   return undefined;
 };
+
+export async function waitForEvent<T extends SessionEvent["type"]>(
+  session: AgentSession,
+  type: T,
+  afterSequence = 0,
+): Promise<Extract<SessionEvent, { type: T }>> {
+  for await (const event of session.events(afterSequence)) {
+    if (event.type === type) return event as Extract<SessionEvent, { type: T }>;
+  }
+  throw new Error(`event ${type} was never emitted before the session settled`);
+}

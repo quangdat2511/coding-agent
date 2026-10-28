@@ -281,7 +281,11 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
           preflight.prepared.summary,
         );
         if (decision.decision === "allow") {
-          const approval: Approval = { status: "allowed", decidedBy: "user" };
+          const approval: Approval = {
+            status: "allowed",
+            decidedBy: "user",
+            ...(decision.reason === undefined ? {} : { reason: decision.reason }),
+          };
           result = await executeToolCall(
             modelTurn,
             draft,
@@ -567,7 +571,17 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
       );
     }
     const status: ApprovalStatus = command.decision === "allow" ? "allowed" : "denied";
-    const sequence = commit(state, {
+    const nextState =
+      state.phase === "awaiting_approval" && command.decision === "allow"
+        ? {
+            ...withoutPhase(state),
+            phase: "executing_tool" as const,
+            modelTurn: state.modelTurn,
+            toolCall: state.toolCall,
+            queuedToolCalls: state.queuedToolCalls,
+          }
+        : state;
+    const sequence = commit(nextState, {
       type: "approval_resolved",
       data: {
         approvalId: pendingApproval.approvalId,

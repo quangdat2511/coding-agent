@@ -10,6 +10,7 @@ import {
   resultOf,
   textTurn,
   toolCallTurn,
+  waitForEvent,
 } from "./kit/index.ts";
 
 const task = { objective: "Fix the failing test" };
@@ -32,7 +33,7 @@ describe("waiting for Approval under the ask policy", () => {
     });
 
     await session.dispatch({ type: "start", task });
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await waitForEvent(session, "approval_requested");
 
     expect(session.snapshot()).toMatchObject({
       phase: "awaiting_approval",
@@ -84,12 +85,13 @@ describe("waiting for Approval under the ask policy", () => {
     });
 
     await session.dispatch({ type: "start", task });
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await waitForEvent(session, "approval_requested");
 
     const approvalResult = await session.dispatch({
       type: "resolve_approval",
       approvalId: "approval-1",
       decision: "allow",
+      reason: "approved for testing",
     });
     expect(approvalResult).toMatchObject({ accepted: true });
 
@@ -103,6 +105,7 @@ describe("waiting for Approval under the ask policy", () => {
       toolCallId: "tool_call-1",
       status: "allowed",
       decidedBy: "user",
+      reason: "approved for testing",
     });
 
     // Check the state was executing_tool during execute
@@ -117,12 +120,41 @@ describe("waiting for Approval under the ask policy", () => {
     expect(toolResult?.metadata?.approval).toEqual({
       status: "allowed",
       decidedBy: "user",
+      reason: "approved for testing",
     });
 
     expect(result).toMatchObject({
       outcome: "succeeded",
       workspaceChanged: true,
     });
+  });
+
+  it("immediately transitions to executing_tool upon dispatching an allow decision", async () => {
+    const { session } = openTestSession({
+      tools: [fakeWriteTool()],
+      model: {
+        turns: [
+          toolCallTurn({ toolCallId: "call-1", name: "write", input: { path: "src/a.ts" } }),
+          textTurn("Fixed it."),
+        ],
+      },
+    });
+
+    await session.dispatch({ type: "start", task });
+    await waitForEvent(session, "approval_requested");
+
+    const commandResult = await session.dispatch({
+      type: "resolve_approval",
+      approvalId: "approval-1",
+      decision: "allow",
+    });
+    expect(commandResult).toMatchObject({ accepted: true });
+
+    // State snapshot must immediately reflect executing_tool, not awaiting_approval
+    expect(session.snapshot().phase).toBe("executing_tool");
+
+    const result = await session.result();
+    expect(result.outcome).toBe("succeeded");
   });
 
   it("rejects a resolve_approval naming a different approvalId as STALE_APPROVAL", async () => {
@@ -137,7 +169,7 @@ describe("waiting for Approval under the ask policy", () => {
     });
 
     await session.dispatch({ type: "start", task });
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await waitForEvent(session, "approval_requested");
 
     const staleResult = await session.dispatch({
       type: "resolve_approval",
@@ -224,7 +256,7 @@ describe("waiting for Approval under the ask policy", () => {
     });
 
     await session.dispatch({ type: "start", task });
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await waitForEvent(session, "approval_requested");
     await session.dispatch({
       type: "resolve_approval",
       approvalId: "approval-1",
@@ -258,7 +290,7 @@ describe("waiting for Approval under the ask policy", () => {
     });
 
     await session.dispatch({ type: "start", task });
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await waitForEvent(session, "approval_requested");
     await session.dispatch({
       type: "resolve_approval",
       approvalId: "approval-1",
@@ -320,7 +352,7 @@ describe("waiting for Approval under the ask policy", () => {
     });
 
     await session.dispatch({ type: "start", task });
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    const req1 = await waitForEvent(session, "approval_requested");
 
     // Deny the first call
     expect(session.snapshot().phase).toBe("awaiting_approval");
@@ -334,7 +366,7 @@ describe("waiting for Approval under the ask policy", () => {
       approvalId: "approval-1",
       decision: "deny",
     });
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await waitForEvent(session, "approval_requested", req1.sequence);
 
     // The session should now be awaiting approval for the second call
     expect(session.snapshot().phase).toBe("awaiting_approval");
@@ -376,7 +408,7 @@ describe("waiting for Approval under the ask policy", () => {
     });
 
     await session.dispatch({ type: "start", task });
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await waitForEvent(session, "approval_requested");
     await session.dispatch({
       type: "resolve_approval",
       approvalId: "approval-1",
@@ -404,7 +436,7 @@ describe("waiting for Approval under the ask policy", () => {
     });
 
     await session.dispatch({ type: "start", task });
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await waitForEvent(session, "approval_requested");
     await session.dispatch({
       type: "resolve_approval",
       approvalId: "approval-1",
