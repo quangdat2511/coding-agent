@@ -10,6 +10,11 @@ const SPECIFIERS = [
 const PATH_ALIAS = /^@(?:tests|examples)?\//;
 const SKIPPED_DIRECTORIES = new Set(["node_modules", "dist"]);
 
+// Diagnostics use "/" on every platform, so a Windows run reports the same paths as CI on Linux.
+export function displayPath(path: string, separator: string = sep): string {
+  return path.split(separator).join("/");
+}
+
 async function workspacePackages(root: string): Promise<string[]> {
   const { workspaces } = (await Bun.file(join(root, "package.json")).json()) as {
     workspaces: string[];
@@ -42,7 +47,7 @@ function violations(
   source: string,
 ): string[] {
   const found: string[] = [];
-  const shown = file.split(sep).join("/");
+  const shown = displayPath(file);
   const matches = SPECIFIERS.flatMap((pattern) => [...source.matchAll(pattern)]);
   for (const match of matches.sort((a, b) => a.index - b.index)) {
     const specifier = match[1] ?? "";
@@ -79,7 +84,7 @@ export async function findImportViolations(root: string, files?: string[]): Prom
   for (const file of candidates) {
     const sourceFile = Bun.file(join(root, file));
     if (!(await sourceFile.exists())) {
-      found.push(`${file.split(sep).join("/")}: file not found`);
+      found.push(`${displayPath(file)}: file not found`);
       continue;
     }
     const packageDirectory = await owningPackage(root, file);

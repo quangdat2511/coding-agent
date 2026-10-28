@@ -244,11 +244,14 @@ async function missingDirectories(path: string): Promise<string[]> {
 }
 
 // Windows reports a directory creation below a regular file as ENOENT rather than ENOTDIR, so the
-// error alone cannot tell that case from a dangling symbolic link.
-async function parentIsFile(path: string): Promise<boolean> {
+// error alone cannot tell that case from a dangling symbolic link. Exported with an injectable
+// stat so the unit test can reproduce that Windows error on any host.
+type DirectoryStat = (path: string) => Promise<{ isDirectory(): boolean }>;
+
+export async function parentIsFile(path: string, statPath: DirectoryStat = stat): Promise<boolean> {
   for (let dir = dirname(path); ; dir = dirname(dir)) {
     try {
-      return !(await stat(dir)).isDirectory();
+      return !(await statPath(dir)).isDirectory();
     } catch (error) {
       if (errnoOf(error) !== "ENOENT" || dirname(dir) === dir) return false;
     }

@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "bun:test";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { findImportViolations } from "../check-import-boundaries.ts";
+import { displayPath, findImportViolations } from "../check-import-boundaries.ts";
 
 const roots: string[] = [];
 
@@ -159,5 +159,15 @@ describe("findImportViolations", () => {
     expect(await findImportViolations(root, files)).toEqual([
       'packages/tools/src/index.ts:1: "@/a" is a path alias; use a relative import',
     ]);
+  });
+});
+
+describe("displayPath", () => {
+  it("normalizes Windows separators to the diagnostic form", () => {
+    expect(displayPath("packages\\tools\\src\\index.ts", "\\")).toBe("packages/tools/src/index.ts");
+  });
+
+  it("leaves POSIX paths unchanged", () => {
+    expect(displayPath("packages/tools/src/index.ts", "/")).toBe("packages/tools/src/index.ts");
   });
 });
