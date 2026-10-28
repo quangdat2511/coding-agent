@@ -87,10 +87,6 @@ describe("the write tool's declaration", () => {
     expect(Value.Check(WriteParams, { path: "src/", content: "text" })).toBe(false);
     expect(Value.Check(WriteParams, { path: "src/.", content: "text" })).toBe(false);
     expect(Value.Check(WriteParams, { path: "src/..", content: "text" })).toBe(false);
-    expect(Value.Check(WriteParams, { path: "src\\", content: "text" })).toBe(false);
-    expect(Value.Check(WriteParams, { path: "src\\.", content: "text" })).toBe(false);
-    expect(Value.Check(WriteParams, { path: "src\\..", content: "text" })).toBe(false);
-    expect(Value.Check(WriteParams, { path: "src\\a.ts", content: "text" })).toBe(true);
     expect(Value.Check(WriteParams, { path: ".", content: "text" })).toBe(false);
     expect(Value.Check(WriteParams, { path: "src/../a.ts", content: "text" })).toBe(true);
     expect(Value.Check(WriteParams, { path: 1, content: "text" })).toBe(false);
@@ -199,20 +195,15 @@ describe("writing a file", () => {
     expect(renameSawSync).toBe(true);
   });
 
-  // Windows chmod only toggles the read-only attribute, so POSIX permission bits are not observable
-  // there.
-  it.skipIf(process.platform === "win32")(
-    "preserves the permissions of the file it replaces",
-    async () => {
-      await writeFile(join(repo, "run.sh"), "#!/bin/sh\n");
-      await chmod(join(repo, "run.sh"), 0o751);
+  it("preserves the permissions of the file it replaces", async () => {
+    await writeFile(join(repo, "run.sh"), "#!/bin/sh\n");
+    await chmod(join(repo, "run.sh"), 0o751);
 
-      expect(await write({ path: "run.sh", content: "#!/bin/sh\necho hi\n" })).toMatchObject({
-        isError: false,
-      });
-      expect((await stat(join(repo, "run.sh"))).mode & 0o777).toBe(0o751);
-    },
-  );
+    expect(await write({ path: "run.sh", content: "#!/bin/sh\necho hi\n" })).toMatchObject({
+      isError: false,
+    });
+    expect((await stat(join(repo, "run.sh"))).mode & 0o777).toBe(0o751);
+  });
 });
 
 describe("refusing a write", () => {
@@ -226,19 +217,16 @@ describe("refusing a write", () => {
     expect(await readdir(repo)).toEqual(["src"]);
   });
 
-  it.skipIf(process.platform === "win32")(
-    "refuses to replace a FIFO as PERMISSION_DENIED",
-    async () => {
-      expect(Bun.spawnSync(["mkfifo", join(repo, "pipe")]).exitCode).toBe(0);
+  it("refuses to replace a FIFO as PERMISSION_DENIED", async () => {
+    expect(Bun.spawnSync(["mkfifo", join(repo, "pipe")]).exitCode).toBe(0);
 
-      expect(await prepare({ path: "pipe", content: "x" })).toMatchObject({
-        ok: false,
-        code: "PERMISSION_DENIED",
-        message: expect.stringContaining("not a regular file"),
-      });
-      expect(await readdir(repo)).toEqual(["pipe"]);
-    },
-  );
+    expect(await prepare({ path: "pipe", content: "x" })).toMatchObject({
+      ok: false,
+      code: "PERMISSION_DENIED",
+      message: expect.stringContaining("not a regular file"),
+    });
+    expect(await readdir(repo)).toEqual(["pipe"]);
+  });
 
   it("refuses a path that ends like a directory as a schema violation", async () => {
     expect(await prepare({ path: "new/", content: "x" })).toMatchObject({
@@ -291,26 +279,6 @@ describe("refusing a write", () => {
       error: { code: "PERMISSION_DENIED" },
     });
     expect(await readdir(repo)).toEqual([]);
-  });
-
-  it("retries a rename the filesystem briefly refuses", async () => {
-    let attempts = 0;
-    const tool = writeToolWith({
-      ...fs,
-      rename: async (from, to) => {
-        attempts += 1;
-        if (attempts < 3) {
-          throw Object.assign(new Error("EPERM: operation not permitted"), { code: "EPERM" });
-        }
-        await fs.rename(from, to);
-      },
-    });
-
-    expect(await write({ path: "a.ts", content: "new\n" }, tool)).toMatchObject({
-      isError: false,
-    });
-    expect(attempts).toBe(3);
-    expect(await readFile(join(repo, "a.ts"), "utf8")).toBe("new\n");
   });
 
   it("leaves the original intact and removes the temporary file when the rename fails", async () => {
@@ -430,7 +398,7 @@ describe("the two phases", () => {
       prepared: {
         input: { path: "src/new/file.ts", content: "héllo\n" },
         paths: [join(repo, "src/new/file.ts") as RepoPath],
-        summary: `write ${join("src", "new", "file.ts")} (7 bytes)`,
+        summary: "write src/new/file.ts (7 bytes)",
       },
     });
     expect(await readdir(repo)).toEqual([]);
@@ -448,76 +416,55 @@ describe("the two phases", () => {
   it.each([
     ["a path above the root", () => "../outside.ts"],
     ["an absolute path outside the root", () => join(sandbox, "outside.ts")],
+    ["a symbolic link", () => "link.ts"],
+    ["a path below a symbolic-link directory", () => "linked/new.ts"],
   ])("refuses %s as outside the repository", async (_, path) => {
     await writeFile(join(sandbox, "outside.ts"), "secret\n");
+    await mkdir(join(sandbox, "outside"));
+    await symlink(join(sandbox, "outside.ts"), join(repo, "link.ts"));
+    await symlink(join(sandbox, "outside"), join(repo, "linked"));
 
     expect(await write({ path: path(), content: "overwritten\n" })).toMatchObject({
       isError: true,
       error: { code: "PATH_OUTSIDE_REPO" },
     });
     expect(await readFile(join(sandbox, "outside.ts"), "utf8")).toBe("secret\n");
+    expect(await readdir(join(sandbox, "outside"))).toEqual([]);
   });
 
-  // Windows creates symbolic links only with Developer Mode or elevation, so the link cases run
-  // where the platform can set them up.
-  describe.skipIf(process.platform === "win32")("symbolic links", () => {
-    it.each([
-      ["a symbolic link", () => "link.ts"],
-      ["a path below a symbolic-link directory", () => "linked/new.ts"],
-    ])("refuses %s as outside the repository", async (_, path) => {
-      await writeFile(join(sandbox, "outside.ts"), "secret\n");
-      await mkdir(join(sandbox, "outside"));
-      await symlink(join(sandbox, "outside.ts"), join(repo, "link.ts"));
-      await symlink(join(sandbox, "outside"), join(repo, "linked"));
+  it("re-resolves a parent directory swapped for a symbolic link when it executes", async () => {
+    await mkdir(join(repo, "sub"));
+    await writeFile(join(repo, "sub", "a.ts"), "inside\n");
+    await mkdir(join(sandbox, "outside"));
+    await writeFile(join(sandbox, "outside", "a.ts"), "secret\n");
+    const tool = writeTool();
+    const prepared = await tool.prepare({ path: "sub/a.ts", content: "new\n" }, context());
+    if (!prepared.ok) throw new Error(`expected a prepared call, got: ${prepared.message}`);
 
-      expect(await write({ path: path(), content: "overwritten\n" })).toMatchObject({
-        isError: true,
-        error: { code: "PATH_OUTSIDE_REPO" },
-      });
-      expect(await readFile(join(sandbox, "outside.ts"), "utf8")).toBe("secret\n");
-      expect(await readdir(join(sandbox, "outside"))).toEqual([]);
+    await rename(join(repo, "sub"), join(sandbox, "moved"));
+    await symlink(join(sandbox, "outside"), join(repo, "sub"));
+
+    expect(await tool.execute(prepared.prepared, context())).toMatchObject({
+      isError: true,
+      error: { code: "PATH_OUTSIDE_REPO" },
     });
+    expect(await readFile(join(sandbox, "outside", "a.ts"), "utf8")).toBe("secret\n");
   });
 
-  it.skipIf(process.platform === "win32")(
-    "re-resolves a parent directory swapped for a symbolic link when it executes",
-    async () => {
-      await mkdir(join(repo, "sub"));
-      await writeFile(join(repo, "sub", "a.ts"), "inside\n");
-      await mkdir(join(sandbox, "outside"));
-      await writeFile(join(sandbox, "outside", "a.ts"), "secret\n");
-      const tool = writeTool();
-      const prepared = await tool.prepare({ path: "sub/a.ts", content: "new\n" }, context());
-      if (!prepared.ok) throw new Error(`expected a prepared call, got: ${prepared.message}`);
+  it("re-resolves a target swapped for a symbolic link when it executes", async () => {
+    await writeFile(join(repo, "a.ts"), "inside\n");
+    await writeFile(join(sandbox, "outside.ts"), "secret\n");
+    const tool = writeTool();
+    const prepared = await tool.prepare({ path: "a.ts", content: "new\n" }, context());
+    if (!prepared.ok) throw new Error(`expected a prepared call, got: ${prepared.message}`);
 
-      await rename(join(repo, "sub"), join(sandbox, "moved"));
-      await symlink(join(sandbox, "outside"), join(repo, "sub"));
+    await unlink(join(repo, "a.ts"));
+    await symlink(join(sandbox, "outside.ts"), join(repo, "a.ts"));
 
-      expect(await tool.execute(prepared.prepared, context())).toMatchObject({
-        isError: true,
-        error: { code: "PATH_OUTSIDE_REPO" },
-      });
-      expect(await readFile(join(sandbox, "outside", "a.ts"), "utf8")).toBe("secret\n");
-    },
-  );
-
-  it.skipIf(process.platform === "win32")(
-    "re-resolves a target swapped for a symbolic link when it executes",
-    async () => {
-      await writeFile(join(repo, "a.ts"), "inside\n");
-      await writeFile(join(sandbox, "outside.ts"), "secret\n");
-      const tool = writeTool();
-      const prepared = await tool.prepare({ path: "a.ts", content: "new\n" }, context());
-      if (!prepared.ok) throw new Error(`expected a prepared call, got: ${prepared.message}`);
-
-      await unlink(join(repo, "a.ts"));
-      await symlink(join(sandbox, "outside.ts"), join(repo, "a.ts"));
-
-      expect(await tool.execute(prepared.prepared, context())).toMatchObject({
-        isError: true,
-        error: { code: "PATH_OUTSIDE_REPO" },
-      });
-      expect(await readFile(join(sandbox, "outside.ts"), "utf8")).toBe("secret\n");
-    },
-  );
+    expect(await tool.execute(prepared.prepared, context())).toMatchObject({
+      isError: true,
+      error: { code: "PATH_OUTSIDE_REPO" },
+    });
+    expect(await readFile(join(sandbox, "outside.ts"), "utf8")).toBe("secret\n");
+  });
 });

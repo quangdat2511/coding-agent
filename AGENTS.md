@@ -49,10 +49,10 @@ This is a Bun workspace monorepo (`packages/*`). Run all commands from the repo 
 
 There is no build step defined yet.
 
-**Platforms**: Linux, macOS, and Windows. Native Windows is supported without WSL: Git Bash,
+**Platforms**: Linux, macOS, and Windows. Windows follows Pi's native-Windows approach: Git Bash,
 MSYS, Cygwin, and WSL drive paths are normalized before resolution, junctions are rejected like
-symbolic links, and tests that need POSIX-only facilities skip. The `bash` tool (B3) should follow
-Pi's Windows shell contract: Git Bash first, an optional PowerShell tool, and no WSL requirement.
+symbolic links, and the future `bash` tool should resolve Git Bash first with an optional
+PowerShell tool, without requiring WSL.
 
 ## Architecture
 

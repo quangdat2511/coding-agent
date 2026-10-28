@@ -30,25 +30,12 @@ const required = [
 
 const secret = "sk-test-credential-value";
 
-const windows = process.platform === "win32";
-
-// Children get only the variables the runtime needs plus what a test adds, so a developer's own
-// provider keys never decide whether a credential is present.
-const systemEnv: Record<string, string> = { PATH: process.env.PATH ?? "" };
-if (windows) {
-  for (const name of ["SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT", "TEMP", "TMP", "USERPROFILE"]) {
-    const value = process.env[name];
-    if (value !== undefined) systemEnv[name] = value;
-  }
-}
-
+// Children get only PATH (to find bun) plus what a test adds, so a developer's own provider keys
+// never decide whether a credential is present.
 async function run(args: readonly string[], cwd = packageRoot, env: Record<string, string> = {}) {
-  // Windows cannot execute the shebang script directly; run it through Bun and keep the env-file
-  // isolation the shebang asks for.
-  const command = windows ? [process.execPath, "--no-env-file", bin, ...args] : [bin, ...args];
-  const child = Bun.spawn(command, {
+  const child = Bun.spawn([bin, ...args], {
     cwd,
-    env: { ...systemEnv, ...env },
+    env: { PATH: process.env.PATH ?? "", ...env },
     stdout: "pipe",
     stderr: "pipe",
   });
@@ -60,7 +47,7 @@ async function run(args: readonly string[], cwd = packageRoot, env: Record<strin
   return { exitCode, stdout, stderr };
 }
 
-const firstLine = (stderr: string): string => (stderr.split("\n")[0] ?? "").replace(/\r$/, "");
+const firstLine = (stderr: string): string => stderr.split("\n")[0] ?? "";
 
 async function withTemporaryDirectory(body: (directory: string) => Promise<void>): Promise<void> {
   const directory = await mkdtemp(join(tmpdir(), "coding-agent-cli-"));
@@ -93,15 +80,14 @@ interface ConfigurationErrorCase {
 }
 
 describe("the coding-agent executable", () => {
-  it("declares a bin entry whose shebang disables Bun's autoload", async () => {
+  it("is declared as an executable bin entry whose shebang disables Bun's autoload", async () => {
     expect(existsSync(bin)).toBe(true);
-    if (!windows) expect(statSync(bin).mode & 0o111).not.toBe(0);
+    expect(statSync(bin).mode & 0o111).not.toBe(0);
     const source = await Bun.file(bin).text();
     expect(source.split("\n")[0]).toBe("#!/usr/bin/env -S bun --no-env-file --config=/dev/null");
   });
 
-  // A shebang is not used on Windows, so the config it names cannot be applied there.
-  it.skipIf(windows)("ignores a bunfig.toml preload in the working directory", async () => {
+  it("ignores a bunfig.toml preload in the working directory", async () => {
     await withTemporaryDirectory(async (directory) => {
       await Bun.write(join(directory, "bunfig.toml"), 'preload = ["./preload.ts"]\n');
       await Bun.write(join(directory, "preload.ts"), 'process.stderr.write("preloaded\\n");\n');

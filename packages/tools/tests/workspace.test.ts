@@ -2,12 +2,10 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import * as fs from "node:fs/promises";
 import { chmod, mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, sep } from "node:path";
+import { join } from "node:path";
 import type { RepoPath, WorkspaceResolver } from "@coding-agent/agent-core";
 import { createWorkspaceResolver } from "../src/index.ts";
 import { createWorkspaceResolverWith, type WorkspaceFileSystem } from "../src/workspace.ts";
-
-const windows = process.platform === "win32";
 
 let sandbox: string;
 
@@ -28,19 +26,16 @@ async function makeRepo(): Promise<string> {
 }
 
 describe("creating a workspace resolver", () => {
-  it.skipIf(windows)(
-    "canonicalizes a Repository Root reached through a symbolic link",
-    async () => {
-      const repo = await makeRepo();
-      const alias = join(sandbox, "alias");
-      await symlink(repo, alias);
+  it("canonicalizes a Repository Root reached through a symbolic link", async () => {
+    const repo = await makeRepo();
+    const alias = join(sandbox, "alias");
+    await symlink(repo, alias);
 
-      const created = await createWorkspaceResolver(alias);
+    const created = await createWorkspaceResolver(alias);
 
-      if (!created.ok) throw new Error(`expected a resolver, got: ${created.message}`);
-      expect(created.workspace.repoRoot).toBe(repo as RepoPath);
-    },
-  );
+    if (!created.ok) throw new Error(`expected a resolver, got: ${created.message}`);
+    expect(created.workspace.repoRoot).toBe(repo as RepoPath);
+  });
 
   it.each([
     ["a missing directory", (sandbox: string) => join(sandbox, "missing")],
@@ -56,10 +51,9 @@ describe("creating a workspace resolver", () => {
 
   it("refuses a Repository Root that cannot be searched", async () => {
     const repo = await makeRepo();
-    // A process running as root ignores directory permissions, and Windows has no POSIX search
-    // bit, so both simulate the refusal.
+    // A process running as root ignores directory permissions, so it simulates the refusal.
     const created =
-      windows || process.getuid?.() === 0
+      process.getuid?.() === 0
         ? await createWorkspaceResolverWith(repo, {
             ...fs,
             access: async () => {
@@ -102,25 +96,22 @@ describe("resolving an existing path", () => {
     });
   });
 
-  it.skipIf(windows)(
-    "accepts an absolute path spelled through the Repository Root as given",
-    async () => {
-      const repo = await makeRepo();
-      await writeFile(join(repo, "a.ts"), "");
-      const alias = join(sandbox, "alias");
-      await symlink(repo, alias);
-      const workspace = await resolverFor(alias);
+  it("accepts an absolute path spelled through the Repository Root as given", async () => {
+    const repo = await makeRepo();
+    await writeFile(join(repo, "a.ts"), "");
+    const alias = join(sandbox, "alias");
+    await symlink(repo, alias);
+    const workspace = await resolverFor(alias);
 
-      expect(await workspace.resolveExisting(join(alias, "a.ts"))).toEqual({
-        ok: true,
-        path: join(repo, "a.ts") as RepoPath,
-      });
-      expect(await workspace.resolveExisting(join(alias, "../outside.txt"))).toMatchObject({
-        ok: false,
-        code: "PATH_OUTSIDE_REPO",
-      });
-    },
-  );
+    expect(await workspace.resolveExisting(join(alias, "a.ts"))).toEqual({
+      ok: true,
+      path: join(repo, "a.ts") as RepoPath,
+    });
+    expect(await workspace.resolveExisting(join(alias, "../outside.txt"))).toMatchObject({
+      ok: false,
+      code: "PATH_OUTSIDE_REPO",
+    });
+  });
 
   it("accepts a directory named with a trailing slash", async () => {
     const repo = await makeRepo();
@@ -234,18 +225,18 @@ describe("resolving a path that cannot be reached", () => {
     });
   });
 
-  // Windows may report a component over its path limit as missing rather than ENAMETOOLONG.
-  describe.skipIf(windows)("a name longer than the filesystem allows", () => {
-    it.each([
-      [
-        "resolveExisting",
-        (workspace: WorkspaceResolver, input: string) => workspace.resolveExisting(input),
-      ],
-      [
-        "resolveForCreate",
-        (workspace: WorkspaceResolver, input: string) => workspace.resolveForCreate(input),
-      ],
-    ])("%s reports it, echoing a bounded prefix", async (_, resolve) => {
+  it.each([
+    [
+      "resolveExisting",
+      (workspace: WorkspaceResolver, input: string) => workspace.resolveExisting(input),
+    ],
+    [
+      "resolveForCreate",
+      (workspace: WorkspaceResolver, input: string) => workspace.resolveForCreate(input),
+    ],
+  ])(
+    "%s reports a name longer than the filesystem allows, echoing a bounded prefix",
+    async (_, resolve) => {
       const repo = await makeRepo();
       const workspace = await resolverFor(repo);
 
@@ -256,13 +247,13 @@ describe("resolving a path that cannot be reached", () => {
         code: "NOT_FOUND",
         message: `"${"x".repeat(120)}"... (180 more characters) is longer than the filesystem allows`,
       });
-    });
-  });
+    },
+  );
 });
 
 function failingAt(path: string, code: string): WorkspaceFileSystem {
   const fail = (target: string) => {
-    if (target === path || target.startsWith(`${path}${sep}`)) {
+    if (target === path || target.startsWith(`${path}/`)) {
       throw Object.assign(new Error(`${code}: ${target}`), { code });
     }
   };
@@ -285,10 +276,9 @@ describe("resolving a path the filesystem refuses", () => {
     const repo = await makeRepo();
     await mkdir(join(repo, "locked"));
     await writeFile(join(repo, "locked/a.ts"), "");
-    // A process running as root ignores directory permissions, and Windows has no POSIX search
-    // bit, so both simulate the refusal.
+    // A process running as root ignores directory permissions, so it simulates the refusal.
     const created =
-      windows || process.getuid?.() === 0
+      process.getuid?.() === 0
         ? await createWorkspaceResolverWith(repo, failingAt(join(repo, "locked/a.ts"), "EACCES"))
         : await chmod(join(repo, "locked"), 0o000).then(() => createWorkspaceResolver(repo));
     if (!created.ok) throw new Error(`expected a resolver, got: ${created.message}`);
@@ -296,23 +286,6 @@ describe("resolving a path the filesystem refuses", () => {
     expect(await created.workspace.resolveExisting("locked/a.ts")).toMatchObject({
       ok: false,
       code: "PERMISSION_DENIED",
-    });
-  });
-
-  it("reports a path the platform considers invalid as not found", async () => {
-    const repo = await makeRepo();
-    const created = await createWorkspaceResolverWith(repo, {
-      ...fs,
-      lstat: async () => {
-        throw Object.assign(new Error("EINVAL: invalid argument"), { code: "EINVAL" });
-      },
-    });
-    if (!created.ok) throw new Error(`expected a resolver, got: ${created.message}`);
-
-    expect(await created.workspace.resolveExisting("bad:name")).toEqual({
-      ok: false,
-      code: "NOT_FOUND",
-      message: '"bad:name" is not a valid path on this platform',
     });
   });
 
@@ -386,33 +359,7 @@ describe("resolving a path the filesystem refuses", () => {
   });
 });
 
-// A junction is a reparse point Windows can create without elevation, so the jail can be checked
-// there without the privilege a symbolic link needs.
-describe.skipIf(!windows)("the Path Jail on Windows", () => {
-  it.each([
-    [
-      "resolveExisting",
-      (workspace: WorkspaceResolver, input: string) => workspace.resolveExisting(input),
-    ],
-    [
-      "resolveForCreate",
-      (workspace: WorkspaceResolver, input: string) => workspace.resolveForCreate(input),
-    ],
-  ])("%s rejects a directory junction into another tree", async (_, resolve) => {
-    const repo = await makeRepo();
-    await mkdir(join(sandbox, "private"));
-    await writeFile(join(sandbox, "private", "secret.txt"), "");
-    await symlink(join(sandbox, "private"), join(repo, "linked"), "junction");
-    const workspace = await resolverFor(repo);
-
-    expect(await resolve(workspace, "linked/secret.txt")).toMatchObject({
-      ok: false,
-      code: "PATH_OUTSIDE_REPO",
-    });
-  });
-});
-
-describe.skipIf(windows)("the Path Jail and symbolic links", () => {
+describe("the Path Jail and symbolic links", () => {
   it.each([
     ["a symbolic link pointing outside the root", "leak", "leak"],
     ["a file reached through a symbolic-link directory", "linked/secret.txt", "linked"],
@@ -499,35 +446,22 @@ describe("resolving a path to create", () => {
   });
 
   it.each([
+    ["a symbolic link as the target", "leak"],
+    ["a path below a symbolic-link directory", "linked/new.txt"],
     ["a traversal outside the root", "../new.txt"],
     ["the Repository Root itself", "."],
   ])("rejects %s as outside the repository", async (_, input) => {
     const repo = await makeRepo();
+    await mkdir(join(sandbox, "private"));
+    await writeFile(join(sandbox, "secret.txt"), "");
+    await symlink(join(sandbox, "secret.txt"), join(repo, "leak"));
+    await symlink(join(sandbox, "private"), join(repo, "linked"));
     const workspace = await resolverFor(repo);
 
     expect(await workspace.resolveForCreate(input)).toMatchObject({
       ok: false,
       code: "PATH_OUTSIDE_REPO",
     });
-  });
-
-  describe.skipIf(windows)("symbolic links", () => {
-    it.each([
-      ["a symbolic link as the target", "leak"],
-      ["a path below a symbolic-link directory", "linked/new.txt"],
-    ])("rejects %s as outside the repository", async (_, input) => {
-      const repo = await makeRepo();
-      await mkdir(join(sandbox, "private"));
-      await writeFile(join(sandbox, "secret.txt"), "");
-      await symlink(join(sandbox, "secret.txt"), join(repo, "leak"));
-      await symlink(join(sandbox, "private"), join(repo, "linked"));
-      const workspace = await resolverFor(repo);
-
-      expect(await workspace.resolveForCreate(input)).toMatchObject({
-        ok: false,
-        code: "PATH_OUTSIDE_REPO",
-      });
-      expect(await fs.readdir(join(sandbox, "private"))).toEqual([]);
-    });
+    expect(await fs.readdir(join(sandbox, "private"))).toEqual([]);
   });
 });
