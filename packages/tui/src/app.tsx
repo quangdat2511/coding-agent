@@ -5,15 +5,19 @@ import type { TranscriptRow } from "./rows.ts";
 import { Transcript } from "./transcript.tsx";
 import type { TuiHandlers } from "./types.ts";
 
+const PROMPT_HEIGHT = 1;
+const HINT_HEIGHT = 1;
 // The rows under the transcript: the prompt, then the key hint.
-export const FOOTER_HEIGHT = 2;
+export const FOOTER_HEIGHT = PROMPT_HEIGHT + HINT_HEIGHT;
 
-// How the rows of the terminal are shared out under the frame.
+// How the frame shares out the rows of the terminal.
 export interface FrameLayout {
   // The rows the transcript gets.
   readonly transcript: number;
   // Whether the key hint fits under the prompt.
   readonly showHint: boolean;
+  // The rows of the whole frame: the transcript, the prompt and, when it shows, the key hint.
+  readonly height: number;
 }
 
 // How a terminal `screenRows` tall is shared out. The prompt always shows; the key hint needs a
@@ -21,7 +25,9 @@ export interface FrameLayout {
 // transcript, and the frame is never taller than the screen.
 export function frameLayout(screenRows: number): FrameLayout {
   const showHint = screenRows > FOOTER_HEIGHT;
-  return { transcript: Math.max(0, screenRows - (showHint ? FOOTER_HEIGHT : 1)), showHint };
+  const footer = showHint ? FOOTER_HEIGHT : PROMPT_HEIGHT;
+  const transcript = Math.max(0, screenRows - footer);
+  return { transcript, showHint, height: transcript + footer };
 }
 
 // The cancel keys come first, so a narrow terminal cuts the hint after them.
@@ -107,7 +113,7 @@ export function App({
   usePaste((pasted) => perform(routePaste("prompt", pasted)), { isActive: takesInput });
 
   return (
-    <Box flexDirection="column" height={layout.transcript + (layout.showHint ? FOOTER_HEIGHT : 1)}>
+    <Box flexDirection="column" height={layout.height}>
       <Transcript rows={rows} height={layout.transcript} />
       {/* A task wider than the row shows its end, where the typing happens. The marker keeps its
           width, which Ink would otherwise shrink to make room for the text. */}
