@@ -1,8 +1,8 @@
 import { render } from "ink";
+import { Frame, frameLayout } from "./frame.tsx";
 import { transcriptRows } from "./rows.ts";
-import { Transcript } from "./transcript.tsx";
 import type { TuiHandle, TuiHandlers, TuiModel } from "./types.ts";
-import { FOLLOWING, positionAt, type ScrollPosition, topRow } from "./viewport.ts";
+import { FOLLOWING, pageRows, positionAt, type ScrollPosition, topRow } from "./viewport.ts";
 
 // The terminal the TUI draws on: the process's own streams in renderTui, streams backed by
 // @xterm/headless in tests. Node's stream types keep Ink out of this signature.
@@ -16,7 +16,8 @@ export interface MountedTui extends TuiHandle {
   // so the frame for an update() may still be pending when update() returns.
   flush(): Promise<void>;
   // Moves the viewport by `rows` terminal rows: negative toward older entries, positive toward the
-  // newest. Scroll keys arrive with input routing (CDA-54); until then tests scroll through here.
+  // newest. Page Up and Page Down move it a page at a time along the same path; tests that need an
+  // exact number of rows scroll through here.
   scrollBy(rows: number): void;
 }
 
@@ -38,7 +39,7 @@ export function mountTui(
   let unmounted: Promise<void> | undefined;
 
   // Lays the transcript out for the current terminal size, moves the viewport by `scroll` rows and
-  // draws only the rows that fit, so the frame is never taller than the screen.
+  // draws only the rows that fit above the Prompt, so the frame is never taller than the screen.
   function draw(scroll = 0) {
     // Ink would mount the tree again if it rendered after unmount.
     if (unmounted !== undefined) {
@@ -46,11 +47,25 @@ export function mountTui(
     }
     // Ink also assumes 80x24 when the stream reports no size.
     const columns = streams.stdout.columns || 80;
-    const height = streams.stdout.rows || 24;
+    const frame = frameLayout(streams.stdout.rows || 24);
+    const viewportHeight = frame.transcript;
     const rows = transcriptRows(model.transcript, columns);
-    position = positionAt(rows, height, topRow(rows, height, position) + scroll);
-    const top = topRow(rows, height, position);
-    instance.rerender(<Transcript rows={rows.slice(top, top + height)} height={height} />);
+    // With no transcript row in view there is nothing to scroll. Moving would anchor the viewport
+    // out of sight, and once the terminal grew it would not follow new rows.
+    if (viewportHeight > 0) {
+      position = positionAt(rows, viewportHeight, topRow(rows, viewportHeight, position) + scroll);
+    }
+    const top = topRow(rows, viewportHeight, position);
+    // Every draw renders a new onScroll, a resize included, so the height it pages by is current.
+    instance.rerender(
+      <Frame
+        rows={rows.slice(top, top + viewportHeight)}
+        layout={frame}
+        interactive={interactive}
+        handlers={props.handlers}
+        onScroll={(direction) => draw(direction * pageRows(viewportHeight))}
+      />,
+    );
   }
 
   // Added before render() so that it runs before Ink's own resize listener, which redraws the
@@ -70,6 +85,9 @@ export function mountTui(
     alternateScreen: true,
     incrementalRendering: true,
     maxFps: 60,
+    // Ctrl+C is a cancel key in the input policy. Left on, Ink would exit on it before the policy
+    // saw the key.
+    exitOnCtrlC: false,
   });
   if (interactive) {
     streams.stdout.write(CURSOR_HOME);

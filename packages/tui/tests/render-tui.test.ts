@@ -1,46 +1,35 @@
 import { afterEach, describe, expect, it } from "bun:test";
+import { FOOTER_HEIGHT, KEY_HINT } from "../src/frame.tsx";
 import * as publicApi from "../src/index.ts";
-import { type MountedTui, mountTui } from "../src/render.tsx";
-import type { TranscriptEntry, TuiHandlers } from "../src/types.ts";
-import { createTestTerminal, type TestTerminal } from "./support/terminal.ts";
+import type { TranscriptEntry } from "../src/types.ts";
+import { createTestTerminal } from "./support/terminal.ts";
+import { mountOn, unmountTui } from "./support/tui.ts";
 
 const COLUMNS = 80;
 const ROWS = 24;
 
 const TASK = "Sửa test đang lỗi trong src/math.ts";
 
-// Rendering never calls a handler; input arrives in a later ticket.
-function unexpectedHandlerCall(): never {
-  throw new Error("The TUI called a handler while rendering");
-}
-const handlers: TuiHandlers = {
-  onSubmit: unexpectedHandlerCall,
-  onCancel: unexpectedHandlerCall,
-  onApproval: unexpectedHandlerCall,
-};
-
-const mounted: { tui: MountedTui; terminal: TestTerminal }[] = [];
-
+// These tests press no keys, so the TUI never calls a handler.
 function mount(
   transcript: readonly TranscriptEntry[],
   terminal = createTestTerminal(COLUMNS, ROWS),
 ) {
-  const tui = mountTui({ model: { transcript }, handlers }, terminal.streams);
-  mounted.push({ tui, terminal });
-  return { tui, terminal };
+  return { tui: mountOn(terminal, { transcript }), terminal };
 }
 
-// The whole visible screen: the given rows, then empty rows to the bottom.
+// The whole visible screen while the TUI runs: the given transcript rows, empty rows down to the
+// Prompt, then the empty Prompt and the key hint.
 function screenOf(...rows: string[]): string[] {
+  return [...shellScreen(...rows).slice(0, ROWS - FOOTER_HEIGHT), ">", KEY_HINT];
+}
+
+// The whole visible screen without the TUI: the given rows, then empty rows to the bottom.
+function shellScreen(...rows: string[]): string[] {
   return [...rows, ...Array.from({ length: ROWS - rows.length }, () => "")];
 }
 
-afterEach(async () => {
-  for (const { tui, terminal } of mounted.splice(0)) {
-    await tui.unmount();
-    terminal.dispose();
-  }
-});
+afterEach(unmountTui);
 
 describe("renderTui", () => {
   it("draws user messages, assistant text, Tool Calls and Tool Results", async () => {
@@ -235,7 +224,7 @@ describe("renderTui", () => {
 
     expect(terminal.terminal.buffer.active.type).toBe("normal");
     expect(await terminal.isCursorVisible()).toBe(true);
-    expect(terminal.screen()).toEqual(screenOf("$ coding-agent"));
+    expect(terminal.screen()).toEqual(shellScreen("$ coding-agent"));
     expect(terminal.terminal.buffer.active.cursorY).toBe(1);
   });
 
@@ -252,7 +241,7 @@ describe("renderTui", () => {
     expect(terminal.screen()).toEqual(screenOf(`> ${TASK}`));
 
     await tui.unmount();
-    expect(terminal.screen()).toEqual(screenOf(...shellOutput));
+    expect(terminal.screen()).toEqual(shellScreen(...shellOutput));
     expect(terminal.terminal.buffer.active.cursorY).toBe(10);
   });
 
@@ -315,7 +304,7 @@ describe("renderTui", () => {
     await tui.flush();
 
     expect(terminal.terminal.buffer.active.type).toBe("normal");
-    expect(terminal.screen()).toEqual(screenOf());
+    expect(terminal.screen()).toEqual(shellScreen());
   });
 
   it("leaves no beforeExit listener behind", async () => {
