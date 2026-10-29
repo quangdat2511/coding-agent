@@ -107,6 +107,20 @@ describe("transcript viewport", () => {
     expect(viewport(terminal)).toEqual(lines(24, 33));
   });
 
+  it("does not scroll while the terminal has no row for the transcript", async () => {
+    const { tui, terminal } = mount([message("m-1", 30, "streaming")]);
+    // One row holds only the Prompt.
+    terminal.resize(COLUMNS, 1);
+    await terminal.press(KEYS.pageUp);
+    tui.scrollBy(-5);
+    tui.update({ transcript: [message("m-1", 40, "streaming")] });
+
+    // Grown again, the view still follows the newest rows.
+    resize(terminal, COLUMNS, VIEWPORT_ROWS);
+    await tui.flush();
+    expect(viewport(terminal)).toEqual(lines(31, 40));
+  });
+
   it("sends typing to the prompt and scroll keys to the viewport", async () => {
     const { tui, terminal } = mount([message("m-1", 30)]);
     await terminal.press(KEYS.pageUp);

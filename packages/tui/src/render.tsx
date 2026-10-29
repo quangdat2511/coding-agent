@@ -49,7 +49,11 @@ export function mountTui(
     const columns = streams.stdout.columns || 80;
     const { transcript: height, hint } = layout();
     const rows = transcriptRows(model.transcript, columns);
-    position = positionAt(rows, height, topRow(rows, height, position) + scroll);
+    // With no transcript row in view there is nothing to scroll. Moving would anchor the viewport
+    // out of sight, and once the terminal grew it would not follow new rows.
+    if (height > 0) {
+      position = positionAt(rows, height, topRow(rows, height, position) + scroll);
+    }
     const top = topRow(rows, height, position);
     instance.rerender(
       <App
