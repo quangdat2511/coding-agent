@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import { FOOTER_HEIGHT, KEY_HINT } from "../src/frame.tsx";
 import * as publicApi from "../src/index.ts";
-import { type MountedTui, mountTui } from "../src/render.tsx";
-import type { TranscriptEntry, TuiHandlers } from "../src/types.ts";
-import { createTestTerminal, type TestTerminal } from "./support/terminal.ts";
+import type { TranscriptEntry } from "../src/types.ts";
+import { createTestTerminal } from "./support/terminal.ts";
+import { mountOn, unmountTui } from "./support/tui.ts";
 
 const COLUMNS = 80;
 const ROWS = 24;
@@ -11,24 +11,11 @@ const ROWS = 24;
 const TASK = "Sửa test đang lỗi trong src/math.ts";
 
 // These tests press no keys, so the TUI never calls a handler.
-function unexpectedHandlerCall(): never {
-  throw new Error("The TUI called a handler while rendering");
-}
-const handlers: TuiHandlers = {
-  onSubmit: unexpectedHandlerCall,
-  onCancel: unexpectedHandlerCall,
-  onApproval: unexpectedHandlerCall,
-};
-
-const mounted: { tui: MountedTui; terminal: TestTerminal }[] = [];
-
 function mount(
   transcript: readonly TranscriptEntry[],
   terminal = createTestTerminal(COLUMNS, ROWS),
 ) {
-  const tui = mountTui({ model: { transcript }, handlers }, terminal.streams);
-  mounted.push({ tui, terminal });
-  return { tui, terminal };
+  return { tui: mountOn(terminal, { transcript }), terminal };
 }
 
 // The whole visible screen while the TUI runs: the given transcript rows, empty rows down to the
@@ -42,12 +29,7 @@ function shellScreen(...rows: string[]): string[] {
   return [...rows, ...Array.from({ length: ROWS - rows.length }, () => "")];
 }
 
-afterEach(async () => {
-  for (const { tui, terminal } of mounted.splice(0)) {
-    await tui.unmount();
-    terminal.dispose();
-  }
-});
+afterEach(unmountTui);
 
 describe("renderTui", () => {
   it("draws user messages, assistant text, Tool Calls and Tool Results", async () => {

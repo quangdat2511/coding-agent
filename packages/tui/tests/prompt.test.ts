@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import { PassThrough, Writable } from "node:stream";
-import { type MountedTui, mountTui, type TuiStreams } from "../src/render.tsx";
+import type { TuiStreams } from "../src/render.tsx";
 import type { TranscriptEntry, TuiHandlers } from "../src/types.ts";
 import {
   createTestTerminal,
@@ -8,6 +8,7 @@ import {
   REDRAWS_IN_PLACE,
   type TestTerminal,
 } from "./support/terminal.ts";
+import { mountOn, unexpectedHandlerCall, unmountTui } from "./support/tui.ts";
 
 const COLUMNS = 40;
 const ROWS = 6;
@@ -17,12 +18,6 @@ const PASTE_START = "\u001b[200~";
 const PASTE_END = "\u001b[201~";
 const CLEAR_SCREEN = "\u001b[2J";
 
-function unexpectedHandlerCall(): never {
-  throw new Error("The TUI called a handler these keys do not reach");
-}
-
-const mounted: { tui: MountedTui; terminal: TestTerminal }[] = [];
-
 // `streams` stands in for the terminal's stdin or stdout, as when input or output is piped.
 function mount(
   transcript: readonly TranscriptEntry[] = [],
@@ -30,12 +25,6 @@ function mount(
   rows = ROWS,
   streams: Partial<TuiStreams> = {},
 ) {
-  // Each Ink instance patches console, and patch-console saves the methods it replaces in one place
-  // for every instance. With two TUIs mounted at once, console is left without its methods after
-  // both unmount, which breaks later test files, so a test mounts one TUI.
-  if (mounted.length > 0) {
-    throw new Error("A TUI is already mounted in this test");
-  }
   const terminal = createTestTerminal(columns, rows);
   const submitted: string[] = [];
   const cancelled = { count: 0 };
@@ -48,17 +37,11 @@ function mount(
     },
     onApproval: unexpectedHandlerCall,
   };
-  const tui = mountTui({ model: { transcript }, handlers }, { ...terminal.streams, ...streams });
-  mounted.push({ tui, terminal });
+  const tui = mountOn(terminal, { transcript }, handlers, streams);
   return { tui, terminal, submitted, cancelled };
 }
 
-afterEach(async () => {
-  for (const { tui, terminal } of mounted.splice(0)) {
-    await tui.unmount();
-    terminal.dispose();
-  }
-});
+afterEach(unmountTui);
 
 // The prompt is the row above the key hint, at the bottom of the screen.
 function prompt(terminal: TestTerminal): string | undefined {

@@ -1,13 +1,13 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import { FOOTER_HEIGHT } from "../src/frame.tsx";
-import { type MountedTui, mountTui } from "../src/render.tsx";
-import type { TranscriptEntry, TuiHandlers } from "../src/types.ts";
+import type { TranscriptEntry } from "../src/types.ts";
 import {
   createTestTerminal,
   KEYS,
   REDRAWS_IN_PLACE,
   type TestTerminal,
 } from "./support/terminal.ts";
+import { mountOn, unmountTui } from "./support/tui.ts";
 
 const COLUMNS = 40;
 // The height of the viewport. The terminal also has the prompt and the key hint under it.
@@ -18,23 +18,11 @@ const VIEWPORT_ROWS = 10;
 const CLEAR_SCREEN = "\u001b[2J";
 const CLEAR_SCROLLBACK = "\u001b[3J";
 
-// These tests press no keys, so the TUI never calls a handler.
-function unexpectedHandlerCall(): never {
-  throw new Error("The TUI called a handler while rendering");
-}
-const handlers: TuiHandlers = {
-  onSubmit: unexpectedHandlerCall,
-  onCancel: unexpectedHandlerCall,
-  onApproval: unexpectedHandlerCall,
-};
-
-const mounted: { tui: MountedTui; terminal: TestTerminal }[] = [];
-
 // `rows` is the height of the viewport: the terminal also has the prompt and the key hint below it.
 function mount(transcript: readonly TranscriptEntry[], columns = COLUMNS, rows = VIEWPORT_ROWS) {
   const terminal = createTestTerminal(columns, rows + FOOTER_HEIGHT);
-  const tui = mountTui({ model: { transcript }, handlers }, terminal.streams);
-  mounted.push({ tui, terminal });
+  // No key these tests press reaches a handler.
+  const tui = mountOn(terminal, { transcript });
   return { tui, terminal };
 }
 
@@ -47,12 +35,7 @@ function viewport(terminal: TestTerminal): string[] {
   return terminal.screen().slice(0, -FOOTER_HEIGHT);
 }
 
-afterEach(async () => {
-  for (const { tui, terminal } of mounted.splice(0)) {
-    await tui.unmount();
-    terminal.dispose();
-  }
-});
+afterEach(unmountTui);
 
 // "line first" through "line last", one per row.
 function lines(first: number, last: number): string[] {
