@@ -427,8 +427,7 @@ describe("refusing a write", () => {
       isError: true,
       error: { code: "PATH_OUTSIDE_REPO" },
     });
-    expect(await readdir(join(sandbox, "outside"))).toEqual(["b"]);
-    expect(await readdir(join(sandbox, "outside", "b"))).toEqual([]);
+    expect(await readdir(join(sandbox, "outside"))).toEqual([]);
   });
 
   it("does not rename after cancellation and leaves the original file intact", async () => {

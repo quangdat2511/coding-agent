@@ -267,23 +267,24 @@ async function createParents(
     try {
       await fs.mkdir(current);
       created.push(current);
-      continue;
     } catch (cause) {
       if (errnoOf(cause) !== "EEXIST") return parentFailure(current, cause);
+      let stats: FileStat;
+      try {
+        stats = await fs.lstat(current);
+      } catch (error) {
+        return parentFailure(current, error);
+      }
+      if (stats.isSymbolicLink()) return symbolicLinkFailure(current);
+      if (!stats.isDirectory()) {
+        return {
+          code: "PARENT_CREATION_FAILED",
+          message: `${quote(current)} cannot be created: a file is in the way`,
+        };
+      }
     }
-    let stats: FileStat;
-    try {
-      stats = await fs.lstat(current);
-    } catch (cause) {
-      return parentFailure(current, cause);
-    }
-    if (stats.isSymbolicLink()) return symbolicLinkFailure(current);
-    if (!stats.isDirectory()) {
-      return {
-        code: "PARENT_CREATION_FAILED",
-        message: `${quote(current)} cannot be created: a file is in the way`,
-      };
-    }
+    const problem = await inspectDirectory(fs, current);
+    if (problem !== undefined) return problem;
   }
   return undefined;
 }
