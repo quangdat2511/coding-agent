@@ -75,10 +75,11 @@ function routePromptKey(input: string, key: KeyPress): readonly KeyAction[] {
   if (key.ctrl || key.meta) {
     return [];
   }
-  // Ink leaves a carriage return inside a chunk of text. Keys typed while the TUI is busy reach it
-  // as one chunk ending in the Enter that was pressed, so a carriage return at the end submits.
-  // Text pasted without bracketed paste arrives the same way with its line breaks, so one inside
-  // the chunk becomes a space: a chunk submits at most once and a paste never starts several tasks.
+  // Ink leaves a carriage return inside a chunk of text, and the chunk alone cannot tell keys typed
+  // ahead while the TUI was busy from lines pasted without bracketed paste. So a chunk submits at
+  // most once, when it ends in Enter, and a line break inside it becomes a space: a paste never
+  // starts several Coding Tasks. Typing ahead pays for it. Two tasks typed with Enter before Ink
+  // reads them go as one, and an Enter with more typing after it in the chunk submits nothing.
   const enter = /\r\n?$/.exec(input);
   if (enter === null) {
     return insert(input);

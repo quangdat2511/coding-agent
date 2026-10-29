@@ -24,7 +24,7 @@ describe("routeKey", () => {
   });
 
   it("submits a chunk of typed text that ends in Enter", () => {
-    // Keys typed while the TUI is busy, Enter included.
+    // Keys typed ahead while the TUI is busy, Enter included.
     expect(routeKey("prompt", "Sửa test\r", {})).toEqual([
       { kind: "insert", text: "Sửa test" },
       { kind: "submit" },
@@ -41,6 +41,18 @@ describe("routeKey", () => {
     expect(routeKey("prompt", "a\rb\r", {})).toEqual([
       { kind: "insert", text: "a b" },
       { kind: "submit" },
+    ]);
+  });
+
+  it("submits tasks typed ahead in one chunk as one, and only when the chunk ends in Enter", () => {
+    // Keys typed ahead look like a paste: two tasks, each with its Enter, go as one...
+    expect(routeKey("prompt", "task A\rtask B\r", {})).toEqual([
+      { kind: "insert", text: "task A task B" },
+      { kind: "submit" },
+    ]);
+    // ...and an Enter with more typing after it submits nothing.
+    expect(routeKey("prompt", "task A\rpartial", {})).toEqual([
+      { kind: "insert", text: "task A partial" },
     ]);
   });
 

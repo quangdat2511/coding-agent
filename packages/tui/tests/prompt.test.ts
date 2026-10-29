@@ -86,6 +86,20 @@ describe("prompt", () => {
     expect(prompt(terminal)).toBe(">");
   });
 
+  it("submits keys typed ahead in one read at most once", async () => {
+    const { tui, terminal, submitted } = mount();
+    // Ink leaves the Enters inside one read, so two tasks typed ahead go as one...
+    await terminal.press(`task A${KEYS.enter}task B${KEYS.enter}`);
+    await tui.flush();
+    expect(submitted).toEqual(["task A task B"]);
+
+    // ...and an Enter with more typing after it submits nothing.
+    await terminal.press(`task C${KEYS.enter}partial`);
+    await tui.flush();
+    expect(submitted).toEqual(["task A task B"]);
+    expect(prompt(terminal)).toBe("> task C partial");
+  });
+
   it("submits pasted lines once when the terminal has no bracketed paste", async () => {
     const { tui, terminal, submitted } = mount();
     // Without bracketed paste, pasted lines arrive as one chunk of typed text.
