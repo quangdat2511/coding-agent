@@ -1,7 +1,7 @@
 import { Box, Text, useInput, usePaste, useStdin } from "ink";
 import { useRef, useState } from "react";
 import { type KeyAction, routeKey, routePaste } from "./input.ts";
-import type { TranscriptRow } from "./rows.ts";
+import { TASK_MARKER, type TranscriptRow } from "./rows.ts";
 import { Transcript } from "./transcript.tsx";
 import type { TuiHandlers } from "./types.ts";
 
@@ -32,8 +32,6 @@ export function frameLayout(screenRows: number): FrameLayout {
 
 // The cancel keys come first, so a narrow terminal cuts the hint after them.
 export const KEY_HINT = "Esc/Ctrl+C cancel · Enter submit · PgUp/PgDn scroll";
-
-const PROMPT_MARKER = "> ";
 
 const graphemes = new Intl.Segmenter(undefined, { granularity: "grapheme" });
 
@@ -119,7 +117,7 @@ export function App({
           width, which Ink would otherwise shrink to make room for the text. */}
       <Box>
         <Box flexShrink={0}>
-          <Text>{PROMPT_MARKER}</Text>
+          <Text>{TASK_MARKER}</Text>
         </Box>
         <Text wrap="truncate-start">{text}</Text>
       </Box>
