@@ -47,7 +47,8 @@ export function mountTui(
     }
     // Ink also assumes 80x24 when the stream reports no size.
     const columns = streams.stdout.columns || 80;
-    const { transcript: height, hint } = layout();
+    const frame = layout();
+    const height = frame.transcript;
     const rows = transcriptRows(model.transcript, columns);
     // With no transcript row in view there is nothing to scroll. Moving would anchor the viewport
     // out of sight, and once the terminal grew it would not follow new rows.
@@ -58,8 +59,7 @@ export function mountTui(
     instance.rerender(
       <App
         rows={rows.slice(top, top + height)}
-        height={height}
-        hint={hint}
+        layout={frame}
         interactive={interactive}
         handlers={props.handlers}
         onScroll={(direction) => draw(direction * pageRows(layout().transcript))}

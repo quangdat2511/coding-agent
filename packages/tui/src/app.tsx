@@ -8,12 +8,20 @@ import type { TuiHandlers } from "./types.ts";
 // The rows under the transcript: the prompt, then the key hint.
 export const FOOTER_HEIGHT = 2;
 
+// How the rows of the terminal are shared out under the frame.
+export interface FrameLayout {
+  // The rows the transcript gets.
+  readonly transcript: number;
+  // Whether the key hint fits under the prompt.
+  readonly showHint: boolean;
+}
+
 // How a terminal `screenRows` tall is shared out. The prompt always shows; the key hint needs a
 // third row and the transcript a second, so a shorter terminal drops the hint, then the
 // transcript, and the frame is never taller than the screen.
-export function frameLayout(screenRows: number): { transcript: number; hint: boolean } {
-  const hint = screenRows > FOOTER_HEIGHT;
-  return { transcript: Math.max(0, screenRows - (hint ? FOOTER_HEIGHT : 1)), hint };
+export function frameLayout(screenRows: number): FrameLayout {
+  const showHint = screenRows > FOOTER_HEIGHT;
+  return { transcript: Math.max(0, screenRows - (showHint ? FOOTER_HEIGHT : 1)), showHint };
 }
 
 // The cancel keys come first, so a narrow terminal cuts the hint after them.
@@ -29,16 +37,13 @@ const graphemes = new Intl.Segmenter(undefined, { granularity: "grapheme" });
 // position stays with mountTui, which lays out the rows, so scrolling goes back to it as onScroll.
 export function App({
   rows,
-  height,
-  hint,
+  layout,
   interactive,
   handlers,
   onScroll,
 }: {
   rows: readonly TranscriptRow[];
-  height: number;
-  // Whether the key hint fits under the prompt; see frameLayout.
-  hint: boolean;
+  layout: FrameLayout;
   // Whether mountTui draws on a terminal.
   interactive: boolean;
   handlers: TuiHandlers;
@@ -102,8 +107,8 @@ export function App({
   usePaste((pasted) => perform(routePaste("prompt", pasted)), { isActive: takesInput });
 
   return (
-    <Box flexDirection="column" height={height + (hint ? FOOTER_HEIGHT : 1)}>
-      <Transcript rows={rows} height={height} />
+    <Box flexDirection="column" height={layout.transcript + (layout.showHint ? FOOTER_HEIGHT : 1)}>
+      <Transcript rows={rows} height={layout.transcript} />
       {/* A task wider than the row shows its end, where the typing happens. The marker keeps its
           width, which Ink would otherwise shrink to make room for the text. */}
       <Box>
@@ -112,7 +117,7 @@ export function App({
         </Box>
         <Text wrap="truncate-start">{text}</Text>
       </Box>
-      {hint ? <Text wrap="truncate-end">{KEY_HINT}</Text> : null}
+      {layout.showHint ? <Text wrap="truncate-end">{KEY_HINT}</Text> : null}
     </Box>
   );
 }
