@@ -30,6 +30,12 @@ function mount(
   rows = ROWS,
   streams: Partial<TuiStreams> = {},
 ) {
+  // Each Ink instance patches console, and patch-console saves the methods it replaces in one place
+  // for every instance. With two TUIs mounted at once, console is left without its methods after
+  // both unmount, which breaks later test files, so a test mounts one TUI.
+  if (mounted.length > 0) {
+    throw new Error("A TUI is already mounted in this test");
+  }
   const terminal = createTestTerminal(columns, rows);
   const submitted: string[] = [];
   const cancelled = { count: 0 };
@@ -177,20 +183,21 @@ describe("prompt", () => {
     }
   });
 
-  it("fits a terminal shorter than three rows, dropping the hint, then the transcript", async () => {
-    const transcript = [{ kind: "user", id: "task", text: "Sửa test" }] as const;
-    const twoRows = mount(transcript, COLUMNS, 2);
-    await twoRows.terminal.press("abc");
-    await twoRows.tui.flush();
-    expect(twoRows.terminal.screen()).toEqual(["> Sửa test", "> abc"]);
+  it("drops the key hint on a terminal of two rows", async () => {
+    const { tui, terminal } = mount([{ kind: "user", id: "task", text: "Sửa test" }], COLUMNS, 2);
+    await terminal.press("abc");
+    await tui.flush();
+    expect(terminal.screen()).toEqual(["> Sửa test", "> abc"]);
+  });
 
-    const oneRow = mount(transcript, COLUMNS, 1);
-    await oneRow.terminal.press("abc");
-    await oneRow.tui.flush();
-    expect(oneRow.terminal.screen()).toEqual(["> abc"]);
+  it("drops the transcript too on a terminal of one row", async () => {
+    const { tui, terminal } = mount([{ kind: "user", id: "task", text: "Sửa test" }], COLUMNS, 1);
+    await terminal.press("abc");
+    await tui.flush();
+    expect(terminal.screen()).toEqual(["> abc"]);
     // The frame fits the screen, so typing redraws it in place.
     if (REDRAWS_IN_PLACE) {
-      expect(oneRow.terminal.takeOutput()).not.toContain(CLEAR_SCREEN);
+      expect(terminal.takeOutput()).not.toContain(CLEAR_SCREEN);
     }
   });
 
@@ -215,34 +222,35 @@ describe("prompt", () => {
     expect(terminal.terminal.buffer.active.type).toBe("normal");
   });
 
-  it("switches stdin to raw mode only while it draws on a terminal", async () => {
-    const drawn = mount();
-    await drawn.tui.flush();
-    expect(drawn.terminal.isRawMode()).toBe(true);
+  it("switches stdin to raw mode while it draws on a terminal", async () => {
+    const { tui, terminal } = mount();
+    await tui.flush();
+    expect(terminal.isRawMode()).toBe(true);
+  });
 
-    // Output piped, input still the terminal: nothing is drawn, so the terminal keeps its keys and
-    // Ctrl+C still stops the process.
+  it("leaves stdin out of raw mode when output is piped", async () => {
+    // Input still the terminal: nothing is drawn, so the terminal keeps its keys and Ctrl+C still
+    // stops the process.
     const stdout = new Writable({
       write(_chunk, _encoding, callback) {
         callback();
       },
     }) as unknown as NodeJS.WriteStream;
-    const piped = mount([], COLUMNS, ROWS, { stdout });
-    await piped.tui.flush();
-    expect(piped.terminal.isRawMode()).toBe(false);
+    const { tui, terminal } = mount([], COLUMNS, ROWS, { stdout });
+    await tui.flush();
+    expect(terminal.isRawMode()).toBe(false);
   });
 
   it("shows the keys under the prompt, both cancel keys first", async () => {
-    const wide = mount([], 80);
-    await wide.tui.flush();
-    expect(wide.terminal.screen().at(-1)).toBe(
-      "Esc/Ctrl+C cancel · Enter submit · PgUp/PgDn scroll",
-    );
+    const { tui, terminal } = mount([], 80);
+    await tui.flush();
+    expect(terminal.screen().at(-1)).toBe("Esc/Ctrl+C cancel · Enter submit · PgUp/PgDn scroll");
+  });
 
-    // A narrow terminal cuts the hint, but not before the cancel keys.
-    const narrow = mount([], 20);
-    await narrow.tui.flush();
-    expect(narrow.terminal.screen().at(-1)).toBe("Esc/Ctrl+C cancel ·…");
+  it("cuts the key hint on a narrow terminal, but not before the cancel keys", async () => {
+    const { tui, terminal } = mount([], 20);
+    await tui.flush();
+    expect(terminal.screen().at(-1)).toBe("Esc/Ctrl+C cancel ·…");
   });
 });
 
