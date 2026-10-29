@@ -87,9 +87,8 @@ function routePromptKey(input: string, key: KeyPress): readonly KeyAction[] {
   return [...insert(input.slice(0, enter.index)), SUBMIT];
 }
 
-// Pasted text keeps its line breaks and tabs. The prompt is one row and its text goes to
-// onSubmit, so line breaks and tabs become spaces and other control characters are dropped before
-// the prompt keeps the text.
+// Typed and pasted text alike can carry line breaks and tabs. The Prompt is one row and its text
+// goes to onSubmit, so they become spaces, and other control characters are dropped.
 function insert(input: string): readonly KeyAction[] {
   const text = input.replace(/\r\n|[\r\n\t]/g, " ").replace(/\p{Cc}/gu, "");
   return text === "" ? [] : [{ kind: "insert", text }];
