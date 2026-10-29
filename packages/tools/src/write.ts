@@ -42,6 +42,7 @@ export interface WriteFileSystem {
   lstat(path: RepoPath): Promise<FileStat>;
   mkdir(path: RepoPath): Promise<unknown>;
   open(path: RepoPath, flags: number, mode: number): Promise<WriteHandle>;
+  realpath(path: RepoPath): Promise<string>;
   rename(from: RepoPath, to: RepoPath): Promise<void>;
   unlink(path: RepoPath): Promise<void>;
 }
@@ -89,16 +90,25 @@ export function writeToolWith(fs: WriteFileSystem): ExecutableTool<typeof WriteP
       const invalid = checkInput(input);
       if (invalid !== undefined) return prepareFailure("SCHEMA_VIOLATION", invalid);
       const resolved = await workspace.resolveForCreate(input.path);
-      if (!resolved.ok) return resolved;
+      if (!resolved.ok) {
+        // resolveForCreate only returns NOT_FOUND when the path cannot be created: a parent is a
+        // file, the name is invalid or too long, or a component disappeared. Write's contract
+        // reports that as a failure to create the parent chain, not as a missing target.
+        const code = resolved.code === "NOT_FOUND" ? "PARENT_CREATION_FAILED" : resolved.code;
+        return prepareFailure(code, resolved.message);
+      }
       const target = await inspectTarget(fs, resolved.path);
       if (!target.ok) return prepareFailure(target.failure.code, target.failure.message);
+      const createsParents = target.mode === undefined && (await parentMissing(fs, resolved.path));
       const shown = relative(workspace.repoRoot, resolved.path) || ".";
+      const action = target.mode === undefined ? "create" : "overwrite";
+      const parents = createsParents ? "; creates parent directories" : "";
       return {
         ok: true,
         prepared: {
           input,
           paths: [resolved.path],
-          summary: `write ${shown} (${Buffer.byteLength(input.content, "utf8")} bytes)`,
+          summary: `${action} ${quote(shown)} (${Buffer.byteLength(input.content, "utf8")} bytes)${parents}`,
         },
       };
     },
@@ -106,7 +116,10 @@ export function writeToolWith(fs: WriteFileSystem): ExecutableTool<typeof WriteP
     // Re-resolves the path, since the filesystem may have changed since prepare.
     async execute({ input }, { workspace, signal }): Promise<ToolOutcome> {
       const resolved = await workspace.resolveForCreate(input.path);
-      if (!resolved.ok) return toolError(resolved.code, resolved.message);
+      if (!resolved.ok) {
+        const code = resolved.code === "NOT_FOUND" ? "PARENT_CREATION_FAILED" : resolved.code;
+        return toolError(code, resolved.message);
+      }
       return writeAtomically(fs, workspace.repoRoot, resolved.path, input.content, signal);
     },
   };
@@ -127,6 +140,20 @@ function checkInput({ path, content }: WriteInput): string | undefined {
   return undefined;
 }
 
+// Whether prepare will create at least one parent directory. Looking at the immediate parent is
+// enough: a missing ancestor implies a missing parent, and the resolver already rejects a file in
+// the parent chain.
+async function parentMissing(fs: WriteFileSystem, path: RepoPath): Promise<boolean> {
+  try {
+    await fs.lstat(dirname(path) as RepoPath);
+    return false;
+  } catch (cause) {
+    if (errnoOf(cause) === "ENOENT") return true;
+    if (errnoOf(cause) === "ENOTDIR") return false;
+    throw cause;
+  }
+}
+
 // Agent Core dispatches one Tool Call at a time and never asks for parallel tool calls (ADR 0002),
 // so this tool needs no process-local mutation queue of its own; the atomic rename still keeps an
 // external concurrent writer from exposing a partial file.
@@ -137,25 +164,31 @@ async function writeAtomically(
   content: string,
   signal: AbortSignal,
 ): Promise<ToolOutcome> {
+  const created: RepoPath[] = [];
+  const fail = (failure: WriteFailure): ToolOutcome =>
+    toolError(failure.code, withCreatedDirectories(failure.message, repoRoot, created));
+
   signal.throwIfAborted();
-  const parentProblem = await createParents(fs, repoRoot, path);
-  if (parentProblem !== undefined) return toolError(parentProblem.code, parentProblem.message);
+  const parentProblem = await createParents(fs, repoRoot, path, created);
+  if (parentProblem !== undefined) return fail(parentProblem);
 
   const target = await inspectTarget(fs, path);
-  if (!target.ok) return toolError(target.failure.code, target.failure.message);
+  if (!target.ok) return fail(target.failure);
 
   const directory = dirname(path) as RepoPath;
+  const directoryProblem = await inspectDirectory(fs, directory);
+  if (directoryProblem !== undefined) return fail(directoryProblem);
+
   const temporary = join(directory, `.coding-agent-${randomUUID()}.tmp`) as RepoPath;
-  let created = false;
+  let createdTemporary = false;
   let renamed = false;
   try {
     let handle: WriteHandle;
     try {
       handle = await fs.open(temporary, OPEN_FLAGS, target.mode ?? DEFAULT_FILE_MODE);
-      created = true;
+      createdTemporary = true;
     } catch (cause) {
-      const failure = openFailure(directory, cause);
-      return toolError(failure.code, failure.message);
+      return fail(openFailure(directory, cause));
     }
 
     let writeError: unknown;
@@ -175,22 +208,18 @@ async function writeAtomically(
     } catch (cause) {
       writeError ??= cause;
     }
-    if (writeError !== undefined) {
-      const failure = writeFailure(path, writeError);
-      return toolError(failure.code, failure.message);
-    }
+    if (writeError !== undefined) return fail(writeFailure(path, writeError));
     signal.throwIfAborted();
 
     try {
       await renameWithRetry(fs, temporary, path, signal);
       renamed = true;
     } catch (cause) {
-      const failure = renameFailure(path, cause);
-      return toolError(failure.code, failure.message);
+      return fail(renameFailure(path, cause));
     }
     return success(`${quote(path)} (${Buffer.byteLength(content, "utf8")} bytes written)`);
   } finally {
-    if (created && !renamed) await fs.unlink(temporary).catch(() => undefined);
+    if (createdTemporary && !renamed) await fs.unlink(temporary).catch(() => undefined);
   }
 }
 
@@ -221,11 +250,12 @@ async function renameWithRetry(
 
 // Creates each missing component with mkdir rather than a recursive call, which would follow a
 // symbolic link swapped in after resolution. Directories created before a later failure are not
-// rolled back, as ADR 0001 §5 accepts.
+// rolled back, as ADR 0001 §5 accepts; writeAtomically reports them in the failure.
 async function createParents(
   fs: WriteFileSystem,
   repoRoot: RepoPath,
   path: RepoPath,
+  created: RepoPath[],
 ): Promise<WriteFailure | undefined> {
   const parent = dirname(path);
   const segments = relative(repoRoot, parent)
@@ -236,6 +266,7 @@ async function createParents(
     current = join(current, segment) as RepoPath;
     try {
       await fs.mkdir(current);
+      created.push(current);
       continue;
     } catch (cause) {
       if (errnoOf(cause) !== "EEXIST") return parentFailure(current, cause);
@@ -280,6 +311,14 @@ async function inspectTarget(fs: WriteFileSystem, path: RepoPath): Promise<Targe
         failure: { code: "PERMISSION_DENIED", message: `${quote(path)} is not a regular file` },
       };
     }
+    // Rename only needs write access to the directory, so without this check a read-only target
+    // would be replaced silently. A direct write would fail, and a locked file is intentional.
+    if ((stats.mode & 0o222) === 0) {
+      return {
+        ok: false,
+        failure: { code: "PERMISSION_DENIED", message: `${quote(path)} is read-only` },
+      };
+    }
     return { ok: true, mode: stats.mode & 0o777 };
   } catch (cause) {
     switch (errnoOf(cause)) {
@@ -310,8 +349,52 @@ async function inspectTarget(fs: WriteFileSystem, path: RepoPath): Promise<Targe
   }
 }
 
-// Maps the expected failures to the port's codes; anything else is rethrown so Agent Core reports
-// TOOL_INTERNAL_ERROR.
+// The resolver verifies the lexical path before creation and createParents checks every component
+// it creates, but a parent can still be swapped for a symbolic link after those checks. Requiring
+// the destination directory to canonicalize to itself catches that before the temporary file is
+// opened; the window between this check and the open is the TOCTOU gap ADR 0001 accepts.
+async function inspectDirectory(
+  fs: WriteFileSystem,
+  directory: RepoPath,
+): Promise<WriteFailure | undefined> {
+  try {
+    if ((await fs.realpath(directory)) !== directory) {
+      return {
+        code: "PATH_OUTSIDE_REPO",
+        message: `${quote(directory)} changed while being created; symbolic links are not followed`,
+      };
+    }
+    return undefined;
+  } catch (cause) {
+    switch (errnoOf(cause)) {
+      case "ENOENT":
+      case "ENOTDIR":
+        return {
+          code: "PARENT_CREATION_FAILED",
+          message: `${quote(directory)} disappeared while being created`,
+        };
+      case "EACCES":
+      case "EPERM":
+        return {
+          code: "PERMISSION_DENIED",
+          message: `${quote(directory)} cannot be inspected: permission denied`,
+        };
+      case "ELOOP":
+        return symbolicLinkFailure(directory);
+      case "EINVAL":
+        return {
+          code: "PARENT_CREATION_FAILED",
+          message: `${quote(directory)} is not a valid path on this platform`,
+        };
+      default:
+        throw cause;
+    }
+  }
+}
+
+// Maps the expected failures to the port's codes. Anything else, including EIO and the capacity
+// errors ENOSPC, EDQUOT, and EFBIG, is rethrown so Agent Core reports TOOL_INTERNAL_ERROR with the
+// OS message; ADR 0001 has no code for them, and adding one would be an ADR change outside CDA-62.
 function parentFailure(path: RepoPath, cause: unknown): WriteFailure {
   switch (errnoOf(cause)) {
     case "EACCES":
@@ -404,6 +487,18 @@ function symbolicLinkFailure(path: RepoPath): WriteFailure {
     code: "PATH_OUTSIDE_REPO",
     message: `${quote(path)} is a symbolic link; symbolic links are not followed`,
   };
+}
+
+// ADR 0001 §5 accepts that created directories are not rolled back; the Tool Result must report
+// them so the model knows what remains after a failure.
+function withCreatedDirectories(
+  message: string,
+  repoRoot: RepoPath,
+  created: readonly RepoPath[],
+): string {
+  if (created.length === 0) return message;
+  const shown = created.map((directory) => quote(relative(repoRoot, directory))).join(", ");
+  return `${message}; created directories: ${shown}`;
 }
 
 // The canonical path can hold any character but "/" and NUL, so it is quoted to keep a name with

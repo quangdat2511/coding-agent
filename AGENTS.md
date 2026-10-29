@@ -52,7 +52,8 @@ There is no build step defined yet.
 **Platforms**: Linux, macOS, and Windows. Windows follows Pi's native-Windows approach: Git Bash,
 MSYS, Cygwin, and WSL drive paths are normalized before resolution, junctions are rejected like
 symbolic links, and the future `bash` tool should resolve Git Bash first with an optional
-PowerShell tool, without requiring WSL.
+PowerShell tool, without requiring WSL. Windows-specific path handling is unit-tested on every
+host; CI has no Windows runner, so Windows behavior is not exercised end-to-end there.
 
 ## Architecture
 

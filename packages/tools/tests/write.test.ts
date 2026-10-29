@@ -244,6 +244,28 @@ describe("refusing a write", () => {
     expect(await readdir(repo)).toEqual([]);
   });
 
+  it("refuses to replace a read-only file", async () => {
+    await writeFile(join(repo, "a.ts"), "old\n");
+    await chmod(join(repo, "a.ts"), 0o444);
+
+    expect(await prepare({ path: "a.ts", content: "new\n" })).toMatchObject({
+      ok: false,
+      code: "PERMISSION_DENIED",
+      message: expect.stringContaining("read-only"),
+    });
+    expect(await readFile(join(repo, "a.ts"), "utf8")).toBe("old\n");
+  });
+
+  it("reports a parent that is a file as PARENT_CREATION_FAILED", async () => {
+    await writeFile(join(repo, "file.txt"), "");
+
+    expect(await write({ path: "file.txt/a.ts", content: "x" })).toMatchObject({
+      isError: true,
+      error: { code: "PARENT_CREATION_FAILED" },
+    });
+    expect(await readdir(repo)).toEqual(["file.txt"]);
+  });
+
   it("reports a parent that cannot be created as PARENT_CREATION_FAILED", async () => {
     const tool = writeToolWith({
       ...fs,
@@ -346,17 +368,67 @@ describe("refusing a write", () => {
     expect(await readdir(repo)).toEqual(["a.ts"]);
   });
 
-  it("leaves created parent directories behind when a later write fails", async () => {
+  it("reports created parent directories when a later write fails", async () => {
     const tool = writeToolWith({
       ...fs,
       rename: async () => {
-        throw Object.assign(new Error("EIO: i/o error"), { code: "EIO" });
+        throw Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" });
       },
     });
 
-    await expect(write({ path: "src/new/a.ts", content: "x" }, tool)).rejects.toThrow("EIO");
+    expect(await write({ path: "src/new/a.ts", content: "x" }, tool)).toMatchObject({
+      isError: true,
+      error: {
+        code: "PERMISSION_DENIED",
+        message: expect.stringContaining('created directories: "src", "src/new"'),
+      },
+    });
     expect((await stat(join(repo, "src/new"))).isDirectory()).toBe(true);
     expect(await readdir(join(repo, "src/new"))).toEqual([]);
+  });
+
+  it("reports directories created before parent creation fails", async () => {
+    const tool = writeToolWith({
+      ...fs,
+      mkdir: async (path) => {
+        if (path === join(repo, "src", "new")) {
+          throw Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" });
+        }
+        await fs.mkdir(path);
+      },
+    });
+
+    expect(await write({ path: "src/new/a.ts", content: "x" }, tool)).toMatchObject({
+      isError: true,
+      error: {
+        code: "PARENT_CREATION_FAILED",
+        message: expect.stringContaining('created directories: "src"'),
+      },
+    });
+    expect(await readdir(join(repo, "src"))).toEqual([]);
+  });
+
+  it("rechecks the destination directory after creating parents", async () => {
+    await mkdir(join(sandbox, "outside"));
+    let swapped = false;
+    const tool = writeToolWith({
+      ...fs,
+      mkdir: async (path) => {
+        await fs.mkdir(path);
+        if (!swapped && path === join(repo, "a")) {
+          swapped = true;
+          await fs.rename(path, join(sandbox, "moved"));
+          await fs.symlink(join(sandbox, "outside"), path);
+        }
+      },
+    });
+
+    expect(await write({ path: "a/b/evil.ts", content: "evil\n" }, tool)).toMatchObject({
+      isError: true,
+      error: { code: "PATH_OUTSIDE_REPO" },
+    });
+    expect(await readdir(join(sandbox, "outside"))).toEqual(["b"]);
+    expect(await readdir(join(sandbox, "outside", "b"))).toEqual([]);
   });
 
   it("does not rename after cancellation and leaves the original file intact", async () => {
@@ -436,6 +508,9 @@ describe("the two phases", () => {
       open: async () => {
         throw new Error("prepare must not open the file");
       },
+      realpath: async () => {
+        throw new Error("prepare must not resolve the directory");
+      },
       rename: async () => {
         throw new Error("prepare must not rename the file");
       },
@@ -449,9 +524,57 @@ describe("the two phases", () => {
       prepared: {
         input: { path: "src/new/file.ts", content: "héllo\n" },
         paths: [join(repo, "src/new/file.ts") as RepoPath],
-        summary: "write src/new/file.ts (7 bytes)",
+        summary: 'create "src/new/file.ts" (7 bytes); creates parent directories',
       },
     });
+    expect(await readdir(repo)).toEqual([]);
+  });
+
+  it("summarizes an overwrite with the quoted path and byte count", async () => {
+    await writeFile(join(repo, "a b.ts"), "old\n");
+
+    expect(await prepare({ path: "a b.ts", content: "new\n" })).toEqual({
+      ok: true,
+      prepared: {
+        input: { path: "a b.ts", content: "new\n" },
+        paths: [join(repo, "a b.ts") as RepoPath],
+        summary: 'overwrite "a b.ts" (4 bytes)',
+      },
+    });
+  });
+
+  it("does not mention parent directories when they already exist", async () => {
+    await mkdir(join(repo, "src"));
+
+    expect(await prepare({ path: "src/a.ts", content: "x" })).toMatchObject({
+      ok: true,
+      prepared: { summary: 'create "src/a.ts" (1 bytes)' },
+    });
+  });
+
+  it("resolves the input again before writing", async () => {
+    const actual = workspace;
+    const calls: string[] = [];
+    const changing: WorkspaceResolver = {
+      ...actual,
+      resolveForCreate: async (input) => {
+        calls.push(input);
+        if (calls.length === 2) {
+          return { ok: false, code: "PATH_OUTSIDE_REPO", message: "changed after prepare" };
+        }
+        return actual.resolveForCreate(input);
+      },
+    };
+    const tool = writeTool();
+    const ctx = { ...context(), workspace: changing };
+    const prepared = await tool.prepare({ path: "a.ts", content: "new\n" }, ctx);
+    if (!prepared.ok) throw new Error(`expected a prepared call, got: ${prepared.message}`);
+
+    expect(await tool.execute(prepared.prepared, ctx)).toMatchObject({
+      isError: true,
+      error: { code: "PATH_OUTSIDE_REPO", message: "changed after prepare" },
+    });
+    expect(calls).toEqual(["a.ts", "a.ts"]);
     expect(await readdir(repo)).toEqual([]);
   });
 
