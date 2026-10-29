@@ -14,6 +14,11 @@ export const KEYS = {
   pageDown: "\u001b[6~",
 } as const;
 
+// On a Windows console Ink clears the screen for every frame that fills it (isWindowsConsole in
+// ink/build/ink.js), and this TUI's frames always fill the screen, so a check that a frame is
+// redrawn in place holds on every other platform only.
+export const REDRAWS_IN_PLACE = process.platform !== "win32";
+
 // Ink holds a lone ESC for 20 ms in case the rest of an escape sequence follows, and only then
 // reports the escape key.
 const ESCAPE_DELAY_MS = 30;

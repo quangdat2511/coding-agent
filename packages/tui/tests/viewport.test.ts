@@ -2,7 +2,12 @@ import { afterEach, describe, expect, it } from "bun:test";
 import { FOOTER_HEIGHT } from "../src/app.tsx";
 import { type MountedTui, mountTui } from "../src/render.tsx";
 import type { TranscriptEntry, TuiHandlers } from "../src/types.ts";
-import { createTestTerminal, KEYS, type TestTerminal } from "./support/terminal.ts";
+import {
+  createTestTerminal,
+  KEYS,
+  REDRAWS_IN_PLACE,
+  type TestTerminal,
+} from "./support/terminal.ts";
 
 const COLUMNS = 40;
 // The height of the viewport. The terminal also has the prompt and the key hint under it.
@@ -227,8 +232,10 @@ describe("transcript viewport", () => {
       await tui.flush();
       expect(viewport(terminal)).toEqual(step.screen);
       const output = terminal.takeOutput();
-      expect(output).not.toContain(CLEAR_SCREEN);
-      expect(output).not.toContain(CLEAR_SCROLLBACK);
+      if (REDRAWS_IN_PLACE) {
+        expect(output).not.toContain(CLEAR_SCREEN);
+        expect(output).not.toContain(CLEAR_SCROLLBACK);
+      }
     }
     expect(terminal.terminal.buffer.active.type).toBe("alternate");
     expect(terminal.terminal.buffer.active.baseY).toBe(0);
@@ -291,8 +298,10 @@ describe("transcript viewport", () => {
 
     // A width change redraws in place.
     const output = terminal.takeOutput();
-    expect(output).not.toContain(CLEAR_SCREEN);
-    expect(output).not.toContain(CLEAR_SCROLLBACK);
+    if (REDRAWS_IN_PLACE) {
+      expect(output).not.toContain(CLEAR_SCREEN);
+      expect(output).not.toContain(CLEAR_SCROLLBACK);
+    }
 
     // A shorter terminal also ends on the last row. Ink redraws it in full, clearing the screen,
     // because the previous frame is taller than the screen and the cursor cannot reach its top.

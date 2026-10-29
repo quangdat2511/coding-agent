@@ -2,7 +2,12 @@ import { afterEach, describe, expect, it } from "bun:test";
 import { PassThrough, Writable } from "node:stream";
 import { type MountedTui, mountTui } from "../src/render.tsx";
 import type { TranscriptEntry, TuiHandlers } from "../src/types.ts";
-import { createTestTerminal, KEYS, type TestTerminal } from "./support/terminal.ts";
+import {
+  createTestTerminal,
+  KEYS,
+  REDRAWS_IN_PLACE,
+  type TestTerminal,
+} from "./support/terminal.ts";
 
 const COLUMNS = 40;
 const ROWS = 6;
@@ -11,11 +16,6 @@ const ROWS = 6;
 const PASTE_START = "\u001b[200~";
 const PASTE_END = "\u001b[201~";
 const CLEAR_SCREEN = "\u001b[2J";
-
-// On a Windows console Ink clears the screen for every frame that fills it (isWindowsConsole in
-// ink/build/ink.js), and this TUI's frames always fill the screen, so a check that a frame is
-// redrawn in place holds on every other platform only.
-const REDRAWS_IN_PLACE = process.platform !== "win32";
 
 function unexpectedHandlerCall(): never {
   throw new Error("The TUI called a handler these keys do not reach");
