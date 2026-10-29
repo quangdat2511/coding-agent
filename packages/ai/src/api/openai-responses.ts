@@ -73,10 +73,14 @@ export function buildParams(
           if (block.type === "text") {
             textParts.push(block.text);
           } else if (block.type === "tool_result") {
-            throw new Error("tool_result history is not supported by this adapter yet (CDA-43)");
+            // A tool message has no error flag; the content carries the error.
+            messages.push({ role: "tool", tool_call_id: block.toolCallId, content: block.content });
           }
         }
-        messages.push({ role: "user", content: textParts.join("") });
+        const answersToolCalls = msg.content.some((block) => block.type === "tool_result");
+        if (!answersToolCalls || textParts.length > 0) {
+          messages.push({ role: "user", content: textParts.join("") });
+        }
       }
     } else {
       const textParts: string[] = [];
@@ -158,6 +162,9 @@ export function stream(model: Model, context: Context, options?: StreamOptions):
           model: model.id,
           messages: messages,
           ...(tools ? { tools } : {}),
+          ...(tools && options?.parallelToolCalls !== undefined
+            ? { parallel_tool_calls: options.parallelToolCalls }
+            : {}),
           temperature: options?.temperature,
           max_tokens: options?.maxTokens,
           stream: true,

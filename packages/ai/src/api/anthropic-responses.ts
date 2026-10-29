@@ -73,6 +73,22 @@ function ensureNonEmptyContent<T>(parts: T[], role: "user" | "assistant"): T[] {
   return parts;
 }
 
+const asBlocks = (content: Anthropic.MessageParam["content"]): Anthropic.ContentBlockParam[] =>
+  typeof content === "string" ? [{ type: "text", text: content }] : content;
+
+// Anthropic rejects a tool_use turn whose tool_result blocks are split across user messages.
+function pushUserMessage(
+  messages: Anthropic.MessageParam[],
+  content: Anthropic.MessageParam["content"],
+): void {
+  const previous = messages.at(-1);
+  if (previous?.role === "user") {
+    previous.content = [...asBlocks(previous.content), ...asBlocks(content)];
+  } else {
+    messages.push({ role: "user", content });
+  }
+}
+
 export function buildParams(context: Context): Anthropic.MessageParam[] {
   const messages: Anthropic.MessageParam[] = [];
 
@@ -82,27 +98,24 @@ export function buildParams(context: Context): Anthropic.MessageParam[] {
         if (msg.content.trim().length === 0) {
           throw new Error("Anthropic messages require non-empty text content (role: user)");
         }
-        messages.push({
-          role: "user",
-          content: msg.content,
-        });
+        pushUserMessage(messages, msg.content);
       } else {
-        const parts: Anthropic.TextBlockParam[] = [];
+        const parts: Array<Anthropic.TextBlockParam | Anthropic.ToolResultBlockParam> = [];
         for (const block of msg.content) {
           if (block.type === "text") {
             if (block.text.trim().length > 0) {
               parts.push({ type: "text", text: block.text });
             }
           } else if (block.type === "tool_result") {
-            throw new Error(
-              "tool_result history is not supported by the Anthropic adapter yet (CDA-43)",
-            );
+            parts.push({
+              type: "tool_result",
+              tool_use_id: block.toolCallId,
+              content: block.content,
+              is_error: block.isError,
+            });
           }
         }
-        messages.push({
-          role: "user",
-          content: ensureNonEmptyContent(parts, "user"),
-        });
+        pushUserMessage(messages, ensureNonEmptyContent(parts, "user"));
       }
     } else {
       const parts: Array<Anthropic.TextBlockParam | Anthropic.ToolUseBlockParam> = [];
@@ -186,6 +199,9 @@ export function stream(model: Model, context: Context, options?: StreamOptions):
           messages: messages,
           system: context.systemPrompt,
           ...(tools ? { tools } : {}),
+          ...(tools && options?.parallelToolCalls === false
+            ? { tool_choice: { type: "auto", disable_parallel_tool_use: true } }
+            : {}),
           temperature: options?.temperature,
           max_tokens: options?.maxTokens || 4096,
           stream: true,

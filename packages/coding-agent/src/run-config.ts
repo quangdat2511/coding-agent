@@ -18,7 +18,7 @@ import {
   readEnvCredential,
 } from "@coding-agent/ai";
 import { normalizeWindowsShellPath } from "@coding-agent/tools";
-import type { Profile, RunArgs } from "./run-args.ts";
+import type { Profile, ProviderId, RunArgs } from "./run-args.ts";
 
 // The ADR 0003 §4 defaults. CDA-59 chose cancellationGraceMs: long enough for a tool or
 // Verification child to go from SIGTERM to SIGKILL, and short enough that a cancelled run still
@@ -30,6 +30,23 @@ export const DEFAULT_SESSION_LIMITS: SessionLimits = Object.freeze({
   maxConsecutiveRecoverableFailures: 3,
   cancellationGraceMs: 5_000,
 });
+
+// null leaves a setting to the provider's own default.
+export interface SamplingSettings {
+  readonly maxOutputTokens: number | null;
+  readonly temperature: number | null;
+}
+
+// Anthropic requires a cap, and ai otherwise sends 4,096 tokens, too few for a large write.
+export const SAMPLING_BY_PROVIDER: Readonly<Record<ProviderId, SamplingSettings>> = Object.freeze({
+  anthropic: Object.freeze({ maxOutputTokens: 32_000, temperature: null }),
+  google: Object.freeze({ maxOutputTokens: null, temperature: null }),
+  openai: Object.freeze({ maxOutputTokens: null, temperature: null }),
+  openrouter: Object.freeze({ maxOutputTokens: null, temperature: null }),
+  xai: Object.freeze({ maxOutputTokens: null, temperature: null }),
+});
+
+export const TRANSPORT_RETRY_BOUND = 2;
 
 // The only way to configure a verification command, for every entry point. It is not a flag,
 // because ADR 0005 §3 fixes the command line, and not a repository file, because the repository
@@ -60,6 +77,8 @@ export interface RunConfig {
   readonly taskFile: string;
   readonly model: Model;
   readonly credential: ResolvedCredential;
+  readonly sampling: SamplingSettings;
+  readonly transportRetryBound: number;
   readonly approvalPolicy: RunArgs["approvalPolicy"];
   // The canonical Repository Root.
   readonly repoRoot: string;
@@ -377,6 +396,8 @@ export async function resolveRunConfig(
       taskFile: task.value.path,
       model,
       credential: { variable, reveal: () => value },
+      sampling: SAMPLING_BY_PROVIDER[args.provider],
+      transportRetryBound: TRANSPORT_RETRY_BOUND,
       approvalPolicy: args.approvalPolicy,
       repoRoot: repoRoot.value.canonical,
       givenRepoRoot: repoRoot.value.given,

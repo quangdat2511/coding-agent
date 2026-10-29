@@ -116,6 +116,8 @@ export interface StreamOptions {
   headers?: Record<string, string>;
   maxRetries?: number;
   signal?: AbortSignal;
+  // Honoured only where the model declares parallelToolCallControl.
+  parallelToolCalls?: boolean;
 }
 
 export type ContentBlockDelta = { type: "text_delta"; text: string };
