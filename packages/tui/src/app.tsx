@@ -1,4 +1,4 @@
-import { Box, Text, useInput, usePaste, useStdin, useStdout } from "ink";
+import { Box, Text, useInput, usePaste, useStdin } from "ink";
 import { useRef, useState } from "react";
 import { type KeyAction, routeKey, routePaste } from "./input.ts";
 import type { TranscriptRow } from "./rows.ts";
@@ -31,6 +31,7 @@ export function App({
   rows,
   height,
   hint,
+  interactive,
   handlers,
   onScroll,
 }: {
@@ -38,6 +39,8 @@ export function App({
   height: number;
   // Whether the key hint fits under the prompt; see frameLayout.
   hint: boolean;
+  // Whether mountTui draws on a terminal.
+  interactive: boolean;
   handlers: TuiHandlers;
   // -1 for a page toward older entries, 1 for a page toward the newest.
   onScroll(direction: -1 | 1): void;
@@ -89,14 +92,12 @@ export function App({
   }
 
   // Ink reads keys only from a stdin it can switch to raw mode, and throws for any other. Without
-  // one, as when input is piped, the TUI still draws and takes no input. Without a terminal on
-  // stdout, as when output is piped, mountTui draws nothing, and raw mode would leave the person
-  // typing at a blank screen where Ctrl+C no longer stops the process, so it takes no input then
-  // either. Both flags are isTTY, undefined on a plain stream, and the hooks treat only false as
-  // inactive.
+  // one, as when input is piped, the TUI still draws and takes no input. When mountTui draws
+  // nothing, as when output is piped, raw mode would leave the person typing at a blank screen
+  // where Ctrl+C no longer stops the process, so it takes no input then either. Ink's flag is
+  // stdin's isTTY, undefined on a plain stream, and the hooks treat only false as inactive.
   const { isRawModeSupported } = useStdin();
-  const { stdout } = useStdout();
-  const takesInput = isRawModeSupported === true && stdout.isTTY === true;
+  const takesInput = interactive && isRawModeSupported === true;
   useInput((input, key) => perform(routeKey("prompt", input, key)), { isActive: takesInput });
   usePaste((pasted) => perform(routePaste("prompt", pasted)), { isActive: takesInput });
 

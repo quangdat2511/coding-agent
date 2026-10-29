@@ -60,6 +60,7 @@ export function mountTui(
         rows={rows.slice(top, top + height)}
         height={height}
         hint={hint}
+        interactive={interactive}
         handlers={props.handlers}
         onScroll={(direction) => draw(direction * pageRows(layout().transcript))}
       />,
