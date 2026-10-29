@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "bun:test";
-import { FOOTER_HEIGHT } from "../src/app.tsx";
+import { FOOTER_HEIGHT } from "../src/frame.tsx";
 import { type MountedTui, mountTui } from "../src/render.tsx";
 import type { TranscriptEntry, TuiHandlers } from "../src/types.ts";
 import {

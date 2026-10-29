@@ -1,5 +1,5 @@
 import { render } from "ink";
-import { App, frameLayout } from "./app.tsx";
+import { Frame, frameLayout } from "./frame.tsx";
 import { transcriptRows } from "./rows.ts";
 import type { TuiHandle, TuiHandlers, TuiModel } from "./types.ts";
 import { FOLLOWING, pageRows, positionAt, type ScrollPosition, topRow } from "./viewport.ts";
@@ -58,7 +58,7 @@ export function mountTui(
     const top = topRow(rows, viewportHeight, position);
     // Every draw renders a new onScroll, a resize included, so the height it pages by is current.
     instance.rerender(
-      <App
+      <Frame
         rows={rows.slice(top, top + viewportHeight)}
         layout={frame}
         interactive={interactive}

@@ -39,7 +39,7 @@ const graphemes = new Intl.Segmenter(undefined, { granularity: "grapheme" });
 // goes through the input policy, and this component carries out what it decides. mountTui renders
 // it again for each frame, so the Prompt's text, kept here, survives transcript updates. The scroll
 // position stays with mountTui, which lays out the rows, so scrolling goes back to it as onScroll.
-export function App({
+export function Frame({
   rows,
   layout,
   interactive,
