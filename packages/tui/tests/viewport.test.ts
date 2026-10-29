@@ -10,7 +10,7 @@ import {
 import { mountOn, prompt, unmountTui, viewport } from "./support/tui.ts";
 
 const COLUMNS = 40;
-// The height of the viewport. The terminal also has the prompt and the key hint under it.
+// The height of the viewport. The terminal also has the Prompt and the key hint under it.
 const VIEWPORT_ROWS = 10;
 
 // ESC[2J clears the screen and ESC[3J the scrollback: Ink sends both whenever a frame is taller than
@@ -18,7 +18,7 @@ const VIEWPORT_ROWS = 10;
 const CLEAR_SCREEN = "\u001b[2J";
 const CLEAR_SCROLLBACK = "\u001b[3J";
 
-// `viewportRows` is the height of the viewport: the terminal also has the prompt and the key hint
+// `viewportRows` is the height of the viewport: the terminal also has the Prompt and the key hint
 // below it.
 function mount(
   transcript: readonly TranscriptEntry[],
@@ -109,19 +109,19 @@ describe("transcript viewport", () => {
     expect(viewport(terminal)).toEqual(lines(31, 40));
   });
 
-  it("sends typing to the prompt and scroll keys to the viewport", async () => {
+  it("sends typing to the Prompt and scroll keys to the viewport", async () => {
     const { tui, terminal } = mount([message("m-1", 30)]);
     await terminal.press(KEYS.pageUp);
     await tui.flush();
     expect(viewport(terminal)).toEqual(lines(12, 21));
 
-    // Typing reaches the prompt and leaves the viewport where it was.
+    // Typing reaches the Prompt and leaves the viewport where it was.
     await terminal.press("abc");
     await tui.flush();
     expect(viewport(terminal)).toEqual(lines(12, 21));
     expect(prompt(terminal)).toBe("> abc");
 
-    // A scroll key moves the viewport and leaves the prompt as it was.
+    // A scroll key moves the viewport and leaves the Prompt as it was.
     await terminal.press(KEYS.pageDown);
     await tui.flush();
     expect(viewport(terminal)).toEqual(lines(21, 30));
@@ -133,7 +133,7 @@ describe("transcript viewport", () => {
     await terminal.press(KEYS.pageUp);
     await tui.flush();
 
-    // The arrow keys are left for the prompt's own use later; for now they do nothing.
+    // The arrow keys are left for the Prompt's own use later; for now they do nothing.
     await terminal.press(KEYS.up, KEYS.down);
     await tui.flush();
     expect(viewport(terminal)).toEqual(lines(12, 21));

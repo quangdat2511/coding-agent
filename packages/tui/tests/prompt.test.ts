@@ -40,7 +40,7 @@ function mount(
 
 afterEach(unmountTui);
 
-describe("prompt", () => {
+describe("Prompt", () => {
   it("shows typed text and deletes it with Backspace", async () => {
     const { tui, terminal } = mount();
     await terminal.press("Sửa testt", KEYS.backspace);
@@ -56,7 +56,7 @@ describe("prompt", () => {
     expect(prompt(terminal)).toBe("> S");
   });
 
-  it("submits the typed task and clears the prompt", async () => {
+  it("submits the typed task and clears the Prompt", async () => {
     const { tui, terminal, submitted } = mount();
     await terminal.press("Sửa test", KEYS.enter);
     await tui.flush();
@@ -117,7 +117,7 @@ describe("prompt", () => {
     expect(submitted).toEqual(["Sửa"]);
   });
 
-  it("does not submit a prompt of only spaces, and clears it", async () => {
+  it("does not submit a Prompt of only spaces, and clears it", async () => {
     const { tui, submitted, terminal } = mount();
     await terminal.press(KEYS.enter, "   ", KEYS.enter);
     await tui.flush();
@@ -144,7 +144,7 @@ describe("prompt", () => {
     expect(submitted).toEqual(["dong 1 dong 2"]);
   });
 
-  it("shows the end of a task wider than the prompt row, without clearing the screen", async () => {
+  it("shows the end of a task wider than the Prompt row, without clearing the screen", async () => {
     const { tui, terminal } = mount();
     await tui.flush();
     terminal.takeOutput();
@@ -216,7 +216,7 @@ describe("prompt", () => {
     expect(terminal.isRawMode()).toBe(false);
   });
 
-  it("shows the keys under the prompt, both cancel keys first", async () => {
+  it("shows the keys under the Prompt, both cancel keys first", async () => {
     const { tui, terminal } = mount([], 80);
     await tui.flush();
     expect(terminal.screen().at(-1)).toBe("Esc/Ctrl+C cancel · Enter submit · PgUp/PgDn scroll");
@@ -230,7 +230,7 @@ describe("prompt", () => {
 });
 
 describe("cancel keys", () => {
-  it("call onCancel on Esc and leave the typed text in the prompt", async () => {
+  it("call onCancel on Esc and leave the typed text in the Prompt", async () => {
     const { tui, terminal, cancelled } = mount();
     await terminal.press("abc", KEYS.escape);
     await tui.flush();

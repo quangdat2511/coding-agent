@@ -19,7 +19,7 @@ function mount(
 }
 
 // The whole visible screen while the TUI runs: the given transcript rows, empty rows down to the
-// prompt, then the empty prompt and the key hint.
+// Prompt, then the empty Prompt and the key hint.
 function screenOf(...rows: string[]): string[] {
   return [...shellScreen(...rows).slice(0, ROWS - FOOTER_HEIGHT), ">", KEY_HINT];
 }

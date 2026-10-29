@@ -12,12 +12,12 @@ describe("routeKey", () => {
     expect(routeKey("prompt", "", { backspace: true })).toEqual([{ kind: "backspace" }]);
   });
 
-  it("sends Page Up and Page Down to the viewport, never to the prompt", () => {
+  it("sends Page Up and Page Down to the viewport, never to the Prompt", () => {
     expect(routeKey("prompt", "", { pageUp: true })).toEqual([{ kind: "scroll", direction: -1 }]);
     expect(routeKey("prompt", "", { pageDown: true })).toEqual([{ kind: "scroll", direction: 1 }]);
   });
 
-  it("sends typed text to the prompt, never to the viewport", () => {
+  it("sends typed text to the Prompt, never to the viewport", () => {
     expect(routeKey("prompt", "S", {})).toEqual([{ kind: "insert", text: "S" }]);
     // Characters that arrive together are inserted together.
     expect(routeKey("prompt", "Sửa test", {})).toEqual([{ kind: "insert", text: "Sửa test" }]);
@@ -72,7 +72,7 @@ describe("routeKey", () => {
 });
 
 describe("routePaste", () => {
-  it("inserts pasted lines into the prompt as one line, without submitting", () => {
+  it("inserts pasted lines into the Prompt as one line, without submitting", () => {
     expect(routePaste("prompt", "dong 1\rdong 2\n")).toEqual([
       { kind: "insert", text: "dong 1 dong 2 " },
     ]);
