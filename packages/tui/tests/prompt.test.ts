@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import { PassThrough, Writable } from "node:stream";
-import { type MountedTui, mountTui } from "../src/render.tsx";
+import { type MountedTui, mountTui, type TuiStreams } from "../src/render.tsx";
 import type { TranscriptEntry, TuiHandlers } from "../src/types.ts";
 import {
   createTestTerminal,
@@ -23,7 +23,13 @@ function unexpectedHandlerCall(): never {
 
 const mounted: { tui: MountedTui; terminal: TestTerminal }[] = [];
 
-function mount(transcript: readonly TranscriptEntry[] = [], columns = COLUMNS, rows = ROWS) {
+// `streams` stands in for the terminal's stdin or stdout, as when input or output is piped.
+function mount(
+  transcript: readonly TranscriptEntry[] = [],
+  columns = COLUMNS,
+  rows = ROWS,
+  streams: Partial<TuiStreams> = {},
+) {
   const terminal = createTestTerminal(columns, rows);
   const submitted: string[] = [];
   const cancelled = { count: 0 };
@@ -36,7 +42,7 @@ function mount(transcript: readonly TranscriptEntry[] = [], columns = COLUMNS, r
     },
     onApproval: unexpectedHandlerCall,
   };
-  const tui = mountTui({ model: { transcript }, handlers }, terminal.streams);
+  const tui = mountTui({ model: { transcript }, handlers }, { ...terminal.streams, ...streams });
   mounted.push({ tui, terminal });
   return { tui, terminal, submitted, cancelled };
 }
@@ -198,19 +204,10 @@ describe("prompt", () => {
   });
 
   it("draws without taking input when stdin is not a terminal", async () => {
-    const terminal = createTestTerminal(COLUMNS, ROWS);
-    const handlers: TuiHandlers = {
-      onSubmit: unexpectedHandlerCall,
-      onCancel: unexpectedHandlerCall,
-      onApproval: unexpectedHandlerCall,
-    };
     // A plain stream, as when input is piped: it cannot be switched to raw mode.
     const stdin = new PassThrough() as unknown as NodeJS.ReadStream;
-    const tui = mountTui(
-      { model: { transcript: [{ kind: "user", id: "task", text: "Sửa test" }] }, handlers },
-      { stdout: terminal.streams.stdout, stdin },
-    );
-    mounted.push({ tui, terminal });
+    const transcript = [{ kind: "user", id: "task", text: "Sửa test" }] as const;
+    const { tui, terminal } = mount(transcript, COLUMNS, ROWS, { stdin });
     await tui.flush();
     expect(terminal.screen()[0]).toBe("> Sửa test");
     expect(prompt(terminal)).toBe(">");
@@ -225,24 +222,14 @@ describe("prompt", () => {
 
     // Output piped, input still the terminal: nothing is drawn, so the terminal keeps its keys and
     // Ctrl+C still stops the process.
-    const terminal = createTestTerminal(COLUMNS, ROWS);
-    const handlers: TuiHandlers = {
-      onSubmit: unexpectedHandlerCall,
-      onCancel: unexpectedHandlerCall,
-      onApproval: unexpectedHandlerCall,
-    };
     const stdout = new Writable({
       write(_chunk, _encoding, callback) {
         callback();
       },
     }) as unknown as NodeJS.WriteStream;
-    const tui = mountTui(
-      { model: { transcript: [] }, handlers },
-      { stdout, stdin: terminal.streams.stdin },
-    );
-    mounted.push({ tui, terminal });
-    await tui.flush();
-    expect(terminal.isRawMode()).toBe(false);
+    const piped = mount([], COLUMNS, ROWS, { stdout });
+    await piped.tui.flush();
+    expect(piped.terminal.isRawMode()).toBe(false);
   });
 
   it("shows the keys under the prompt, both cancel keys first", async () => {
