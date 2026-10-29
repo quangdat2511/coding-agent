@@ -39,7 +39,7 @@ export function mountTui(
   let unmounted: Promise<void> | undefined;
 
   // Lays the transcript out for the current terminal size, moves the viewport by `scroll` rows and
-  // draws only the rows that fit above the prompt, so the frame is never taller than the screen.
+  // draws only the rows that fit above the Prompt, so the frame is never taller than the screen.
   function draw(scroll = 0) {
     // Ink would mount the tree again if it rendered after unmount.
     if (unmounted !== undefined) {
@@ -67,7 +67,7 @@ export function mountTui(
     );
   }
 
-  // How the terminal's rows are shared between the transcript, the prompt and the key hint.
+  // How the terminal's rows are shared between the transcript, the Prompt and the key hint.
   function layout() {
     return frameLayout(streams.stdout.rows || 24);
   }

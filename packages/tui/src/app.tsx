@@ -7,20 +7,20 @@ import type { TuiHandlers } from "./types.ts";
 
 const PROMPT_HEIGHT = 1;
 const HINT_HEIGHT = 1;
-// The rows under the transcript: the prompt, then the key hint.
+// The rows under the transcript: the Prompt, then the key hint.
 export const FOOTER_HEIGHT = PROMPT_HEIGHT + HINT_HEIGHT;
 
 // How the frame shares out the rows of the terminal.
 export interface FrameLayout {
   // The rows the transcript gets.
   readonly transcript: number;
-  // Whether the key hint fits under the prompt.
+  // Whether the key hint fits under the Prompt.
   readonly showHint: boolean;
-  // The rows of the whole frame: the transcript, the prompt and, when it shows, the key hint.
+  // The rows of the whole frame: the transcript, the Prompt and, when it shows, the key hint.
   readonly height: number;
 }
 
-// How a terminal `screenRows` tall is shared out. The prompt always shows; the key hint needs a
+// How a terminal `screenRows` tall is shared out. The Prompt always shows; the key hint needs a
 // third row and the transcript a second, so a shorter terminal drops the hint, then the
 // transcript, and the frame is never taller than the screen.
 export function frameLayout(screenRows: number): FrameLayout {
@@ -37,9 +37,9 @@ const PROMPT_MARKER = "> ";
 
 const graphemes = new Intl.Segmenter(undefined, { granularity: "grapheme" });
 
-// The whole frame: the transcript rows in view, the prompt and the key hint. Every key and paste
+// The whole frame: the transcript rows in view, the Prompt and the key hint. Every key and paste
 // goes through the input policy, and this component carries out what it decides. mountTui renders
-// it again for each frame, so the prompt text, kept here, survives transcript updates. The scroll
+// it again for each frame, so the Prompt's text, kept here, survives transcript updates. The scroll
 // position stays with mountTui, which lays out the rows, so scrolling goes back to it as onScroll.
 export function App({
   rows,
@@ -74,7 +74,7 @@ export function App({
           break;
         case "submit": {
           // Spaces around the task, such as the one a pasted line break leaves, are not part of
-          // it, and a prompt of only spaces has no Coding Task to start; Enter clears the prompt
+          // it, and a Prompt of only spaces has no Coding Task to start; Enter clears the Prompt
           // either way. Input methods may send a letter composed or as a base and combining
           // marks; NFC sends the same text in one form.
           const task = next.trim();
@@ -88,7 +88,7 @@ export function App({
           onScroll(action.direction);
           break;
         // Whether a task is running is the host's to know: it ignores a cancel with none. The
-        // prompt keeps its text, which may be the next task.
+        // Prompt keeps its text, which may be the next task.
         case "cancel":
           handlers.onCancel();
           break;
@@ -128,8 +128,8 @@ export function App({
   );
 }
 
-// Removes the last character as the user sees it, so a letter typed as a base and a combining mark,
-// or an emoji, goes in one Backspace.
+// Removes the last character as the person sees it, so a letter typed as a base and a combining
+// mark, or an emoji, goes in one Backspace.
 function withoutLastCharacter(text: string): string {
   const last = [...graphemes.segment(text)].at(-1);
   return last === undefined ? text : text.slice(0, last.index);

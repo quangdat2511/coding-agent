@@ -1,7 +1,7 @@
 // The input policy: what each key press or paste does in the TUI. It is the only place that
 // decides, so a new mode adds an entry to MODES here instead of key handling in another component.
 
-// Which part of the TUI has the keyboard. The transcript and the prompt share the only mode today;
+// Which part of the TUI has the keyboard. The transcript and the Prompt share the only mode today;
 // the Approval overlay (CDA-60) adds its own.
 export type InputMode = "prompt";
 
@@ -58,7 +58,7 @@ export function routePaste(mode: InputMode, text: string): readonly KeyAction[] 
   return MODES[mode].paste(text);
 }
 
-// Scroll keys go to the viewport and everything else to the prompt, so neither reaches the other.
+// Scroll keys go to the viewport and everything else to the Prompt, so neither reaches the other.
 function routePromptKey(input: string, key: KeyPress): readonly KeyAction[] {
   if (key.return) {
     return [SUBMIT];
