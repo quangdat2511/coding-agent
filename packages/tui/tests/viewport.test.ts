@@ -7,7 +7,7 @@ import {
   REDRAWS_IN_PLACE,
   type TestTerminal,
 } from "./support/terminal.ts";
-import { mountOn, unmountTui } from "./support/tui.ts";
+import { mountOn, prompt, unmountTui, viewport } from "./support/tui.ts";
 
 const COLUMNS = 40;
 // The height of the viewport. The terminal also has the prompt and the key hint under it.
@@ -18,21 +18,21 @@ const VIEWPORT_ROWS = 10;
 const CLEAR_SCREEN = "\u001b[2J";
 const CLEAR_SCROLLBACK = "\u001b[3J";
 
-// `rows` is the height of the viewport: the terminal also has the prompt and the key hint below it.
-function mount(transcript: readonly TranscriptEntry[], columns = COLUMNS, rows = VIEWPORT_ROWS) {
-  const terminal = createTestTerminal(columns, rows + FOOTER_HEIGHT);
+// `viewportRows` is the height of the viewport: the terminal also has the prompt and the key hint
+// below it.
+function mount(
+  transcript: readonly TranscriptEntry[],
+  columns = COLUMNS,
+  viewportRows = VIEWPORT_ROWS,
+) {
+  const terminal = createTestTerminal(columns, viewportRows + FOOTER_HEIGHT);
   // No key these tests press reaches a handler.
   const tui = mountOn(terminal, { transcript });
   return { tui, terminal };
 }
 
-function resize(terminal: TestTerminal, columns: number, rows: number) {
-  terminal.resize(columns, rows + FOOTER_HEIGHT);
-}
-
-// The rows of the viewport, above the prompt.
-function viewport(terminal: TestTerminal): string[] {
-  return terminal.screen().slice(0, -FOOTER_HEIGHT);
+function resize(terminal: TestTerminal, columns: number, viewportRows: number) {
+  terminal.resize(columns, viewportRows + FOOTER_HEIGHT);
 }
 
 afterEach(unmountTui);
@@ -119,13 +119,13 @@ describe("transcript viewport", () => {
     await terminal.press("abc");
     await tui.flush();
     expect(viewport(terminal)).toEqual(lines(12, 21));
-    expect(terminal.screen().at(-2)).toBe("> abc");
+    expect(prompt(terminal)).toBe("> abc");
 
     // A scroll key moves the viewport and leaves the prompt as it was.
     await terminal.press(KEYS.pageDown);
     await tui.flush();
     expect(viewport(terminal)).toEqual(lines(21, 30));
-    expect(terminal.screen().at(-2)).toBe("> abc");
+    expect(prompt(terminal)).toBe("> abc");
   });
 
   it("neither scrolls nor types on the arrow keys", async () => {
@@ -137,7 +137,7 @@ describe("transcript viewport", () => {
     await terminal.press(KEYS.up, KEYS.down);
     await tui.flush();
     expect(viewport(terminal)).toEqual(lines(12, 21));
-    expect(terminal.screen().at(-2)).toBe(">");
+    expect(prompt(terminal)).toBe(">");
   });
 
   it("does not scroll a transcript that fits on the screen", async () => {

@@ -2,30 +2,27 @@ import { afterEach, describe, expect, it } from "bun:test";
 import { PassThrough, Writable } from "node:stream";
 import type { TuiStreams } from "../src/render.tsx";
 import type { TranscriptEntry, TuiHandlers } from "../src/types.ts";
-import {
-  createTestTerminal,
-  KEYS,
-  REDRAWS_IN_PLACE,
-  type TestTerminal,
-} from "./support/terminal.ts";
-import { mountOn, unexpectedHandlerCall, unmountTui } from "./support/tui.ts";
+import { createTestTerminal, KEYS, REDRAWS_IN_PLACE } from "./support/terminal.ts";
+import { mountOn, prompt, unexpectedHandlerCall, unmountTui, viewport } from "./support/tui.ts";
 
 const COLUMNS = 40;
-const ROWS = 6;
+// The height of the whole terminal: the transcript, the Prompt and the key hint.
+const SCREEN_ROWS = 6;
 
 // Bracketed paste markers, which a terminal puts around pasted text once Ink asks for them.
 const PASTE_START = "\u001b[200~";
 const PASTE_END = "\u001b[201~";
 const CLEAR_SCREEN = "\u001b[2J";
 
-// `streams` stands in for the terminal's stdin or stdout, as when input or output is piped.
+// `screenRows` is the height of the whole terminal. `streams` stands in for its stdin or stdout, as
+// when input or output is piped.
 function mount(
   transcript: readonly TranscriptEntry[] = [],
   columns = COLUMNS,
-  rows = ROWS,
+  screenRows = SCREEN_ROWS,
   streams: Partial<TuiStreams> = {},
 ) {
-  const terminal = createTestTerminal(columns, rows);
+  const terminal = createTestTerminal(columns, screenRows);
   const submitted: string[] = [];
   const cancelled = { count: 0 };
   const handlers: TuiHandlers = {
@@ -42,11 +39,6 @@ function mount(
 }
 
 afterEach(unmountTui);
-
-// The prompt is the row above the key hint, at the bottom of the screen.
-function prompt(terminal: TestTerminal): string | undefined {
-  return terminal.screen().at(-2);
-}
 
 describe("prompt", () => {
   it("shows typed text and deletes it with Backspace", async () => {
@@ -197,7 +189,7 @@ describe("prompt", () => {
     // A plain stream, as when input is piped: it cannot be switched to raw mode.
     const stdin = new PassThrough() as unknown as NodeJS.ReadStream;
     const transcript = [{ kind: "user", id: "task", text: "Sửa test" }] as const;
-    const { tui, terminal } = mount(transcript, COLUMNS, ROWS, { stdin });
+    const { tui, terminal } = mount(transcript, COLUMNS, SCREEN_ROWS, { stdin });
     await tui.flush();
     expect(terminal.screen()[0]).toBe("> Sửa test");
     expect(prompt(terminal)).toBe(">");
@@ -219,7 +211,7 @@ describe("prompt", () => {
         callback();
       },
     }) as unknown as NodeJS.WriteStream;
-    const { tui, terminal } = mount([], COLUMNS, ROWS, { stdout });
+    const { tui, terminal } = mount([], COLUMNS, SCREEN_ROWS, { stdout });
     await tui.flush();
     expect(terminal.isRawMode()).toBe(false);
   });
@@ -264,12 +256,12 @@ describe("cancel keys", () => {
     ]);
     await terminal.press(KEYS.pageUp);
     await tui.flush();
-    const viewport = ["line 14", "line 15", "line 16", "line 17"];
-    expect(terminal.screen().slice(0, -2)).toEqual(viewport);
+    const inView = ["line 14", "line 15", "line 16", "line 17"];
+    expect(viewport(terminal)).toEqual(inView);
 
     await terminal.press(KEYS.escape);
     await tui.flush();
     expect(cancelled.count).toBe(1);
-    expect(terminal.screen().slice(0, -2)).toEqual(viewport);
+    expect(viewport(terminal)).toEqual(inView);
   });
 });

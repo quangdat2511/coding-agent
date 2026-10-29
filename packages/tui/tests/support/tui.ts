@@ -1,3 +1,4 @@
+import { FOOTER_HEIGHT } from "../../src/frame.tsx";
 import { type MountedTui, mountTui, type TuiStreams } from "../../src/render.tsx";
 import type { TuiHandlers, TuiModel } from "../../src/types.ts";
 import type { TestTerminal } from "./terminal.ts";
@@ -40,4 +41,14 @@ export async function unmountTui(): Promise<void> {
     await tui.unmount();
     terminal.dispose();
   }
+}
+
+// The Prompt's row, the first of the rows under the transcript.
+export function prompt(terminal: TestTerminal): string | undefined {
+  return terminal.screen().at(-FOOTER_HEIGHT);
+}
+
+// The rows of the viewport, above the Prompt and the key hint.
+export function viewport(terminal: TestTerminal): string[] {
+  return terminal.screen().slice(0, -FOOTER_HEIGHT);
 }
