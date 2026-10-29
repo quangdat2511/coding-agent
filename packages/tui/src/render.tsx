@@ -47,7 +47,7 @@ export function mountTui(
     }
     // Ink also assumes 80x24 when the stream reports no size.
     const columns = streams.stdout.columns || 80;
-    const frame = layout();
+    const frame = frameLayout(streams.stdout.rows || 24);
     const viewportHeight = frame.transcript;
     const rows = transcriptRows(model.transcript, columns);
     // With no transcript row in view there is nothing to scroll. Moving would anchor the viewport
@@ -66,11 +66,6 @@ export function mountTui(
         onScroll={(direction) => draw(direction * pageRows(viewportHeight))}
       />,
     );
-  }
-
-  // How the terminal's rows are shared between the transcript, the Prompt and the key hint.
-  function layout() {
-    return frameLayout(streams.stdout.rows || 24);
   }
 
   // Added before render() so that it runs before Ink's own resize listener, which redraws the
