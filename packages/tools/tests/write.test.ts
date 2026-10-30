@@ -111,6 +111,20 @@ describe("writing a file", () => {
     expect(await readFile(join(repo, "a.ts"), "utf8")).toBe("inside\n");
   });
 
+  it("counts the replacement bytes for a lone surrogate", async () => {
+    const content = "\uD800";
+
+    expect(await prepare({ path: "lone.ts", content })).toMatchObject({
+      ok: true,
+      prepared: { summary: 'create "lone.ts" (3 bytes)' },
+    });
+    expect(await write({ path: "lone.ts", content })).toEqual({
+      isError: false,
+      content: `"${join(repo, "lone.ts")}" (3 bytes written)`,
+    });
+    expect((await stat(join(repo, "lone.ts"))).size).toBe(3);
+  });
+
   it("creates missing parent directories", async () => {
     expect(await write({ path: "src/new/deeper/file.ts", content: "kept\n" })).toMatchObject({
       isError: false,
@@ -256,6 +270,32 @@ describe("refusing a write", () => {
     expect(await readFile(join(repo, "a.ts"), "utf8")).toBe("old\n");
   });
 
+  it.skipIf(process.getuid?.() === 0)(
+    "refuses a file this process cannot write even with a group write bit",
+    async () => {
+      await writeFile(join(repo, "a.ts"), "old\n");
+      await chmod(join(repo, "a.ts"), 0o464);
+
+      expect(await prepare({ path: "a.ts", content: "new\n" })).toMatchObject({
+        ok: false,
+        code: "PERMISSION_DENIED",
+        message: expect.stringContaining("not writable"),
+      });
+      expect(await readFile(join(repo, "a.ts"), "utf8")).toBe("old\n");
+    },
+  );
+
+  it("reports a too-long target name below a new parent as PARENT_CREATION_FAILED", async () => {
+    expect(await write({ path: `newdir/${"x".repeat(300)}.ts`, content: "x" })).toMatchObject({
+      isError: true,
+      error: {
+        code: "PARENT_CREATION_FAILED",
+        message: expect.stringContaining('created directories: "newdir"'),
+      },
+    });
+    expect(await readdir(join(repo, "newdir"))).toEqual([]);
+  });
+
   it("reports a parent that is a file as PARENT_CREATION_FAILED", async () => {
     await writeFile(join(repo, "file.txt"), "");
 
@@ -352,6 +392,21 @@ describe("refusing a write", () => {
     expect(attempts).toBe(1);
     expect(await readFile(join(repo, "a.ts"), "utf8")).toBe("old\n");
     expect(await readdir(repo)).toEqual(["a.ts"]);
+  });
+
+  it("does not retry a rename failure without an errno code", async () => {
+    let attempts = 0;
+    const tool = writeToolWith({
+      ...fs,
+      rename: async () => {
+        attempts += 1;
+        throw new TypeError("rename bug");
+      },
+    });
+
+    await expect(write({ path: "a.ts", content: "new\n" }, tool)).rejects.toThrow("rename bug");
+    expect(attempts).toBe(1);
+    expect(await readdir(repo)).toEqual([]);
   });
 
   it("leaves the original intact and removes the temporary file when the rename fails", async () => {
@@ -516,6 +571,9 @@ describe("the two phases", () => {
   it("prepares without creating anything, returning the validated path and a summary", async () => {
     const tool = writeToolWith({
       ...fs,
+      access: async () => {
+        throw new Error("prepare must not check write access");
+      },
       mkdir: async () => {
         throw new Error("prepare must not create directories");
       },
@@ -562,7 +620,7 @@ describe("the two phases", () => {
 
     expect(await prepare({ path: "src/a.ts", content: "x" })).toMatchObject({
       ok: true,
-      prepared: { summary: 'create "src/a.ts" (1 bytes)' },
+      prepared: { summary: 'create "src/a.ts" (1 byte)' },
     });
   });
 

@@ -39,6 +39,7 @@ interface FileStat {
 // The filesystem operations the tool needs. Not exported from the package: it lets tests simulate
 // failures, such as EACCES, that a process running as root cannot produce.
 export interface WriteFileSystem {
+  access(path: RepoPath, mode: number): Promise<void>;
   lstat(path: RepoPath): Promise<FileStat>;
   mkdir(path: RepoPath): Promise<unknown>;
   open(path: RepoPath, flags: number, mode: number): Promise<WriteHandle>;
@@ -64,6 +65,15 @@ const OPEN_FLAGS =
   constants.O_EXCL |
   ((constants.O_NOFOLLOW as number | undefined) ?? 0);
 const DEFAULT_FILE_MODE = 0o666;
+
+// TextEncoder encodes a lone surrogate as U+FFFD (3 bytes), matching what writeFile puts on
+// disk; Buffer.byteLength reports the replacement differently on some runtimes.
+const utf8 = new TextEncoder();
+
+function describeBytes(content: string): string {
+  const bytes = utf8.encode(content).byteLength;
+  return `${bytes} ${bytes === 1 ? "byte" : "bytes"}`;
+}
 
 // Windows can briefly refuse a rename while an antivirus scanner or the search indexer holds the
 // target; the same call usually succeeds a moment later.
@@ -108,7 +118,7 @@ export function writeToolWith(fs: WriteFileSystem): ExecutableTool<typeof WriteP
         prepared: {
           input,
           paths: [resolved.path],
-          summary: `${action} ${quote(shown)} (${Buffer.byteLength(input.content, "utf8")} bytes)${parents}`,
+          summary: `${action} ${quote(shown)} (${describeBytes(input.content)})${parents}`,
         },
       };
     },
@@ -218,7 +228,7 @@ async function writeAtomically(
       } catch (cause) {
         return fail(renameFailure(path, cause));
       }
-      return success(`${quote(path)} (${Buffer.byteLength(content, "utf8")} bytes written)`);
+      return success(`${quote(path)} (${describeBytes(content)} written)`);
     } finally {
       if (createdTemporary && !renamed) await fs.unlink(temporary).catch(() => undefined);
     }
@@ -248,7 +258,7 @@ async function renameWithRetry(
       return;
     } catch (cause) {
       const code = errnoOf(cause);
-      if (attempt >= RENAME_ATTEMPTS || (code !== undefined && RETRYABLE_RENAME[code] !== true)) {
+      if (attempt >= RENAME_ATTEMPTS || code === undefined || RETRYABLE_RENAME[code] !== true) {
         throw cause;
       }
       const { promise, resolve } = Promise.withResolvers<void>();
@@ -322,13 +332,47 @@ async function inspectTarget(fs: WriteFileSystem, path: RepoPath): Promise<Targe
         failure: { code: "PERMISSION_DENIED", message: `${quote(path)} is not a regular file` },
       };
     }
-    // Rename only needs write access to the directory, so without this check a read-only target
-    // would be replaced silently. A direct write would fail, and a locked file is intentional.
+    // Rename only needs write access to the directory, so without these checks a read-only target
+    // would be replaced silently. The mode check also catches 0444 for root, which bypasses
+    // access(); access() catches owner/group permissions such as 0464.
     if ((stats.mode & 0o222) === 0) {
       return {
         ok: false,
         failure: { code: "PERMISSION_DENIED", message: `${quote(path)} is read-only` },
       };
+    }
+    try {
+      await fs.access(path, constants.W_OK);
+    } catch (cause) {
+      switch (errnoOf(cause)) {
+        case "EACCES":
+        case "EPERM":
+        case "EROFS":
+          return {
+            ok: false,
+            failure: {
+              code: "PERMISSION_DENIED",
+              message: `${quote(path)} is not writable: permission denied`,
+            },
+          };
+        case "ENOENT":
+        case "ENOTDIR":
+          // The target disappeared between lstat and access. Treat it as a create and let the
+          // destination-directory check or the open report a parent that changed underneath.
+          return { ok: true };
+        case "ENAMETOOLONG":
+          return {
+            ok: false,
+            failure: {
+              code: "PARENT_CREATION_FAILED",
+              message: `${quote(path)} is longer than the filesystem allows`,
+            },
+          };
+        case "ELOOP":
+          return { ok: false, failure: symbolicLinkFailure(path) };
+        default:
+          throw cause;
+      }
     }
     return { ok: true, mode: stats.mode & 0o777 };
   } catch (cause) {
@@ -350,6 +394,14 @@ async function inspectTarget(fs: WriteFileSystem, path: RepoPath): Promise<Targe
           failure: {
             code: "PERMISSION_DENIED",
             message: `${quote(path)} cannot be inspected: permission denied`,
+          },
+        };
+      case "ENAMETOOLONG":
+        return {
+          ok: false,
+          failure: {
+            code: "PARENT_CREATION_FAILED",
+            message: `${quote(path)} is longer than the filesystem allows`,
           },
         };
       case "ELOOP":
@@ -394,6 +446,11 @@ async function inspectDirectory(
         };
       case "ELOOP":
         return symbolicLinkFailure(directory);
+      case "ENAMETOOLONG":
+        return {
+          code: "PARENT_CREATION_FAILED",
+          message: `${quote(directory)} is longer than the filesystem allows`,
+        };
       case "EINVAL":
         return {
           code: "PARENT_CREATION_FAILED",
