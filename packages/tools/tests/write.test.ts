@@ -640,4 +640,32 @@ describe("the two phases", () => {
     });
     expect(await readFile(join(sandbox, "outside.ts"), "utf8")).toBe("secret\n");
   });
+
+  it("rechecks an existing parent after inspecting the target", async () => {
+    await mkdir(join(repo, "sub"));
+    await writeFile(join(repo, "sub", "a.ts"), "old\n");
+    await mkdir(join(sandbox, "outside"));
+    let swapped = false;
+    const tool = writeToolWith({
+      ...fs,
+      lstat: async (path) => {
+        const stats = await fs.lstat(path);
+        if (!swapped && path === join(repo, "sub", "a.ts")) {
+          swapped = true;
+          await fs.rename(join(repo, "sub"), join(sandbox, "moved"));
+          await fs.symlink(join(sandbox, "outside"), join(repo, "sub"));
+        }
+        return stats;
+      },
+    });
+    const prepared = await writeTool().prepare({ path: "sub/a.ts", content: "new\n" }, context());
+    if (!prepared.ok) throw new Error(`expected a prepared call, got: ${prepared.message}`);
+
+    expect(await tool.execute(prepared.prepared, context())).toMatchObject({
+      isError: true,
+      error: { code: "PATH_OUTSIDE_REPO" },
+    });
+    expect(await readdir(join(sandbox, "outside"))).toEqual([]);
+    expect(await readFile(join(sandbox, "moved", "a.ts"), "utf8")).toBe("old\n");
+  });
 });

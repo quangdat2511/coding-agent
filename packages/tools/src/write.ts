@@ -353,7 +353,9 @@ async function inspectTarget(fs: WriteFileSystem, path: RepoPath): Promise<Targe
 // The resolver verifies the lexical path before creation and createParents checks every component
 // it creates, but a parent can still be swapped for a symbolic link after those checks. Requiring
 // the destination directory to canonicalize to itself catches that before the temporary file is
-// opened; the window between this check and the open is the TOCTOU gap ADR 0001 accepts.
+// opened. This narrows but does not close the race: the remaining window is the TOCTOU gap the
+// workspace resolver documents for CDA-50/58, and ADR 0004 keeps it small by re-resolving in
+// execute.
 async function inspectDirectory(
   fs: WriteFileSystem,
   directory: RepoPath,
