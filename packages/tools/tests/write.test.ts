@@ -408,6 +408,21 @@ describe("refusing a write", () => {
     expect(await readdir(join(repo, "src"))).toEqual([]);
   });
 
+  it("reports created parent directories when an unexpected error is thrown", async () => {
+    const tool = writeToolWith({
+      ...fs,
+      open: async () => {
+        throw Object.assign(new Error("ENOSPC: no space left on device"), { code: "ENOSPC" });
+      },
+    });
+
+    await expect(write({ path: "d1/d2/a.ts", content: "x" }, tool)).rejects.toThrow(
+      'created directories: "d1", "d1/d2"',
+    );
+    expect((await stat(join(repo, "d1/d2"))).isDirectory()).toBe(true);
+    expect(await readdir(join(repo, "d1/d2"))).toEqual([]);
+  });
+
   it("rechecks the destination directory after creating parents", async () => {
     await mkdir(join(sandbox, "outside"));
     let swapped = false;

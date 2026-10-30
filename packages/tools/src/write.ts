@@ -168,58 +168,68 @@ async function writeAtomically(
   const fail = (failure: WriteFailure): ToolOutcome =>
     toolError(failure.code, withCreatedDirectories(failure.message, repoRoot, created));
 
-  signal.throwIfAborted();
-  const parentProblem = await createParents(fs, repoRoot, path, created);
-  if (parentProblem !== undefined) return fail(parentProblem);
-
-  const target = await inspectTarget(fs, path);
-  if (!target.ok) return fail(target.failure);
-
-  const directory = dirname(path) as RepoPath;
-  const directoryProblem = await inspectDirectory(fs, directory);
-  if (directoryProblem !== undefined) return fail(directoryProblem);
-
-  const temporary = join(directory, `.coding-agent-${randomUUID()}.tmp`) as RepoPath;
-  let createdTemporary = false;
-  let renamed = false;
   try {
-    let handle: WriteHandle;
-    try {
-      handle = await fs.open(temporary, OPEN_FLAGS, target.mode ?? DEFAULT_FILE_MODE);
-      createdTemporary = true;
-    } catch (cause) {
-      return fail(openFailure(directory, cause));
-    }
-
-    let writeError: unknown;
-    try {
-      await handle.writeFile(content, { encoding: "utf8", signal });
-      // Renaming replaces the inode, so the previous permission bits are copied onto the temporary
-      // file; setuid, setgid, and the sticky bit are deliberately dropped as a write would.
-      if (target.mode !== undefined) await handle.chmod(target.mode);
-      signal.throwIfAborted();
-      // The rename must not publish content that a crash could still lose.
-      await handle.sync();
-    } catch (cause) {
-      writeError = cause;
-    }
-    try {
-      await handle.close();
-    } catch (cause) {
-      writeError ??= cause;
-    }
-    if (writeError !== undefined) return fail(writeFailure(path, writeError));
     signal.throwIfAborted();
+    const parentProblem = await createParents(fs, repoRoot, path, created);
+    if (parentProblem !== undefined) return fail(parentProblem);
 
+    const target = await inspectTarget(fs, path);
+    if (!target.ok) return fail(target.failure);
+
+    const directory = dirname(path) as RepoPath;
+    const directoryProblem = await inspectDirectory(fs, directory);
+    if (directoryProblem !== undefined) return fail(directoryProblem);
+
+    const temporary = join(directory, `.coding-agent-${randomUUID()}.tmp`) as RepoPath;
+    let createdTemporary = false;
+    let renamed = false;
     try {
-      await renameWithRetry(fs, temporary, path, signal);
-      renamed = true;
-    } catch (cause) {
-      return fail(renameFailure(path, cause));
+      let handle: WriteHandle;
+      try {
+        handle = await fs.open(temporary, OPEN_FLAGS, target.mode ?? DEFAULT_FILE_MODE);
+        createdTemporary = true;
+      } catch (cause) {
+        return fail(openFailure(directory, cause));
+      }
+
+      let writeError: unknown;
+      try {
+        await handle.writeFile(content, { encoding: "utf8", signal });
+        // Renaming replaces the inode, so the previous permission bits are copied onto the temporary
+        // file; setuid, setgid, and the sticky bit are deliberately dropped as a write would.
+        if (target.mode !== undefined) await handle.chmod(target.mode);
+        signal.throwIfAborted();
+        // The rename must not publish content that a crash could still lose.
+        await handle.sync();
+      } catch (cause) {
+        writeError = cause;
+      }
+      try {
+        await handle.close();
+      } catch (cause) {
+        writeError ??= cause;
+      }
+      if (writeError !== undefined) return fail(writeFailure(path, writeError));
+      signal.throwIfAborted();
+
+      try {
+        await renameWithRetry(fs, temporary, path, signal);
+        renamed = true;
+      } catch (cause) {
+        return fail(renameFailure(path, cause));
+      }
+      return success(`${quote(path)} (${Buffer.byteLength(content, "utf8")} bytes written)`);
+    } finally {
+      if (createdTemporary && !renamed) await fs.unlink(temporary).catch(() => undefined);
     }
-    return success(`${quote(path)} (${Buffer.byteLength(content, "utf8")} bytes written)`);
-  } finally {
-    if (createdTemporary && !renamed) await fs.unlink(temporary).catch(() => undefined);
+  } catch (cause) {
+    // Failures with no ADR code (EIO, ENOSPC, EDQUOT, EFBIG) are rethrown so Agent Core reports
+    // TOOL_INTERNAL_ERROR, but the directories created before the failure must still reach the
+    // model. Cancellation keeps its original error so Agent Core can record it as cancelled.
+    if (signal.aborted || (cause instanceof Error && cause.name === "AbortError")) throw cause;
+    if (created.length === 0) throw cause;
+    const detail = cause instanceof Error ? cause.message : String(cause);
+    throw new Error(withCreatedDirectories(detail, repoRoot, created), { cause });
   }
 }
 
