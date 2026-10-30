@@ -24,7 +24,7 @@ import type {
 import type { CodingTask } from "./task.ts";
 import { type PreflightOutcome, preflightToolCall } from "./tool-call-preflight.ts";
 import { executeTool } from "./tool-execution.ts";
-import type { ApprovalDecider, ApprovalStatus, ToolError, ToolResult } from "./tool-result.ts";
+import type { ApprovalDecider, ToolError, ToolResult } from "./tool-result.ts";
 import { addUsage, usageOf } from "./usage.ts";
 import type { VerificationDecision } from "./verification.ts";
 
@@ -61,7 +61,8 @@ type PreflightPassed = Extract<PreflightOutcome, { ok: true }>;
 type Approval = NonNullable<NonNullable<ToolResult["metadata"]>["approval"]>;
 
 interface ApprovalDecision {
-  readonly decision: "allow" | "deny";
+  // CDA-70 will expand this union to "allow" | "deny"
+  readonly decision: "allow";
   readonly reason?: string;
 }
 
@@ -237,26 +238,6 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
     return resolver.promise;
   }
 
-  function deniedResult(toolCall: QueuedToolCall, reason: string | undefined): ToolResult {
-    const message =
-      reason !== undefined ? `Approval denied: ${reason}` : "Approval denied: no reason given";
-    return {
-      toolCallId: toolCall.id,
-      toolName: toolCall.name,
-      content: message,
-      isError: true,
-      error: { code: "APPROVAL_DENIED", message },
-      metadata: {
-        durationMs: 0,
-        approval: {
-          status: "denied" as ApprovalStatus,
-          decidedBy: "user" as ApprovalDecider,
-          ...(reason === undefined ? {} : { reason }),
-        },
-      },
-    };
-  }
-
   async function resolveToolCalls(
     modelTurn: ModelTurnRef,
     draft: AssistantMessageDraft,
@@ -268,7 +249,8 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
       const remaining = queue.slice(index + 1);
 
       let result: ToolResult;
-      let outcome: "succeeded" | "failed" | "denied";
+      // CDA-70 will expand outcome to include "denied"
+      let outcome: "succeeded" | "failed";
 
       if (!preflight.ok) {
         result = rejectedResult(toolCall, preflight.error);
@@ -280,25 +262,14 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
           remaining,
           preflight.prepared.summary,
         );
-        if (decision.decision === "allow") {
-          const approval: Approval = {
-            status: "allowed",
-            decidedBy: "user",
-            ...(decision.reason === undefined ? {} : { reason: decision.reason }),
-          };
-          result = await executeToolCall(
-            modelTurn,
-            draft,
-            toolCall,
-            remaining,
-            preflight,
-            approval,
-          );
-          outcome = result.isError ? "failed" : "succeeded";
-        } else {
-          result = deniedResult(toolCall, decision.reason);
-          outcome = "denied";
-        }
+        // CDA-70 will branch on decision.decision === "deny" to produce an APPROVAL_DENIED ToolResult
+        const approval: Approval = {
+          status: "allowed",
+          decidedBy: "user",
+          ...(decision.reason === undefined ? {} : { reason: decision.reason }),
+        };
+        result = await executeToolCall(modelTurn, draft, toolCall, remaining, preflight, approval);
+        outcome = result.isError ? "failed" : "succeeded";
       } else {
         result = await executeToolCall(modelTurn, draft, toolCall, remaining, preflight);
         outcome = result.isError ? "failed" : "succeeded";
@@ -570,9 +541,12 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
         `Approval ${command.approvalId} does not match the pending Approval ${pendingApproval.approvalId}`,
       );
     }
-    const status: ApprovalStatus = command.decision === "allow" ? "allowed" : "denied";
+    // CDA-70 (A3.2) will handle "deny": resolving with status "denied" and outcome "denied"
+    if (command.decision === "deny") {
+      return refuse("INVALID_STATE", "denials are not supported yet");
+    }
     const nextState =
-      state.phase === "awaiting_approval" && command.decision === "allow"
+      state.phase === "awaiting_approval"
         ? {
             ...withoutPhase(state),
             phase: "executing_tool" as const,
@@ -586,14 +560,14 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
       data: {
         approvalId: pendingApproval.approvalId,
         toolCallId: pendingApproval.toolCallId,
-        status,
+        status: "allowed",
         decidedBy: "user" as ApprovalDecider,
         ...(command.reason === undefined ? {} : { reason: command.reason }),
       },
     });
     const { resolve } = pendingApproval;
     pendingApproval = undefined;
-    resolve({ decision: command.decision, reason: command.reason });
+    resolve({ decision: "allow", reason: command.reason });
     return { accepted: true, sequence };
   }
 

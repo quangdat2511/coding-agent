@@ -1,5 +1,4 @@
 import { describe, expect, it } from "bun:test";
-import type { UserMessage } from "@coding-agent/ai";
 import type { AgentState, ExecutableTool } from "../src/index.ts";
 import {
   collect,
@@ -14,11 +13,6 @@ import {
 } from "./kit/index.ts";
 
 const task = { objective: "Fix the failing test" };
-
-const toolResultMessage = (toolCallId: string, content: string, isError: boolean): UserMessage => ({
-  role: "user",
-  content: [{ type: "tool_result", toolCallId, content, isError }],
-});
 
 describe("waiting for Approval under the ask policy", () => {
   it("enters awaiting_approval and emits approval_requested with the correct identifiers, summary, and policy", async () => {
@@ -275,156 +269,9 @@ describe("waiting for Approval under the ask policy", () => {
     });
   });
 
-  it("produces an APPROVAL_DENIED error Tool Result when the user denies, and the loop continues to the next call", async () => {
-    const { session, model } = openTestSession({
-      tools: [fakeTool(), fakeWriteTool()],
-      model: {
-        turns: [
-          toolCallTurn(
-            { toolCallId: "call-1", name: "write", input: { path: "src/a.ts" } },
-            { toolCallId: "call-2", name: "echo", input: {} },
-          ),
-          textTurn("Fixed it."),
-        ],
-      },
-    });
-
-    await session.dispatch({ type: "start", task });
-    await waitForEvent(session, "approval_requested");
-    await session.dispatch({
-      type: "resolve_approval",
-      approvalId: "approval-1",
-      decision: "deny",
-      reason: "too risky",
-    });
-    const result = await session.result();
-    const events = await collect(session.events());
-
-    // Check denied Tool Result
-    const deniedResult = resultOf(events, "tool_call-1");
-    expect(deniedResult).toEqual({
-      toolCallId: "tool_call-1",
-      toolName: "write",
-      content: "Approval denied: too risky",
-      isError: true,
-      error: { code: "APPROVAL_DENIED", message: "Approval denied: too risky" },
-      metadata: {
-        durationMs: 0,
-        approval: { status: "denied", decidedBy: "user", reason: "too risky" },
-      },
-    });
-
-    // Check the denied call has outcome "denied"
-    const denied = events.find(
-      (event) => event.type === "tool_call_completed" && event.data.toolCallId === "tool_call-1",
-    );
-    expect(denied?.data).toMatchObject({ outcome: "denied" });
-
-    // The next call (echo) should have been executed
-    const echoResult = resultOf(events, "tool_call-2");
-    expect(echoResult?.isError).toBe(false);
-
-    // The model gets both tool results
-    expect(model.requests[1]?.context.messages.slice(2)).toEqual([
-      toolResultMessage("call-1", "Approval denied: too risky", true),
-      toolResultMessage("call-2", "ok", false),
-    ]);
-
-    expect(result).toMatchObject({
-      outcome: "succeeded",
-      workspaceChanged: false,
-      partialChangesPossible: false,
-    });
-  });
-
-  it("self-transitions awaiting_approval when the user denies and the next queued call also requires Approval", async () => {
-    const { session } = openTestSession({
-      tools: [fakeWriteTool()],
-      model: {
-        turns: [
-          toolCallTurn(
-            { toolCallId: "call-1", name: "write", input: { path: "src/a.ts" } },
-            { toolCallId: "call-2", name: "write", input: { path: "src/b.ts" } },
-          ),
-          textTurn("Fixed it."),
-        ],
-      },
-    });
-
-    await session.dispatch({ type: "start", task });
-    const req1 = await waitForEvent(session, "approval_requested");
-
-    // Deny the first call
-    expect(session.snapshot().phase).toBe("awaiting_approval");
-    expect(session.snapshot()).toMatchObject({
-      toolCall: { id: "tool_call-1", name: "write" },
-      approval: { approvalId: "approval-1" },
-    });
-
-    await session.dispatch({
-      type: "resolve_approval",
-      approvalId: "approval-1",
-      decision: "deny",
-    });
-    await waitForEvent(session, "approval_requested", req1.sequence);
-
-    // The session should now be awaiting approval for the second call
-    expect(session.snapshot().phase).toBe("awaiting_approval");
-    expect(session.snapshot()).toMatchObject({
-      toolCall: { id: "tool_call-2", name: "write" },
-      approval: { approvalId: "approval-2", summary: "write src/b.ts" },
-    });
-
-    // Allow the second call so the session can settle
-    await session.dispatch({
-      type: "resolve_approval",
-      approvalId: "approval-2",
-      decision: "allow",
-    });
-    const result = await session.result();
-    expect(result.outcome).toBe("succeeded");
-  });
-
-  it("transitions from awaiting_approval to executing_tool when the user denies and the next call is read-only", async () => {
-    let executingState: AgentState | undefined;
-    const echo: ExecutableTool = {
-      ...fakeTool({ name: "echo" }),
-      async execute() {
-        executingState = session.snapshot();
-        return { isError: false, content: "echoed" };
-      },
-    };
-    const { session } = openTestSession({
-      tools: [fakeWriteTool(), echo],
-      model: {
-        turns: [
-          toolCallTurn(
-            { toolCallId: "call-1", name: "write", input: { path: "src/a.ts" } },
-            { toolCallId: "call-2", name: "echo", input: {} },
-          ),
-          textTurn("Fixed it."),
-        ],
-      },
-    });
-
-    await session.dispatch({ type: "start", task });
-    await waitForEvent(session, "approval_requested");
-    await session.dispatch({
-      type: "resolve_approval",
-      approvalId: "approval-1",
-      decision: "deny",
-    });
-    const result = await session.result();
-
-    expect(executingState).toMatchObject({
-      phase: "executing_tool",
-      toolCall: { id: "tool_call-2", name: "echo" },
-      queuedToolCalls: [],
-    });
-    expect(result.outcome).toBe("succeeded");
-  });
-
-  it("transitions from awaiting_approval to streaming_model when the user denies and no queued call remains", async () => {
+  // CDA-70 (A3.2 Handle Approval denials) will replace this refusal test with the full suite of
+  // denial assertions (APPROVAL_DENIED result, self-transitions, batch continuation, failure counter).
+  it("rejects a resolve_approval with decision deny as INVALID_STATE since denials are not supported yet", async () => {
     const { session } = openTestSession({
       tools: [fakeWriteTool()],
       model: {
@@ -437,16 +284,25 @@ describe("waiting for Approval under the ask policy", () => {
 
     await session.dispatch({ type: "start", task });
     await waitForEvent(session, "approval_requested");
-    await session.dispatch({
+
+    const denyResult = await session.dispatch({
       type: "resolve_approval",
       approvalId: "approval-1",
       decision: "deny",
     });
-    const result = await session.result();
-    const events = await collect(session.events());
+    expect(denyResult).toMatchObject({
+      accepted: false,
+      code: "INVALID_STATE",
+    });
+    expect(session.snapshot().phase).toBe("awaiting_approval");
 
-    // The model receives the denied result and tries again
-    expect(events.filter((event) => event.type === "model_turn_started")).toHaveLength(2);
+    // Clean up by allowing so the session can settle
+    await session.dispatch({
+      type: "resolve_approval",
+      approvalId: "approval-1",
+      decision: "allow",
+    });
+    const result = await session.result();
     expect(result.outcome).toBe("succeeded");
   });
 
