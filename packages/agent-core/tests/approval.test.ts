@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import type { AgentState, ExecutableTool, ToolResult } from "../src/index.ts";
+import type { AgentState, ExecutableTool, PrepareOutcome, ToolResult } from "../src/index.ts";
 import {
   collect,
   fakeTool,
@@ -388,6 +388,153 @@ describe("waiting for Approval under the ask policy", () => {
     const toolResult = resultOf(events, "tool_call-1");
 
     expect(toolResult).toEqual(expectedDeniedResult("tool_call-1", "write"));
+  });
+
+  it("uses the default reason when a denial provides a blank reason", async () => {
+    const { session } = openTestSession({
+      tools: [fakeWriteTool()],
+      model: {
+        turns: [
+          toolCallTurn({ toolCallId: "call-1", name: "write", input: { path: "src/a.ts" } }),
+          textTurn("Understood."),
+        ],
+      },
+    });
+
+    await session.dispatch({ type: "start", task });
+    await waitForEvent(session, "approval_requested");
+
+    const commandResult = await session.dispatch({
+      type: "resolve_approval",
+      approvalId: "approval-1",
+      decision: "deny",
+      reason: "   ",
+    });
+    expect(commandResult).toMatchObject({ accepted: true });
+
+    await session.result();
+    const events = await collect(session.events());
+    const toolResult = resultOf(events, "tool_call-1");
+
+    expect(toolResult).toEqual(expectedDeniedResult("tool_call-1", "write"));
+
+    const resolved = events.find((event) => event.type === "approval_resolved");
+    expect(resolved?.data).toEqual({
+      approvalId: "approval-1",
+      toolCallId: "tool_call-1",
+      status: "denied",
+      decidedBy: "user",
+    });
+  });
+
+  it("rejects an already resolved approval as STALE_APPROVAL when another call is preparing", async () => {
+    const deferredPrepare = Promise.withResolvers<PrepareOutcome>();
+    const baseWrite = fakeWriteTool();
+    let prepareCount = 0;
+    const write: typeof baseWrite = {
+      ...baseWrite,
+      async prepare(input, ctx) {
+        prepareCount++;
+        if (prepareCount === 2) {
+          return deferredPrepare.promise;
+        }
+        return baseWrite.prepare(input, ctx);
+      },
+    };
+
+    const { session } = openTestSession({
+      tools: [write],
+      model: {
+        turns: [
+          toolCallTurn(
+            { toolCallId: "call-1", name: "write", input: { path: "src/a.ts" } },
+            { toolCallId: "call-2", name: "write", input: { path: "src/b.ts" } },
+          ),
+          textTurn("Done."),
+        ],
+      },
+    });
+
+    await session.dispatch({ type: "start", task });
+    const req1 = await waitForEvent(session, "approval_requested");
+
+    await session.dispatch({
+      type: "resolve_approval",
+      approvalId: "approval-1",
+      decision: "deny",
+    });
+
+    // While call 2 is still preparing, session is in awaiting_approval (Call 1 was resolved)
+    // Dispatching resolve_approval for approval-1 again must return STALE_APPROVAL
+    const staleResult = await session.dispatch({
+      type: "resolve_approval",
+      approvalId: "approval-1",
+      decision: "allow",
+    });
+    expect(staleResult).toMatchObject({
+      accepted: false,
+      code: "STALE_APPROVAL",
+    });
+
+    // Release call 2's prepare
+    deferredPrepare.resolve({
+      ok: true,
+      prepared: { input: { path: "src/b.ts" }, paths: [], summary: "write src/b.ts" },
+    });
+
+    const req2 = await waitForEvent(session, "approval_requested", req1.sequence);
+    expect(req2.data.approvalId).toBe("approval-2");
+
+    await session.dispatch({
+      type: "resolve_approval",
+      approvalId: "approval-2",
+      decision: "allow",
+    });
+
+    const result = await session.result();
+    expect(result.outcome).toBe("succeeded");
+  });
+
+  it("does not re-execute preflight when a denied call is followed by a call that fails preflight", async () => {
+    let call2PrepareCount = 0;
+    const inspect: ExecutableTool = {
+      ...fakeTool({ name: "failing_mutating" }),
+      mutation: "mutating",
+      async prepare() {
+        call2PrepareCount++;
+        return { ok: false, code: "SCHEMA_VIOLATION", message: "invalid payload" };
+      },
+    };
+
+    const { session } = openTestSession({
+      tools: [fakeWriteTool(), inspect],
+      model: {
+        turns: [
+          toolCallTurn(
+            { toolCallId: "call-1", name: "write", input: { path: "src/a.ts" } },
+            { toolCallId: "call-2", name: "failing_mutating", input: {} },
+          ),
+          textTurn("Done after failures."),
+        ],
+      },
+    });
+
+    await session.dispatch({ type: "start", task });
+    await waitForEvent(session, "approval_requested");
+
+    await session.dispatch({
+      type: "resolve_approval",
+      approvalId: "approval-1",
+      decision: "deny",
+    });
+
+    const result = await session.result();
+    expect(result.outcome).toBe("succeeded");
+    expect(call2PrepareCount).toBe(1);
+
+    const events = await collect(session.events());
+    expect(resultOf(events, "tool_call-1")?.error?.code).toBe("APPROVAL_DENIED");
+    expect(resultOf(events, "tool_call-2")?.error?.code).toBe("SCHEMA_VIOLATION");
   });
 
   it("stays in awaiting_approval with a fresh request when a denied call is followed by another call needing Approval", async () => {
