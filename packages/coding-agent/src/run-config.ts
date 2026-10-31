@@ -17,6 +17,7 @@ import {
   PROVIDER_CREDENTIAL_ENV_VARS_BY_PROVIDER,
   readEnvCredential,
 } from "@coding-agent/ai";
+import { normalizeWindowsShellPath } from "@coding-agent/tools";
 import type { Profile, RunArgs } from "./run-args.ts";
 
 // The ADR 0003 §4 defaults. CDA-59 chose cancellationGraceMs: long enough for a tool or
@@ -39,6 +40,8 @@ export const VERIFICATION_COMMAND_ENV_VAR = "CODING_AGENT_VERIFICATION_COMMAND";
 // An objective is a prompt, not a data file. A larger task file is almost certainly the wrong path,
 // so no more than one byte past this limit is ever read, whatever size the file system reports.
 export const MAX_TASK_FILE_BYTES = 1024 * 1024;
+
+const TASK_OPEN_FLAGS = constants.O_RDONLY | ((constants.O_NONBLOCK as number | undefined) ?? 0);
 
 const tooLarge = `is larger than ${MAX_TASK_FILE_BYTES / (1024 * 1024)} MiB`;
 
@@ -110,6 +113,12 @@ const errnoOf = (error: unknown): string | undefined =>
     ? error.code
     : undefined;
 
+// Resolve a command-line path, accepting the Git Bash, MSYS, Cygwin, and WSL drive spelling on
+// Windows.
+function resolveInput(cwd: string, given: string): string {
+  return resolve(cwd, normalizeWindowsShellPath(given));
+}
+
 // Describes why a path given on the command line could not be used, as the end of a sentence that
 // starts with the flag and the path.
 function unusable(error: unknown, action: "read" | "created"): string {
@@ -136,7 +145,7 @@ async function resolveRepoRoot(cwd: string, given: string): Promise<Checked<Repo
   // name a flag that was never passed.
   const subject =
     given === cwd ? `the working directory "${cwd}" (the default ${flag})` : `${flag} "${given}"`;
-  const path = resolve(cwd, given);
+  const path = resolveInput(cwd, given);
   let root: string;
   try {
     root = await realpath(path);
@@ -183,7 +192,7 @@ interface Task {
 
 async function readObjective(cwd: string, given: string): Promise<Checked<Task>> {
   const flag = "--task-file";
-  const path = resolve(cwd, given);
+  const path = resolveInput(cwd, given);
   let bytes: Uint8Array;
   try {
     // Opening a pipe would block and opening a device can have side effects, so the path is
@@ -191,7 +200,7 @@ async function readObjective(cwd: string, given: string): Promise<Checked<Task>>
     // case the path was replaced in between.
     const unfit = unfitTaskFile(await stat(path));
     if (unfit) return refuse(flag, `${flag} "${given}" ${unfit}`);
-    const handle = await open(path, constants.O_RDONLY | constants.O_NONBLOCK);
+    const handle = await open(path, TASK_OPEN_FLAGS);
     try {
       const reopened = unfitTaskFile(await handle.stat());
       if (reopened) return refuse(flag, `${flag} "${given}" ${reopened}`);
@@ -234,6 +243,21 @@ async function missingDirectories(path: string): Promise<string[]> {
   return missing;
 }
 
+// Windows reports a directory creation below a regular file as ENOENT rather than ENOTDIR, so the
+// error alone cannot tell that case from a dangling symbolic link. Exported with an injectable
+// stat so the unit test can reproduce that Windows error on any host.
+type DirectoryStat = (path: string) => Promise<{ isDirectory(): boolean }>;
+
+export async function parentIsFile(path: string, statPath: DirectoryStat = stat): Promise<boolean> {
+  for (let dir = dirname(path); ; dir = dirname(dir)) {
+    try {
+      return !(await statPath(dir)).isDirectory();
+    } catch (error) {
+      if (errnoOf(error) !== "ENOENT" || dirname(dir) === dir) return false;
+    }
+  }
+}
+
 // Removes the directories this run created, deepest first, so a run that is refused after creating
 // them leaves nothing behind. They are this run's own, so each first gets owner rwx back in case
 // the umask created it read-only. rmdir never removes a directory something else has filled, and a
@@ -255,7 +279,7 @@ interface OutputDir {
 
 async function prepareOutputDir(cwd: string, given: string): Promise<Checked<OutputDir>> {
   const flag = "--output-dir";
-  const path = resolve(cwd, given);
+  const path = resolveInput(cwd, given);
   // One level at a time, and never recursive: a directory is this run's only when its own mkdir
   // succeeded. EEXIST means something else made it first, so it is never removed.
   const created: string[] = [];
@@ -280,7 +304,11 @@ async function prepareOutputDir(cwd: string, given: string): Promise<Checked<Out
         return refuseAndRemove("cannot be created: a parent is not a directory");
       // A dangling symbolic link: mkdir finds the name taken, and stat finds nothing behind it.
       case "ENOENT":
-        return refuseAndRemove("is not a directory");
+        return refuseAndRemove(
+          (await parentIsFile(path))
+            ? "cannot be created: a parent is not a directory"
+            : "is not a directory",
+        );
       default:
         return refuseAndRemove(unusable(error, "created"));
     }

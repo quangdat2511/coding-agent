@@ -289,6 +289,23 @@ describe("resolving a path the filesystem refuses", () => {
     });
   });
 
+  it("reports a path the platform considers invalid as not found", async () => {
+    const repo = await makeRepo();
+    const created = await createWorkspaceResolverWith(repo, {
+      ...fs,
+      lstat: async () => {
+        throw Object.assign(new Error("EINVAL: invalid argument"), { code: "EINVAL" });
+      },
+    });
+    if (!created.ok) throw new Error(`expected a resolver, got: ${created.message}`);
+
+    expect(await created.workspace.resolveExisting("bad:name")).toEqual({
+      ok: false,
+      code: "NOT_FOUND",
+      message: '"bad:name" is not a valid path on this platform',
+    });
+  });
+
   it("reports a symbolic-link loop as outside the repository", async () => {
     const repo = await makeRepo();
     await writeFile(join(repo, "a.ts"), "");

@@ -10,6 +10,11 @@ const SPECIFIERS = [
 const PATH_ALIAS = /^@(?:tests|examples)?\//;
 const SKIPPED_DIRECTORIES = new Set(["node_modules", "dist"]);
 
+// Diagnostics use "/" on every platform, so a Windows run reports the same paths as CI on Linux.
+export function displayPath(path: string, separator: string = sep): string {
+  return path.split(separator).join("/");
+}
+
 async function workspacePackages(root: string): Promise<string[]> {
   const { workspaces } = (await Bun.file(join(root, "package.json")).json()) as {
     workspaces: string[];
@@ -19,7 +24,7 @@ async function workspacePackages(root: string): Promise<string[]> {
       Array.fromAsync(new Bun.Glob(`${pattern}/package.json`).scan({ cwd: root })),
     ),
   );
-  return manifests.flat().map((manifest) => dirname(manifest));
+  return manifests.flat().map((manifest) => dirname(manifest.split("/").join(sep)));
 }
 
 async function sourceFiles(root: string, directory: string): Promise<string[]> {
@@ -42,19 +47,20 @@ function violations(
   source: string,
 ): string[] {
   const found: string[] = [];
+  const shown = displayPath(file);
   const matches = SPECIFIERS.flatMap((pattern) => [...source.matchAll(pattern)]);
   for (const match of matches.sort((a, b) => a.index - b.index)) {
     const specifier = match[1] ?? "";
     const line = source.slice(0, match.index).split("\n").length;
     if (PATH_ALIAS.test(specifier)) {
-      found.push(`${file}:${line}: "${specifier}" is a path alias; use a relative import`);
+      found.push(`${shown}:${line}: "${specifier}" is a path alias; use a relative import`);
       continue;
     }
     if (!specifier.startsWith(".") || specifier.includes("${")) continue;
     const target = relative(join(root, packageDirectory), resolve(root, dirname(file), specifier));
     if (target === ".." || target.startsWith(`..${sep}`)) {
       found.push(
-        `${file}:${line}: "${specifier}" resolves outside ${packageDirectory}; import that package by name`,
+        `${shown}:${line}: "${specifier}" resolves outside ${packageDirectory}; import that package by name`,
       );
     }
   }
@@ -78,7 +84,7 @@ export async function findImportViolations(root: string, files?: string[]): Prom
   for (const file of candidates) {
     const sourceFile = Bun.file(join(root, file));
     if (!(await sourceFile.exists())) {
-      found.push(`${file}: file not found`);
+      found.push(`${displayPath(file)}: file not found`);
       continue;
     }
     const packageDirectory = await owningPackage(root, file);

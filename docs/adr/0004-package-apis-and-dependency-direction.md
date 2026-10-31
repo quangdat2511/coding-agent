@@ -372,6 +372,7 @@ export function createWorkspaceResolver(
   | { ok: false; code: "INVALID_CONFIGURATION"; message: string; field: "repoRoot" }
 >;
 
+export function normalizeWindowsShellPath(input: string): string;
 export function createDefaultTools(): ToolRegistry;
 export function readTool(): ExecutableTool<typeof ReadParams>;
 export function writeTool(): ExecutableTool<typeof WriteParams>;
@@ -381,7 +382,10 @@ export function bashTool(): ExecutableTool<typeof BashParams>;
 
 `createWorkspaceResolver` canonicalizes and validates `repoRoot` once, which satisfies ADR 0002's
 requirement that `repoRoot` be valid before the Agent Session reaches `ready`. Tools take no
-`repoRoot` argument; it arrives through `ctx.workspace`. `bashTool` takes no timeout options,
+`repoRoot` argument; it arrives through `ctx.workspace`. `normalizeWindowsShellPath` converts the
+Git Bash, MSYS, Cygwin, and WSL drive spellings (`/c/...`, `/mnt/c/...`, `/cygdrive/c/...`) to the
+native Windows form before the composition root or the workspace resolver resolves a path; other
+platforms pass the path through unchanged. `bashTool` takes no timeout options,
 because ADR 0001 fixes the 30,000 ms default and the 120,000 ms cap for `timeoutMs`. Filesystem
 helpers inside the package accept `RepoPath` rather than `string`, so skipping validation is a type
 error. Individual tools are exported alongside the default registry so an evaluation harness can

@@ -8,6 +8,7 @@ import type {
   WorkspaceResolver,
 } from "@coding-agent/agent-core";
 import { errnoOf } from "./errno.ts";
+import { namesDirectory, normalizeWindowsShellPath } from "./paths.ts";
 
 // The same failure shape openAgentSession reports, narrowed to the one field this factory checks.
 export type CreateWorkspaceResult =
@@ -32,7 +33,7 @@ export async function createWorkspaceResolverWith(
   fs: WorkspaceFileSystem,
 ): Promise<CreateWorkspaceResult> {
   if (repoRoot === "") return invalidRoot("repoRoot must not be empty");
-  const given = resolve(repoRoot);
+  const given = resolve(normalizeWindowsShellPath(repoRoot));
   let root: RepoPath;
   try {
     root = (await fs.realpath(given)) as RepoPath;
@@ -76,7 +77,7 @@ async function resolvePath(jail: Jail, input: string, mode: Mode): Promise<PathR
     if (walked.file !== undefined) return notDirectory(input, walked.file);
     if (mode === "existing" && walked.missing.length > 0) return notFound(input, "does not exist");
     if (walked.missing.length === 0 && target.directory && !walked.isDirectory) {
-      return notDirectory(input, walked.existing.join("/"));
+      return notDirectory(input, join(...walked.existing));
     }
     // Every component was checked with lstat, so the canonical form of the deepest existing one is
     // itself; anything else means a symbolic link appeared after the walk. Comparing for equality
@@ -107,15 +108,23 @@ type Located =
 // through the root as given is moved onto the canonical root first.
 function locate(jail: Jail, input: string): Located {
   if (input.includes("\0")) return outsideRoot(input);
-  let path = resolve(jail.root, input);
+  const normalized = normalizeWindowsShellPath(input);
+  let path = resolve(jail.root, normalized);
   if (!within(jail.root, path) && within(jail.given, path)) {
     path = join(jail.root, relative(jail.given, path));
   }
   if (!within(jail.root, path)) return outsideRoot(input);
-  // A trailing "/" or "/." asks for a directory, as it does in a POSIX path. The returned path drops
-  // it, so resolveForCreate cannot tell a file to create from a directory to create; a tool that
-  // needs that distinction must extend the port rather than rely on the resolved path.
-  return { ok: true, path: path as RepoPath, directory: /\/\.?$/.test(input) };
+  // A path that names the root itself is normalized to the canonical root, which on Windows also
+  // settles the drive letter's case before resolveForCreate compares against it.
+  if (relative(jail.root, path) === "") path = jail.root;
+  // The returned path drops a trailing separator, so resolveForCreate cannot tell a file to create
+  // from a directory to create; a tool that needs that distinction must extend the port rather
+  // than rely on the resolved path.
+  return {
+    ok: true,
+    path: path as RepoPath,
+    directory: namesDirectory(normalized),
+  };
 }
 
 function within(base: string, path: string): boolean {
@@ -144,7 +153,7 @@ async function walk(jail: Jail, path: string): Promise<Walk> {
   for (let index = 0; index < segments.length; index++) {
     const existing = segments.slice(0, index + 1);
     if (!isDirectory) {
-      return { file: segments.slice(0, index).join("/"), existing, missing: [], isDirectory };
+      return { file: join(...segments.slice(0, index)), existing, missing: [], isDirectory };
     }
     let stats: Awaited<ReturnType<WorkspaceFileSystem["lstat"]>>;
     try {
@@ -154,7 +163,7 @@ async function walk(jail: Jail, path: string): Promise<Walk> {
       return { existing: segments.slice(0, index), missing: segments.slice(index), isDirectory };
     }
     if (stats.isSymbolicLink())
-      return { link: existing.join("/"), existing, missing: [], isDirectory };
+      return { link: join(...existing), existing, missing: [], isDirectory };
     isDirectory = stats.isDirectory();
   }
   return { existing: segments, missing: [], isDirectory };
@@ -169,6 +178,9 @@ function unreachable(input: string, error: unknown): PathResolution {
       return notFound(input, "changed while being resolved");
     case "ENAMETOOLONG":
       return notFound(input, "is longer than the filesystem allows");
+    case "EINVAL":
+      // Windows rejects characters its file names cannot hold this way.
+      return notFound(input, "is not a valid path on this platform");
     case "EACCES":
     case "EPERM":
       return {

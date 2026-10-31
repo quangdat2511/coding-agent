@@ -42,8 +42,12 @@ interface ReadHandle {
 }
 
 // O_NOFOLLOW refuses a final component swapped for a symbolic link after resolution, and
-// O_NONBLOCK keeps opening a FIFO from waiting for a writer that never comes.
-const OPEN_FLAGS = constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK;
+// O_NONBLOCK keeps opening a FIFO from waiting for a writer that never comes. Windows defines
+// neither flag, where the resolver still rejects symbolic links before the open.
+const OPEN_FLAGS =
+  constants.O_RDONLY |
+  ((constants.O_NOFOLLOW as number | undefined) ?? 0) |
+  ((constants.O_NONBLOCK as number | undefined) ?? 0);
 
 export function readTool(): ExecutableTool<typeof ReadParams> {
   return readToolWith(nodeFs);

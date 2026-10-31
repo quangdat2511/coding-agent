@@ -13,7 +13,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { RunArgs } from "../src/run-args.ts";
-import { MAX_TASK_FILE_BYTES, resolveRunConfig } from "../src/run-config.ts";
+import { MAX_TASK_FILE_BYTES, parentIsFile, resolveRunConfig } from "../src/run-config.ts";
 
 const secret = "sk-test-credential-value";
 
@@ -392,6 +392,37 @@ describe("preparing the output directory", () => {
       refusal("--output-dir", '--output-dir "out" is not a directory'),
     );
     expect((await lstat(join(directory, "out"))).isSymbolicLink()).toBe(true);
+  });
+});
+
+describe("classifying a missing output parent", () => {
+  it("finds the first existing ancestor and reports whether it is a file", async () => {
+    const calls: string[] = [];
+    const statPath = async (path: string) => {
+      calls.push(path);
+      if (path === join("root", "file", "missing")) {
+        throw Object.assign(new Error("ENOENT: no such file"), { code: "ENOENT" });
+      }
+      if (path === join("root", "file")) return { isDirectory: () => false };
+      return { isDirectory: () => true };
+    };
+
+    expect(await parentIsFile(join("root", "file", "missing", "out"), statPath)).toBe(true);
+    expect(calls).toEqual([join("root", "file", "missing"), join("root", "file")]);
+  });
+
+  it("returns false when the first existing ancestor is a directory", async () => {
+    const statPath = async () => ({ isDirectory: () => true });
+
+    expect(await parentIsFile(join("root", "out"), statPath)).toBe(false);
+  });
+
+  it("returns false when no ancestor exists", async () => {
+    const statPath = async () => {
+      throw Object.assign(new Error("ENOENT: no such file"), { code: "ENOENT" });
+    };
+
+    expect(await parentIsFile(join("/", "missing", "out"), statPath)).toBe(false);
   });
 });
 
