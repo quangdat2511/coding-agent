@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import type { AgentState, ExecutableTool } from "../src/index.ts";
+import type { AgentState, ExecutableTool, ToolResult } from "../src/index.ts";
 import {
   collect,
   fakeTool,
@@ -13,6 +13,32 @@ import {
 } from "./kit/index.ts";
 
 const task = { objective: "Fix the failing test" };
+
+const expectedDeniedResult = (
+  toolCallId: string,
+  toolName: string,
+  reason?: string,
+): ToolResult => {
+  const message = reason ?? "approval denied by user";
+  return {
+    toolCallId,
+    toolName,
+    content: message,
+    isError: true,
+    error: {
+      code: "APPROVAL_DENIED",
+      message,
+    },
+    metadata: {
+      durationMs: 0,
+      approval: {
+        status: "denied",
+        decidedBy: "user",
+        ...(reason === undefined ? {} : { reason }),
+      },
+    },
+  };
+};
 
 describe("waiting for Approval under the ask policy", () => {
   it("enters awaiting_approval and emits approval_requested with the correct identifiers, summary, and policy", async () => {
@@ -269,15 +295,21 @@ describe("waiting for Approval under the ask policy", () => {
     });
   });
 
-  // CDA-70 (A3.2 Handle Approval denials) will replace this refusal test with the full suite of
-  // denial assertions (APPROVAL_DENIED result, self-transitions, batch continuation, failure counter).
-  it("rejects a resolve_approval with decision deny as INVALID_STATE since denials are not supported yet", async () => {
+  it("resolves a denial with decidedBy user, produces an APPROVAL_DENIED Tool Result without executing, and returns to streaming with none remaining", async () => {
+    let executed = false;
+    const write: ExecutableTool = {
+      ...fakeWriteTool(),
+      async execute() {
+        executed = true;
+        return { isError: false, content: "ok" };
+      },
+    };
     const { session } = openTestSession({
-      tools: [fakeWriteTool()],
+      tools: [write],
       model: {
         turns: [
           toolCallTurn({ toolCallId: "call-1", name: "write", input: { path: "src/a.ts" } }),
-          textTurn("Fixed it."),
+          textTurn("Understood, I will adapt without modifying that file."),
         ],
       },
     });
@@ -285,18 +317,259 @@ describe("waiting for Approval under the ask policy", () => {
     await session.dispatch({ type: "start", task });
     await waitForEvent(session, "approval_requested");
 
-    const denyResult = await session.dispatch({
+    const commandResult = await session.dispatch({
+      type: "resolve_approval",
+      approvalId: "approval-1",
+      decision: "deny",
+      reason: "do not modify this file",
+    });
+    expect(commandResult).toMatchObject({ accepted: true });
+
+    const result = await session.result();
+    expect(result.outcome).toBe("succeeded");
+    expect(executed).toBe(false);
+
+    const events = await collect(session.events());
+
+    // 1. Approval was resolved as denied with decidedBy: "user" and the reason
+    const resolved = events.find((event) => event.type === "approval_resolved");
+    expect(resolved?.data).toEqual({
+      approvalId: "approval-1",
+      toolCallId: "tool_call-1",
+      status: "denied",
+      decidedBy: "user",
+      reason: "do not modify this file",
+    });
+
+    // 2. The denied call has no execution-started event
+    const executionStarted = events.find((event) => event.type === "tool_execution_started");
+    expect(executionStarted).toBeUndefined();
+
+    // 3. Tool Result carries APPROVAL_DENIED, the reason, durationMs 0, and approval metadata
+    const completed = events.find((event) => event.type === "tool_call_completed");
+    expect(completed?.data).toMatchObject({
+      toolCallId: "tool_call-1",
+      outcome: "denied",
+    });
+
+    const toolResult = resultOf(events, "tool_call-1");
+    expect(toolResult).toEqual(
+      expectedDeniedResult("tool_call-1", "write", "do not modify this file"),
+    );
+
+    // 4. Workspace flags were untouched
+    expect(result.workspaceChanged).toBe(false);
+    expect(result.partialChangesPossible).toBe(false);
+  });
+
+  it("uses the default reason when a denial does not provide one", async () => {
+    const { session } = openTestSession({
+      tools: [fakeWriteTool()],
+      model: {
+        turns: [
+          toolCallTurn({ toolCallId: "call-1", name: "write", input: { path: "src/a.ts" } }),
+          textTurn("Understood."),
+        ],
+      },
+    });
+
+    await session.dispatch({ type: "start", task });
+    await waitForEvent(session, "approval_requested");
+
+    const commandResult = await session.dispatch({
       type: "resolve_approval",
       approvalId: "approval-1",
       decision: "deny",
     });
-    expect(denyResult).toMatchObject({
-      accepted: false,
-      code: "INVALID_STATE",
+    expect(commandResult).toMatchObject({ accepted: true });
+
+    await session.result();
+    const events = await collect(session.events());
+    const toolResult = resultOf(events, "tool_call-1");
+
+    expect(toolResult).toEqual(expectedDeniedResult("tool_call-1", "write"));
+  });
+
+  it("stays in awaiting_approval with a fresh request when a denied call is followed by another call needing Approval", async () => {
+    let phaseDuringCall2Prepare: string | undefined;
+    const baseWrite = fakeWriteTool();
+    let prepareCount = 0;
+    const write: typeof baseWrite = {
+      ...baseWrite,
+      async prepare(input, ctx) {
+        prepareCount++;
+        if (prepareCount === 2) {
+          phaseDuringCall2Prepare = session.snapshot().phase;
+        }
+        return baseWrite.prepare(input, ctx);
+      },
+    };
+
+    const { session } = openTestSession({
+      tools: [write],
+      model: {
+        turns: [
+          toolCallTurn(
+            { toolCallId: "call-1", name: "write", input: { path: "src/a.ts" } },
+            { toolCallId: "call-2", name: "write", input: { path: "src/b.ts" } },
+          ),
+          textTurn("Completed turn with second file written."),
+        ],
+      },
     });
+
+    await session.dispatch({ type: "start", task });
+
+    // First call requests approval
+    const req1 = await waitForEvent(session, "approval_requested");
+    expect(req1.data).toMatchObject({
+      approvalId: "approval-1",
+      toolCallId: "tool_call-1",
+      summary: "write src/a.ts",
+    });
+
+    // Deny the first call
+    const denyResult = await session.dispatch({
+      type: "resolve_approval",
+      approvalId: "approval-1",
+      decision: "deny",
+      reason: "do not touch a.ts",
+    });
+    expect(denyResult).toMatchObject({ accepted: true });
+
+    // Second call requests a fresh approval and stays in awaiting_approval
+    const req2 = await waitForEvent(session, "approval_requested", req1.sequence);
+    expect(req2.data).toMatchObject({
+      approvalId: "approval-2",
+      toolCallId: "tool_call-2",
+      summary: "write src/b.ts",
+    });
+
+    // Verify call 2 prepared while in awaiting_approval (never entered executing_tool)
+    expect(phaseDuringCall2Prepare).toBe("awaiting_approval");
+
+    expect(session.snapshot()).toMatchObject({
+      phase: "awaiting_approval",
+      toolCall: { id: "tool_call-2", providerId: "call-2", name: "write" },
+      queuedToolCalls: [],
+      approval: {
+        approvalId: "approval-2",
+        summary: "write src/b.ts",
+        policy: "ask",
+      },
+    });
+
+    // Allow the second call so the session settles
+    const allowResult = await session.dispatch({
+      type: "resolve_approval",
+      approvalId: "approval-2",
+      decision: "allow",
+    });
+    expect(allowResult).toMatchObject({ accepted: true });
+
+    const result = await session.result();
+    expect(result.outcome).toBe("succeeded");
+
+    const events = await collect(session.events());
+
+    // Call 1 was denied and has no execution-started event
+    const executionEvents = events.filter((event) => event.type === "tool_execution_started");
+    expect(executionEvents).toHaveLength(1);
+    expect(executionEvents[0]?.data.toolCallId).toBe("tool_call-2");
+
+    expect(resultOf(events, "tool_call-1")?.error?.code).toBe("APPROVAL_DENIED");
+    expect(resultOf(events, "tool_call-2")?.isError).toBe(false);
+  });
+
+  it("moves to execution when a denied call is followed by an automatically allowed call", async () => {
+    let lookupExecuted = false;
+    const lookup: ExecutableTool = {
+      ...fakeTool({ name: "lookup" }),
+      async execute() {
+        lookupExecuted = true;
+        return { isError: false, content: "file content" };
+      },
+    };
+
+    const { session } = openTestSession({
+      tools: [fakeWriteTool(), lookup],
+      model: {
+        turns: [
+          toolCallTurn(
+            { toolCallId: "call-1", name: "write", input: { path: "src/a.ts" } },
+            { toolCallId: "call-2", name: "lookup", input: {} },
+          ),
+          textTurn("Completed after reading."),
+        ],
+      },
+    });
+
+    await session.dispatch({ type: "start", task });
+    const req = await waitForEvent(session, "approval_requested");
+    expect(req.data.toolCallId).toBe("tool_call-1");
+
+    // Deny the mutating call
+    await session.dispatch({
+      type: "resolve_approval",
+      approvalId: "approval-1",
+      decision: "deny",
+      reason: "skip write",
+    });
+
+    // The session should automatically execute the read-only call without another approval request
+    const result = await session.result();
+    expect(result.outcome).toBe("succeeded");
+    expect(lookupExecuted).toBe(true);
+
+    const events = await collect(session.events());
+    const approvalRequests = events.filter((event) => event.type === "approval_requested");
+    expect(approvalRequests).toHaveLength(1);
+
+    const executionStarted = events.find((event) => event.type === "tool_execution_started");
+    expect(executionStarted?.data.toolCallId).toBe("tool_call-2");
+
+    expect(resultOf(events, "tool_call-1")?.error?.code).toBe("APPROVAL_DENIED");
+    expect(resultOf(events, "tool_call-2")?.content).toBe("file content");
+  });
+
+  it("moves from execution to awaiting_approval when a completed call is followed by one needing Approval", async () => {
+    let phaseDuringCall2Prepare: string | undefined;
+    const baseWrite = fakeWriteTool();
+    const write: typeof baseWrite = {
+      ...baseWrite,
+      async prepare(input, ctx) {
+        phaseDuringCall2Prepare = session.snapshot().phase;
+        return baseWrite.prepare(input, ctx);
+      },
+    };
+
+    const { session } = openTestSession({
+      tools: [fakeTool({ name: "lookup" }), write],
+      model: {
+        turns: [
+          toolCallTurn(
+            { toolCallId: "call-1", name: "lookup", input: {} },
+            { toolCallId: "call-2", name: "write", input: { path: "src/a.ts" } },
+          ),
+          textTurn("All done."),
+        ],
+      },
+    });
+
+    await session.dispatch({ type: "start", task });
+
+    // Lookup completes automatically in executing_tool, and write prepares in executing_tool
+    const req = await waitForEvent(session, "approval_requested");
+    expect(req.data).toMatchObject({
+      approvalId: "approval-1",
+      toolCallId: "tool_call-2",
+      summary: "write src/a.ts",
+    });
+
+    // Write moved into awaiting_approval
     expect(session.snapshot().phase).toBe("awaiting_approval");
 
-    // Clean up by allowing so the session can settle
+    // Allow write to finish
     await session.dispatch({
       type: "resolve_approval",
       approvalId: "approval-1",
@@ -304,6 +577,9 @@ describe("waiting for Approval under the ask policy", () => {
     });
     const result = await session.result();
     expect(result.outcome).toBe("succeeded");
+
+    // Verify call 2 prepared while in executing_tool, then moved to awaiting_approval
+    expect(phaseDuringCall2Prepare).toBe("executing_tool");
   });
 
   it("keeps the state in executing_tool with the next call during its prepare, between calls in a batch", async () => {
@@ -341,5 +617,66 @@ describe("waiting for Approval under the ask policy", () => {
       toolCall: { id: "tool_call-2", name: "inspect" },
       queuedToolCalls: [{ id: "tool_call-3" }],
     });
+  });
+
+  it("increments consecutive recoverable failures on denial and resets upon a successful call", async () => {
+    let failuresObservedAtCall2Req = 0;
+    let failuresObservedAtCall3Req = 0;
+
+    const { session } = openTestSession({
+      tools: [fakeWriteTool()],
+      model: {
+        turns: [
+          toolCallTurn(
+            { toolCallId: "call-1", name: "write", input: { path: "src/a.ts" } },
+            { toolCallId: "call-2", name: "write", input: { path: "src/b.ts" } },
+            { toolCallId: "call-3", name: "write", input: { path: "src/c.ts" } },
+          ),
+          textTurn("Finished after call 3."),
+        ],
+      },
+    });
+
+    await session.dispatch({ type: "start", task });
+
+    // Call 1
+    const req1 = await waitForEvent(session, "approval_requested");
+    await session.dispatch({
+      type: "resolve_approval",
+      approvalId: "approval-1",
+      decision: "deny",
+    });
+
+    // Call 2
+    const req2 = await waitForEvent(session, "approval_requested", req1.sequence);
+    failuresObservedAtCall2Req = session.snapshot().counters.consecutiveRecoverableFailures;
+
+    await session.dispatch({
+      type: "resolve_approval",
+      approvalId: "approval-2",
+      decision: "deny",
+    });
+
+    // Call 3
+    const req3 = await waitForEvent(session, "approval_requested", req2.sequence);
+    expect(req3.data.toolCallId).toBe("tool_call-3");
+    failuresObservedAtCall3Req = session.snapshot().counters.consecutiveRecoverableFailures;
+
+    // Allow Call 3
+    await session.dispatch({
+      type: "resolve_approval",
+      approvalId: "approval-3",
+      decision: "allow",
+    });
+
+    const result = await session.result();
+    expect(result.outcome).toBe("succeeded");
+
+    // Denials incremented consecutive recoverable failures
+    expect(failuresObservedAtCall2Req).toBe(1);
+    expect(failuresObservedAtCall3Req).toBe(2);
+
+    // After call 3 succeeded, the consecutive counter reset to 0
+    expect(session.snapshot().counters.consecutiveRecoverableFailures).toBe(0);
   });
 });
