@@ -187,7 +187,21 @@ Quy ước của nhóm: nếu conflict nằm ở phần code của người khá
 
 ### Nội dung PR
 
-Điền đầy đủ [template PR](.github/pull_request_template.md): link ticket, loại thay đổi, thay đổi gì, vì sao, cách giải quyết, cách kiểm thử (nếu có thay đổi code), ảnh chụp màn hình (nếu có thay đổi giao diện) và checklist.
+Điền [template PR](.github/pull_request_template.md). Mục tiêu: người chưa đọc ticket và chưa mở diff, chỉ cần đọc **Tóm tắt** và **Ví dụ** là kể lại được PR làm gì. Các mục sau đó giúp reviewer hiểu PR làm như thế nào.
+
+| Mục | Nội dung |
+|-----|----------|
+| Tóm tắt | Trước, sau, vì sao, phần chưa làm, link ticket |
+| Ví dụ | Hành vi mới qua một ví dụ cụ thể: output TUI/CLI, Tool Result, chuỗi Session Event, ... |
+| Thay đổi | Bản đồ diff, thứ tự nên đọc, thay đổi interface giữa các package |
+| Flow | Sơ đồ Mermaid khi PR thêm hoặc đổi luồng chạy qua nhiều thành phần |
+| Quyết định thiết kế | Chỗ ticket/ADR không quy định sẵn: đã chọn gì, vì sao, phương án bị loại |
+| Kiểm thử | Lệnh test riêng, kịch bản được bao phủ, phần chưa kiểm thử được (nếu có thay đổi code) |
+| Rủi ro và ngoài phạm vi | Rủi ro đã biết, việc để lại kèm ticket theo dõi |
+
+Mục nào không áp dụng thì xóa. Không cần ghi lại loại thay đổi (đã có trong tiêu đề PR) hay liệt kê lại các lệnh mà CI đã chạy.
+
+PR tham khảo cách viết: [#61](https://github.com/quangdat2511/coding-agent/pull/61) (bảng quyết định thiết kế) và [#57](https://github.com/quangdat2511/coding-agent/pull/57) (Flow gồm `flowchart` và `sequenceDiagram`; PR đã đóng nhưng phần Flow vẫn đáng tham khảo). Hai PR này viết theo template cũ nên tên mục khác, nhưng nội dung đúng tinh thần của template hiện tại.
 
 > **Lưu ý:** Có thể dùng AI hỗ trợ soạn tiêu đề và mô tả PR, nhưng chủ PR phải **đọc lại toàn bộ trước khi chuyển PR sang Ready for review**, đảm bảo nội dung phản ánh đúng và đầy đủ thay đổi thực tế.
 
@@ -240,6 +254,7 @@ Nếu trong lúc chờ review mà `main` đã tiến lên hoặc CI chuyển san
 
 - **Bắt buộc review** PR khi được request. Nếu thấy việc mình được request review là không hợp lý, **nêu ý kiến** với chủ PR, không im lặng và bỏ qua không review.
 - Chủ động **sắp xếp thời gian review sớm nhất có thể** ngay khi được request, để branch không bị giữ lâu, đúng tinh thần short-lived branch và giúp PR được merge sớm. Nên review xong **trong vòng 2 ngày** kể từ khi được request.
+- Đọc **Tóm tắt** và **Ví dụ** trong mô tả PR trước. Nếu đọc xong mà không kể lại được PR làm gì, comment yêu cầu chủ PR sửa mô tả trước, chưa review code.
 - Để lại comment cụ thể, gắn với dòng code cần góp ý.
 - Chỉ approve khi đã hiểu rõ chủ PR đang làm gì và đồng ý với thay đổi cũng như hướng triển khai đó.
 - Có thể dùng AI hỗ trợ quá trình review và gợi ý nội dung comment, nhưng phải **tự đánh giá gợi ý đó có hợp lý không trước khi đăng comment** - không copy-paste nguyên văn suggestion của AI khi chưa hiểu rõ.
