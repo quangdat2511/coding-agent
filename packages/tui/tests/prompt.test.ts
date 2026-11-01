@@ -13,6 +13,8 @@ const SCREEN_ROWS = 6;
 const PASTE_START = "\u001b[200~";
 const PASTE_END = "\u001b[201~";
 const CLEAR_SCREEN = "\u001b[2J";
+// The Prompt's row on a terminal SCREEN_ROWS tall.
+const PROMPT_ROW = SCREEN_ROWS - 2;
 
 // `screenRows` is the height of the whole terminal. `streams` stands in for its stdin or stdout, as
 // when input or output is piped.
@@ -54,6 +56,53 @@ describe("Prompt", () => {
     await terminal.press("Sử", KEYS.backspace);
     await tui.flush();
     expect(prompt(terminal)).toBe("> S");
+  });
+
+  it("shows the cursor after the typed text", async () => {
+    const { tui, terminal } = mount();
+    await terminal.press("Sửa");
+    await tui.flush();
+    expect(await terminal.cursorAt()).toEqual([PROMPT_ROW, 5]);
+  });
+
+  it("inserts at the cursor and deletes on either side of it", async () => {
+    const { tui, terminal, submitted } = mount();
+    await terminal.press("Sửa test", KEYS.home, KEYS.right, KEYS.right, KEYS.right, " lại");
+    await tui.flush();
+    expect(prompt(terminal)).toBe("> Sửa lại test");
+    // The cursor is on the space before "test".
+    expect(await terminal.cursorAt()).toEqual([PROMPT_ROW, 9]);
+
+    // Delete takes the space after the cursor, Backspace the i before it.
+    await terminal.press(KEYS.delete, KEYS.backspace, KEYS.end, "!", KEYS.enter);
+    await tui.flush();
+    expect(submitted).toEqual(["Sửa lạtest!"]);
+  });
+
+  it("moves the cursor over a letter typed as a base and combining marks in one step", async () => {
+    const { tui, terminal, submitted } = mount();
+    // "Sửa" with ử written as u, a horn and a hook above.
+    await terminal.press("Su\u031b\u0309a", KEYS.left, KEYS.left, KEYS.delete, "u", KEYS.enter);
+    await tui.flush();
+    expect(submitted).toEqual(["Sua"]);
+  });
+
+  it("never moves the viewport on editing keys, nor the cursor on scroll keys", async () => {
+    // 21 rows: the header, then line 1 to line 20, in a viewport of 4 rows.
+    const text = Array.from({ length: 20 }, (_, index) => `line ${index + 1}`).join("\n");
+    const { tui, terminal } = mount([{ kind: "assistant", id: "m-1", text, status: "completed" }]);
+    await terminal.press("abc", KEYS.pageUp, KEYS.left);
+    await tui.flush();
+    const inView = ["line 14", "line 15", "line 16", "line 17"];
+    expect(viewport(terminal)).toEqual(inView);
+    expect(await terminal.cursorAt()).toEqual([PROMPT_ROW, 4]);
+
+    await terminal.press(KEYS.home, KEYS.end, KEYS.delete, KEYS.backspace);
+    await tui.flush();
+    expect(viewport(terminal)).toEqual(inView);
+    await terminal.press(KEYS.home, KEYS.pageDown);
+    await tui.flush();
+    expect(await terminal.cursorAt()).toEqual([PROMPT_ROW, 2]);
   });
 
   it("submits the typed task and clears the Prompt", async () => {
@@ -144,15 +193,21 @@ describe("Prompt", () => {
     expect(submitted).toEqual(["dong 1 dong 2"]);
   });
 
-  it("shows the end of a task wider than the Prompt row, without clearing the screen", async () => {
+  it("keeps the cursor of a task wider than the Prompt row in view, without clearing the screen", async () => {
     const { tui, terminal } = mount();
     await tui.flush();
     terminal.takeOutput();
     const task = "0123456789".repeat(6);
     await terminal.press(task);
     await tui.flush();
-    // The 38 columns after the marker hold an ellipsis and the last 37 characters.
-    expect(prompt(terminal)).toBe(`> …${task.slice(-37)}`);
+    // The 38 columns after the marker hold the last 37 characters and the cursor after them.
+    expect(prompt(terminal)).toBe(`> ${task.slice(-37)}`);
+    expect(await terminal.cursorAt()).toEqual([PROMPT_ROW, COLUMNS - 1]);
+    // Home shows the start of the task, with the cursor on its first character.
+    await terminal.press(KEYS.home);
+    await tui.flush();
+    expect(prompt(terminal)).toBe(`> ${task.slice(0, 38)}`);
+    expect(await terminal.cursorAt()).toEqual([PROMPT_ROW, 2]);
     if (REDRAWS_IN_PLACE) {
       expect(terminal.takeOutput()).not.toContain(CLEAR_SCREEN);
     }

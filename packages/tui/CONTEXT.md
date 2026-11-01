@@ -14,3 +14,9 @@ _Avoid_: CLI output, command prompt, terminal framework
 The one-row input under the transcript where the person types a Coding Task and submits it. The
 Prompt is where the text is typed; the submitted text is the Coding Task.
 _Avoid_: Input box, command line, system prompt
+
+**Approval overlay**:
+The box drawn over the bottom of the transcript while an Approval is pending. It shows the tool
+and its mutation summary; the person allows with `y`, or denies with `n` and then types an optional
+reason and presses Enter. The transcript underneath keeps its content and scroll position.
+_Avoid_: Approval dialog, popup, modal, confirmation prompt

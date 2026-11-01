@@ -61,6 +61,8 @@ export function mountTui(
       <Frame
         rows={rows.slice(top, top + viewportHeight)}
         layout={frame}
+        columns={columns}
+        approval={model.pendingApproval}
         interactive={interactive}
         handlers={props.handlers}
         onScroll={(direction) => draw(direction * pageRows(viewportHeight))}

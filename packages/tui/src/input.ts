@@ -1,9 +1,12 @@
+import type { EditAction } from "./editor.ts";
+
 // The input policy: what each key press or paste does in the TUI. It is the only place that
 // decides, so a new mode adds an entry to MODES here instead of key handling in another component.
 
-// Which part of the TUI has the keyboard. The transcript and the Prompt share the only mode today;
-// the Approval overlay (CDA-60) adds its own.
-export type InputMode = "prompt";
+// Which part of the TUI has the keyboard. The transcript shares every mode: Page Up and Page Down
+// scroll it in each. "prompt" types a Coding Task, "approval" decides the pending Approval and
+// "reason" types why it is denied.
+export type InputMode = "prompt" | "approval" | "reason";
 
 // The fields of Ink's key report that the policy reads. Declared here so that tests build a key
 // press without Ink and this module names no Ink type. Ink's report has every field.
@@ -11,6 +14,11 @@ export interface KeyPress {
   readonly escape?: boolean;
   readonly return?: boolean;
   readonly backspace?: boolean;
+  readonly delete?: boolean;
+  readonly leftArrow?: boolean;
+  readonly rightArrow?: boolean;
+  readonly home?: boolean;
+  readonly end?: boolean;
   readonly pageUp?: boolean;
   readonly pageDown?: boolean;
   readonly ctrl?: boolean;
@@ -19,13 +27,15 @@ export interface KeyPress {
 
 // One step the TUI takes. A key press or paste maps to a list of them, carried out in order: text
 // and the Enter typed after it can arrive together, and a key the TUI does not use maps to none.
+// Edit actions go to the text being typed, the Prompt or the denial reason.
 export type KeyAction =
-  | { readonly kind: "insert"; readonly text: string }
-  | { readonly kind: "backspace" }
+  | EditAction
   | { readonly kind: "submit" }
   // -1 moves the viewport a page toward older entries, 1 a page toward the newest.
   | { readonly kind: "scroll"; readonly direction: -1 | 1 }
-  | { readonly kind: "cancel" };
+  | { readonly kind: "cancel" }
+  | { readonly kind: "allow" }
+  | { readonly kind: "deny" };
 
 const SUBMIT: KeyAction = { kind: "submit" };
 
@@ -38,7 +48,9 @@ interface ModePolicy {
 // Every mode's rules, in one entry each. The record type makes the compiler ask for an entry for a
 // new mode, with both its key and its paste rules.
 const MODES: Record<InputMode, ModePolicy> = {
-  prompt: { key: routePromptKey, paste: insert },
+  prompt: { key: routeTextKey, paste: insert },
+  approval: { key: routeApprovalKey, paste: () => [] },
+  reason: { key: routeTextKey, paste: insert },
 };
 
 // `input` and `key` are what Ink's useInput passes: the typed text, empty for a named key such as
@@ -58,19 +70,19 @@ export function routePaste(mode: InputMode, text: string): readonly KeyAction[] 
   return MODES[mode].paste(text);
 }
 
-// Scroll keys go to the viewport and everything else to the Prompt, so neither reaches the other.
-function routePromptKey(input: string, key: KeyPress): readonly KeyAction[] {
+// The keys of a row of text, the Prompt or the denial reason: Enter submits it, and scroll keys go
+// to the viewport and editing keys to the text, so neither reaches the other.
+function routeTextKey(input: string, key: KeyPress): readonly KeyAction[] {
   if (key.return) {
     return [SUBMIT];
   }
-  if (key.backspace) {
-    return [{ kind: "backspace" }];
+  const editing = routeEditingKey(key);
+  if (editing !== undefined) {
+    return [editing];
   }
-  if (key.pageUp) {
-    return [{ kind: "scroll", direction: -1 }];
-  }
-  if (key.pageDown) {
-    return [{ kind: "scroll", direction: 1 }];
+  const scroll = routeScroll(key);
+  if (scroll !== undefined) {
+    return [scroll];
   }
   if (key.ctrl || key.meta) {
     return [];
@@ -87,8 +99,62 @@ function routePromptKey(input: string, key: KeyPress): readonly KeyAction[] {
   return [...insert(input.slice(0, enter.index)), SUBMIT];
 }
 
-// Typed and pasted text alike can carry line breaks and tabs. The Prompt is one row and its text
-// goes to onSubmit, so they become spaces, and other control characters are dropped.
+// A decision takes one key on its own. Enter decides nothing and neither does a chunk of several
+// characters, so Enter or text typed ahead for the Prompt cannot allow a Tool Call.
+function routeApprovalKey(input: string, key: KeyPress): readonly KeyAction[] {
+  const scroll = routeScroll(key);
+  if (scroll !== undefined) {
+    return [scroll];
+  }
+  if (key.ctrl || key.meta) {
+    return [];
+  }
+  switch (input) {
+    case "y":
+    case "Y":
+      return [{ kind: "allow" }];
+    case "n":
+    case "N":
+      return [{ kind: "deny" }];
+    default:
+      return [];
+  }
+}
+
+function routeEditingKey(key: KeyPress): EditAction | undefined {
+  if (key.backspace) {
+    return { kind: "backspace" };
+  }
+  if (key.delete) {
+    return { kind: "delete" };
+  }
+  if (key.leftArrow) {
+    return { kind: "move", to: "left" };
+  }
+  if (key.rightArrow) {
+    return { kind: "move", to: "right" };
+  }
+  if (key.home) {
+    return { kind: "move", to: "home" };
+  }
+  if (key.end) {
+    return { kind: "move", to: "end" };
+  }
+  return undefined;
+}
+
+function routeScroll(key: KeyPress): KeyAction | undefined {
+  if (key.pageUp) {
+    return { kind: "scroll", direction: -1 };
+  }
+  if (key.pageDown) {
+    return { kind: "scroll", direction: 1 };
+  }
+  return undefined;
+}
+
+// Typed and pasted text alike can carry line breaks and tabs. The Prompt and the denial reason are
+// one row each, so they become spaces, and other control characters are dropped.
 function insert(input: string): readonly KeyAction[] {
   const text = input.replace(/\r\n|[\r\n\t]/g, " ").replace(/\p{Cc}/gu, "");
   return text === "" ? [] : [{ kind: "insert", text }];

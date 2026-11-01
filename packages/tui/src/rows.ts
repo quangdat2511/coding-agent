@@ -89,7 +89,7 @@ function toolCallLines(entry: Entry<"tool_call">, columns: number): string[] {
 
 // Wraps text the way Ink wraps a <Text> (ink/build/wrap-text.js), so a row never needs wrapping
 // again. Empty text takes no rows, as an empty <Text> takes no height.
-function wrap(text: string, columns: number): string[] {
+export function wrap(text: string, columns: number): string[] {
   const display = toDisplayText(text);
   if (display === "") {
     return [];

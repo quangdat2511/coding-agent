@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "bun:test";
-import { FOOTER_HEIGHT, KEY_HINT } from "../src/frame.tsx";
+import { FOOTER_HEIGHT, KEY_HINTS } from "../src/frame.tsx";
 import * as publicApi from "../src/index.ts";
 import type { TranscriptEntry } from "../src/types.ts";
 import { createTestTerminal } from "./support/terminal.ts";
@@ -21,7 +21,7 @@ function mount(
 // The whole visible screen while the TUI runs: the given transcript rows, empty rows down to the
 // Prompt, then the empty Prompt and the key hint.
 function screenOf(...rows: string[]): string[] {
-  return [...shellScreen(...rows).slice(0, ROWS - FOOTER_HEIGHT), ">", KEY_HINT];
+  return [...shellScreen(...rows).slice(0, ROWS - FOOTER_HEIGHT), ">", KEY_HINTS.prompt];
 }
 
 // The whole visible screen without the TUI: the given rows, then empty rows to the bottom.
@@ -218,7 +218,8 @@ describe("renderTui", () => {
     const { tui } = mount([{ kind: "user", id: "task", text: TASK }], terminal);
     await tui.flush();
     expect(terminal.terminal.buffer.active.type).toBe("alternate");
-    expect(await terminal.isCursorVisible()).toBe(false);
+    // While the TUI draws, the cursor sits in the empty Prompt, after its marker.
+    expect(await terminal.cursorAt()).toEqual([ROWS - FOOTER_HEIGHT, 2]);
 
     await tui.unmount();
 

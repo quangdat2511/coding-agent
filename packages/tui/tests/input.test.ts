@@ -63,11 +63,72 @@ describe("routeKey", () => {
     expect(routeKey("prompt", "\u0007", {})).toEqual([]);
   });
 
-  it("does nothing for named keys and other Ctrl and Meta combinations", () => {
-    // Ink reports an arrow, Tab, Delete, Home or End with empty input.
+  it("moves the cursor on Left, Right, Home and End and deletes after it on Delete", () => {
+    expect(routeKey("prompt", "", { leftArrow: true })).toEqual([{ kind: "move", to: "left" }]);
+    expect(routeKey("prompt", "", { rightArrow: true })).toEqual([{ kind: "move", to: "right" }]);
+    expect(routeKey("prompt", "", { home: true })).toEqual([{ kind: "move", to: "home" }]);
+    expect(routeKey("prompt", "", { end: true })).toEqual([{ kind: "move", to: "end" }]);
+    expect(routeKey("prompt", "", { delete: true })).toEqual([{ kind: "delete" }]);
+  });
+
+  it("does nothing for other named keys and other Ctrl and Meta combinations", () => {
+    // Ink reports Up, Down or Tab with empty input.
     expect(routeKey("prompt", "", {})).toEqual([]);
     expect(routeKey("prompt", "a", { ctrl: true })).toEqual([]);
     expect(routeKey("prompt", "a", { meta: true })).toEqual([]);
+  });
+});
+
+describe("routeKey in the Approval overlay", () => {
+  it("allows on y and denies on n, in either case", () => {
+    expect(routeKey("approval", "y", {})).toEqual([{ kind: "allow" }]);
+    expect(routeKey("approval", "Y", {})).toEqual([{ kind: "allow" }]);
+    expect(routeKey("approval", "n", {})).toEqual([{ kind: "deny" }]);
+    expect(routeKey("approval", "N", {})).toEqual([{ kind: "deny" }]);
+  });
+
+  it("decides nothing on Enter or on other text, so keys typed ahead never allow", () => {
+    expect(routeKey("approval", "", { return: true })).toEqual([]);
+    expect(routeKey("approval", "\r", {})).toEqual([]);
+    expect(routeKey("approval", "yes", {})).toEqual([]);
+    expect(routeKey("approval", "x", {})).toEqual([]);
+    expect(routeKey("approval", "y", { ctrl: true })).toEqual([]);
+  });
+
+  it("still cancels and scrolls the transcript underneath", () => {
+    expect(routeKey("approval", "", { escape: true })).toEqual([{ kind: "cancel" }]);
+    expect(routeKey("approval", "", { pageUp: true })).toEqual([{ kind: "scroll", direction: -1 }]);
+    expect(routeKey("approval", "", { pageDown: true })).toEqual([
+      { kind: "scroll", direction: 1 },
+    ]);
+  });
+
+  it("ignores pasted text", () => {
+    expect(routePaste("approval", "y")).toEqual([]);
+  });
+});
+
+describe("routeKey in the denial reason", () => {
+  it("edits the reason with the same keys as the Prompt", () => {
+    expect(routeKey("reason", "abc", {})).toEqual([{ kind: "insert", text: "abc" }]);
+    expect(routeKey("reason", "", { backspace: true })).toEqual([{ kind: "backspace" }]);
+    expect(routeKey("reason", "", { delete: true })).toEqual([{ kind: "delete" }]);
+    expect(routeKey("reason", "", { leftArrow: true })).toEqual([{ kind: "move", to: "left" }]);
+    expect(routeKey("reason", "", { home: true })).toEqual([{ kind: "move", to: "home" }]);
+  });
+
+  it("submits the reason on Enter", () => {
+    expect(routeKey("reason", "", { return: true })).toEqual([{ kind: "submit" }]);
+    expect(routeKey("reason", "too risky\r", {})).toEqual([
+      { kind: "insert", text: "too risky" },
+      { kind: "submit" },
+    ]);
+  });
+
+  it("keeps the cancel and scroll keys, and inserts pasted text as one line", () => {
+    expect(routeKey("reason", "", { escape: true })).toEqual([{ kind: "cancel" }]);
+    expect(routeKey("reason", "", { pageUp: true })).toEqual([{ kind: "scroll", direction: -1 }]);
+    expect(routePaste("reason", "a\rb")).toEqual([{ kind: "insert", text: "a b" }]);
   });
 });
 

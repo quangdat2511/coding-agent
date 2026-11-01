@@ -6,8 +6,15 @@
 export interface TuiModel {
   // Oldest first. Each id is unique across the transcript and stays the same across updates.
   readonly transcript: readonly TranscriptEntry[];
+  // The Approval awaiting a decision, from approval_requested. The overlay shows it until the
+  // person decides, and the decision goes to onApproval with this approvalId.
+  readonly pendingApproval?: {
+    readonly approvalId: string;
+    readonly toolName: string;
+    // The mutation summary of approval_requested, written by the projection.
+    readonly summary: string;
+  };
   // Planned optional fields:
-  // - pendingApproval (CDA-60): the Approval awaiting a decision, answered through onApproval.
   // - session: the Agent Session status shown outside the transcript.
   // - limitNotice: limit kind, configured limit and observed value from runtime_limit_reached.
 }
@@ -37,10 +44,11 @@ export type TranscriptEntry =
       readonly toolName: string;
       // One line describing the call's arguments, written by the projection.
       readonly summary: string;
-      // tool_call_completed outcomes, plus "queued" after tool_call_queued and "executing" after
-      // tool_execution_started. Planned member: "awaiting_approval" (CDA-60).
+      // tool_call_completed outcomes, plus "queued" after tool_call_queued, "awaiting_approval"
+      // after approval_requested and "executing" after tool_execution_started.
       readonly status:
         | "queued"
+        | "awaiting_approval"
         | "executing"
         | "succeeded"
         | "failed"
