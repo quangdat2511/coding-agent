@@ -123,25 +123,81 @@ describe("buildRequestBody", () => {
     });
   });
 
-  it("throws when user message contains tool_result (deferred to CDA-43)", () => {
+  const toolCallTurn = (
+    ...calls: Array<{ id: string; name: string }>
+  ): Context["messages"][number] => ({
+    role: "assistant",
+    model: "gemini-2.0-flash-lite",
+    finishReason: { reason: "tool_call", rawReason: "STOP" },
+    content: calls.map(({ id, name }) => ({
+      type: "tool_call" as const,
+      toolCallId: id,
+      name,
+      arguments: "{}",
+    })),
+  });
+
+  it("maps Tool Results to functionResponse parts named after their call, with output or error", () => {
     const context: Context = {
       messages: [
+        toolCallTurn({ id: "call_1", name: "get_weather" }, { id: "call_2", name: "read" }),
         {
           role: "user",
           content: [
-            {
-              type: "tool_result",
-              toolCallId: "call_1",
-              content: '{"temp": 20}',
-              isError: false,
-            },
+            { type: "tool_result", toolCallId: "call_1", content: '{"temp": 20}', isError: false },
+            { type: "tool_result", toolCallId: "call_2", content: "not found", isError: true },
           ],
         },
       ],
     };
 
+    expect(buildRequestBody(context).contents[1]).toEqual({
+      role: "user",
+      parts: [
+        { functionResponse: { name: "get_weather", response: { output: '{"temp": 20}' } } },
+        { functionResponse: { name: "read", response: { error: "not found" } } },
+      ],
+    });
+  });
+
+  it("batches consecutive user messages into one content, so a turn's Tool Results share it", () => {
+    const context: Context = {
+      messages: [
+        toolCallTurn({ id: "call_1", name: "read" }, { id: "call_2", name: "read" }),
+        {
+          role: "user",
+          content: [{ type: "tool_result", toolCallId: "call_1", content: "one", isError: false }],
+        },
+        {
+          role: "user",
+          content: [{ type: "tool_result", toolCallId: "call_2", content: "two", isError: false }],
+        },
+      ],
+    };
+
+    const body = buildRequestBody(context);
+    expect(body.contents).toHaveLength(2);
+    expect(body.contents[1]).toEqual({
+      role: "user",
+      parts: [
+        { functionResponse: { name: "read", response: { output: "one" } } },
+        { functionResponse: { name: "read", response: { output: "two" } } },
+      ],
+    });
+  });
+
+  it("throws when a Tool Result answers no earlier Tool Call", () => {
+    const context: Context = {
+      messages: [
+        {
+          role: "user",
+          content: [{ type: "tool_result", toolCallId: "call_9", content: "x", isError: false }],
+        },
+      ],
+    };
+
     expect(() => buildRequestBody(context)).toThrow(
-      "tool_result history is not supported by the Google adapter yet (CDA-43)",
+      'tool_result "call_9" answers no earlier tool_call',
     );
   });
 

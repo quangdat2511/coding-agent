@@ -56,6 +56,25 @@ still writes its files inside the 10 s `docker stop` allows. The `terminalbench`
 with CDA-79 (D3.3). Until then it exits 70 once every configuration check has passed, and removes
 any output directory it created.
 
+### Model settings
+
+The sampling settings and the transport retry bound are fixed by the build, not by a flag, and are
+the same under every profile. They are bound into the `ModelPort`, so Agent Core never reads them,
+and the resolved configuration records them for `run.json`.
+
+- **Max output tokens**: 32,000 for `anthropic`, and the provider's default (the model's full
+  output limit) for the others. Anthropic alone requires a cap, and without one `@coding-agent/ai`
+  falls back to 4,096 tokens, too few for a large `write`. One cap shared by every provider would
+  break models: OpenAI reasoning models reject `max_tokens`, and some models allow fewer tokens
+  than others.
+- **Temperature**: the provider's default for every provider.
+- **Transport retry bound**: 2. `@coding-agent/ai` re-issues a request only before its response
+  stream opens ([ADR 0004 §2](../../docs/adr/0004-package-apis-and-dependency-direction.md)), so a
+  transient 429 or 5xx at the start of a Model Turn does not end the run.
+
+Agent Core always asks for parallel Tool Calls to be disabled. The `ModelPort` passes that request
+to every provider except Google, whose API cannot honour it; Agent Core still accepts a batch.
+
 ### Configuration errors
 
 Each of these exits 2 before any Agent Session opens, with the reason on standard error:

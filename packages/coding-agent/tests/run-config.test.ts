@@ -94,6 +94,36 @@ describe("resolving a valid invocation", () => {
   });
 });
 
+describe("choosing the model settings", () => {
+  const providerDefaults = { maxOutputTokens: null, temperature: null };
+
+  it.each([
+    [
+      "anthropic",
+      "claude-haiku-4-5",
+      "ANTHROPIC_API_KEY",
+      { ...providerDefaults, maxOutputTokens: 32_000 },
+    ],
+    ["google", "gemini-2.5-flash", "GOOGLE_API_KEY", providerDefaults],
+    ["openai", "gpt-4o-mini", "OPENAI_API_KEY", providerDefaults],
+    ["openrouter", "openai/gpt-4o-mini", "OPENROUTER_API_KEY", providerDefaults],
+    ["xai", "grok-4.3", "XAI_API_KEY", providerDefaults],
+  ] as const)(
+    "records the sampling settings %s runs with",
+    async (provider, model, variable, sampling) => {
+      const resolved = await resolveWith({ provider, model }, { [variable]: secret });
+      if (!resolved.ok) throw new Error(`expected a configuration, got: ${resolved.message}`);
+      expect(JSON.parse(JSON.stringify(resolved.config)).sampling).toEqual(sampling);
+    },
+  );
+
+  it("records a transport retry bound of 2", async () => {
+    const resolved = await resolveWith();
+    if (!resolved.ok) throw new Error(`expected a configuration, got: ${resolved.message}`);
+    expect(JSON.parse(JSON.stringify(resolved.config)).transportRetryBound).toBe(2);
+  });
+});
+
 describe("selecting the provider and model", () => {
   it("refuses a model the provider directory does not list for a known provider", async () => {
     await expectRefused(

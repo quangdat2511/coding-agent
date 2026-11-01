@@ -40,9 +40,16 @@ interface GoogleFunctionCall {
   args?: Record<string, unknown> | string | null;
 }
 
+// `output` and `error` are the keys Gemini reads a function's result and its failure from.
+interface GoogleFunctionResponse {
+  name: string;
+  response: { output: string } | { error: string };
+}
+
 interface GooglePart {
   text?: string;
   functionCall?: GoogleFunctionCall;
+  functionResponse?: GoogleFunctionResponse;
 }
 
 interface GoogleContent {
@@ -140,7 +147,8 @@ export function buildRequestBody(context: Context): GoogleRequestBody {
     };
   }
 
-  // Messages → contents
+  // A functionResponse names the function it answers, not the call.
+  const toolNames = new Map<string, string>();
   for (const msg of context.messages) {
     if (msg.role === "user") {
       const parts: GooglePart[] = [];
@@ -151,14 +159,22 @@ export function buildRequestBody(context: Context): GoogleRequestBody {
           if (block.type === "text") {
             parts.push({ text: block.text });
           } else if (block.type === "tool_result") {
-            // TODO(CDA-43): map sang functionResponse { name, response } khi Agent Core chạy multi-turn tool loop.
-            throw new Error(
-              "tool_result history is not supported by the Google adapter yet (CDA-43)",
-            );
+            const name = toolNames.get(block.toolCallId);
+            if (name === undefined) {
+              throw new Error(`tool_result "${block.toolCallId}" answers no earlier tool_call`);
+            }
+            const response = block.isError ? { error: block.content } : { output: block.content };
+            parts.push({ functionResponse: { name, response } });
           }
         }
       }
-      body.contents.push({ role: "user", parts });
+      // Gemini rejects a turn whose function responses are split across contents.
+      const previous = body.contents.at(-1);
+      if (previous?.role === "user") {
+        previous.parts.push(...parts);
+      } else {
+        body.contents.push({ role: "user", parts });
+      }
     } else {
       // assistant → model
       const parts: GooglePart[] = [];
@@ -166,6 +182,7 @@ export function buildRequestBody(context: Context): GoogleRequestBody {
         if (block.type === "text") {
           parts.push({ text: block.text });
         } else if (block.type === "tool_call") {
+          toolNames.set(block.toolCallId, block.name);
           let args: Record<string, unknown> = {};
           try {
             args = JSON.parse(block.arguments) as Record<string, unknown>;

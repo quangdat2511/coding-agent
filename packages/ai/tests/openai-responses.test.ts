@@ -154,21 +154,24 @@ describe("buildParams", () => {
     expect(params).toEqual([{ role: "user", content: "Hello part 1 and part 2" }]);
   });
 
-  it("throws when user message contains tool_result (deferred to CDA-43)", () => {
+  it("maps each Tool Result to a tool message, ahead of any text in the same message", () => {
     const context: Context = {
       messages: [
         {
           role: "user",
           content: [
+            { type: "tool_result", toolCallId: "call_1", content: "1 | hello", isError: false },
             { type: "text", text: "check result" },
-            { type: "tool_result", toolCallId: "call_1", content: "success", isError: false },
+            { type: "tool_result", toolCallId: "call_2", content: "not found", isError: true },
           ],
         },
       ],
     };
-    expect(() => buildParams(context)).toThrow(
-      "tool_result history is not supported by this adapter yet (CDA-43)",
-    );
+    expect(buildParams(context)).toEqual([
+      { role: "tool", tool_call_id: "call_1", content: "1 | hello" },
+      { role: "tool", tool_call_id: "call_2", content: "not found" },
+      { role: "user", content: "check result" },
+    ]);
   });
 
   it("maps assistant message containing text and tool_call", () => {
@@ -460,36 +463,6 @@ describe("OpenAI stream finishReason handling", () => {
       outputTokens: 12,
       raw: { prompt_tokens: 25, completion_tokens: 12 },
     });
-  });
-
-  it("emits error event and rejects result() when context contains tool_result (CDA-43)", async () => {
-    const contextWithToolResult: Context = {
-      messages: [
-        {
-          role: "user",
-          content: [
-            { type: "text", text: "hi" },
-            { type: "tool_result", toolCallId: "call-1", content: "ok", isError: false },
-          ],
-        },
-      ],
-    };
-
-    const streamObj = stream(model, contextWithToolResult, { apiKey: "test-key" });
-    const events = [];
-    for await (const ev of streamObj) {
-      events.push(ev);
-    }
-    expect(events.length).toBe(1);
-    expect(events[0]?.type).toBe("error");
-    if (events[0]?.type === "error") {
-      expect(events[0].error.message).toContain(
-        "tool_result history is not supported by this adapter yet (CDA-43)",
-      );
-    }
-    await expect(streamObj.result()).rejects.toThrow(
-      "tool_result history is not supported by this adapter yet (CDA-43)",
-    );
   });
 
   it("emits error event and rejects result() when create throws an error", async () => {
@@ -929,6 +902,33 @@ describe("OpenAI stream finishReason handling", () => {
     expect(lastCreateBody?.tools?.[0]?.type).toBe("function");
     expect(lastCreateBody?.tools?.[0]?.function.name).toBe("calculate");
     expect(lastCreateBody?.tools?.[0]?.function.description).toBe("Perform math calculation");
+  });
+
+  describe("when parallel Tool Calls are disabled", () => {
+    const tools: ToolDeclaration[] = [
+      { name: "read", description: "Read a file", parameters: Type.Object({}) },
+    ];
+
+    beforeAll(() => {
+      mockChunks = [{ choices: [{ delta: { content: "ok" }, finish_reason: "stop" }] }];
+    });
+
+    it("sends parallel_tool_calls false", async () => {
+      await collectTurnEndEvent(
+        stream(model, { ...context, tools }, { apiKey: "test-key", parallelToolCalls: false }),
+      );
+
+      expect(lastCreateBody).toHaveProperty("parallel_tool_calls", false);
+    });
+
+    // Chat Completions rejects parallel_tool_calls on a request without tools.
+    it("sends no parallel_tool_calls when the request declares no tools", async () => {
+      await collectTurnEndEvent(
+        stream(model, context, { apiKey: "test-key", parallelToolCalls: false }),
+      );
+
+      expect(lastCreateBody).not.toHaveProperty("parallel_tool_calls");
+    });
   });
 
   it("preserves model identifiers containing a slash end-to-end (e.g. openai/gpt-4o-mini)", async () => {
