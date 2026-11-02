@@ -5,7 +5,7 @@ import type {
   UserMessage,
 } from "@coding-agent/ai";
 import { createEventLog } from "./event-log.ts";
-import type { SessionEvent, SessionEventType, SkipReason } from "./events.ts";
+import type { SessionEvent, SessionEventType } from "./events.ts";
 import { messageOf } from "./guards.ts";
 import { readModelResponse } from "./model-response.ts";
 import type { AgentFailure, AgentResult, UsageTotals } from "./result.ts";
@@ -14,6 +14,7 @@ import type {
   AgentState,
   AssistantMessageDraft,
   AssistantMessageRef,
+  ExecutingToolState,
   ModelTurnRef,
   NormalizedToolCall,
   ReadyState,
@@ -23,7 +24,7 @@ import type {
 import type { CodingTask } from "./task.ts";
 import { type PreflightOutcome, preflightToolCall } from "./tool-call-preflight.ts";
 import { executeTool } from "./tool-execution.ts";
-import type { ToolError, ToolResult } from "./tool-result.ts";
+import type { ApprovalDecider, ToolError, ToolResult } from "./tool-result.ts";
 import { addUsage, usageOf } from "./usage.ts";
 import type { VerificationDecision } from "./verification.ts";
 
@@ -58,6 +59,18 @@ type QueuedToolCall = NormalizedToolCall & { readonly providerId: string };
 type PreflightPassed = Extract<PreflightOutcome, { ok: true }>;
 
 type Approval = NonNullable<NonNullable<ToolResult["metadata"]>["approval"]>;
+
+interface ApprovalDecision {
+  // CDA-70 will expand this union to "allow" | "deny"
+  readonly decision: "allow";
+  readonly reason?: string;
+}
+
+interface PendingApprovalResolver {
+  readonly approvalId: string;
+  readonly toolCallId: string;
+  resolve(decision: ApprovalDecision): void;
+}
 
 const rejectedResult = ({ id, name }: QueuedToolCall, error: ToolError): ToolResult => ({
   toolCallId: id,
@@ -102,6 +115,7 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
     workspace: config.workspace,
     signal: abortEffects.signal,
   };
+  let pendingApproval: PendingApprovalResolver | undefined;
 
   function commit(next: AgentState, event: EventDraft): number {
     const occurredAt = config.clock.now();
@@ -145,6 +159,22 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
     return { ...withoutPhase(state), phase: "streaming_model", modelTurn, assistantMessage };
   }
 
+  function afterToolCallResolved(
+    modelTurn: ModelTurnRef,
+    draft: AssistantMessageDraft,
+    remaining: readonly QueuedToolCall[],
+  ): StreamingModelState | ExecutingToolState {
+    if (remaining.length === 0) return streaming(modelTurn, draft);
+    const [nextCall, ...rest] = remaining;
+    return {
+      ...withoutPhase(state),
+      phase: "executing_tool",
+      modelTurn,
+      toolCall: nextCall as QueuedToolCall,
+      queuedToolCalls: rest,
+    };
+  }
+
   const incremented = (counter: keyof SessionCounters): SessionCounters => ({
     ...state.counters,
     [counter]: state.counters[counter] + 1,
@@ -182,18 +212,30 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
     });
   }
 
-  function skipToolCalls(
+  async function awaitUserApproval(
     modelTurn: ModelTurnRef,
-    draft: AssistantMessageDraft,
-    unstarted: readonly QueuedToolCall[],
-    reason: SkipReason,
-  ): void {
-    for (const { id } of unstarted) {
-      commit(streaming(modelTurn, draft), {
-        type: "tool_call_completed",
-        data: { toolCallId: id, outcome: "skipped", reason },
-      });
-    }
+    toolCall: QueuedToolCall,
+    queuedToolCalls: readonly QueuedToolCall[],
+    summary: string,
+  ): Promise<ApprovalDecision> {
+    const approvalId = config.ids.next("approval");
+    const resolver = Promise.withResolvers<ApprovalDecision>();
+    commit(
+      {
+        ...withoutPhase(state),
+        phase: "awaiting_approval",
+        modelTurn,
+        toolCall,
+        queuedToolCalls,
+        approval: { approvalId, summary, policy: config.approvalPolicy },
+      },
+      {
+        type: "approval_requested",
+        data: { approvalId, toolCallId: toolCall.id, summary, policy: config.approvalPolicy },
+      },
+    );
+    pendingApproval = { approvalId, toolCallId: toolCall.id, resolve: resolver.resolve };
+    return resolver.promise;
   }
 
   async function resolveToolCalls(
@@ -204,33 +246,48 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
     for (const [index, toolCall] of queue.entries()) {
       const preflight = await preflightToolCall(toolCall, preflightContext);
       const mutating = preflight.ok && preflight.tool.mutation === "mutating";
-      if (mutating && config.approvalPolicy === "ask") {
-        const failure: AgentFailure = {
-          code: "INTERNAL_ERROR",
-          message: "awaiting Approval is not implemented yet",
+      const remaining = queue.slice(index + 1);
+
+      let result: ToolResult;
+      // CDA-70 will expand outcome to include "denied"
+      let outcome: "succeeded" | "failed";
+
+      if (!preflight.ok) {
+        result = rejectedResult(toolCall, preflight.error);
+        outcome = "failed";
+      } else if (mutating && config.approvalPolicy === "ask") {
+        const decision = await awaitUserApproval(
+          modelTurn,
+          toolCall,
+          remaining,
+          preflight.prepared.summary,
+        );
+        // CDA-70 will branch on decision.decision === "deny" to produce an APPROVAL_DENIED ToolResult
+        const approval: Approval = {
+          status: "allowed",
+          decidedBy: "user",
+          ...(decision.reason === undefined ? {} : { reason: decision.reason }),
         };
-        skipToolCalls(modelTurn, draft, queue.slice(index), failure.code);
-        return failure;
+        result = await executeToolCall(modelTurn, draft, toolCall, remaining, preflight, approval);
+        outcome = result.isError ? "failed" : "succeeded";
+      } else {
+        result = await executeToolCall(modelTurn, draft, toolCall, remaining, preflight);
+        outcome = result.isError ? "failed" : "succeeded";
       }
-      const result = preflight.ok
-        ? await executeToolCall(modelTurn, draft, toolCall, queue.slice(index + 1), preflight)
-        : rejectedResult(toolCall, preflight.error);
+
       commit(
         {
-          ...streaming(modelTurn, draft),
+          ...afterToolCallResolved(modelTurn, draft, remaining),
           transcript: [...state.transcript, toolResultMessage(toolCall.providerId, result)],
           counters: result.isError
             ? incremented("consecutiveRecoverableFailures")
             : { ...state.counters, consecutiveRecoverableFailures: 0 },
-          partialChangesPossible: state.partialChangesPossible || (mutating && result.isError),
+          partialChangesPossible:
+            state.partialChangesPossible || (outcome === "failed" && mutating),
         },
         {
           type: "tool_call_completed",
-          data: {
-            toolCallId: toolCall.id,
-            outcome: result.isError ? "failed" : "succeeded",
-            result,
-          },
+          data: { toolCallId: toolCall.id, outcome, result },
         },
       );
     }
@@ -262,12 +319,14 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
     toolCall: QueuedToolCall,
     queuedToolCalls: readonly QueuedToolCall[],
     { tool, prepared }: PreflightPassed,
+    preApproval?: Approval,
   ): Promise<ToolResult> {
     const { mutation } = tool;
     const approval =
-      mutation === "mutating"
+      preApproval ??
+      (mutation === "mutating"
         ? approveByPolicy(modelTurn, draft, toolCall.id, prepared.summary)
-        : undefined;
+        : undefined);
     commit(
       {
         ...withoutPhase(state),
@@ -470,12 +529,54 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
     return { accepted: true, sequence };
   }
 
+  function resolveApproval(
+    command: Extract<SessionCommand, { type: "resolve_approval" }>,
+  ): CommandResult {
+    if (pendingApproval === undefined) {
+      return refuse("INVALID_STATE", `no Approval is pending while ${state.phase}`);
+    }
+    if (command.approvalId !== pendingApproval.approvalId) {
+      return refuse(
+        "STALE_APPROVAL",
+        `Approval ${command.approvalId} does not match the pending Approval ${pendingApproval.approvalId}`,
+      );
+    }
+    // CDA-70 (A3.2) will handle "deny": resolving with status "denied" and outcome "denied"
+    if (command.decision === "deny") {
+      return refuse("INVALID_STATE", "denials are not supported yet");
+    }
+    const nextState =
+      state.phase === "awaiting_approval"
+        ? {
+            ...withoutPhase(state),
+            phase: "executing_tool" as const,
+            modelTurn: state.modelTurn,
+            toolCall: state.toolCall,
+            queuedToolCalls: state.queuedToolCalls,
+          }
+        : state;
+    const sequence = commit(nextState, {
+      type: "approval_resolved",
+      data: {
+        approvalId: pendingApproval.approvalId,
+        toolCallId: pendingApproval.toolCallId,
+        status: "allowed",
+        decidedBy: "user" as ApprovalDecider,
+        ...(command.reason === undefined ? {} : { reason: command.reason }),
+      },
+    });
+    const { resolve } = pendingApproval;
+    pendingApproval = undefined;
+    resolve({ decision: "allow", reason: command.reason });
+    return { accepted: true, sequence };
+  }
+
   function handle(command: SessionCommand): CommandResult {
     switch (command.type) {
       case "start":
         return start(command.task);
       case "resolve_approval":
-        return refuse("INVALID_STATE", `no Approval is pending while ${state.phase}`);
+        return resolveApproval(command);
       case "cancel":
         return state.phase === "succeeded" || state.phase === "failed"
           ? refuse("ALREADY_SETTLED", `the session has already ${state.phase}`)

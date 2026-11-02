@@ -142,20 +142,19 @@ ready
   -> streaming_model
 
 streaming_model
-  -> awaiting_approval       valid mutating Tool Call under the interactive policy
-  -> executing_tool          valid automatically allowed Tool Call
-  -> streaming_model         all queued calls resolve during preflight
+  -> awaiting_approval       first queued call requires Approval under the interactive policy
+  -> executing_tool          first queued call starts execution, or resolves with queued calls remaining
+  -> streaming_model         sole queued call resolves during preflight
   -> verifying               Candidate Completion
   -> failed                  fatal model/protocol/internal failure or exhausted limit
 
 awaiting_approval
-  -> awaiting_approval       deny, then the next queued call requires Approval
-  -> executing_tool          allow, or deny followed by an automatically allowed call
+  -> executing_tool          allow, or deny with queued calls remaining
   -> streaming_model         deny, then no queued call remains
 
 executing_tool
-  -> awaiting_approval       current call completes, then the next call requires Approval
-  -> executing_tool          current call completes, then the next call is automatically allowed
+  -> awaiting_approval       next queued call requires Approval during preflight
+  -> executing_tool          current call completes, then next queued call advances
   -> streaming_model         current call completes, then no queued call remains
 
 verifying
@@ -172,14 +171,25 @@ cancelling
   -> failed                  cancellation grace expires
 ```
 
-Each queued call repeats preflight and Approval Policy evaluation before either transition. A
-mutating call can reach `executing_tool` only after an interactive allow decision or policy
-auto-approval. The `awaiting_approval` and `executing_tool` self-transitions replace the active
-phase data with the next Tool Call; they never reuse the previous call's Approval.
+Between consecutive Tool Calls in a batch, the session carries the remaining queue and advances
+`toolCall` to the next call upon completing the prior one, so preflight for the upcoming call executes
+while the snapshot reflects `executing_tool` rather than dropping back to `streaming_model`.
+Consequently, a multi-call batch where all calls fail preflight still passes through `executing_tool`
+between calls, whereas a sole queued call resolving during preflight stays in `streaming_model`.
+Furthermore, subsequent mutating calls are already in `executing_tool` during their preflight before
+transitioning to `awaiting_approval`.
 
-Terminal states have no outgoing transitions. Schema Validation, repository-bound preflight,
-Approval Policy evaluation, Tool Result recording, and selection of the next queued Tool Call are
-atomic internal transitions, not extra states.
+Being in `executing_tool` does not mean the tool has executed or even started running:
+`tool_execution_started` remains the execution boundary. A Tool Call without that event is unstarted;
+cancelling before that boundary records `skipped` rather than `cancelled`. The `awaiting_approval`
+transition occurs once preflight determines an interactive decision is required, and completing or
+denying a call replaces the active phase data with the next queued call without reusing any prior
+Approval.
+
+Terminal states have no outgoing transitions. While preflight performs asynchronous preparation
+(ADR 0004) inside `streaming_model` or `executing_tool` rather than as an instantaneous step,
+Schema Validation, path checks, Approval Policy evaluation, and Tool Result recording are internal
+steps within those phases, not extra states.
 
 ### 3. Model Turns, Tool Calls, and transcript commitment
 
