@@ -10,7 +10,8 @@
 ## Tóm tắt
 
 <!--
-Người chưa đọc ticket và chưa mở diff, đọc xong mục này phải kể lại được PR làm gì.
+Người chưa đọc ticket và chưa mở diff, đọc xong mục này phải trả lời được ba câu:
+PR thay đổi hành vi gì (Trước, Sau), vì sao (Vì sao), và chưa làm gì (Chưa làm).
 Thuật ngữ đã có thì dùng đúng như trong CONTEXT.md. Khái niệm mới do PR đưa vào thì định nghĩa một câu.
 -->
 
