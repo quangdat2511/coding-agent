@@ -419,10 +419,14 @@ describe("resolving Tool Calls in preflight", () => {
 
   it("enters awaiting_approval and emits approval_requested when a mutating call passes preflight under the ask policy", async () => {
     const { session } = openTestSession({
-      tools: [fakeWriteTool()],
+      tools: [fakeTool(), fakeWriteTool()],
       model: {
         turns: [
-          toolCallTurn({ toolCallId: "call-1", name: "write", input: { path: "src/a.ts" } }),
+          toolCallTurn(
+            { toolCallId: "call-1", name: "frobnicate", input: {} },
+            { toolCallId: "call-2", name: "write", input: { path: "src/a.ts" } },
+            { toolCallId: "call-3", name: "echo", input: {} },
+          ),
           textTurn("Fixed it."),
         ],
       },
@@ -435,8 +439,8 @@ describe("resolving Tool Calls in preflight", () => {
     expect(snapshot.phase).toBe("awaiting_approval");
     expect(snapshot).toMatchObject({
       phase: "awaiting_approval",
-      toolCall: { id: "tool_call-1", name: "write" },
-      queuedToolCalls: [],
+      toolCall: { id: "tool_call-2", name: "write" },
+      queuedToolCalls: [{ id: "tool_call-3" }],
       approval: {
         approvalId: "approval-1",
         summary: "write src/a.ts",

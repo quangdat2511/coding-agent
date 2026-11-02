@@ -306,12 +306,12 @@ describe("waiting for Approval under the ask policy", () => {
     expect(result.outcome).toBe("succeeded");
   });
 
-  it("keeps the state in executing_tool with the next call during its prepare, between two calls in a batch", async () => {
+  it("keeps the state in executing_tool with the next call during its prepare, between calls in a batch", async () => {
     let stateAtPrepare: AgentState | undefined;
     const inspect: ExecutableTool = {
       ...fakeTool({ name: "inspect" }),
       async prepare(input) {
-        stateAtPrepare = session.snapshot();
+        stateAtPrepare ??= session.snapshot();
         return {
           ok: true,
           prepared: { input, paths: [], summary: `inspect ${JSON.stringify(input)}` },
@@ -326,6 +326,7 @@ describe("waiting for Approval under the ask policy", () => {
           toolCallTurn(
             { toolCallId: "call-1", name: "write", input: { path: "src/a.ts" } },
             { toolCallId: "call-2", name: "inspect", input: {} },
+            { toolCallId: "call-3", name: "inspect", input: {} },
           ),
           textTurn("Fixed it."),
         ],
@@ -338,7 +339,7 @@ describe("waiting for Approval under the ask policy", () => {
     expect(stateAtPrepare).toMatchObject({
       phase: "executing_tool",
       toolCall: { id: "tool_call-2", name: "inspect" },
-      queuedToolCalls: [],
+      queuedToolCalls: [{ id: "tool_call-3" }],
     });
   });
 });
