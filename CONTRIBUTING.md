@@ -191,15 +191,16 @@ Quy ước của nhóm: nếu conflict nằm ở phần code của người khá
 
 | Mục | Nội dung |
 |-----|----------|
-| Tóm tắt | Trước, sau, vì sao, phần chưa làm, mã ticket (ví dụ `CDA-12`, GitHub tự chuyển thành link Jira) |
-| Ví dụ | Hành vi mới qua một ví dụ cụ thể: output TUI/CLI, Tool Result, chuỗi Session Event, ... |
+| Tóm tắt | Trước, sau, vì sao, phần chưa làm, mã ticket (ví dụ `CDA-12`, GitHub tự chuyển thành link Jira). Nếu PR nằm trong một chuỗi ticket thì ghi thêm ticket mà PR dựa trên và mở đường cho |
+| Ví dụ | Hành vi mới qua một ví dụ cụ thể: output TUI/CLI, Tool Result, chuỗi Session Event, ... Nếu sửa hành vi có sẵn thì để cả trước và sau. PR không có hành vi mới thì ghi `Không có: <lý do>` |
 | Thay đổi | Bản đồ diff, thứ tự nên đọc, thay đổi interface giữa các package |
-| Flow | Sơ đồ Mermaid khi PR thêm hoặc đổi luồng chạy qua nhiều thành phần |
-| Quyết định thiết kế | Chỗ ticket/ADR không quy định sẵn: đã chọn gì, vì sao, phương án bị loại |
+| Flow | Sơ đồ Mermaid, bắt buộc khi PR thêm hoặc đổi luồng chạy qua từ 2 thành phần trở lên, thêm hoặc đổi trạng thái của Agent Session, hoặc có vấn đề về thứ tự xử lý, chạy đồng thời |
+| Quyết định thiết kế | Chỗ ticket/ADR không quy định sẵn: đã chọn gì, vì sao, phương án bị loại, nhược điểm còn lại |
 | Kiểm thử | Lệnh test riêng, kịch bản được bao phủ, phần chưa kiểm thử được (nếu có thay đổi code) |
-| Rủi ro và ngoài phạm vi | Rủi ro đã biết, việc để lại kèm ticket theo dõi |
+| Rủi ro và ngoài phạm vi | Rủi ro đã biết, việc để lại kèm mã ticket theo dõi |
+| Checklist | 4 ô chủ PR tự đánh giá, là những việc CI không kiểm được |
 
-Mục nào không áp dụng thì xóa. Không cần ghi lại loại thay đổi (đã có trong tiêu đề PR) hay liệt kê lại các lệnh mà CI đã chạy.
+**Tóm tắt** luôn phải có. **Ví dụ** luôn giữ tiêu đề mục. Các mục khác không áp dụng thì xóa. Không cần ghi lại loại thay đổi (đã có trong tiêu đề PR) hay liệt kê lại các lệnh mà CI đã chạy.
 
 PR tham khảo cách viết: [#61](https://github.com/quangdat2511/coding-agent/pull/61) (bảng quyết định thiết kế) và [#57](https://github.com/quangdat2511/coding-agent/pull/57) (Flow gồm `flowchart` và `sequenceDiagram`; PR đã đóng nhưng phần Flow vẫn đáng tham khảo). Hai PR này viết theo template cũ nên tên mục khác, nhưng nội dung đúng tinh thần của template hiện tại.
 
@@ -254,7 +255,7 @@ Nếu trong lúc chờ review mà `main` đã tiến lên hoặc CI chuyển san
 
 - **Bắt buộc review** PR khi được request. Nếu thấy việc mình được request review là không hợp lý, **nêu ý kiến** với chủ PR, không im lặng và bỏ qua không review.
 - Chủ động **sắp xếp thời gian review sớm nhất có thể** ngay khi được request, để branch không bị giữ lâu, đúng tinh thần short-lived branch và giúp PR được merge sớm. Nên review xong **trong vòng 2 ngày** kể từ khi được request.
-- Đọc **Tóm tắt** và **Ví dụ** trong mô tả PR trước. Nếu chỉ đọc hai mục này mà chưa trả lời được PR thay đổi hành vi gì, vì sao, và chưa làm gì, comment chỉ ra dòng còn thiếu (Trước, Sau, Vì sao hoặc Chưa làm) để chủ PR sửa mô tả trước, chưa review code.
+- Đọc **Tóm tắt** và **Ví dụ** trong mô tả PR trước. Nếu chỉ đọc hai mục này mà chưa trả lời được PR thay đổi hành vi gì, vì sao, và chưa làm gì, comment chỉ ra phần còn thiếu (Trước, Sau, Vì sao, Chưa làm hoặc Ví dụ) để chủ PR sửa mô tả trước, chưa review code.
 - Để lại comment cụ thể, gắn với dòng code cần góp ý.
 - Chỉ approve khi đã hiểu rõ chủ PR đang làm gì và đồng ý với thay đổi cũng như hướng triển khai đó.
 - Có thể dùng AI hỗ trợ quá trình review và gợi ý nội dung comment, nhưng phải **tự đánh giá gợi ý đó có hợp lý không trước khi đăng comment** - không copy-paste nguyên văn suggestion của AI khi chưa hiểu rõ.
