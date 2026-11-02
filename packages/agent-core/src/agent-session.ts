@@ -270,21 +270,11 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
     draft: AssistantMessageDraft,
     queue: readonly QueuedToolCall[],
   ): Promise<AgentFailure | undefined> {
-    let index = 0;
-    let nextPreflightResult: PreflightOutcome | undefined;
-    let nextDecisionPromise: Promise<ApprovalDecision> | undefined;
-
-    while (index < queue.length) {
-      const toolCall = queue[index] as QueuedToolCall;
+    for (const [index, toolCall] of queue.entries()) {
+      const preflight = await preflightToolCall(toolCall, preflightContext);
+      const mutating = preflight.ok && preflight.tool.mutation === "mutating";
       const remaining = queue.slice(index + 1);
 
-      const preflight =
-        nextPreflightResult ?? (await preflightToolCall(toolCall, preflightContext));
-      const decisionPromise = nextDecisionPromise;
-      nextPreflightResult = undefined;
-      nextDecisionPromise = undefined;
-
-      const mutating = preflight.ok && preflight.tool.mutation === "mutating";
       let result: ToolResult;
       let outcome: "succeeded" | "failed" | "denied";
 
@@ -292,9 +282,12 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
         result = rejectedResult(toolCall, preflight.error);
         outcome = "failed";
       } else if (mutating && config.approvalPolicy === "ask") {
-        const decision = decisionPromise
-          ? await decisionPromise
-          : await awaitUserApproval(modelTurn, toolCall, remaining, preflight.prepared.summary);
+        const decision = await awaitUserApproval(
+          modelTurn,
+          toolCall,
+          remaining,
+          preflight.prepared.summary,
+        );
         if (decision.decision === "deny") {
           result = denialResult(toolCall, decision.reason);
           outcome = "denied";
@@ -319,69 +312,6 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
         outcome = result.isError ? "failed" : "succeeded";
       }
 
-      const nextCall = remaining[0];
-      const nextTool = nextCall ? config.tools.get(nextCall.name) : undefined;
-      const nextMightNeedApproval =
-        outcome === "denied" &&
-        nextCall !== undefined &&
-        config.approvalPolicy === "ask" &&
-        nextTool?.mutation === "mutating";
-
-      if (nextMightNeedApproval && nextCall) {
-        const nextPreflight = await preflightToolCall(nextCall, preflightContext);
-        nextPreflightResult = nextPreflight;
-
-        if (nextPreflight.ok && nextPreflight.tool.mutation === "mutating") {
-          const nextRemaining = remaining.slice(1);
-          const nextApprovalId = config.ids.next("approval");
-          const nextApproval = {
-            approvalId: nextApprovalId,
-            summary: nextPreflight.prepared.summary,
-            policy: config.approvalPolicy,
-          };
-          const nextResolver = Promise.withResolvers<ApprovalDecision>();
-          nextDecisionPromise = nextResolver.promise;
-          pendingApproval = {
-            approvalId: nextApprovalId,
-            toolCallId: nextCall.id,
-            resolve: nextResolver.resolve,
-          };
-
-          commit(
-            {
-              ...withoutPhase(state),
-              phase: "awaiting_approval",
-              modelTurn,
-              toolCall: nextCall,
-              queuedToolCalls: nextRemaining,
-              approval: nextApproval,
-              transcript: [...state.transcript, toolResultMessage(toolCall.providerId, result)],
-              counters: result.isError
-                ? incremented("consecutiveRecoverableFailures")
-                : { ...state.counters, consecutiveRecoverableFailures: 0 },
-              partialChangesPossible: state.partialChangesPossible,
-            },
-            {
-              type: "tool_call_completed",
-              data: { toolCallId: toolCall.id, outcome, result },
-            },
-          );
-
-          commit(state, {
-            type: "approval_requested",
-            data: {
-              approvalId: nextApprovalId,
-              toolCallId: nextCall.id,
-              summary: nextPreflight.prepared.summary,
-              policy: config.approvalPolicy,
-            },
-          });
-
-          index++;
-          continue;
-        }
-      }
-
       commit(
         {
           ...afterToolCallResolved(modelTurn, draft, remaining),
@@ -397,8 +327,6 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
           data: { toolCallId: toolCall.id, outcome, result },
         },
       );
-
-      index++;
     }
     return undefined;
   }
@@ -642,14 +570,6 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
     command: Extract<SessionCommand, { type: "resolve_approval" }>,
   ): CommandResult {
     if (pendingApproval === undefined) {
-      if (state.phase === "awaiting_approval") {
-        return command.approvalId === state.approval.approvalId
-          ? refuse("STALE_APPROVAL", `Approval ${command.approvalId} has already been resolved`)
-          : refuse(
-              "STALE_APPROVAL",
-              `Approval ${command.approvalId} does not match the pending Approval ${state.approval.approvalId}`,
-            );
-      }
       return refuse("INVALID_STATE", `no Approval is pending while ${state.phase}`);
     }
     if (command.approvalId !== pendingApproval.approvalId) {
@@ -660,7 +580,7 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
     }
     const reason = denialReason(command.reason);
     const nextState =
-      command.decision === "allow" && state.phase === "awaiting_approval"
+      state.phase === "awaiting_approval"
         ? {
             ...withoutPhase(state),
             phase: "executing_tool" as const,

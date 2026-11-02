@@ -427,7 +427,7 @@ describe("waiting for Approval under the ask policy", () => {
     });
   });
 
-  it("rejects an already resolved approval as STALE_APPROVAL when another call is preparing", async () => {
+  it("rejects an already resolved approval as INVALID_STATE while preparing and as STALE_APPROVAL when another approval is pending", async () => {
     const deferredPrepare = Promise.withResolvers<PrepareOutcome>();
     const baseWrite = fakeWriteTool();
     let prepareCount = 0;
@@ -464,16 +464,15 @@ describe("waiting for Approval under the ask policy", () => {
       decision: "deny",
     });
 
-    // While call 2 is still preparing, session is in awaiting_approval (Call 1 was resolved)
-    // Dispatching resolve_approval for approval-1 again must return STALE_APPROVAL
-    const staleResult = await session.dispatch({
+    // While call 2 is still preparing in executing_tool, no Approval is pending
+    const invalidResult = await session.dispatch({
       type: "resolve_approval",
       approvalId: "approval-1",
       decision: "allow",
     });
-    expect(staleResult).toMatchObject({
+    expect(invalidResult).toMatchObject({
       accepted: false,
-      code: "STALE_APPROVAL",
+      code: "INVALID_STATE",
     });
 
     // Release call 2's prepare
@@ -484,6 +483,17 @@ describe("waiting for Approval under the ask policy", () => {
 
     const req2 = await waitForEvent(session, "approval_requested", req1.sequence);
     expect(req2.data.approvalId).toBe("approval-2");
+
+    // Once approval-2 is pending, dispatching the old approval-1 returns STALE_APPROVAL
+    const staleResult = await session.dispatch({
+      type: "resolve_approval",
+      approvalId: "approval-1",
+      decision: "allow",
+    });
+    expect(staleResult).toMatchObject({
+      accepted: false,
+      code: "STALE_APPROVAL",
+    });
 
     await session.dispatch({
       type: "resolve_approval",
@@ -537,7 +547,7 @@ describe("waiting for Approval under the ask policy", () => {
     expect(resultOf(events, "tool_call-2")?.error?.code).toBe("SCHEMA_VIOLATION");
   });
 
-  it("stays in awaiting_approval with a fresh request when a denied call is followed by another call needing Approval", async () => {
+  it("moves from execution to awaiting_approval with a fresh request when a denied call is followed by another call needing Approval", async () => {
     let phaseDuringCall2Prepare: string | undefined;
     const baseWrite = fakeWriteTool();
     let prepareCount = 0;
@@ -584,7 +594,7 @@ describe("waiting for Approval under the ask policy", () => {
     });
     expect(denyResult).toMatchObject({ accepted: true });
 
-    // Second call requests a fresh approval and stays in awaiting_approval
+    // Second call requests a fresh approval and moves to awaiting_approval
     const req2 = await waitForEvent(session, "approval_requested", req1.sequence);
     expect(req2.data).toMatchObject({
       approvalId: "approval-2",
@@ -592,8 +602,8 @@ describe("waiting for Approval under the ask policy", () => {
       summary: "write src/b.ts",
     });
 
-    // Verify call 2 prepared while in awaiting_approval (never entered executing_tool)
-    expect(phaseDuringCall2Prepare).toBe("awaiting_approval");
+    // Verify call 2 prepared while in executing_tool, then entered awaiting_approval
+    expect(phaseDuringCall2Prepare).toBe("executing_tool");
 
     expect(session.snapshot()).toMatchObject({
       phase: "awaiting_approval",
