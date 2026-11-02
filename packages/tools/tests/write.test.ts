@@ -495,7 +495,10 @@ describe("refusing a write", () => {
 
     expect(await write({ path: "a/b/evil.ts", content: "evil\n" }, tool)).toMatchObject({
       isError: true,
-      error: { code: "PATH_OUTSIDE_REPO" },
+      error: {
+        code: "PATH_OUTSIDE_REPO",
+        message: expect.stringContaining("changed after it was resolved"),
+      },
     });
     expect(await readdir(join(sandbox, "outside"))).toEqual([]);
   });

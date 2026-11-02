@@ -1,3 +1,9 @@
+// A write or edit target must name a file: it cannot end with "/" or "\", and its final component
+// cannot be "." or "..". Both separators are covered so a Windows model path follows the same
+// rule. The negative lookaheads keep it expressible in the JSON Schema handed to the model as well
+// as in checkInput.
+export const FILE_PATH_PATTERN = /^(?!.*[\\/]\.?$)(?!\.{1,2}$)(?!.*[\\/]\.{1,2}$).+$/;
+
 // Git Bash, MSYS, Cygwin, and WSL spell a Windows drive path as "/c/..." or "/mnt/c/...".
 // Convert those spellings before resolving them, as Pi does, so a model or a Windows shell can
 // hand the tools either form. The optional platform is a test seam; callers use the current one.

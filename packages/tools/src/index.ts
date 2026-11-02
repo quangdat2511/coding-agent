@@ -1,3 +1,4 @@
+export { EditParams, editTool } from "./edit.ts";
 export { normalizeWindowsShellPath } from "./paths.ts";
 export { ReadParams, readTool } from "./read.ts";
 export { createDefaultTools } from "./registry.ts";
