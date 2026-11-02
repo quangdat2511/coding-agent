@@ -90,7 +90,7 @@ Settings live in the repository's Settings → Secrets and variables → Actions
 |------|------|-------|
 | `DISCORD_WEBHOOK_URL` | Secret | Webhook of `#ticket-forum`. Without it the workflow skips. |
 | `DISCORD_USER_IDS` | Variable | JSON object from GitHub login to Discord user ID, such as `{"quangdat2511": "123456789012345678"}`. An unmapped login appears as plain `@login` text. |
-| `DISCORD_FORUM_TAG_ID` | Variable | Optional ID of the forum tag applied to new posts. |
+| `DISCORD_FORUM_TAG_ID` | Variable | Optional ID of the forum tag applied to new posts. If Discord rejects the tag, for example after the tag was deleted, the post is created without it and the run shows a warning. |
 
 The workflow uses `pull_request_target`, so it runs the script from `main`: a change to the script
 or the workflow takes effect only after it merges. The posting step uses `continue-on-error`, so a

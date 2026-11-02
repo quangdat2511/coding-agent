@@ -250,4 +250,44 @@ describe("run", () => {
     };
     await expect(run(env, failing)).rejects.toThrow("Discord webhook failed with 429.");
   });
+
+  it("creates the post untagged when Discord rejects the forum tag", async () => {
+    const { calls, dependencies, env } = await setup(event(), [[]]);
+    let rejected: unknown;
+    const rejecting: Dependencies = {
+      ...dependencies,
+      fetch: async (url, init) => {
+        if (url.startsWith("https://discord.test/") && rejected === undefined) {
+          rejected = JSON.parse(String(init?.body));
+          return new Response('{"message":"Invalid Form Body"}', { status: 400 });
+        }
+        return dependencies.fetch(url, init);
+      },
+    };
+
+    expect(await run({ ...env, DISCORD_FORUM_TAG_ID: "555" }, rejecting)).toBe(
+      "::warning::Created post 4242 without the forum tag: Discord rejected DISCORD_FORUM_TAG_ID.",
+    );
+    expect(rejected).toMatchObject({ applied_tags: ["555"] });
+    const retry = calls.find((call) => call.url.startsWith("https://discord.test/"));
+    expect(retry?.body).toMatchObject({ thread_name: "CDA-1 feat: add login" });
+    expect((retry?.body as { applied_tags?: string[] } | undefined)?.applied_tags).toBeUndefined();
+    expect(calls.at(-1)?.url).toBe("https://api.github.test/repos/acme/repo/issues/7/comments");
+  });
+
+  it("does not retry a rejected post that has no tag", async () => {
+    const { dependencies, env } = await setup(event(), [[]]);
+    let posts = 0;
+    const rejecting: Dependencies = {
+      ...dependencies,
+      fetch: async (url, init) => {
+        if (!url.startsWith("https://discord.test/")) return dependencies.fetch(url, init);
+        posts++;
+        return new Response('{"message":"Invalid Form Body"}', { status: 400 });
+      },
+    };
+
+    await expect(run(env, rejecting)).rejects.toThrow("Discord webhook failed with 400.");
+    expect(posts).toBe(1);
+  });
 });

@@ -242,6 +242,16 @@ async function saveRecord(context: GitHubContext, record: ThreadRecord): Promise
   });
 }
 
+class DiscordError extends Error {
+  readonly status: number;
+
+  constructor(status: number) {
+    // The webhook URL carries its token, so errors report the status only.
+    super(`Discord webhook failed with ${status}.`);
+    this.status = status;
+  }
+}
+
 async function postToDiscord(
   fetchImpl: Fetch,
   webhook: string,
@@ -250,14 +260,37 @@ async function postToDiscord(
 ): Promise<unknown> {
   const url = new URL(webhook);
   for (const [key, value] of Object.entries(query)) url.searchParams.set(key, value);
-  // The webhook URL carries its token, so errors report the status only.
   const response = await fetchImpl(url.toString(), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ ...payload, username: WEBHOOK_USERNAME }),
   });
-  if (!response.ok) throw new Error(`Discord webhook failed with ${response.status}.`);
+  if (!response.ok) throw new DiscordError(response.status);
   return response.status === 204 ? undefined : response.json();
+}
+
+async function createPost(
+  fetchImpl: Fetch,
+  webhook: string,
+  message: DiscordMessage,
+): Promise<{ created: unknown; untagged: boolean }> {
+  try {
+    return {
+      created: await postToDiscord(fetchImpl, webhook, { wait: "true" }, message),
+      untagged: false,
+    };
+  } catch (error) {
+    // A wrong or deleted forum tag makes Discord reject the post; the post still matters more
+    // than the tag, so create it untagged.
+    if (!(error instanceof DiscordError) || error.status !== 400 || !message.applied_tags) {
+      throw error;
+    }
+    const untagged = { ...message, applied_tags: undefined };
+    return {
+      created: await postToDiscord(fetchImpl, webhook, { wait: "true" }, untagged),
+      untagged: true,
+    };
+  }
 }
 
 export async function run(
@@ -290,20 +323,18 @@ export async function run(
     return `Posted to thread ${record.id}.`;
   }
   if (plan.kind === "create") {
-    const created = (await postToDiscord(
-      dependencies.fetch,
-      webhook,
-      { wait: "true" },
-      plan.message,
-    )) as { channel_id?: string } | undefined;
-    const id = created?.channel_id;
+    const { created, untagged } = await createPost(dependencies.fetch, webhook, plan.message);
+    const id = (created as { channel_id?: string } | undefined)?.channel_id;
     if (id === undefined) throw new Error("Discord did not return the new post's thread ID.");
     await saveRecord(context, {
       id,
       mentioned: plan.mentioned,
       createdAt: new Date(dependencies.now()).toISOString(),
     });
-    return `Created post ${id}.`;
+    // A ::warning:: line becomes an annotation on the workflow run, so a bad tag gets noticed.
+    return untagged
+      ? `::warning::Created post ${id} without the forum tag: Discord rejected DISCORD_FORUM_TAG_ID.`
+      : `Created post ${id}.`;
   }
   return "Nothing to post.";
 }
