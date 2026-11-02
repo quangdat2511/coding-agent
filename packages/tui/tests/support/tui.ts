@@ -1,5 +1,5 @@
 import { FOOTER_HEIGHT } from "../../src/frame.tsx";
-import { type MountedTui, mountTui, type TuiStreams } from "../../src/render.tsx";
+import { type MountedTui, mountTui, type TuiOptions, type TuiStreams } from "../../src/render.tsx";
 import type { TuiHandlers, TuiModel } from "../../src/types.ts";
 import type { TestTerminal } from "./terminal.ts";
 
@@ -25,11 +25,12 @@ export function mountOn(
   model: TuiModel,
   handlers: TuiHandlers = UNEXPECTED_HANDLERS,
   streams: Partial<TuiStreams> = {},
+  options: TuiOptions = {},
 ): MountedTui {
   if (mounted.length > 0) {
     throw new Error("A TUI is already mounted in this test");
   }
-  const tui = mountTui({ model, handlers }, { ...terminal.streams, ...streams });
+  const tui = mountTui({ model, handlers }, { ...terminal.streams, ...streams }, options);
   mounted.push({ tui, terminal });
   return tui;
 }
@@ -43,12 +44,23 @@ export async function unmountTui(): Promise<void> {
   }
 }
 
-// The Prompt's row, the first of the rows under the transcript.
+// A clock the test moves by hand, so a key comes after a pause only when the test says so.
+export function manualClock(): { now(): number; advance(ms: number): void } {
+  let time = 0;
+  return {
+    now: () => time,
+    advance(ms) {
+      time += ms;
+    },
+  };
+}
+
+// The Prompt's row, the first of the rows under the transcript, while the Prompt has one row.
 export function prompt(terminal: TestTerminal): string | undefined {
   return terminal.screen().at(-FOOTER_HEIGHT);
 }
 
-// The rows of the viewport, above the Prompt and the key hint.
+// The rows of the viewport, above the Prompt and the key hint, while the Prompt has one row.
 export function viewport(terminal: TestTerminal): string[] {
   return terminal.screen().slice(0, -FOOTER_HEIGHT);
 }

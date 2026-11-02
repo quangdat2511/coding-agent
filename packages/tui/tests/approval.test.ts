@@ -1,7 +1,16 @@
 import { afterEach, describe, expect, it } from "bun:test";
-import type { TranscriptEntry, TuiHandlers, TuiModel } from "../src/types.ts";
+import { KEY_HINTS } from "../src/frame.tsx";
+import { QUIET_MS } from "../src/input.ts";
+import type { PendingApproval, TranscriptEntry, TuiHandlers, TuiModel } from "../src/types.ts";
 import { createTestTerminal, KEYS } from "./support/terminal.ts";
-import { mountOn, prompt, unexpectedHandlerCall, unmountTui, viewport } from "./support/tui.ts";
+import {
+  manualClock,
+  mountOn,
+  prompt,
+  unexpectedHandlerCall,
+  unmountTui,
+  viewport,
+} from "./support/tui.ts";
 
 const COLUMNS = 40;
 // The transcript gets 8 of these rows, under them the Prompt and the key hint.
@@ -10,9 +19,7 @@ const PROMPT_ROW = SCREEN_ROWS - 2;
 // The reason's row in the overlay: above the bottom border, which is the transcript's last row.
 const REASON_ROW = PROMPT_ROW - 2;
 
-type Approval = NonNullable<TuiModel["pendingApproval"]>;
-
-const WRITE_APPROVAL: Approval = {
+const WRITE_APPROVAL: PendingApproval = {
   approvalId: "approval-1",
   toolName: "write",
   summary: "src/app.ts (12 lines)",
@@ -31,6 +38,18 @@ const TRANSCRIPT: readonly TranscriptEntry[] = [
     status: "completed",
   },
 ];
+// 21 rows: the header, then line 1 to line 20.
+const LONG_TRANSCRIPT: readonly TranscriptEntry[] = [
+  {
+    kind: "assistant",
+    id: "m-1",
+    text: Array.from({ length: 20 }, (_, index) => `line ${index + 1}`).join("\n"),
+    status: "completed",
+  },
+];
+
+// A row of the bordered overlay on a terminal COLUMNS wide.
+const boxed = (text: string) => `│ ${text.padEnd(COLUMNS - 4)} │`;
 
 function mount(model: TuiModel, columns = COLUMNS, screenRows = SCREEN_ROWS) {
   const terminal = createTestTerminal(columns, screenRows);
@@ -42,8 +61,11 @@ function mount(model: TuiModel, columns = COLUMNS, screenRows = SCREEN_ROWS) {
       decisions.push(args);
     },
   };
-  const tui = mountOn(terminal, model, handlers);
-  return { tui, terminal, decisions };
+  const clock = manualClock();
+  const tui = mountOn(terminal, model, handlers, {}, { now: clock.now });
+  // The person stops typing and reads the overlay, so the next key decides.
+  const pause = () => clock.advance(QUIET_MS);
+  return { tui, terminal, decisions, clock, pause };
 }
 
 afterEach(unmountTui);
@@ -57,19 +79,21 @@ describe("Approval overlay", () => {
     expect(rows.slice(0, 4)).toEqual(["assistant [completed]", "line 1", "line 2", "line 3"]);
     expect(rows.slice(4)).toEqual([
       "╭──────────────────────────────────────╮",
-      "│ write src/app.ts (12 lines)          │",
-      "│ y allow · n deny                     │",
+      boxed("write src/app.ts (12 lines)"),
+      boxed("y allow · n deny"),
       "╰──────────────────────────────────────╯",
     ]);
   });
 
   it("allows on y, then hands the keys back to the Prompt", async () => {
-    const { tui, terminal, decisions } = mount({
+    const { tui, terminal, decisions, pause } = mount({
       transcript: TRANSCRIPT,
       pendingApproval: WRITE_APPROVAL,
     });
     // Enter decides nothing, so an Enter meant for the Prompt cannot allow the call.
-    await terminal.press(KEYS.enter, "y");
+    await terminal.press(KEYS.enter);
+    pause();
+    await terminal.press("y");
     await tui.flush();
     expect(decisions).toEqual([["approval-1", "allow"]]);
     // The overlay closes at once, before the host takes the Approval out of the model.
@@ -81,19 +105,56 @@ describe("Approval overlay", () => {
     expect(decisions).toHaveLength(1);
   });
 
+  it("decides nothing while the person is still typing", async () => {
+    const { tui, terminal, decisions, clock, pause } = mount({ transcript: TRANSCRIPT });
+    await terminal.press("bu");
+    tui.update({ transcript: TRANSCRIPT, pendingApproval: WRITE_APPROVAL });
+    await tui.flush();
+    // "yarn" typed for the Prompt at a few keys a second, as the overlay opens.
+    for (const key of "yarn") {
+      clock.advance(150);
+      await terminal.press(key);
+    }
+    await tui.flush();
+    expect(decisions).toEqual([]);
+    expect(viewport(terminal).at(-2)).toBe(boxed("y allow · n deny"));
+
+    // Once the person stops and reads the overlay, y allows.
+    pause();
+    await terminal.press("y");
+    expect(decisions).toEqual([["approval-1", "allow"]]);
+    await tui.flush();
+    expect(prompt(terminal)).toBe("> bu");
+  });
+
+  it("decides nothing on a key that comes right after the overlay opens", async () => {
+    const { tui, terminal, decisions, clock } = mount({ transcript: TRANSCRIPT });
+    // The keyboard has been quiet for a minute when the Approval arrives.
+    clock.advance(60_000);
+    tui.update({ transcript: TRANSCRIPT, pendingApproval: WRITE_APPROVAL });
+    clock.advance(QUIET_MS - 1);
+    await terminal.press("y");
+    expect(decisions).toEqual([]);
+
+    clock.advance(QUIET_MS);
+    await terminal.press("y");
+    expect(decisions).toEqual([["approval-1", "allow"]]);
+  });
+
   it("covers the transcript rows it is drawn over", async () => {
     // Rows as wide as the terminal, which would show through any cell the overlay left unwritten.
     const text = Array.from({ length: 7 }, () => "x".repeat(COLUMNS)).join("\n");
-    const { tui, terminal } = mount({
+    const { tui, terminal, pause } = mount({
       transcript: [{ kind: "assistant", id: "m-1", text, status: "completed" }],
       pendingApproval: WRITE_APPROVAL,
     });
+    pause();
     await terminal.press("n");
     await tui.flush();
     expect(viewport(terminal).slice(4)).toEqual([
       `╭${"─".repeat(COLUMNS - 2)}╮`,
-      `${"│ write src/app.ts (12 lines)".padEnd(COLUMNS - 1)}│`,
-      `${"│ Reason:".padEnd(COLUMNS - 1)}│`,
+      boxed("write src/app.ts (12 lines)"),
+      boxed("Reason:"),
       `╰${"─".repeat(COLUMNS - 2)}╯`,
     ]);
   });
@@ -105,13 +166,14 @@ describe("Approval overlay", () => {
   });
 
   it("asks for a reason on n and denies with it on Enter", async () => {
-    const { tui, terminal, decisions } = mount({
+    const { tui, terminal, decisions, pause } = mount({
       transcript: TRANSCRIPT,
       pendingApproval: WRITE_APPROVAL,
     });
+    pause();
     await terminal.press("n");
     await tui.flush();
-    expect(viewport(terminal).at(-2)).toBe(`${"│ Reason:".padEnd(COLUMNS - 1)}│`);
+    expect(viewport(terminal).at(-2)).toBe(boxed("Reason:"));
     // The cursor waits in the reason, inside the border and after the label.
     expect(await terminal.cursorAt()).toEqual([REASON_ROW, 10]);
     expect(decisions).toEqual([]);
@@ -119,7 +181,7 @@ describe("Approval overlay", () => {
     // The reason is edited with the same keys as the Prompt.
     await terminal.press("quá ro", KEYS.left, KEYS.left, "rủi ", KEYS.end, KEYS.backspace, "o");
     await tui.flush();
-    expect(viewport(terminal).at(-2)).toBe(`${"│ Reason: quá rủi ro".padEnd(COLUMNS - 1)}│`);
+    expect(viewport(terminal).at(-2)).toBe(boxed("Reason: quá rủi ro"));
     await terminal.press(KEYS.enter);
     await tui.flush();
     expect(decisions).toEqual([["approval-1", "deny", "quá rủi ro"]]);
@@ -131,17 +193,57 @@ describe("Approval overlay", () => {
   });
 
   it("denies without a reason when none is typed", async () => {
-    const { tui, terminal, decisions } = mount({
+    const { tui, terminal, decisions, pause } = mount({
       transcript: TRANSCRIPT,
       pendingApproval: WRITE_APPROVAL,
     });
+    pause();
     await terminal.press("n", "   ", KEYS.enter);
     await tui.flush();
     expect(decisions).toEqual([["approval-1", "deny"]]);
   });
 
+  it("keeps the cursor of a reason wider than its row in view", async () => {
+    const { tui, terminal, pause } = mount({
+      transcript: TRANSCRIPT,
+      pendingApproval: WRITE_APPROVAL,
+    });
+    pause();
+    const reason = "0123456789".repeat(4);
+    await terminal.press("n", reason);
+    await tui.flush();
+    // The 28 columns after the label hold the last 27 characters and the cursor after them.
+    expect(viewport(terminal).at(-2)).toBe(boxed(`Reason: ${reason.slice(-27)}`));
+    expect(await terminal.cursorAt()).toEqual([REASON_ROW, 37]);
+    await terminal.press(KEYS.home);
+    await tui.flush();
+    expect(viewport(terminal).at(-2)).toBe(boxed(`Reason: ${reason.slice(0, 28)}`));
+    expect(await terminal.cursorAt()).toEqual([REASON_ROW, 10]);
+  });
+
+  it("never moves the reason's cursor on scroll keys, nor the viewport on its editing keys", async () => {
+    const { tui, terminal, pause } = mount({
+      transcript: LONG_TRANSCRIPT,
+      pendingApproval: WRITE_APPROVAL,
+    });
+    pause();
+    await terminal.press("n", "abc", KEYS.left);
+    await tui.flush();
+    const following = viewport(terminal)[0];
+    expect(await terminal.cursorAt()).toEqual([REASON_ROW, 12]);
+    await terminal.press(KEYS.pageUp);
+    await tui.flush();
+    const scrolled = viewport(terminal)[0];
+    expect(scrolled).not.toBe(following);
+    expect(await terminal.cursorAt()).toEqual([REASON_ROW, 12]);
+    await terminal.press(KEYS.home, KEYS.end, KEYS.up, KEYS.down, KEYS.backspace);
+    await tui.flush();
+    expect(viewport(terminal)[0]).toBe(scrolled);
+    expect(viewport(terminal).at(-2)).toBe(boxed("Reason: ab"));
+  });
+
   it("keeps the text typed in the Prompt and gives it back the keys and the cursor", async () => {
-    const { tui, terminal } = mount({ transcript: TRANSCRIPT });
+    const { tui, terminal, decisions, pause } = mount({ transcript: TRANSCRIPT });
     await terminal.press("Sửa");
     tui.update({ transcript: TRANSCRIPT, pendingApproval: WRITE_APPROVAL });
     await tui.flush();
@@ -151,33 +253,43 @@ describe("Approval overlay", () => {
     await tui.flush();
     expect(prompt(terminal)).toBe("> Sửa");
 
+    // y decides, and the text after it goes to the Prompt again.
+    pause();
     await terminal.press("y", " test");
     await tui.flush();
+    expect(decisions).toEqual([["approval-1", "allow"]]);
     expect(prompt(terminal)).toBe("> Sửa test");
     expect(await terminal.cursorAt()).toEqual([PROMPT_ROW, 10]);
   });
 
   it("opens each Approval afresh, never with the previous one's state", async () => {
-    const { tui, terminal, decisions } = mount({
+    const { tui, terminal, decisions, pause } = mount({
       transcript: TRANSCRIPT,
       pendingApproval: WRITE_APPROVAL,
     });
     // A reason half typed for the first Approval when a second one replaces it.
+    pause();
     await terminal.press("n", "abc");
-    const second: Approval = { approvalId: "approval-2", toolName: "bash", summary: "rm -rf dist" };
+    const second: PendingApproval = {
+      approvalId: "approval-2",
+      toolName: "bash",
+      summary: "rm -rf dist",
+    };
     tui.update({ transcript: TRANSCRIPT, pendingApproval: second });
     await tui.flush();
     expect(viewport(terminal).slice(-3, -1)).toEqual([
-      "│ bash rm -rf dist                     │",
-      "│ y allow · n deny                     │",
+      boxed("bash rm -rf dist"),
+      boxed("y allow · n deny"),
     ]);
+    pause();
     await terminal.press("n", KEYS.enter);
     await tui.flush();
     expect(decisions).toEqual([["approval-2", "deny"]]);
 
     // A third Approval after a decision opens the overlay again.
-    const third: Approval = { approvalId: "approval-3", toolName: "edit", summary: "README.md" };
+    const third: PendingApproval = { approvalId: "approval-3", toolName: "edit", summary: "x.md" };
     tui.update({ transcript: TRANSCRIPT, pendingApproval: third });
+    pause();
     await terminal.press("y");
     await tui.flush();
     expect(decisions).toEqual([
@@ -187,12 +299,9 @@ describe("Approval overlay", () => {
   });
 
   it("leaves the transcript's scroll position and content as they were", async () => {
-    // 21 rows: the header, then line 1 to line 20, in a viewport of 8 rows.
-    const text = Array.from({ length: 20 }, (_, index) => `line ${index + 1}`).join("\n");
-    const transcript: TranscriptEntry[] = [
-      { kind: "assistant", id: "m-1", text, status: "completed" },
-    ];
-    const { tui, terminal } = mount({ transcript });
+    // 21 rows in a viewport of 8 rows.
+    const transcript = LONG_TRANSCRIPT;
+    const { tui, terminal, pause } = mount({ transcript });
     await terminal.press(KEYS.pageUp);
     await tui.flush();
     const inView = viewport(terminal);
@@ -209,20 +318,21 @@ describe("Approval overlay", () => {
     await tui.flush();
     expect(viewport(terminal).slice(0, 4)).toEqual(inView.slice(0, 4));
 
+    pause();
     await terminal.press("y");
     await tui.flush();
     expect(viewport(terminal)).toEqual(inView);
   });
 
   it("shows the keys of each step under the Prompt", async () => {
-    const { tui, terminal } = mount(
+    const { tui, terminal, pause } = mount(
       { transcript: TRANSCRIPT, pendingApproval: WRITE_APPROVAL },
       80,
     );
     await tui.flush();
-    expect(terminal.screen().at(-1)).toBe(
-      "Esc/Ctrl+C cancel · y allow · n deny · PgUp/PgDn scroll",
-    );
+    expect(terminal.screen().at(-1)).toBe(KEY_HINTS.approval);
+    expect(KEY_HINTS.approval).toBe("Esc/Ctrl+C cancel · y allow · n deny · PgUp/PgDn scroll");
+    pause();
     await terminal.press("n");
     await tui.flush();
     expect(terminal.screen().at(-1)).toBe("Esc/Ctrl+C cancel · Enter deny · PgUp/PgDn scroll");
@@ -241,19 +351,75 @@ describe("Approval overlay", () => {
     expect(rows[1]).toMatch(/^╭─+╮$/);
     expect(rows.slice(2, 6).every((row) => row.startsWith("│ "))).toBe(true);
     expect(rows[5]).toMatch(/…\s*│$/);
-    expect(rows[6]).toBe("│ y allow · n deny                     │");
+    expect(rows[6]).toBe(boxed("y allow · n deny"));
   });
 
-  it("draws only the choices on a transcript too short for the border", async () => {
-    // Two transcript rows, the Prompt and the key hint.
-    const { tui, terminal, decisions } = mount(
+  it("drops the border but keeps the summary on a transcript of three rows", async () => {
+    // Three transcript rows, the Prompt and the key hint.
+    const { tui, terminal, decisions, pause } = mount(
       { transcript: TRANSCRIPT, pendingApproval: WRITE_APPROVAL },
       COLUMNS,
-      4,
+      5,
     );
     await tui.flush();
-    expect(viewport(terminal)).toEqual(["line 6", " y allow · n deny"]);
+    expect(viewport(terminal)).toEqual([
+      "line 5",
+      " write src/app.ts (12 lines)",
+      " y allow · n deny",
+    ]);
+    pause();
     await terminal.press("y");
     expect(decisions).toEqual([["approval-1", "allow"]]);
+  });
+
+  it("covers the transcript under the reason when it has no border", async () => {
+    // Rows as wide as the terminal, which would show through any cell the overlay left unwritten.
+    const text = Array.from({ length: 7 }, () => "x".repeat(20)).join("\n");
+    const { tui, terminal, pause } = mount(
+      {
+        transcript: [{ kind: "assistant", id: "m-1", text, status: "completed" }],
+        pendingApproval: WRITE_APPROVAL,
+      },
+      20,
+      4,
+    );
+    pause();
+    await terminal.press("n");
+    await tui.flush();
+    expect(viewport(terminal)).toEqual([" write src/app.ts…", " Reason:"]);
+  });
+
+  it("allows nothing on a transcript with no room for the summary, but still denies", async () => {
+    // One transcript row, the Prompt and the key hint.
+    const { tui, terminal, decisions, pause } = mount(
+      { transcript: TRANSCRIPT, pendingApproval: WRITE_APPROVAL },
+      80,
+      3,
+    );
+    await tui.flush();
+    expect(terminal.screen()).toEqual([
+      " write · n deny · enlarge to allow",
+      ">",
+      KEY_HINTS.denyOnly,
+    ]);
+    pause();
+    await terminal.press("y");
+    expect(decisions).toEqual([]);
+    pause();
+    await terminal.press("n", KEYS.enter);
+    expect(decisions).toEqual([["approval-1", "deny"]]);
+  });
+
+  it("allows nothing when the terminal has no row for the overlay", async () => {
+    const { tui, terminal, decisions, pause } = mount(
+      { transcript: TRANSCRIPT, pendingApproval: WRITE_APPROVAL },
+      COLUMNS,
+      1,
+    );
+    await tui.flush();
+    expect(terminal.screen()).toEqual([">"]);
+    pause();
+    await terminal.press("y");
+    expect(decisions).toEqual([]);
   });
 });

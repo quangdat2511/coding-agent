@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import { PassThrough, Writable } from "node:stream";
+import { KEY_HINTS } from "../src/frame.tsx";
 import type { TuiStreams } from "../src/render.tsx";
 import type { TranscriptEntry, TuiHandlers } from "../src/types.ts";
 import { createTestTerminal, KEYS, REDRAWS_IN_PLACE } from "./support/terminal.ts";
@@ -13,6 +14,11 @@ const SCREEN_ROWS = 6;
 const PASTE_START = "\u001b[200~";
 const PASTE_END = "\u001b[201~";
 const CLEAR_SCREEN = "\u001b[2J";
+// What a terminal sends for Shift+Enter under the kitty keyboard protocol, for Alt+Enter, and for
+// Ctrl+J.
+const SHIFT_ENTER = "\u001b[13;2u";
+const ALT_ENTER = "\u001b\r";
+const CTRL_J = "\n";
 // The Prompt's row on a terminal SCREEN_ROWS tall.
 const PROMPT_ROW = SCREEN_ROWS - 2;
 
@@ -97,7 +103,7 @@ describe("Prompt", () => {
     expect(viewport(terminal)).toEqual(inView);
     expect(await terminal.cursorAt()).toEqual([PROMPT_ROW, 4]);
 
-    await terminal.press(KEYS.home, KEYS.end, KEYS.delete, KEYS.backspace);
+    await terminal.press(KEYS.up, KEYS.down, KEYS.home, KEYS.end, KEYS.delete, KEYS.backspace);
     await tui.flush();
     expect(viewport(terminal)).toEqual(inView);
     await terminal.press(KEYS.home, KEYS.pageDown);
@@ -124,16 +130,17 @@ describe("Prompt", () => {
 
   it("submits keys typed ahead in one read at most once", async () => {
     const { tui, terminal, submitted } = mount();
-    // Ink leaves the Enters inside one read, so two tasks typed ahead go as one...
+    // Ink leaves the Enters inside one read, so two tasks typed ahead go as one, in two lines...
     await terminal.press(`task A${KEYS.enter}task B${KEYS.enter}`);
     await tui.flush();
-    expect(submitted).toEqual(["task A task B"]);
+    expect(submitted).toEqual(["task A\ntask B"]);
 
     // ...and an Enter with more typing after it submits nothing.
     await terminal.press(`task C${KEYS.enter}partial`);
     await tui.flush();
-    expect(submitted).toEqual(["task A task B"]);
-    expect(prompt(terminal)).toBe("> task C partial");
+    expect(submitted).toEqual(["task A\ntask B"]);
+    await terminal.press(KEYS.enter);
+    expect(submitted).toEqual(["task A\ntask B", "task C\npartial"]);
   });
 
   it("submits pasted lines once when the terminal has no bracketed paste", async () => {
@@ -142,12 +149,11 @@ describe("Prompt", () => {
     await terminal.press("dong 1\rdong 2\rdong 3");
     await tui.flush();
     expect(submitted).toEqual([]);
-    expect(prompt(terminal)).toBe("> dong 1 dong 2 dong 3");
 
     // A paste that ends in a line break submits, but only once.
     await terminal.press(`${KEYS.backspace.repeat(20)}a\rb\r`);
     await tui.flush();
-    expect(submitted).toEqual(["a b"]);
+    expect(submitted).toEqual(["a\nb"]);
   });
 
   it("submits the task in NFC form", async () => {
@@ -174,35 +180,35 @@ describe("Prompt", () => {
     expect(prompt(terminal)).toBe(">");
   });
 
-  it("submits the task without the spaces around it", async () => {
+  it("submits the task without the spaces and line breaks around it", async () => {
     const { tui, submitted, terminal } = mount();
-    // The pasted line break at the end leaves a space.
+    // The pasted line break at the end leaves an empty line.
     await terminal.press(`  ${PASTE_START}dong 1\rdong 2\n${PASTE_END}`, KEYS.enter);
     await tui.flush();
-    expect(submitted).toEqual(["dong 1 dong 2"]);
+    expect(submitted).toEqual(["dong 1\ndong 2"]);
   });
 
-  it("takes pasted lines as one line without submitting them", async () => {
+  it("keeps pasted lines without submitting them", async () => {
     const { tui, terminal, submitted } = mount();
     await terminal.press(`${PASTE_START}dong 1\rdong 2${PASTE_END}`);
     await tui.flush();
-    expect(prompt(terminal)).toBe("> dong 1 dong 2");
     expect(submitted).toEqual([]);
 
     await terminal.press(KEYS.enter);
-    expect(submitted).toEqual(["dong 1 dong 2"]);
+    expect(submitted).toEqual(["dong 1\ndong 2"]);
   });
 
-  it("keeps the cursor of a task wider than the Prompt row in view, without clearing the screen", async () => {
+  it("wraps a task wider than the Prompt row and keeps the cursor's row in view, without clearing the screen", async () => {
     const { tui, terminal } = mount();
     await tui.flush();
     terminal.takeOutput();
     const task = "0123456789".repeat(6);
     await terminal.press(task);
     await tui.flush();
-    // The 38 columns after the marker hold the last 37 characters and the cursor after them.
-    expect(prompt(terminal)).toBe(`> ${task.slice(-37)}`);
-    expect(await terminal.cursorAt()).toEqual([PROMPT_ROW, COLUMNS - 1]);
+    // The first 38 characters fill the row after the marker, and the Prompt of this terminal shows
+    // one row: the one the cursor is on, with the rest of the task.
+    expect(prompt(terminal)).toBe(`  ${task.slice(38)}`);
+    expect(await terminal.cursorAt()).toEqual([PROMPT_ROW, 24]);
     // Home shows the start of the task, with the cursor on its first character.
     await terminal.press(KEYS.home);
     await tui.flush();
@@ -274,13 +280,124 @@ describe("Prompt", () => {
   it("shows the keys under the Prompt, both cancel keys first", async () => {
     const { tui, terminal } = mount([], 80);
     await tui.flush();
-    expect(terminal.screen().at(-1)).toBe("Esc/Ctrl+C cancel · Enter submit · PgUp/PgDn scroll");
+    expect(terminal.screen().at(-1)).toBe(KEY_HINTS.prompt);
+    expect(KEY_HINTS.prompt).toBe(
+      "Esc/Ctrl+C cancel · Enter submit · Ctrl+J new line · PgUp/PgDn scroll",
+    );
   });
 
   it("cuts the key hint on a narrow terminal, but not before the cancel keys", async () => {
     const { tui, terminal } = mount([], 20);
     await tui.flush();
     expect(terminal.screen().at(-1)).toBe("Esc/Ctrl+C cancel ·…");
+  });
+});
+
+describe("Prompt of several lines", () => {
+  // The Prompt takes up to 30% of the rows: 3 of these 10.
+  const TALL = 10;
+
+  it("starts a line on Shift+Enter, Alt+Enter and Ctrl+J, and submits every line on Enter", async () => {
+    const { tui, terminal, submitted } = mount([], COLUMNS, TALL);
+    await terminal.press("dong 1", SHIFT_ENTER, "dong 2", ALT_ENTER, "dong 3");
+    await tui.flush();
+    expect(terminal.screen().slice(6, 9)).toEqual(["> dong 1", "  dong 2", "  dong 3"]);
+    expect(await terminal.cursorAt()).toEqual([8, 8]);
+
+    // A fourth line is more than the Prompt shows, so its rows move up to keep the cursor in view.
+    await terminal.press(CTRL_J, "dong 4");
+    await tui.flush();
+    expect(terminal.screen().slice(6, 9)).toEqual(["  dong 2", "  dong 3", "  dong 4"]);
+
+    await terminal.press(KEYS.enter);
+    await tui.flush();
+    expect(submitted).toEqual(["dong 1\ndong 2\ndong 3\ndong 4"]);
+    expect(prompt(terminal)).toBe(">");
+  });
+
+  it("takes rows from the transcript as it grows and gives them back once submitted", async () => {
+    const text = Array.from({ length: 20 }, (_, index) => `line ${index + 1}`).join("\n");
+    const { tui, terminal } = mount(
+      [{ kind: "assistant", id: "m-1", text, status: "completed" }],
+      COLUMNS,
+      TALL,
+    );
+    await tui.flush();
+    terminal.takeOutput();
+    expect(terminal.screen().slice(0, 8).at(-1)).toBe("line 20");
+    await terminal.press("a", CTRL_J, "b");
+    await tui.flush();
+    // The transcript keeps following its last row, now on the row above the Prompt.
+    expect(terminal.screen().slice(0, 8)).toEqual([
+      "line 14",
+      "line 15",
+      "line 16",
+      "line 17",
+      "line 18",
+      "line 19",
+      "line 20",
+      "> a",
+    ]);
+    await terminal.press(KEYS.enter);
+    await tui.flush();
+    expect(terminal.screen().slice(0, 8).at(-1)).toBe("line 20");
+    if (REDRAWS_IN_PLACE) {
+      expect(terminal.takeOutput()).not.toContain(CLEAR_SCREEN);
+    }
+  });
+
+  it("moves between lines on Up and Down", async () => {
+    const { tui, terminal, submitted } = mount([], COLUMNS, TALL);
+    await terminal.press("abc", CTRL_J, "de", KEYS.up, "X", KEYS.down, "Y");
+    await tui.flush();
+    expect(terminal.screen().slice(7, 9)).toEqual(["> abXc", "  deY"]);
+    expect(await terminal.cursorAt()).toEqual([8, 5]);
+    await terminal.press(KEYS.enter);
+    expect(submitted).toEqual(["abXc\ndeY"]);
+  });
+
+  it("shows pasted lines as they were", async () => {
+    const { tui, terminal } = mount([], COLUMNS, TALL);
+    await terminal.press(
+      `${PASTE_START}Sửa hàm login:\r1. kiểm tra email\r2. trả lỗi 400${PASTE_END}`,
+    );
+    await tui.flush();
+    expect(terminal.screen().slice(6, 9)).toEqual([
+      "> Sửa hàm login:",
+      "  1. kiểm tra email",
+      "  2. trả lỗi 400",
+    ]);
+  });
+
+  it("shows a submitted task of several lines in the transcript", async () => {
+    const { tui, terminal } = mount([], COLUMNS, TALL);
+    tui.update({ transcript: [{ kind: "user", id: "task", text: "dong 1\ndong 2" }] });
+    await tui.flush();
+    expect(terminal.screen().slice(0, 2)).toEqual(["> dong 1", "  dong 2"]);
+  });
+});
+
+describe("kitty keyboard protocol", () => {
+  it("is asked for when asked to, and turned off again on exit", async () => {
+    const terminal = createTestTerminal(COLUMNS, SCREEN_ROWS);
+    const tui = mountOn(terminal, { transcript: [] }, undefined, {}, { kittyKeyboard: true });
+    await tui.flush();
+    expect(terminal.takeOutput()).toContain("\u001b[?u");
+    // The terminal answers with the flags it has on, and Ink turns the protocol on.
+    await terminal.press("\u001b[?0u");
+    await tui.flush();
+    expect(terminal.takeOutput()).toContain("\u001b[>1u");
+    // The answer is not a key: nothing reaches the Prompt.
+    expect(prompt(terminal)).toBe(">");
+    await tui.unmount();
+    expect(terminal.takeOutput()).toContain("\u001b[<u");
+  });
+
+  it("is left alone otherwise", async () => {
+    const { tui, terminal } = mount();
+    await tui.flush();
+    await tui.unmount();
+    expect(terminal.takeOutput()).not.toContain("\u001b[?u");
   });
 });
 

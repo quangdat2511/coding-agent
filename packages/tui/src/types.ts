@@ -8,15 +8,19 @@ export interface TuiModel {
   readonly transcript: readonly TranscriptEntry[];
   // The Approval awaiting a decision, from approval_requested. The overlay shows it until the
   // person decides, and the decision goes to onApproval with this approvalId.
-  readonly pendingApproval?: {
-    readonly approvalId: string;
-    readonly toolName: string;
-    // The mutation summary of approval_requested, written by the projection.
-    readonly summary: string;
-  };
+  readonly pendingApproval?: PendingApproval;
   // Planned optional fields:
   // - session: the Agent Session status shown outside the transcript.
   // - limitNotice: limit kind, configured limit and observed value from runtime_limit_reached.
+}
+
+// Not exported from index.ts, like TranscriptEntry. Consumers derive this type with
+// NonNullable<TuiModel["pendingApproval"]>.
+export interface PendingApproval {
+  readonly approvalId: string;
+  readonly toolName: string;
+  // The mutation summary of approval_requested, written by the projection.
+  readonly summary: string;
 }
 
 // Not exported from index.ts: the public surface is exactly the four names of ADR 0004 §5.
@@ -67,8 +71,12 @@ export type TranscriptEntry =
 
 // Decisions the person makes in the TUI. onApproval mirrors ADR 0002's resolve_approval command.
 export type TuiHandlers = {
+  // The Coding Task typed in the Prompt, which may hold line breaks.
   onSubmit(text: string): void;
   onCancel(): void;
+  // The overlay closes as soon as the person decides and never opens again for this approvalId,
+  // so one Approval is never decided twice. The host takes the Approval out of the model, or sends
+  // one with a new approvalId when it needs another decision, as when resolve_approval fails.
   onApproval(approvalId: string, decision: "allow" | "deny", reason?: string): void;
 };
 

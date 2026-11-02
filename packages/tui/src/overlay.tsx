@@ -1,32 +1,57 @@
 import { Box, Text } from "ink";
 import stringWidth from "string-width";
-import type { Editor } from "./editor.ts";
-import { EditorRow } from "./editor-row.tsx";
+import type { EditorView } from "./editor.ts";
+import { ALLOW_KEY, DENY_KEY } from "./input.ts";
 import { wrap } from "./rows.ts";
-import type { TuiModel } from "./types.ts";
+import type { PendingApproval } from "./types.ts";
 
-type Approval = NonNullable<TuiModel["pendingApproval"]>;
-
-// The left and right border of the box, and the space inside each of them.
-const BORDER_WIDTH = 2;
+// The border's rows and columns, and the space inside it on either side of the text.
+const BORDER = 1;
 const MARGIN = " ";
-const CHOICES = "y allow · n deny";
+const CHOICES = `${ALLOW_KEY} allow · ${DENY_KEY} deny`;
 const REASON_LABEL = "Reason: ";
 
-// The width the denial reason is typed in on a terminal `columns` wide.
-export function reasonColumns(columns: number): number {
-  return Math.max(1, columns - BORDER_WIDTH - 2 * MARGIN.length - REASON_LABEL.length);
+// Where each part of the Approval overlay goes over a transcript `height` rows tall on a terminal
+// `columns` wide. Drawing, the width the reason is typed in and the cursor all read it from here,
+// so they agree on whether the overlay has a border.
+export interface OverlayGeometry {
+  // The transcript rows the overlay is drawn over: none, when the terminal has no row for it.
+  readonly height: number;
+  readonly bordered: boolean;
+  // The columns inside the border, and those inside the margins.
+  readonly inner: number;
+  readonly textColumns: number;
+  // The rows for the tool and its mutation summary. With none, nothing shows what a decision
+  // would allow, so only deny is offered.
+  readonly summaryRows: number;
+  // The width the denial reason is typed in, and its first cell: the column and the row from the
+  // top of the frame.
+  readonly reasonColumns: number;
+  readonly reasonOrigin: { readonly x: number; readonly y: number };
 }
 
-// Where the denial reason starts in an overlay over a transcript `height` rows tall: its row from
-// the top of the frame and its column. Undefined when the transcript has no rows and the overlay
-// is not drawn.
-export function reasonOrigin(height: number): { x: number; y: number } | undefined {
-  if (height <= 0) {
-    return undefined;
-  }
-  const border = height >= 3 ? 1 : 0;
-  return { x: border + MARGIN.length + REASON_LABEL.length, y: height - 1 - border };
+// The summary takes at most half the transcript's rows, so the choices always show and some of the
+// transcript stays in view. The border takes two rows, so it is drawn only when a summary row and
+// the choices fit inside it.
+export function overlayGeometry(columns: number, height: number): OverlayGeometry {
+  const bordered = height >= 2 * BORDER + 2;
+  const border = bordered ? BORDER : 0;
+  const inner = Math.max(1, columns - 2 * border);
+  const textColumns = Math.max(1, inner - 2 * MARGIN.length);
+  return {
+    height: Math.max(0, height),
+    bordered,
+    inner,
+    textColumns,
+    summaryRows: Math.max(0, Math.min(height - 1 - 2 * border, Math.floor(height / 2) || 1)),
+    reasonColumns: Math.max(1, textColumns - REASON_LABEL.length),
+    reasonOrigin: { x: border + MARGIN.length + REASON_LABEL.length, y: height - 1 - border },
+  };
+}
+
+// Allowing needs the person to have seen what they allow: the tool and its summary.
+export function canAllow(geometry: OverlayGeometry): boolean {
+  return geometry.summaryRows > 0;
 }
 
 // The Approval overlay, drawn over the bottom of the transcript so that the rows above it and the
@@ -35,47 +60,37 @@ export function reasonOrigin(height: number): { x: number; y: number } | undefin
 //
 // Ink writes only the cells a <Text> covers and leaves the rest of the box showing the transcript
 // through it, so every row inside the border is padded to the full width, the margin on each side
-// included. The summary takes at most half the transcript's rows, cut with an ellipsis, so the
-// choices always show and some of the transcript stays in view. A transcript too short for the
-// border gets the last row alone, and one with no rows gets no overlay, though its keys still work.
+// included. A transcript with no rows gets no overlay, though its keys still work.
 export function ApprovalOverlay({
   approval,
+  geometry,
   columns,
-  height,
   reason,
 }: {
-  approval: Approval;
+  approval: PendingApproval;
+  geometry: OverlayGeometry;
   columns: number;
-  // The rows of the transcript the overlay is drawn over.
-  height: number;
   // The reason being typed, once the person has pressed n.
-  reason: Editor | undefined;
+  reason: EditorView | undefined;
 }) {
+  const { height, bordered, inner, textColumns, summaryRows } = geometry;
   if (height <= 0) {
     return null;
   }
-  const bordered = height >= 3;
-  const inner = Math.max(1, bordered ? columns - BORDER_WIDTH : columns);
-  const textColumns = Math.max(1, inner - 2 * MARGIN.length);
-  const summaryRows = bordered ? Math.min(height - 3, Math.max(1, Math.floor(height / 2))) : 0;
   const wrapped = wrap(`${approval.toolName} ${approval.summary}`, textColumns);
   const summary = wrapped.slice(0, summaryRows);
   if (wrapped.length > summary.length && summary.length > 0) {
-    // Ink cuts the line at the row's width and ends it with an ellipsis.
-    summary[summary.length - 1] = `${summary.at(-1)}…`;
+    // Ink cuts the line at the row's width and ends it with an ellipsis. Wrapping leaves the space
+    // the line was broken at, which would stand before it.
+    summary[summary.length - 1] = `${summary.at(-1)?.trimEnd()}…`;
   }
+  const choices = canAllow(geometry)
+    ? CHOICES
+    : `${approval.toolName} · ${DENY_KEY} deny · enlarge to allow`;
   const lastRow =
-    reason === undefined ? (
-      <Text wrap="truncate-end">{fill(`${MARGIN}${CHOICES}`, inner)}</Text>
-    ) : (
-      <Box>
-        <Box flexShrink={0}>
-          <Text>{`${MARGIN}${REASON_LABEL}`}</Text>
-        </Box>
-        <EditorRow editor={reason} columns={reasonColumns(columns)} fill />
-        <Text>{MARGIN}</Text>
-      </Box>
-    );
+    reason === undefined
+      ? `${MARGIN}${choices}`
+      : `${MARGIN}${REASON_LABEL}${fill(reason.rows[0] ?? "", geometry.reasonColumns)}`;
   return (
     <Box
       position="absolute"
@@ -85,13 +100,12 @@ export function ApprovalOverlay({
       flexDirection="column"
       borderStyle={bordered ? "round" : undefined}
     >
-      {summary.map((line, index) => (
-        // biome-ignore lint/suspicious/noArrayIndexKey: the lines are laid out again each frame
+      {[...summary.map((line) => `${MARGIN}${line}`), lastRow].map((line, index) => (
+        // biome-ignore lint/suspicious/noArrayIndexKey: the rows are laid out again each frame
         <Text key={index} wrap="truncate-end">
-          {fill(`${MARGIN}${line}`, inner)}
+          {fill(line, inner)}
         </Text>
       ))}
-      {lastRow}
     </Box>
   );
 }
