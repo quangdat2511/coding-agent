@@ -191,7 +191,7 @@ Quy ước của nhóm: nếu conflict nằm ở phần code của người khá
 
 | Mục | Nội dung |
 |-----|----------|
-| Tóm tắt | Trước, sau, vì sao, phần chưa làm, link ticket |
+| Tóm tắt | Trước, sau, vì sao, phần chưa làm, mã ticket (ví dụ `CDA-12`, GitHub tự chuyển thành link Jira) |
 | Ví dụ | Hành vi mới qua một ví dụ cụ thể: output TUI/CLI, Tool Result, chuỗi Session Event, ... |
 | Thay đổi | Bản đồ diff, thứ tự nên đọc, thay đổi interface giữa các package |
 | Flow | Sơ đồ Mermaid khi PR thêm hoặc đổi luồng chạy qua nhiều thành phần |

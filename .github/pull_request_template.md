@@ -17,8 +17,8 @@ Thuật ngữ đã có thì dùng đúng như trong CONTEXT.md. Khái niệm m�
 - **Trước:** <!-- Hệ thống đang làm gì, hoặc còn thiếu gì. -->
 - **Sau:** <!-- Hành vi quan sát được khi PR được merge. -->
 - **Vì sao:** <!-- Vấn đề hoặc yêu cầu của ticket/ADR, 1 đến 2 câu. -->
-- **Chưa làm:** <!-- Phần người đọc dễ tưởng PR đã làm nhưng chưa, kèm link ticket theo dõi. Ghi "Không" nếu không có. -->
-- **Ticket:** <!-- Link đầy đủ tới ticket Jira, ví dụ https://datn-fit-hcmus.atlassian.net/browse/CDA-28. Nếu PR nằm trong một chuỗi ticket: dựa trên ticket nào, mở đường cho ticket nào. -->
+- **Chưa làm:** <!-- Phần người đọc dễ tưởng PR đã làm nhưng chưa, kèm mã ticket theo dõi. Ghi "Không" nếu không có. -->
+- **Ticket:** <!-- Mã ticket Jira, ví dụ CDA-28 (GitHub tự chuyển thành link). Nếu PR nằm trong một chuỗi ticket: dựa trên ticket nào, mở đường cho ticket nào. -->
 
 ## Ví dụ
 
@@ -48,8 +48,9 @@ session, hoặc có vấn đề về thứ tự xử lý, chạy đồng thời.
   bằng `classDef`.
 - Mỗi sơ đồ có một câu dẫn: sơ đồ cho thấy gì, reviewer nên nhìn vào đâu.
 - Chọn loại sơ đồ:
-  - `sequenceDiagram`: các thành phần gọi nhau theo thời gian (Agent Core, ModelPort, provider, Host, TUI).
-  - `flowchart`: rẽ nhánh bên trong một thành phần.
+  - `flowchart`: luồng có rẽ nhánh hoặc vòng lặp là chính, kể cả khi có nhiều thành phần.
+  - `sequenceDiagram`: điều cần thấy là thứ tự các thành phần gọi nhau (Agent Core, ModelPort,
+    provider, Host, TUI). Nếu dùng `alt`, `opt`, `loop` thì ghi điều kiện thành câu rõ ràng.
   - `stateDiagram-v2`: thêm hoặc đổi trạng thái của session.
 - Khoảng 15 node trở xuống, lớn hơn thì tách thành nhiều sơ đồ. Ánh xạ lỗi sang mã lỗi thì viết
   thành bảng, không vẽ.
@@ -92,7 +93,7 @@ Xóa mục này nếu PR không đổi code.
 
 <!--
 - Rủi ro đã biết, phần cần reviewer chú ý đặc biệt.
-- Việc cố ý để lại cho sau: mỗi việc kèm link ticket Jira theo dõi.
+- Việc cố ý để lại cho sau: mỗi việc kèm mã ticket Jira theo dõi.
 -->
 
 ## Checklist
