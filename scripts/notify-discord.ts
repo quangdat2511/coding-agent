@@ -179,6 +179,12 @@ export function planEvent(
       if (pr.draft) return { kind: "skip", reason: "Draft pull request." };
       if (!record) return createPlan(event, config);
       return { kind: "note", message: message("PR được mở lại.", [], config) };
+    case "converted_to_draft":
+      if (!record) return { kind: "skip", reason: "No post for this pull request." };
+      return {
+        kind: "note",
+        message: message("PR đã chuyển về Draft, tạm dừng review.", [], config),
+      };
     case "review_requested": {
       const reviewer = event.requested_reviewer?.login;
       if (reviewer === undefined) return { kind: "skip", reason: "A team was requested." };

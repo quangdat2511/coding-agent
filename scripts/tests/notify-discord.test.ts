@@ -199,6 +199,15 @@ describe("planEvent", () => {
     );
   });
 
+  it("notes a pull request going back to draft without pinging anyone", () => {
+    const draft = event({ action: "converted_to_draft" }, true);
+    const plan = planEvent(draft, record(), config, NOW);
+    if (plan.kind !== "note") throw new Error(`expected note, got ${plan.kind}`);
+    expect(plan.message.content).toBe("PR đã chuyển về Draft, tạm dừng review.");
+    expect(plan.message.allowed_mentions.users).toEqual([]);
+    expect(planEvent(draft, undefined, config, NOW).kind).toBe("skip");
+  });
+
   it("notes a merge or a close in the existing post", () => {
     const merged = event({ action: "closed" });
     merged.pull_request.merged = true;
