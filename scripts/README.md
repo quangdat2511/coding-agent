@@ -78,11 +78,15 @@ or computed module specifiers.
 The `Discord PR Post` workflow runs `scripts/notify-discord.ts` on pull requests into `main`. When a
 pull request is opened ready for review, or a draft is marked ready, it creates a post in the team's
 `#ticket-forum` Discord channel. The post is titled with the pull request title, links the pull
-request, and mentions its author and requested reviewers. The post's thread ID is saved in a hidden
-marker on a `github-actions[bot]` comment, so later events reply in the same post: a reviewer
-requested afterwards is mentioned, marking the pull request ready again lists the reviewers, and
-reopening, merging, or closing adds a note. A reviewer requested within two minutes of the post and
-already mentioned in it is not mentioned twice.
+request, and mentions its author and requested reviewers. Nothing is written on the pull request:
+the workflow uploads the post's thread ID as an artifact named `discord-thread-pr-<number>`, kept
+for 90 days, and later events find the post through it. A reviewer requested afterwards is
+mentioned, marking the pull request ready again lists the reviewers, and reopening, merging, or
+closing adds a note, all in the same post. A reviewer requested within two minutes of the post and
+already mentioned in it is not mentioned twice. Posts created before the artifact kept the thread
+ID in a hidden marker on a `github-actions[bot]` comment; the script still reads that marker when a
+pull request has no artifact. A pull request that stays open longer than 90 days loses its artifact,
+so later events no longer reach its post.
 
 Settings live in the repository's Settings → Secrets and variables → Actions:
 

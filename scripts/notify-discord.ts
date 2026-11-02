@@ -1,18 +1,23 @@
-import { readFile } from "node:fs/promises";
+import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { inflateRawSync } from "node:zlib";
 
-// Each ready pull request gets one post in the team's Discord forum channel. The post's thread ID
-// lives in a hidden marker on a pull request comment, so later events reach the same post.
+// Each ready pull request gets one post in the team's Discord forum channel. The workflow uploads
+// the post's thread ID as an artifact named after the pull request, so later events reach the same
+// post without leaving anything on the pull request. Posts created before that kept the thread ID
+// in a hidden marker on a pull request comment, which is still read.
 
 const MARKER = /<!-- discord-thread: (\{.*?\}) -->/;
 const BOT_LOGIN = "github-actions[bot]";
 const WEBHOOK_USERNAME = "GitHub PR";
 const THREAD_NAME_LIMIT = 100;
+const RECORD_FILE = "discord-thread.json";
 // GitHub sends review_requested right after opened when reviewers are picked while creating the
 // pull request. Those reviewers are already mentioned in the new post.
 const CREATION_WINDOW_MS = 2 * 60 * 1000;
-// review_requested can arrive before the run that creates the post has saved its marker.
-const MARKER_WAIT_MS = 60 * 1000;
-const MARKER_POLL_MS = 5 * 1000;
+// review_requested can arrive before the run that creates the post has uploaded its artifact.
+const RECORD_WAIT_MS = 60 * 1000;
+const RECORD_POLL_MS = 5 * 1000;
 
 type User = { login: string };
 
@@ -62,9 +67,11 @@ export function parseUserIds(raw: string | undefined): Record<string, string> {
   return userIds;
 }
 
-export function parseRecord(body: string): ThreadRecord | undefined {
-  const json = MARKER.exec(body)?.[1];
-  if (json === undefined) return undefined;
+export function artifactName(number: number): string {
+  return `discord-thread-pr-${number}`;
+}
+
+export function parseRecordJson(json: string): ThreadRecord | undefined {
   try {
     const value: unknown = JSON.parse(json);
     if (typeof value !== "object" || value === null) return undefined;
@@ -80,8 +87,30 @@ export function parseRecord(body: string): ThreadRecord | undefined {
   }
 }
 
-export function formatRecord(record: ThreadRecord): string {
-  return `<!-- discord-thread: ${JSON.stringify(record)} -->`;
+export function parseRecord(body: string): ThreadRecord | undefined {
+  const json = MARKER.exec(body)?.[1];
+  return json === undefined ? undefined : parseRecordJson(json);
+}
+
+// Artifacts download as a zip holding the one uploaded file. The central directory has the real
+// sizes even when the entry was streamed with a data descriptor.
+export function readZipEntry(zip: Uint8Array): string {
+  const view = new DataView(zip.buffer, zip.byteOffset, zip.byteLength);
+  let end = zip.length - 22;
+  while (end >= 0 && view.getUint32(end, true) !== 0x06054b50) end--;
+  if (end < 0) throw new Error("The artifact is not a zip file.");
+  const central = view.getUint32(end + 16, true);
+  if (view.getUint32(central, true) !== 0x02014b50) {
+    throw new Error("The artifact zip has no central directory.");
+  }
+  const method = view.getUint16(central + 10, true);
+  const size = view.getUint32(central + 20, true);
+  const local = view.getUint32(central + 42, true);
+  const start = local + 30 + view.getUint16(local + 26, true) + view.getUint16(local + 28, true);
+  const data = zip.subarray(start, start + size);
+  if (method === 0) return new TextDecoder().decode(data);
+  if (method === 8) return new TextDecoder().decode(inflateRawSync(data));
+  throw new Error(`The artifact zip uses unsupported compression method ${method}.`);
 }
 
 function mention(login: string, userIds: Record<string, string>): string {
@@ -203,22 +232,47 @@ type GitHubContext = {
   number: number;
 };
 
-async function github(context: GitHubContext, path: string, init: RequestInit = {}) {
+function githubFetch(context: GitHubContext, path: string, init: RequestInit = {}) {
   const api = context.env.GITHUB_API_URL ?? "https://api.github.com";
-  const response = await context.fetch(`${api}/repos/${context.env.GITHUB_REPOSITORY}${path}`, {
+  return context.fetch(`${api}/repos/${context.env.GITHUB_REPOSITORY}${path}`, {
     ...init,
     headers: {
       Accept: "application/vnd.github+json",
       Authorization: `Bearer ${context.env.GITHUB_TOKEN}`,
-      "Content-Type": "application/json",
       "X-GitHub-Api-Version": "2022-11-28",
     },
   });
-  if (!response.ok) throw new Error(`GitHub ${path} failed with ${response.status}.`);
-  return (await response.json()) as unknown;
 }
 
-async function findRecord(context: GitHubContext): Promise<ThreadRecord | undefined> {
+async function github(context: GitHubContext, path: string): Promise<unknown> {
+  const response = await githubFetch(context, path);
+  if (!response.ok) throw new Error(`GitHub ${path} failed with ${response.status}.`);
+  return response.json();
+}
+
+type Artifact = { id: number; name: string; expired: boolean; created_at: string };
+
+async function findArtifactRecord(context: GitHubContext): Promise<ThreadRecord | undefined> {
+  const name = artifactName(context.number);
+  const { artifacts } = (await github(context, `/actions/artifacts?name=${name}&per_page=100`)) as {
+    artifacts: Artifact[];
+  };
+  // If a pull request ever got two posts, later events keep going to the first one.
+  const [artifact] = artifacts
+    .filter((candidate) => candidate.name === name && !candidate.expired)
+    .sort((a, b) => a.created_at.localeCompare(b.created_at));
+  if (artifact === undefined) return undefined;
+
+  // GitHub redirects to signed storage, which must not receive the GitHub token.
+  const path = `/actions/artifacts/${artifact.id}/zip`;
+  let download = await githubFetch(context, path, { redirect: "manual" });
+  const location = download.headers.get("location");
+  if (location !== null) download = await context.fetch(location);
+  if (!download.ok) throw new Error(`GitHub ${path} failed with ${download.status}.`);
+  return parseRecordJson(readZipEntry(new Uint8Array(await download.arrayBuffer())));
+}
+
+async function findCommentRecord(context: GitHubContext): Promise<ThreadRecord | undefined> {
   const comments = (await github(
     context,
     `/issues/${context.number}/comments?per_page=100`,
@@ -231,15 +285,22 @@ async function findRecord(context: GitHubContext): Promise<ThreadRecord | undefi
   return undefined;
 }
 
-async function saveRecord(context: GitHubContext, record: ThreadRecord): Promise<void> {
-  const body = [
-    "Đã tạo post cho PR này trong kênh #ticket-forum trên Discord.",
-    formatRecord(record),
-  ].join("\n\n");
-  await github(context, `/issues/${context.number}/comments`, {
-    method: "POST",
-    body: JSON.stringify({ body }),
-  });
+async function findRecord(context: GitHubContext): Promise<ThreadRecord | undefined> {
+  return (await findArtifactRecord(context)) ?? (await findCommentRecord(context));
+}
+
+// The workflow's next step uploads the written file as the pull request's artifact.
+async function saveRecord(
+  output: string,
+  temp: string,
+  number: number,
+  record: ThreadRecord,
+): Promise<void> {
+  const directory = join(temp, "discord-thread");
+  await mkdir(directory, { recursive: true });
+  const path = join(directory, RECORD_FILE);
+  await writeFile(path, JSON.stringify(record));
+  await appendFile(output, `artifact-name=${artifactName(number)}\nrecord-path=${path}\n`);
 }
 
 class DiscordError extends Error {
@@ -310,8 +371,8 @@ export async function run(
 
   let record = await findRecord(context);
   if (!record && event.action === "review_requested" && !event.pull_request.draft) {
-    for (let waited = 0; !record && waited < MARKER_WAIT_MS; waited += MARKER_POLL_MS) {
-      await dependencies.sleep(MARKER_POLL_MS);
+    for (let waited = 0; !record && waited < RECORD_WAIT_MS; waited += RECORD_POLL_MS) {
+      await dependencies.sleep(RECORD_POLL_MS);
       record = await findRecord(context);
     }
   }
@@ -323,10 +384,15 @@ export async function run(
     return `Posted to thread ${record.id}.`;
   }
   if (plan.kind === "create") {
+    // Without these the thread ID could not be saved, and a later event would post a second time.
+    const { GITHUB_OUTPUT: output, RUNNER_TEMP: temp } = env;
+    if (!output || !temp) {
+      throw new Error("GITHUB_OUTPUT and RUNNER_TEMP must be set to save the post's thread ID.");
+    }
     const { created, untagged } = await createPost(dependencies.fetch, webhook, plan.message);
     const id = (created as { channel_id?: string } | undefined)?.channel_id;
     if (id === undefined) throw new Error("Discord did not return the new post's thread ID.");
-    await saveRecord(context, {
+    await saveRecord(output, temp, event.number, {
       id,
       mentioned: plan.mentioned,
       createdAt: new Date(dependencies.now()).toISOString(),

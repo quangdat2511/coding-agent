@@ -1,15 +1,16 @@
 import { afterEach, describe, expect, it } from "bun:test";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { deflateRawSync } from "node:zlib";
 import {
   type Config,
   type Dependencies,
-  formatRecord,
   type PullRequestEvent,
   parseRecord,
   parseUserIds,
   planEvent,
+  readZipEntry,
   run,
   type ThreadRecord,
 } from "../notify-discord.ts";
@@ -42,6 +43,59 @@ function record(overrides: Partial<ThreadRecord> = {}): ThreadRecord {
   };
 }
 
+// The comment marker that posts created before the artifact kept on their pull request.
+function marker(value: ThreadRecord): string {
+  return `<!-- discord-thread: ${JSON.stringify(value)} -->`;
+}
+
+// A one-file zip as upload-artifact makes it. A streamed entry leaves its sizes out of the local
+// header and writes them in a data descriptor after the data, as zip streaming libraries do.
+function zip(content: string, method: 0 | 8, streamed = false): Uint8Array {
+  const name = new TextEncoder().encode("discord-thread.json");
+  const raw = new TextEncoder().encode(content);
+  const data = method === 8 ? new Uint8Array(deflateRawSync(raw)) : raw;
+  const descriptor = new Uint8Array(streamed ? 16 : 0);
+
+  const local = new DataView(new ArrayBuffer(30));
+  local.setUint32(0, 0x04034b50, true);
+  local.setUint16(6, streamed ? 0x08 : 0, true);
+  local.setUint16(8, method, true);
+  local.setUint32(18, streamed ? 0 : data.length, true);
+  local.setUint32(22, streamed ? 0 : raw.length, true);
+  local.setUint16(26, name.length, true);
+
+  const central = new DataView(new ArrayBuffer(46));
+  central.setUint32(0, 0x02014b50, true);
+  central.setUint16(10, method, true);
+  central.setUint32(20, data.length, true);
+  central.setUint32(24, raw.length, true);
+  central.setUint16(28, name.length, true);
+
+  const end = new DataView(new ArrayBuffer(22));
+  end.setUint32(0, 0x06054b50, true);
+  end.setUint16(8, 1, true);
+  end.setUint16(10, 1, true);
+  end.setUint32(12, 46 + name.length, true);
+  end.setUint32(16, 30 + name.length + data.length + descriptor.length, true);
+
+  const parts = [
+    new Uint8Array(local.buffer),
+    name,
+    data,
+    descriptor,
+    new Uint8Array(central.buffer),
+    name,
+    new Uint8Array(end.buffer),
+  ];
+  const bytes = new Uint8Array(parts.reduce((total, part) => total + part.length, 0));
+  let offset = 0;
+  for (const part of parts) {
+    bytes.set(part, offset);
+    offset += part.length;
+  }
+  return bytes;
+}
+
 describe("parseUserIds", () => {
   it("maps lowercased GitHub logins to Discord user IDs", () => {
     expect(parseUserIds('{"Alice":"111"}')).toEqual({ alice: "111" });
@@ -56,15 +110,29 @@ describe("parseUserIds", () => {
 });
 
 describe("thread record marker", () => {
-  it("round-trips through a comment body", () => {
-    const body = `Đã tạo post.\n\n${formatRecord(record())}`;
-    expect(parseRecord(body)).toEqual(record());
+  it("is read from an older post's comment body", () => {
+    expect(parseRecord(`Đã tạo post.\n\n${marker(record())}`)).toEqual(record());
   });
 
   it("ignores a missing or malformed marker", () => {
     expect(parseRecord("no marker")).toBeUndefined();
     expect(parseRecord('<!-- discord-thread: {"id":"abc"} -->')).toBeUndefined();
     expect(parseRecord("<!-- discord-thread: {not json} -->")).toBeUndefined();
+  });
+});
+
+describe("readZipEntry", () => {
+  it("reads stored, deflated, and streamed entries", () => {
+    const json = JSON.stringify(record());
+    expect(readZipEntry(zip(json, 0))).toBe(json);
+    expect(readZipEntry(zip(json, 8))).toBe(json);
+    expect(readZipEntry(zip(json, 8, true))).toBe(json);
+  });
+
+  it("rejects bytes that are not a zip", () => {
+    expect(() => readZipEntry(new TextEncoder().encode("not a zip at all, honestly"))).toThrow(
+      "not a zip",
+    );
   });
 });
 
@@ -152,9 +220,22 @@ describe("run", () => {
     await Promise.all(directories.splice(0).map((path) => rm(path, { recursive: true })));
   });
 
-  type Call = { method: string; url: string; body: unknown };
+  type Call = { method: string; url: string; body: unknown; headers: unknown };
+  type Artifact = { id: number; name: string; expired: boolean; created_at: string };
+  type Fixture = {
+    artifacts?: Artifact[][];
+    blobs?: Record<number, Uint8Array>;
+    comments?: unknown[][];
+  };
 
-  async function setup(payload: PullRequestEvent, comments: unknown[][]) {
+  const API = "https://api.github.test/repos/acme/repo";
+  const WEBHOOK = "https://discord.test/api/webhooks/1/token";
+
+  function artifact(id: number, createdAt: string, expired = false): Artifact {
+    return { id, name: "discord-thread-pr-7", expired, created_at: createdAt };
+  }
+
+  async function setup(payload: PullRequestEvent, fixture: Fixture = {}) {
     const directory = await mkdtemp(join(tmpdir(), "notify-discord-"));
     directories.push(directory);
     const eventPath = join(directory, "event.json");
@@ -162,18 +243,30 @@ describe("run", () => {
 
     const calls: Call[] = [];
     const sleeps: number[] = [];
-    const listings = [...comments];
+    const artifactListings = [...(fixture.artifacts ?? [])];
+    const commentListings = [...(fixture.comments ?? [])];
     const dependencies: Dependencies = {
       fetch: async (url, init = {}) => {
         const method = init.method ?? "GET";
-        calls.push({ method, url, body: init.body ? JSON.parse(String(init.body)) : undefined });
+        const body = init.body ? JSON.parse(String(init.body)) : undefined;
+        calls.push({ method, url, body, headers: init.headers });
         if (url.startsWith("https://discord.test/")) {
           return new Response(JSON.stringify({ id: "1", channel_id: "4242" }), { status: 200 });
         }
-        if (method === "GET") {
-          return new Response(JSON.stringify(listings.shift() ?? []), { status: 200 });
+        if (url === `${API}/actions/artifacts?name=discord-thread-pr-7&per_page=100`) {
+          return Response.json({ artifacts: artifactListings.shift() ?? [] });
         }
-        return new Response("{}", { status: 201 });
+        const download = /\/actions\/artifacts\/(\d+)\/zip$/.exec(url);
+        if (download) {
+          const location = `https://blob.test/${download[1]}`;
+          return new Response(null, { status: 302, headers: { location } });
+        }
+        const blob = fixture.blobs?.[Number(url.replace("https://blob.test/", ""))];
+        if (blob) return new Response(blob, { status: 200 });
+        if (url === `${API}/issues/7/comments?per_page=100`) {
+          return Response.json(commentListings.shift() ?? []);
+        }
+        return new Response("unexpected request", { status: 500 });
       },
       sleep: async (ms) => {
         sleeps.push(ms);
@@ -181,66 +274,112 @@ describe("run", () => {
       now: () => NOW,
     };
     const env = {
-      DISCORD_WEBHOOK_URL: "https://discord.test/api/webhooks/1/token",
+      DISCORD_WEBHOOK_URL: WEBHOOK,
       DISCORD_USER_IDS: '{"alice":"111","bob":"222"}',
       GITHUB_EVENT_PATH: eventPath,
+      GITHUB_OUTPUT: join(directory, "output"),
       GITHUB_REPOSITORY: "acme/repo",
       GITHUB_API_URL: "https://api.github.test",
       GITHUB_TOKEN: "token",
+      RUNNER_TEMP: directory,
     };
-    return { calls, sleeps, dependencies, env };
+    return { calls, sleeps, dependencies, env, directory };
   }
 
   it("skips without calling anything when the webhook secret is missing", async () => {
-    const { calls, dependencies, env } = await setup(event(), []);
+    const { calls, dependencies, env } = await setup(event());
     const result = await run({ ...env, DISCORD_WEBHOOK_URL: "" }, dependencies);
     expect(result).toContain("skipping");
     expect(calls).toHaveLength(0);
   });
 
-  it("creates the post and saves its thread ID on the pull request", async () => {
-    const { calls, dependencies, env } = await setup(event(), [[]]);
+  it("creates the post and hands its thread ID to the upload step", async () => {
+    const { calls, dependencies, env, directory } = await setup(event());
     expect(await run(env, dependencies)).toBe("Created post 4242.");
 
-    const [listing, post, comment] = calls;
-    expect(listing?.url).toBe(
-      "https://api.github.test/repos/acme/repo/issues/7/comments?per_page=100",
-    );
-    expect(post?.url).toBe("https://discord.test/api/webhooks/1/token?wait=true");
-    expect(post?.body).toMatchObject({
+    expect(calls.map((call) => `${call.method} ${call.url}`)).toEqual([
+      `GET ${API}/actions/artifacts?name=discord-thread-pr-7&per_page=100`,
+      `GET ${API}/issues/7/comments?per_page=100`,
+      `POST ${WEBHOOK}?wait=true`,
+    ]);
+    expect(calls[2]?.body).toMatchObject({
       thread_name: "CDA-1 feat: add login",
       username: "GitHub PR",
     });
-    expect(comment?.url).toBe("https://api.github.test/repos/acme/repo/issues/7/comments");
-    const saved = parseRecord((comment?.body as { body?: string } | undefined)?.body ?? "");
-    expect(saved).toEqual({
+
+    const recordPath = join(directory, "discord-thread", "discord-thread.json");
+    expect(await readFile(env.GITHUB_OUTPUT, "utf8")).toBe(
+      `artifact-name=discord-thread-pr-7\nrecord-path=${recordPath}\n`,
+    );
+    expect(JSON.parse(await readFile(recordPath, "utf8"))).toEqual({
       id: "4242",
       mentioned: ["alice", "bob", "carol"],
       createdAt: new Date(NOW).toISOString(),
     });
   });
 
-  it("waits for the post before mentioning a requested reviewer", async () => {
-    const marker = { user: { login: "github-actions[bot]" }, body: formatRecord(record()) };
+  it("does not create a post whose thread ID it could not save", async () => {
+    const { calls, dependencies, env } = await setup(event());
+    await expect(run({ ...env, GITHUB_OUTPUT: "" }, dependencies)).rejects.toThrow(
+      "GITHUB_OUTPUT and RUNNER_TEMP",
+    );
+    expect(calls.some((call) => call.url.startsWith("https://discord.test/"))).toBe(false);
+  });
+
+  it("finds the post through the oldest live artifact", async () => {
+    const merged = event({ action: "closed" });
+    merged.pull_request.merged = true;
+    const { calls, dependencies, env } = await setup(merged, {
+      artifacts: [
+        [
+          artifact(6, "2026-11-03T00:00:00Z"),
+          artifact(5, "2026-11-01T00:00:00Z", true),
+          artifact(7, "2026-11-02T00:00:00Z"),
+        ],
+      ],
+      blobs: { 7: zip(JSON.stringify(record()), 0) },
+    });
+
+    expect(await run(env, dependencies)).toBe("Posted to thread 999.");
+    const download = calls.find((call) => call.url === "https://blob.test/7");
+    expect(download?.headers).toBeUndefined();
+    expect(calls.at(-1)?.url).toBe(`${WEBHOOK}?thread_id=999`);
+    expect(calls.at(-1)?.body).toMatchObject({ content: "PR đã được merge vào `main`." });
+  });
+
+  it("falls back to the comment marker of a post created before the artifact", async () => {
+    const legacy = { user: { login: "github-actions[bot]" }, body: marker(record()) };
+    const { calls, dependencies, env } = await setup(event({ action: "closed" }), {
+      comments: [[legacy]],
+    });
+    expect(await run(env, dependencies)).toBe("Posted to thread 999.");
+    expect(calls.at(-1)?.url).toBe(`${WEBHOOK}?thread_id=999`);
+  });
+
+  it("ignores comment markers that github-actions did not write", async () => {
+    const forged = { user: { login: "mallory" }, body: marker(record()) };
+    const { calls, dependencies, env } = await setup(event({ action: "closed" }), {
+      comments: [[forged]],
+    });
+    expect(await run(env, dependencies)).toBe("No post for this pull request.");
+    expect(calls).toHaveLength(2);
+  });
+
+  it("waits for the post's artifact before mentioning a requested reviewer", async () => {
     const requested = event({ action: "review_requested", requested_reviewer: { login: "dave" } });
-    const { calls, sleeps, dependencies, env } = await setup(requested, [[], [], [marker]]);
+    const { calls, sleeps, dependencies, env } = await setup(requested, {
+      artifacts: [[], [], [artifact(7, "2026-11-02T00:00:00Z")]],
+      blobs: { 7: zip(JSON.stringify(record()), 8, true) },
+    });
 
     expect(await run(env, dependencies)).toBe("Posted to thread 999.");
     expect(sleeps).toEqual([5000, 5000]);
-    const post = calls.at(-1);
-    expect(post?.url).toBe("https://discord.test/api/webhooks/1/token?thread_id=999");
-    expect(post?.body).toMatchObject({ content: "@dave được request review." });
-  });
-
-  it("ignores markers that github-actions did not write", async () => {
-    const forged = { user: { login: "mallory" }, body: formatRecord(record()) };
-    const { calls, dependencies, env } = await setup(event({ action: "closed" }), [[forged]]);
-    expect(await run(env, dependencies)).toBe("No post for this pull request.");
-    expect(calls).toHaveLength(1);
+    expect(calls.at(-1)?.url).toBe(`${WEBHOOK}?thread_id=999`);
+    expect(calls.at(-1)?.body).toMatchObject({ content: "@dave được request review." });
   });
 
   it("reports a failed webhook call without the webhook URL", async () => {
-    const { dependencies, env } = await setup(event(), [[]]);
+    const { dependencies, env } = await setup(event());
     const failing: Dependencies = {
       ...dependencies,
       fetch: async (url, init) =>
@@ -252,7 +391,7 @@ describe("run", () => {
   });
 
   it("creates the post untagged when Discord rejects the forum tag", async () => {
-    const { calls, dependencies, env } = await setup(event(), [[]]);
+    const { calls, dependencies, env } = await setup(event());
     let rejected: unknown;
     const rejecting: Dependencies = {
       ...dependencies,
@@ -272,11 +411,11 @@ describe("run", () => {
     const retry = calls.find((call) => call.url.startsWith("https://discord.test/"));
     expect(retry?.body).toMatchObject({ thread_name: "CDA-1 feat: add login" });
     expect((retry?.body as { applied_tags?: string[] } | undefined)?.applied_tags).toBeUndefined();
-    expect(calls.at(-1)?.url).toBe("https://api.github.test/repos/acme/repo/issues/7/comments");
+    expect(await readFile(env.GITHUB_OUTPUT, "utf8")).toContain("discord-thread-pr-7");
   });
 
   it("does not retry a rejected post that has no tag", async () => {
-    const { dependencies, env } = await setup(event(), [[]]);
+    const { dependencies, env } = await setup(event());
     let posts = 0;
     const rejecting: Dependencies = {
       ...dependencies,
