@@ -255,7 +255,7 @@ Nếu trong lúc chờ review mà `main` đã tiến lên hoặc CI chuyển san
 
 - **Bắt buộc review** PR khi được request. Nếu thấy việc mình được request review là không hợp lý, **nêu ý kiến** với chủ PR, không im lặng và bỏ qua không review.
 - Chủ động **sắp xếp thời gian review sớm nhất có thể** ngay khi được request, để branch không bị giữ lâu, đúng tinh thần short-lived branch và giúp PR được merge sớm. Nên review xong **trong vòng 2 ngày** kể từ khi được request.
-- Đọc **Tóm tắt** và **Ví dụ** trong mô tả PR trước. Nếu chỉ đọc hai mục này mà chưa trả lời được PR thay đổi hành vi gì, vì sao, và chưa làm gì, comment chỉ ra phần còn thiếu (Trước, Sau, Vì sao, Chưa làm hoặc Ví dụ) để chủ PR sửa mô tả trước, chưa review code.
+- Đọc **Tóm tắt** và **Ví dụ** trong mô tả PR trước. Nếu chỉ đọc hai mục này mà chưa trả lời được PR thay đổi hành vi gì, vì sao, và chưa làm gì, comment chỉ ra phần còn thiếu hoặc chưa rõ (Trước, Sau, Vì sao, Chưa làm hoặc Ví dụ), kèm câu hỏi cụ thể mà mình chưa trả lời được, để chủ PR sửa mô tả trước, chưa review code. Chủ PR trả lời bằng cách sửa mô tả, không chỉ trả lời trong comment.
 - Để lại comment cụ thể, gắn với dòng code cần góp ý.
 - Chỉ approve khi đã hiểu rõ chủ PR đang làm gì và đồng ý với thay đổi cũng như hướng triển khai đó.
 - Có thể dùng AI hỗ trợ quá trình review và gợi ý nội dung comment, nhưng phải **tự đánh giá gợi ý đó có hợp lý không trước khi đăng comment** - không copy-paste nguyên văn suggestion của AI khi chưa hiểu rõ.
