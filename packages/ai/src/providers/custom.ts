@@ -2,7 +2,7 @@ import { type Static, Type } from "typebox";
 import { Value } from "typebox/value";
 import { stream as anthropicStream } from "../api/anthropic-responses.ts";
 import { stream as openaiStream } from "../api/openai-responses.ts";
-import { readEnvCredential } from "../auth/helpers.ts";
+import { apiKeyFromEnv } from "../auth/helpers.ts";
 import type { ProviderCredentials } from "../auth/types.ts";
 import {
   ANTHROPIC_MESSAGES_CAPABILITIES,
@@ -15,7 +15,12 @@ import type { Model, ModelCapabilities } from "../types.ts";
 /** Fallback credential for unauthenticated local endpoints (Ollama, vLLM). */
 const LOCAL_RUNNER_NO_AUTH_KEY = "no-key";
 
-export type CustomProviderVariant = "chat_completions" | "messages";
+export const CustomProviderVariantSchema = Type.Union([
+  Type.Literal("chat_completions"),
+  Type.Literal("messages"),
+]);
+
+export type CustomProviderVariant = Static<typeof CustomProviderVariantSchema>;
 
 interface CustomVariantDefinition {
   readonly defaultCapabilities: ModelCapabilities;
@@ -65,7 +70,7 @@ export const CustomProviderConfigSchema = Type.Object(
   {
     id: Type.String({ minLength: 1, pattern: "^\\S(?:.*\\S)?$" }),
     name: Type.Optional(Type.String({ minLength: 1 })),
-    variant: Type.Union([Type.Literal("chat_completions"), Type.Literal("messages")]),
+    variant: CustomProviderVariantSchema,
     baseUrl: Type.Optional(Type.String({ minLength: 1, pattern: "^\\S(?:.*\\S)?$" })),
     apiKey: Type.Optional(Type.String({ minLength: 1, pattern: "^\\S(?:.*\\S)?$" })),
     apiKeyEnv: Type.Optional(Type.String({ minLength: 1, pattern: "^[A-Za-z_][A-Za-z0-9_]*$" })),
@@ -104,24 +109,9 @@ export function createCustomProvider(config: CustomProviderConfig): Provider {
     );
   }
 
-  // Edge case validation: explicit whitespace-only check
-  const explicitKey = config.apiKey?.trim();
-  if (config.apiKey !== undefined && explicitKey === "") {
-    throw new CustomProviderValidationError("apiKey must not be empty or whitespace-only", [
-      "#/apiKey: Expected non-whitespace string",
-    ]);
-  }
-
-  const explicitKeyEnv = config.apiKeyEnv?.trim();
-  if (config.apiKeyEnv !== undefined && explicitKeyEnv === "") {
-    throw new CustomProviderValidationError("apiKeyEnv must not be empty or whitespace-only", [
-      "#/apiKeyEnv: Expected non-whitespace string",
-    ]);
-  }
-
   // Unauthenticated local runner requires baseUrl
-  const isNoAuth = explicitKey === undefined && explicitKeyEnv === undefined;
-  if (isNoAuth && (!config.baseUrl || config.baseUrl.trim() === "")) {
+  const isNoAuth = config.apiKey === undefined && config.apiKeyEnv === undefined;
+  if (isNoAuth && !config.baseUrl) {
     throw new CustomProviderValidationError(
       "Custom provider without apiKey or apiKeyEnv requires baseUrl for local unauthenticated endpoint (e.g. http://localhost:11434/v1)",
       ["#/baseUrl: baseUrl is required when no authentication is configured"],
@@ -145,20 +135,19 @@ export function createCustomProvider(config: CustomProviderConfig): Provider {
   });
 
   const auth: ProviderCredentials = {
-    apiKey: {
-      name: `${config.id} API key`,
-      resolve: async () => {
-        if (explicitKey !== undefined && explicitKey !== "") {
-          return explicitKey;
-        }
-
-        if (explicitKeyEnv !== undefined && explicitKeyEnv !== "") {
-          return readEnvCredential([explicitKeyEnv])?.value;
-        }
-
-        return LOCAL_RUNNER_NO_AUTH_KEY;
-      },
-    },
+    apiKey:
+      config.apiKey !== undefined
+        ? {
+            name: `${config.id} API key`,
+            ...(config.apiKeyEnv !== undefined ? { envVars: [config.apiKeyEnv] } : {}),
+            resolve: async () => config.apiKey,
+          }
+        : config.apiKeyEnv !== undefined
+          ? apiKeyFromEnv(`${config.id} API key`, [config.apiKeyEnv])
+          : {
+              name: `${config.id} API key`,
+              resolve: async () => LOCAL_RUNNER_NO_AUTH_KEY,
+            },
   };
 
   return defineProvider({

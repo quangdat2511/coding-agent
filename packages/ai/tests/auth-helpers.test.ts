@@ -44,6 +44,7 @@ describe("apiKeyFromEnv", () => {
     process.env.GOOGLE_API_KEY = " ";
     process.env.GEMINI_API_KEY = "gemini-key\n";
     const source = apiKeyFromEnv("Google API key", ["GOOGLE_API_KEY", "GEMINI_API_KEY"]);
+    expect(source.envVars).toEqual(["GOOGLE_API_KEY", "GEMINI_API_KEY"]);
     expect(await source.resolve()).toBe("gemini-key");
   });
 });

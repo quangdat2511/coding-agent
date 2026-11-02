@@ -76,7 +76,11 @@ async function main(): Promise<void> {
   };
 
   console.log("1. Creating custom provider from declarative config:");
-  console.log(JSON.stringify(customConfig, null, 2));
+  const maskedConfig = {
+    ...customConfig,
+    ...(customConfig.apiKey ? { apiKey: "***" } : {}),
+  };
+  console.log(JSON.stringify(maskedConfig, null, 2));
 
   const customProvider = createCustomProvider(customConfig);
 

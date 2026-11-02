@@ -10,6 +10,7 @@ import {
   CustomModelConfigSchema,
   CustomProviderConfigSchema,
   CustomProviderValidationError,
+  CustomProviderVariantSchema,
   createCustomProvider,
 } from "../src/providers/custom.ts";
 import type { Context, Model, ModelStream, ModelStreamEvent } from "../src/types.ts";
@@ -105,6 +106,7 @@ describe("Custom Provider Schema & Validation", () => {
   it("exports schemas and validator error class with discriminant code", () => {
     expect(CustomModelConfigSchema).toBeDefined();
     expect(CustomProviderConfigSchema).toBeDefined();
+    expect(CustomProviderVariantSchema).toBeDefined();
     expect(CustomProviderValidationError).toBeDefined();
 
     const err = new CustomProviderValidationError("test", ["error 1"]);
@@ -308,7 +310,7 @@ describe("Custom Provider Schema & Validation", () => {
 });
 
 describe("Credential Resolution", () => {
-  it("resolves explicit apiKey directly and trims whitespace", async () => {
+  it("resolves explicit apiKey directly", async () => {
     const provider = createCustomProvider({
       id: "custom-auth",
       variant: "chat_completions",
@@ -318,9 +320,10 @@ describe("Credential Resolution", () => {
 
     const resolved = await provider.auth.apiKey?.resolve();
     expect(resolved).toBe("secret-key-123");
+    expect(provider.auth.apiKey?.envVars).toBeUndefined();
   });
 
-  it("resolves apiKeyEnv from environment variables and trims whitespace", async () => {
+  it("resolves apiKeyEnv from environment variables and trims variable value whitespace", async () => {
     const envKey = "TEST_CUSTOM_API_KEY_ENV";
     process.env[envKey] = "   env-secret-456\r\n ";
 
@@ -334,6 +337,7 @@ describe("Credential Resolution", () => {
 
       const resolved = await provider.auth.apiKey?.resolve();
       expect(resolved).toBe("env-secret-456");
+      expect(provider.auth.apiKey?.envVars).toEqual([envKey]);
     } finally {
       delete process.env[envKey];
     }
@@ -352,6 +356,7 @@ describe("Credential Resolution", () => {
 
     const resolved = await provider.auth.apiKey?.resolve();
     expect(resolved).toBeUndefined();
+    expect(provider.auth.apiKey?.envVars).toEqual([missingEnv]);
   });
 
   it("prioritizes explicit apiKey over apiKeyEnv", async () => {
@@ -369,6 +374,7 @@ describe("Credential Resolution", () => {
 
       const resolved = await provider.auth.apiKey?.resolve();
       expect(resolved).toBe("from-direct");
+      expect(provider.auth.apiKey?.envVars).toEqual([envKey]);
     } finally {
       delete process.env[envKey];
     }
@@ -384,6 +390,7 @@ describe("Credential Resolution", () => {
 
     const resolved = await provider.auth.apiKey?.resolve();
     expect(resolved).toBe("no-key");
+    expect(provider.auth.apiKey?.envVars).toBeUndefined();
   });
 });
 

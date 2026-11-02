@@ -11,7 +11,7 @@ Google, xAI, and OpenCode (OpenCode Zen).
 _Avoid_: LLM vendor, backend
 
 **Custom Provider**:
-A Model Provider instantiated dynamically at runtime from declarative configuration rather than built-in defaults. Dynamic credential variables specified via `apiKeyEnv` are resolved at interaction time; when integrated into the composition root, they must be registered with the child process credential scrub set (ADR 0001 §8).
+A Model Provider instantiated dynamically from declarative configuration rather than built-in definitions.
 _Avoid_: Dynamic provider, ad-hoc provider, user provider, plugin provider
 
 **Model Interaction**:

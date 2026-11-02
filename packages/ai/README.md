@@ -168,7 +168,7 @@ models.stream(model, context, { temperature: 0.7, maxTokens: 1000 });
 You can instantiate custom endpoints (Ollama, vLLM, DeepSeek, custom OpenAI or Anthropic compatible proxies) declaratively from in-memory configuration objects:
 
 ```typescript
-import { createCustomProvider } from "@coding-agent/ai";
+import { createCustomProvider, createProviderDirectory } from "@coding-agent/ai";
 
 // Create custom provider pointing to a proxy endpoint with environment variable resolution
 const customProvider = createCustomProvider({
@@ -184,14 +184,22 @@ const customProvider = createCustomProvider({
 });
 
 // Or unauthenticated local runner (e.g. Ollama or vLLM)
+// If the local runner endpoint does not support parallel tool call control fields,
+// override capabilities: { parallelToolCallControl: false } on the model.
 const localOllama = createCustomProvider({
   id: "ollama",
   variant: "chat_completions",
   baseUrl: "http://localhost:11434/v1",
-  models: [{ id: "llama3" }],
+  models: [
+    {
+      id: "llama3",
+      capabilities: { parallelToolCallControl: false },
+    },
+  ],
 });
 
 // Register into ProviderDirectory
+const directory = createProviderDirectory();
 directory.setProvider(customProvider);
 directory.setProvider(localOllama);
 ```
