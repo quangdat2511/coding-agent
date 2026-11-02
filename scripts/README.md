@@ -72,3 +72,27 @@ Also verified: `require("@coding-agent/ai")`, `import("@coding-agent/ai")`, and
 `export * from "@coding-agent/ai"` fail when retained in the bundle; exporting the plain string
 `"@coding-agent/ai"` passes. These checks inspect reachable emitted code, not unused source imports
 or computed module specifiers.
+
+## Discord PR posts
+
+The `Discord PR Post` workflow runs `scripts/notify-discord.ts` on pull requests into `main`. When a
+pull request is opened ready for review, or a draft is marked ready, it creates a post in the team's
+`#ticket-forum` Discord channel. The post is titled with the pull request title, links the pull
+request, and mentions its author and requested reviewers. The post's thread ID is saved in a hidden
+marker on a `github-actions[bot]` comment, so later events reply in the same post: a reviewer
+requested afterwards is mentioned, marking the pull request ready again lists the reviewers, and
+reopening, merging, or closing adds a note. A reviewer requested within two minutes of the post and
+already mentioned in it is not mentioned twice.
+
+Settings live in the repository's Settings → Secrets and variables → Actions:
+
+| Name | Kind | Value |
+|------|------|-------|
+| `DISCORD_WEBHOOK_URL` | Secret | Webhook of `#ticket-forum`. Without it the workflow skips. |
+| `DISCORD_USER_IDS` | Variable | JSON object from GitHub login to Discord user ID, such as `{"quangdat2511": "123456789012345678"}`. An unmapped login appears as plain `@login` text. |
+| `DISCORD_FORUM_TAG_ID` | Variable | Optional ID of the forum tag applied to new posts. If Discord rejects the tag, for example after the tag was deleted, the post is created without it and the run shows a warning. |
+
+The workflow uses `pull_request_target`, so it runs the script from `main`: a change to the script
+or the workflow takes effect only after it merges. The posting step uses `continue-on-error`, so a
+Discord failure or a bad setting leaves the pull request's checks green and shows the error in the
+job log. Run `bun test scripts/tests/notify-discord.test.ts` for the unit tests.

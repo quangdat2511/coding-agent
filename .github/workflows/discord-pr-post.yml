@@ -1,0 +1,45 @@
+name: Discord PR Post
+
+# pull_request_target runs this workflow and its script from main, never from the pull request, so
+# no pull request can change what runs with the webhook secret.
+on:
+  pull_request_target:
+    types:
+      - opened
+      - reopened
+      - ready_for_review
+      - review_requested
+      - closed
+    branches:
+      - main
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  post:
+    name: Post to Discord
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+
+    steps:
+      - name: Check out main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: .bun-version
+
+      - name: Post to the ticket forum
+        # A Discord outage or a bad setting must not turn the pull request's checks red.
+        continue-on-error: true
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          DISCORD_USER_IDS: ${{ vars.DISCORD_USER_IDS }}
+          DISCORD_FORUM_TAG_ID: ${{ vars.DISCORD_FORUM_TAG_ID }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: bun run scripts/notify-discord.ts
