@@ -1,88 +1,108 @@
 <!--
 ============================================================
   PULL REQUEST TEMPLATE - Đồ án tốt nghiệp
-  Vui lòng điền đầy đủ các mục bên dưới trước khi tạo PR.
-  Xóa các dòng ghi chú (comment) nếu không cần thiết.
+  Tóm tắt luôn phải có. Ví dụ luôn giữ tiêu đề mục, PR không có hành vi mới thì ghi
+  "Không có: <lý do>". Các mục khác không áp dụng thì xóa cả tiêu đề mục.
+  Trước khi chuyển Ready for review: đọc lại mô tả, đảm bảo khớp với diff hiện tại.
+  Hướng dẫn và PR tham khảo: CONTRIBUTING.md, Bước 6.
 ============================================================
 -->
 
-## Ticket liên quan
+## Tóm tắt
 
-<!-- Dán link đầy đủ tới ticket Jira, ví dụ: https://datn-fit-hcmus.atlassian.net/browse/CDA-28. Không chỉ ghi mã ticket (CDA-28). -->
+<!--
+Người chưa đọc ticket và chưa mở diff, đọc xong mục này phải trả lời được ba câu:
+PR thay đổi hành vi gì (Trước, Sau), vì sao (Vì sao), và chưa làm gì (Chưa làm).
+Thuật ngữ đã có thì dùng đúng như trong CONTEXT.md. Khái niệm mới do PR đưa vào thì định nghĩa một câu.
+-->
 
+- **Trước:** <!-- Hệ thống đang làm gì, hoặc còn thiếu gì. -->
+- **Sau:** <!-- Hành vi quan sát được khi PR được merge. -->
+- **Vì sao:** <!-- Vấn đề hoặc yêu cầu của ticket/ADR, 1 đến 2 câu. -->
+- **Chưa làm:** <!-- Phần người đọc dễ tưởng PR đã làm nhưng chưa, kèm mã ticket theo dõi. Ghi "Không" nếu không có. -->
+- **Ticket:** <!-- Mã ticket Jira, ví dụ CDA-28 (GitHub tự chuyển thành link). Nếu PR nằm trong một chuỗi ticket: dựa trên ticket nào, mở đường cho ticket nào. -->
 
-## Loại thay đổi
+## Ví dụ
 
-<!-- Đánh dấu [x] vào các ô phù hợp -->
+<!--
+Một ví dụ cụ thể cho thấy hành vi mới. Có thể là:
+- output TUI/CLI: ảnh, asciinema hoặc GIF;
+- Tool Result, chuỗi Session Event;
+- input và output của một hàm public.
+Nếu PR sửa hành vi có sẵn thì để cả trước và sau.
+PR không có hành vi mới (chỉ sửa docs, refactor, config) thì ghi "Không có: <lý do>", không xóa mục này.
+-->
 
-- [ ] Feature: Tính năng mới
-- [ ] Bugfix: Sửa lỗi
-- [ ] Refactor: Tối ưu code, không đổi chức năng
-- [ ] Style/UI: Thay đổi giao diện, định dạng
-- [ ] Documentation: Cập nhật tài liệu, README, báo cáo
-- [ ] Config/Build: Cấu hình, CI/CD, dependencies
-- [ ] Test: Thêm hoặc sửa test
-- [ ] Hotfix: Sửa lỗi khẩn cấp
-- [ ] Revert: Hoàn tác thay đổi trước đó
+## Thay đổi
 
-## Thay đổi gì
+<!--
+Bản đồ diff theo file hoặc module, không kể lại code từng dòng.
+- Ghi rõ phần cốt lõi cần soi kỹ, phần cơ học (đổi tên, test kit, docs) và thứ tự nên đọc.
+- Nếu đổi type được export hoặc hợp đồng giữa các package: ghi cũ → mới và package nào bị ảnh hưởng.
+-->
 
-<!-- PR này thay đổi những gì. Liệt kê các thay đổi chính. -->
+## Flow
 
-- 
+<!--
+Bắt buộc khi PR thêm hoặc đổi luồng chạy qua từ 2 thành phần trở lên, thêm hoặc đổi trạng thái của
+Agent Session, hoặc có vấn đề về thứ tự xử lý, chạy đồng thời. Các trường hợp khác thì xóa mục này.
 
-## Vì sao
+- Chỉ vẽ phần PR thêm hoặc đổi. Nếu sửa một luồng đã có thì vẽ trước và sau, hoặc tô đậm node mới
+  bằng `classDef`.
+- Mỗi sơ đồ có một câu dẫn: sơ đồ cho thấy gì, reviewer nên nhìn vào đâu.
+- Chọn loại sơ đồ:
+  - `flowchart`: luồng có rẽ nhánh hoặc vòng lặp là chính, kể cả khi có nhiều thành phần.
+  - `sequenceDiagram`: điều cần thấy là thứ tự các thành phần gọi nhau (Agent Core, ModelPort,
+    Model Provider, Coding Agent, Full-screen TUI). Nếu dùng `alt`, `opt`, `loop` thì ghi điều
+    kiện thành câu rõ ràng.
+  - `stateDiagram-v2`: thêm hoặc đổi trạng thái của Agent Session.
+- Khoảng 15 node trở xuống, lớn hơn thì tách thành nhiều sơ đồ. Ánh xạ lỗi sang mã lỗi thì viết
+  thành bảng, không vẽ.
+- Dùng thuật ngữ trong CONTEXT.md và ADR. Mở tab Preview để chắc sơ đồ hiển thị được.
 
-<!-- Vì sao cần thay đổi này: vấn đề đang gặp, yêu cầu của ticket, ... -->
+Khung mẫu, chép ra ngoài comment rồi sửa (mũi tên trả về nét đứt của Mermaid có chuỗi đóng comment
+HTML, nên khung mẫu dùng nét liền):
 
+```mermaid
+sequenceDiagram
+  participant A as Thành phần A
+  participant B as Thành phần B
+  A->>B: lời gọi
+  B->>A: kết quả
+```
+-->
 
+## Quyết định thiết kế
 
-## Cách giải quyết
+<!--
+Những chỗ ticket và ADR không quy định sẵn: đã chọn gì, vì sao, phương án nào bị loại, nhược điểm
+còn lại. Gợi ý dạng bảng:
 
-<!-- Cách tiếp cận đã chọn và lý do chọn cách đó (nếu có nhiều phương án). -->
-
-
+| Tình huống | Quyết định | Lý do |
+|---|---|---|
+-->
 
 ## Kiểm thử
 
-<!-- Mô tả cách bạn đã test. Reviewer cần biết cần kiểm tra ở đâu. Xóa mục này nếu PR không có thay đổi code (ví dụ PR chỉ sửa tài liệu). -->
+<!--
+Không liệt kê lại test, typecheck, lint, build mà CI đã chạy. Ghi:
+- Lệnh test riêng cho thay đổi này và kết quả.
+- Kịch bản mà test mới bao phủ: luồng chính và các edge case quan trọng.
+- Phần chưa kiểm thử được và lý do, ví dụ Windows chưa chạy end-to-end.
+- Cách reviewer tự tái hiện bằng tay, nếu có.
+Xóa mục này nếu PR không đổi code.
+-->
 
-- [ ] Đã chạy thành công ở môi trường local
-- [ ] Đã thêm/cập nhật unit test (nếu có)
-- [ ] Đã kiểm thử các luồng chính (happy path) và các trường hợp biên (edge case)
+## Rủi ro và ngoài phạm vi
 
-**Các bước kiểm thử:**
+<!--
+- Rủi ro đã biết, phần cần reviewer chú ý đặc biệt.
+- Việc cố ý để lại cho sau: mỗi việc kèm mã ticket Jira theo dõi.
+-->
 
-1. 
-2. 
-3. 
+## Checklist
 
-## Ảnh chụp màn hình hoặc video
-
-<!-- Đính kèm ảnh/video cho các thay đổi về giao diện. Xóa mục này nếu không liên quan. -->
-
-
-## Checklist trước khi request reviewer
-
-<!-- Người tạo PR tự kiểm tra trước khi yêu cầu review. Xoá nhóm "Nếu PR có thay đổi code" nếu PR không đụng tới code (ví dụ PR chỉ sửa tài liệu). -->
-
-**Mọi PR:**
-
-- [ ] Đã tự review lại toàn bộ diff của mình
-- [ ] Không commit file nhạy cảm (`.env`, key, mật khẩu, credentials)
-- [ ] Đã cập nhật tài liệu liên quan (README, docs, ...) nếu thay đổi có ảnh hưởng tới chúng
-- [ ] Đã rebase `main` mới nhất vào nhánh này và xử lý conflict
-- [ ] PR chỉ tập trung vào **một** mục đích (không gộp nhiều thay đổi không liên quan)
-
-**Nếu PR có thay đổi code:**
-
-- [ ] Code tuân thủ coding convention của nhóm
-- [ ] Đã comment ở những đoạn code phức tạp, khó hiểu
-- [ ] Không còn `console.log`, code debug, hoặc code thừa
-
-
-## Ghi chú thêm và rủi ro
-
-<!-- Rủi ro tiềm ẩn, phần cần chú ý đặc biệt, việc còn dang dở, TODO... -->
-
-
+- [ ] Đã tự review toàn bộ diff, giải thích được mọi dòng, đã comment đoạn code khó hiểu, không có file nhạy cảm hay code debug
+- [ ] PR chỉ phục vụ một mục đích
+- [ ] Đã cập nhật docs, ADR, CONTEXT.md bị ảnh hưởng, hoặc không cần cập nhật
+- [ ] Mô tả và Flow khớp với code hiện tại, sẽ cập nhật nếu code đổi trong lúc review
