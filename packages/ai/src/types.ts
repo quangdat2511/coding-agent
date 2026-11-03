@@ -11,6 +11,10 @@ export interface ToolCallBlock {
   toolCallId: string;
   name: string;
   arguments: string;
+  // Opaque provider payload sent back unchanged with this call on the next request. Only the
+  // adapter that produced it reads it: Gemini 3 rejects a replayed functionCall without its
+  // thought signature.
+  signature?: string;
 }
 
 export interface ToolResultBlock {

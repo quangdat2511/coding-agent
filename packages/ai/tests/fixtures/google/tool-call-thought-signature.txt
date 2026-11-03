@@ -1,0 +1,2 @@
+data: {"candidates":[{"content":{"parts":[{"functionCall":{"id":"i6wx3vbk","name":"read","args":{"path":"README.md"}},"thoughtSignature":"CroCAdHtim9Qk0f5yXrB2Ylq7TzGxWvQ1KcVb3mF8nD2eJ4pA6sH0uR9wL5tY7iO1zX3cE8vN2bM4kQ6jP0gS9fU1hW3dT5yR7eA=="},{"functionCall":{"id":"q2nh8zfm","name":"read","args":{"path":"package.json"}}}],"role":"model"},"finishReason":"STOP","index":0}],"usageMetadata":{"promptTokenCount":112,"candidatesTokenCount":36,"totalTokenCount":201,"thoughtsTokenCount":53},"modelVersion":"gemini-3-flash-preview","responseId":"c0NqafKxL9mKz7IP3pW5wQo"}
+

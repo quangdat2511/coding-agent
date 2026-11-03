@@ -586,6 +586,17 @@ amended this record:
   package. This replaces the Lefthook and CI rule, noted in Context, that rejected relative
   imports.
 
+On 2026-11-04,
+[Replay Gemini thought signatures and call ids in the Google adapter](https://datn-fit-hcmus.atlassian.net/browse/CDA-102)
+amended this record:
+
+- **Tool Call signature** (§2): a completed `tool_call` block may carry an optional `signature`,
+  an opaque provider-owned string. The adapter that produced it sends it back unchanged with that
+  call on the next request, and nothing else reads it; Agent Core only checks that it is a string.
+  Gemini 3 attaches its `thoughtSignature` to the `functionCall` part itself and rejects a replay
+  without it, so the payload lives on the Tool Call rather than in the research's separate opaque
+  block.
+
 ## Consequences
 
 - `ai` tests against recorded provider fixtures with no other package present. Agent Core tests use

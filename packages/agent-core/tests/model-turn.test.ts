@@ -9,6 +9,8 @@ import {
   streamOf,
   textMessage,
   textTurn,
+  toolCallMessage,
+  toolCallTurn,
   withFinalMessage,
 } from "./kit/index.ts";
 
@@ -220,6 +222,19 @@ describe("running a Model Turn", () => {
       },
     ]);
     expect(model.requests[1]?.context.messages[1]).toEqual(answer);
+  });
+
+  it("keeps a Tool Call's opaque signature in the transcript for the next request", async () => {
+    const call = { toolCallId: "fc-1", name: "echo", input: {}, signature: "c2lnbmVkLWNhbGw=" };
+    const { session, model } = openTestSession({
+      model: { turns: [toolCallTurn(call), textTurn("Fixed it.")] },
+    });
+
+    await session.dispatch({ type: "start", task });
+    await session.result();
+
+    expect(session.snapshot().transcript[1]).toEqual(toolCallMessage(call));
+    expect(model.requests[1]?.context.messages[1]).toEqual(toolCallMessage(call));
   });
 
   it("accumulates usage across Model Turns, keeping only the token counts", async () => {

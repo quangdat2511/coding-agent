@@ -166,6 +166,17 @@ describe("settling a failed Model Turn", () => {
         finishReason: { reason: "tool_call", rawReason: "tool_use" },
       }),
     },
+    {
+      name: "a final Tool Call's signature is not a string",
+      turn: endingWith({
+        role: "assistant",
+        content: [
+          { type: "tool_call", toolCallId: "call-1", name: "echo", arguments: "{}", signature: 7 },
+        ],
+        model: "fake-model",
+        finishReason: { reason: "tool_call", rawReason: "tool_use" },
+      }),
+    },
     { name: "the stream yields something that is not an event", turn: rawStream(null) },
     {
       name: "the stream yields an unknown event",

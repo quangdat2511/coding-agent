@@ -36,12 +36,15 @@ import { sanitizeMaxRetries } from "../utils/retry.ts";
 // ---------------------------------------------------------------------------
 
 interface GoogleFunctionCall {
+  // Issued by Gemini 3 and later; earlier models correlate calls by name and position.
+  id?: string;
   name: string;
   args?: Record<string, unknown> | string | null;
 }
 
 // `output` and `error` are the keys Gemini reads a function's result and its failure from.
 interface GoogleFunctionResponse {
+  id?: string;
   name: string;
   response: { output: string } | { error: string };
 }
@@ -50,6 +53,8 @@ interface GooglePart {
   text?: string;
   functionCall?: GoogleFunctionCall;
   functionResponse?: GoogleFunctionResponse;
+  // Opaque; Gemini 3 requires it back, unchanged, on the functionCall part it came with.
+  thoughtSignature?: string;
 }
 
 interface GoogleContent {
@@ -115,6 +120,18 @@ export function mapGoogleFinishReason(
 }
 
 // ---------------------------------------------------------------------------
+// Call ids
+// ---------------------------------------------------------------------------
+
+// Prefix of the ids this adapter makes up for calls Gemini returned without one.
+const SYNTHETIC_CALL_ID_PREFIX = "google-fc-";
+
+// Gemini matches a functionResponse to its functionCall by id, but only knows the ids it issued.
+function geminiCallId(toolCallId: string): { id?: string } {
+  return toolCallId.startsWith(SYNTHETIC_CALL_ID_PREFIX) ? {} : { id: toolCallId };
+}
+
+// ---------------------------------------------------------------------------
 // Request building
 // ---------------------------------------------------------------------------
 
@@ -164,7 +181,7 @@ export function buildRequestBody(context: Context): GoogleRequestBody {
               throw new Error(`tool_result "${block.toolCallId}" answers no earlier tool_call`);
             }
             const response = block.isError ? { error: block.content } : { output: block.content };
-            parts.push({ functionResponse: { name, response } });
+            parts.push({ functionResponse: { ...geminiCallId(block.toolCallId), name, response } });
           }
         }
       }
@@ -190,10 +207,8 @@ export function buildRequestBody(context: Context): GoogleRequestBody {
             // Ignore parse errors if malformed
           }
           parts.push({
-            functionCall: {
-              name: block.name,
-              args,
-            },
+            functionCall: { ...geminiCallId(block.toolCallId), name: block.name, args },
+            ...(block.signature === undefined ? {} : { thoughtSignature: block.signature }),
           });
         }
       }
@@ -415,8 +430,8 @@ export function stream(model: Model, context: Context, options?: StreamOptions):
 
               // Function call — arguments arrive whole (never streamed)
               const toolCallId =
-                (part.functionCall as { id?: string }).id ??
-                `google-fc-${crypto.randomUUID().slice(0, 8)}-${nextBlockIndex}`;
+                part.functionCall.id ??
+                `${SYNTHETIC_CALL_ID_PREFIX}${crypto.randomUUID().slice(0, 8)}-${nextBlockIndex}`;
               const blockIndex = nextBlockIndex++;
               const argsString =
                 typeof part.functionCall.args === "string"
@@ -430,6 +445,9 @@ export function stream(model: Model, context: Context, options?: StreamOptions):
                 toolCallId,
                 name: part.functionCall.name,
                 arguments: argsString,
+                ...(part.thoughtSignature === undefined
+                  ? {}
+                  : { signature: part.thoughtSignature }),
               };
 
               eventStream.push({
