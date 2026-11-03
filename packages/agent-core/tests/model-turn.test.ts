@@ -224,7 +224,7 @@ describe("running a Model Turn", () => {
     expect(model.requests[1]?.context.messages[1]).toEqual(answer);
   });
 
-  it("keeps a Tool Call's opaque signature in the transcript for the next request", async () => {
+  it("keeps a Tool Call's Provider Signature in the transcript for the next request", async () => {
     const call = { toolCallId: "fc-1", name: "echo", input: {}, signature: "c2lnbmVkLWNhbGw=" };
     const { session, model } = openTestSession({
       model: { turns: [toolCallTurn(call), textTurn("Fixed it.")] },

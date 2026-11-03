@@ -30,6 +30,10 @@ _Avoid_: Provider auth, API key credential
 A typed unit of structured content within a message: text, tool_call, or tool_result.
 _Avoid_: Content item, message part, chunk
 
+**Provider Signature**:
+An opaque value that a Model Provider attaches to a Content Block and requires back, unchanged, with that block in later requests. Only that Model Provider interprets it.
+_Avoid_: Thought signature, encrypted content, replay token
+
 **Finish Reason**:
 A normalized completion reason paired with the Model Provider's raw value.
 _Avoid_: Stop reason, stop cause

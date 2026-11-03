@@ -167,7 +167,7 @@ describe("settling a failed Model Turn", () => {
       }),
     },
     {
-      name: "a final Tool Call's signature is not a string",
+      name: "a final Tool Call's Provider Signature is not a string",
       turn: endingWith({
         role: "assistant",
         content: [
