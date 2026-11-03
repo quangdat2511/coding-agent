@@ -119,7 +119,7 @@ async function replaceOnce(
   { targetContent, replacementContent }: EditInput,
   signal: AbortSignal,
 ): Promise<Replaced> {
-  const current = await readTextFile(fs, path, signal);
+  const current = await readTextFile(fs, path, signal, { invalidUtf8: "reject" });
   if (typeof current !== "string") return { ok: false, error: current };
   const matches = findMatches(current, targetContent);
   if (matches.count === 0) {

@@ -114,7 +114,9 @@ describe("editing a file", () => {
       isError: false,
       content: `"${join(repo, "a.ts")}" (1 replacement, 17 bytes written)`,
     });
-    expect(await readFile(join(repo, "a.ts"), "utf8")).toBe("let answer = 43;\n");
+    expect((await readFile(join(repo, "a.ts"))).equals(Buffer.from("let answer = 43;\n"))).toBe(
+      true,
+    );
   });
 
   it("replaces a multi-line target", async () => {
@@ -334,20 +336,60 @@ describe("refusing the input", () => {
   });
 });
 
+describe("refusing text it cannot rewrite exactly", () => {
+  it("refuses a file that is not valid UTF-8 and leaves its bytes untouched", async () => {
+    const original = Buffer.from("caf\xe9\nold\n", "latin1");
+    await writeFile(join(repo, "latin1.ts"), original);
+
+    expect(
+      await edit({ path: "latin1.ts", targetContent: "old", replacementContent: "new" }),
+    ).toMatchObject({
+      isError: true,
+      error: { code: "PERMISSION_DENIED", message: expect.stringContaining("not valid UTF-8") },
+    });
+    expect((await readFile(join(repo, "latin1.ts"))).equals(original)).toBe(true);
+  });
+
+  it("refuses a binary file and leaves its bytes untouched", async () => {
+    const original = Buffer.from([0x00, 0xff, 0xfe, 0x6f, 0x6c, 0x64, 0x00]);
+    await writeFile(join(repo, "blob.bin"), original);
+
+    expect(
+      await edit({ path: "blob.bin", targetContent: "old", replacementContent: "new" }),
+    ).toMatchObject({
+      isError: true,
+      error: { code: "PERMISSION_DENIED", message: expect.stringContaining("not valid UTF-8") },
+    });
+    expect((await readFile(join(repo, "blob.bin"))).equals(original)).toBe(true);
+  });
+
+  it("keeps a UTF-8 byte order mark when the edit succeeds", async () => {
+    const bom = Buffer.from([0xef, 0xbb, 0xbf]);
+    await writeFile(join(repo, "bom.ts"), Buffer.concat([bom, Buffer.from("old\n")]));
+
+    expect(
+      await edit({ path: "bom.ts", targetContent: "old", replacementContent: "new" }),
+    ).toMatchObject({ isError: false });
+    expect(
+      (await readFile(join(repo, "bom.ts"))).equals(Buffer.concat([bom, Buffer.from("new\n")])),
+    ).toBe(true);
+  });
+});
+
 describe("writing atomically", () => {
   it("puts a complete temporary file beside the target before renaming it", async () => {
     await writeFile(join(repo, "a.ts"), "old\n");
     const commit: {
       temporary?: string;
-      temporaryContent?: string;
-      originalContent?: string;
+      temporaryContent?: Buffer;
+      originalContent?: Buffer;
     } = {};
     const tool = editToolWith(fs, {
       ...fs,
       rename: async (from, to) => {
         commit.temporary = from;
-        commit.temporaryContent = await fs.readFile(from, "utf8");
-        commit.originalContent = await fs.readFile(to, "utf8");
+        commit.temporaryContent = await fs.readFile(from);
+        commit.originalContent = await fs.readFile(to);
         await fs.rename(from, to);
       },
     });
@@ -356,13 +398,13 @@ describe("writing atomically", () => {
       await edit({ path: "a.ts", targetContent: "old", replacementContent: "new" }, tool),
     ).toMatchObject({ isError: false });
 
-    expect(commit.temporaryContent).toBe("new\n");
-    expect(commit.originalContent).toBe("old\n");
+    expect(commit.temporaryContent?.equals(Buffer.from("new\n"))).toBe(true);
+    expect(commit.originalContent?.equals(Buffer.from("old\n"))).toBe(true);
     if (commit.temporary === undefined) {
       throw new Error("the edit did not rename a temporary file");
     }
     expect(dirname(commit.temporary)).toBe(repo);
-    expect(await readFile(join(repo, "a.ts"), "utf8")).toBe("new\n");
+    expect((await readFile(join(repo, "a.ts"))).equals(Buffer.from("new\n"))).toBe(true);
     expect(await readdir(repo)).toEqual(["a.ts"]);
   });
 
@@ -562,6 +604,39 @@ describe("the two phases", () => {
       error: { code: "NOT_FOUND", message: expect.stringContaining("does not exist") },
     });
     expect(await readFile(join(repo, "a.ts"), "utf8")).toBe("old\n");
+  });
+
+  it.each([
+    [
+      "the temporary file cannot be opened",
+      {
+        open: async () => {
+          throw Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" });
+        },
+      },
+    ],
+    [
+      "the rename finds no destination",
+      {
+        rename: async () => {
+          throw Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" });
+        },
+      },
+    ],
+  ])("reports %s as NOT_FOUND", async (_, override) => {
+    await writeFile(join(repo, "a.ts"), "old\n");
+    const tool = editToolWith(fs, { ...fs, ...override });
+    const prepared = await tool.prepare(
+      { path: "a.ts", targetContent: "old", replacementContent: "new" },
+      context(),
+    );
+    if (!prepared.ok) throw new Error(`expected a prepared call, got: ${prepared.message}`);
+
+    expect(await tool.execute(prepared.prepared, context())).toMatchObject({
+      isError: true,
+      error: { code: "NOT_FOUND" },
+    });
+    expect((await readFile(join(repo, "a.ts"))).equals(Buffer.from("old\n"))).toBe(true);
   });
 
   it("reports NOT_FOUND when the file disappears before it executes", async () => {

@@ -12,8 +12,15 @@ export interface ReadFileSystem {
 
 export interface ReadHandle {
   stat(): Promise<{ isDirectory(): boolean; isFile(): boolean }>;
-  readFile(options: { encoding: "utf8"; signal: AbortSignal }): Promise<string>;
+  readFile(options: { signal: AbortSignal }): Promise<Uint8Array>;
   close(): Promise<void>;
+}
+
+export interface ReadTextOptions {
+  // Whether bytes that are not valid UTF-8 fail the read. `read` can show them as U+FFFD, which
+  // loses nothing on screen. `edit` writes the text back, so a replacement character would
+  // silently rewrite every invalid byte in the file, including ones outside the matched text.
+  readonly invalidUtf8: "replace" | "reject";
 }
 
 // O_NOFOLLOW refuses a final component swapped for a symbolic link after resolution, and
@@ -32,6 +39,7 @@ export async function readTextFile(
   fs: ReadFileSystem,
   path: RepoPath,
   signal: AbortSignal,
+  { invalidUtf8 }: ReadTextOptions,
 ): Promise<string | ToolError> {
   let handle: ReadHandle;
   try {
@@ -43,7 +51,17 @@ export async function readTextFile(
     const stats = await handle.stat();
     if (stats.isDirectory()) return directoryFailure(path);
     if (!stats.isFile()) return notRegularFileFailure(path);
-    return await handle.readFile({ encoding: "utf8", signal });
+    const bytes = await handle.readFile({ signal });
+    // ignoreBOM keeps a leading byte order mark as a character. Dropping it would change the
+    // file's first bytes, which matters as soon as the text is written back.
+    if (invalidUtf8 === "replace") {
+      return new TextDecoder("utf-8", { ignoreBOM: true }).decode(bytes);
+    }
+    try {
+      return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes);
+    } catch {
+      return { code: "PERMISSION_DENIED", message: `${quote(path)} is not valid UTF-8 text` };
+    }
   } finally {
     // The file was only read, so a failure to close it must not replace the outcome.
     await handle.close().catch(() => undefined);

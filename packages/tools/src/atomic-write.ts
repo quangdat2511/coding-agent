@@ -218,6 +218,22 @@ export async function replaceAtomically(
   fs: WriteFileSystem,
   path: RepoPath,
   content: string,
+  options: AtomicWriteOptions,
+): Promise<AtomicWriteOutcome> {
+  const outcome = await replaceFile(fs, path, content, options);
+  // Only a tool that may create the target can report a parent it failed to create or keep. A tool
+  // that may only replace an existing file, such as edit, reports the vanished parent as the
+  // missing target it is, so no race branch leaks a code its contract does not list.
+  if (!outcome.ok && !options.createMissing && outcome.error.code === "PARENT_CREATION_FAILED") {
+    return { ok: false, error: { code: "NOT_FOUND", message: `${quote(path)} does not exist` } };
+  }
+  return outcome;
+}
+
+async function replaceFile(
+  fs: WriteFileSystem,
+  path: RepoPath,
+  content: string,
   { signal, createMissing }: AtomicWriteOptions,
 ): Promise<AtomicWriteOutcome> {
   signal.throwIfAborted();
@@ -229,15 +245,7 @@ export async function replaceAtomically(
 
   const directory = dirname(path) as RepoPath;
   const directoryProblem = await inspectDirectory(fs, directory);
-  if (directoryProblem !== undefined) {
-    // Only a tool that may create the target can report a parent it failed to create. A tool that
-    // may only replace an existing file, such as edit, reports the vanished directory as the
-    // missing target it is.
-    if (!createMissing && directoryProblem.code === "PARENT_CREATION_FAILED") {
-      return { ok: false, error: { code: "NOT_FOUND", message: `${quote(path)} does not exist` } };
-    }
-    return { ok: false, error: directoryProblem };
-  }
+  if (directoryProblem !== undefined) return { ok: false, error: directoryProblem };
 
   const temporary = join(directory, `.coding-agent-${randomUUID()}.tmp`) as RepoPath;
   let createdTemporary = false;

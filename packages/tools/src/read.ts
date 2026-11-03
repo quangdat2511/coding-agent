@@ -66,7 +66,7 @@ export function readToolWith(fs: ReadFileSystem): ExecutableTool<typeof ReadPara
     async execute({ input }, { workspace, signal }): Promise<ToolOutcome> {
       const resolved = await workspace.resolveExisting(input.path);
       if (!resolved.ok) return toolError(resolved);
-      const text = await readTextFile(fs, resolved.path, signal);
+      const text = await readTextFile(fs, resolved.path, signal, { invalidUtf8: "replace" });
       if (typeof text !== "string") return toolError(text);
       return render(resolved.path, text, input);
     },
