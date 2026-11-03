@@ -537,7 +537,7 @@ describe("the two phases", () => {
     expect(await readFile(join(repo, "a.ts"), "utf8")).toBe("old\n");
   });
 
-  it("resolves the input again before writing", async () => {
+  it("re-validates the prepared path before writing", async () => {
     await writeFile(join(repo, "a.ts"), "old\n");
     const actual = workspace;
     const calls: string[] = [];
@@ -563,8 +563,38 @@ describe("the two phases", () => {
       isError: true,
       error: { code: "PATH_OUTSIDE_REPO", message: "changed after prepare" },
     });
-    expect(calls).toEqual(["a.ts", "a.ts"]);
+    expect(calls).toEqual(["a.ts", join(repo, "a.ts")]);
     expect(await readFile(join(repo, "a.ts"), "utf8")).toBe("old\n");
+  });
+
+  it("refuses a prepared path that no longer resolves to itself", async () => {
+    await writeFile(join(repo, "a.ts"), "old\n");
+    const actual = workspace;
+    let calls = 0;
+    const moving: WorkspaceResolver = {
+      ...actual,
+      resolveExisting: async (input) => {
+        calls += 1;
+        if (calls === 2) return { ok: true, path: join(repo, "elsewhere.ts") as RepoPath };
+        return actual.resolveExisting(input);
+      },
+    };
+    const tool = editTool();
+    const ctx = { ...context(), workspace: moving };
+    const prepared = await tool.prepare(
+      { path: "a.ts", targetContent: "old", replacementContent: "new" },
+      ctx,
+    );
+    if (!prepared.ok) throw new Error(`expected a prepared call, got: ${prepared.message}`);
+
+    expect(await tool.execute(prepared.prepared, ctx)).toMatchObject({
+      isError: true,
+      error: {
+        code: "PATH_OUTSIDE_REPO",
+        message: expect.stringContaining("changed after it was approved"),
+      },
+    });
+    expect((await readFile(join(repo, "a.ts"))).equals(Buffer.from("old\n"))).toBe(true);
   });
 
   it("re-reads the file after Approval and refuses a target that is no longer unique", async () => {

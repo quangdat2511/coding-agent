@@ -19,6 +19,7 @@ import { errnoOf } from "./errno.ts";
 import { symbolicLinkFailure } from "./failures.ts";
 import { describeBytes, quote } from "./messages.ts";
 import { FILE_PATH_PATTERN } from "./paths.ts";
+import { revalidatePreparedPath } from "./prepared-path.ts";
 import { prepareFailure, success, toolError } from "./tool-outcome.ts";
 
 export const WriteParams = Type.Object({
@@ -77,14 +78,14 @@ export function writeToolWith(fs: WriteFileSystem): ExecutableTool<typeof WriteP
       };
     },
 
-    // Re-resolves the path, since the filesystem may have changed since prepare.
-    async execute({ input }, { workspace, signal }): Promise<ToolOutcome> {
-      const resolved = await workspace.resolveForCreate(input.path);
-      if (!resolved.ok) {
-        const code = resolved.code === "NOT_FOUND" ? "PARENT_CREATION_FAILED" : resolved.code;
-        return toolError({ code, message: resolved.message });
+    // Re-validates the path Approval saw, since the filesystem may have changed since prepare.
+    async execute(prepared, { workspace, signal }): Promise<ToolOutcome> {
+      const approved = await revalidatePreparedPath(workspace, prepared.paths, "create");
+      if (!approved.ok) {
+        const code = approved.code === "NOT_FOUND" ? "PARENT_CREATION_FAILED" : approved.code;
+        return toolError({ code, message: approved.message });
       }
-      return writeAtomically(fs, workspace.repoRoot, resolved.path, input.content, signal);
+      return writeAtomically(fs, workspace.repoRoot, approved.path, prepared.input.content, signal);
     },
   };
 }

@@ -627,7 +627,7 @@ describe("the two phases", () => {
     });
   });
 
-  it("resolves the input again before writing", async () => {
+  it("re-validates the prepared path before writing", async () => {
     const actual = workspace;
     const calls: string[] = [];
     const changing: WorkspaceResolver = {
@@ -649,7 +649,33 @@ describe("the two phases", () => {
       isError: true,
       error: { code: "PATH_OUTSIDE_REPO", message: "changed after prepare" },
     });
-    expect(calls).toEqual(["a.ts", "a.ts"]);
+    expect(calls).toEqual(["a.ts", join(repo, "a.ts")]);
+    expect(await readdir(repo)).toEqual([]);
+  });
+
+  it("refuses a prepared path that no longer resolves to itself", async () => {
+    const actual = workspace;
+    let calls = 0;
+    const moving: WorkspaceResolver = {
+      ...actual,
+      resolveForCreate: async (input) => {
+        calls += 1;
+        if (calls === 2) return { ok: true, path: join(repo, "elsewhere.ts") as RepoPath };
+        return actual.resolveForCreate(input);
+      },
+    };
+    const tool = writeTool();
+    const ctx = { ...context(), workspace: moving };
+    const prepared = await tool.prepare({ path: "a.ts", content: "new\n" }, ctx);
+    if (!prepared.ok) throw new Error(`expected a prepared call, got: ${prepared.message}`);
+
+    expect(await tool.execute(prepared.prepared, ctx)).toMatchObject({
+      isError: true,
+      error: {
+        code: "PATH_OUTSIDE_REPO",
+        message: expect.stringContaining("changed after it was approved"),
+      },
+    });
     expect(await readdir(repo)).toEqual([]);
   });
 

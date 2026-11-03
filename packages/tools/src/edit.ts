@@ -11,6 +11,7 @@ import { type Static, Type } from "typebox";
 import { inspectTarget, replaceAtomically, type WriteFileSystem } from "./atomic-write.ts";
 import { describeBytes, preview, quote } from "./messages.ts";
 import { FILE_PATH_PATTERN } from "./paths.ts";
+import { revalidatePreparedPath } from "./prepared-path.ts";
 import { type ReadFileSystem, readTextFile } from "./text-file.ts";
 import { prepareFailure, success, toolError } from "./tool-outcome.ts";
 
@@ -74,19 +75,19 @@ export function editToolWith(
       };
     },
 
-    // Re-resolves and re-reads the file, since the filesystem may have changed since prepare.
-    async execute({ input }, { workspace, signal }): Promise<ToolOutcome> {
-      const resolved = await workspace.resolveExisting(input.path);
-      if (!resolved.ok) return toolError(resolved);
-      const replaced = await replaceOnce(readFs, resolved.path, input, signal);
+    // Re-validates the approved path and re-reads the file, since the filesystem may have changed.
+    async execute(prepared, { workspace, signal }): Promise<ToolOutcome> {
+      const approved = await revalidatePreparedPath(workspace, prepared.paths, "existing");
+      if (!approved.ok) return toolError(approved);
+      const replaced = await replaceOnce(readFs, approved.path, prepared.input, signal);
       if (!replaced.ok) return toolError(replaced.error);
-      const written = await replaceAtomically(writeFs, resolved.path, replaced.content, {
+      const written = await replaceAtomically(writeFs, approved.path, replaced.content, {
         signal,
         createMissing: false,
       });
       if (!written.ok) return toolError(written.error);
       return success(
-        `${quote(resolved.path)} (1 replacement, ${describeBytes(replaced.content)} written)`,
+        `${quote(approved.path)} (1 replacement, ${describeBytes(replaced.content)} written)`,
       );
     },
   };

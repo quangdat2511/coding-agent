@@ -8,6 +8,7 @@ import type {
 } from "@coding-agent/agent-core";
 import { type Static, Type } from "typebox";
 import { quote } from "./messages.ts";
+import { revalidatePreparedPath } from "./prepared-path.ts";
 import { type ReadFileSystem, readTextFile } from "./text-file.ts";
 import { prepareFailure, success, toolError } from "./tool-outcome.ts";
 
@@ -62,13 +63,13 @@ export function readToolWith(fs: ReadFileSystem): ExecutableTool<typeof ReadPara
       };
     },
 
-    // Re-resolves the path, since the filesystem may have changed since prepare.
-    async execute({ input }, { workspace, signal }): Promise<ToolOutcome> {
-      const resolved = await workspace.resolveExisting(input.path);
-      if (!resolved.ok) return toolError(resolved);
-      const text = await readTextFile(fs, resolved.path, signal, { invalidUtf8: "replace" });
+    // Re-validates the path Approval saw, since the filesystem may have changed since prepare.
+    async execute(prepared, { workspace, signal }): Promise<ToolOutcome> {
+      const approved = await revalidatePreparedPath(workspace, prepared.paths, "existing");
+      if (!approved.ok) return toolError(approved);
+      const text = await readTextFile(fs, approved.path, signal, { invalidUtf8: "replace" });
       if (typeof text !== "string") return toolError(text);
-      return render(resolved.path, text, input);
+      return render(approved.path, text, prepared.input);
     },
   };
 }
