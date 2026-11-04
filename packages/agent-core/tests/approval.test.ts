@@ -325,6 +325,9 @@ describe("waiting for Approval under the ask policy", () => {
     });
     expect(commandResult).toMatchObject({ accepted: true });
 
+    // When denied with none remaining, the session returns directly to streaming_model
+    expect(session.snapshot().phase).toBe("streaming_model");
+
     const result = await session.result();
     expect(result.outcome).toBe("succeeded");
     expect(executed).toBe(false);

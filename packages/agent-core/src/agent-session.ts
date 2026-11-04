@@ -67,6 +67,7 @@ type ApprovalDecision =
 interface PendingApprovalResolver {
   readonly approvalId: string;
   readonly toolCallId: string;
+  readonly draft: AssistantMessageDraft;
   resolve(decision: ApprovalDecision): void;
 }
 
@@ -78,14 +79,14 @@ const rejectedResult = ({ id, name }: QueuedToolCall, error: ToolError): ToolRes
   error,
 });
 
-const denialReason = (reason?: string): string | undefined => {
+const normalizeReason = (reason?: string): string | undefined => {
   if (reason === undefined) return undefined;
   const trimmed = reason.trim();
   return trimmed.length > 0 ? trimmed : undefined;
 };
 
 const denialResult = ({ id, name }: QueuedToolCall, rawReason?: string): ToolResult => {
-  const reason = denialReason(rawReason);
+  const reason = normalizeReason(rawReason);
   const message = reason ?? "approval denied by user";
   return {
     toolCallId: id,
@@ -241,6 +242,7 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
 
   async function awaitUserApproval(
     modelTurn: ModelTurnRef,
+    draft: AssistantMessageDraft,
     toolCall: QueuedToolCall,
     queuedToolCalls: readonly QueuedToolCall[],
     summary: string,
@@ -261,7 +263,7 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
         data: { approvalId, toolCallId: toolCall.id, summary, policy: config.approvalPolicy },
       },
     );
-    pendingApproval = { approvalId, toolCallId: toolCall.id, resolve: resolver.resolve };
+    pendingApproval = { approvalId, toolCallId: toolCall.id, draft, resolve: resolver.resolve };
     return resolver.promise;
   }
 
@@ -284,6 +286,7 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
       } else if (mutating && config.approvalPolicy === "ask") {
         const decision = await awaitUserApproval(
           modelTurn,
+          draft,
           toolCall,
           remaining,
           preflight.prepared.summary,
@@ -578,16 +581,18 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
         `Approval ${command.approvalId} does not match the pending Approval ${pendingApproval.approvalId}`,
       );
     }
-    const reason = denialReason(command.reason);
+    const reason = normalizeReason(command.reason);
     const nextState =
       state.phase === "awaiting_approval"
-        ? {
-            ...withoutPhase(state),
-            phase: "executing_tool" as const,
-            modelTurn: state.modelTurn,
-            toolCall: state.toolCall,
-            queuedToolCalls: state.queuedToolCalls,
-          }
+        ? command.decision === "deny" && state.queuedToolCalls.length === 0
+          ? streaming(state.modelTurn, pendingApproval.draft)
+          : {
+              ...withoutPhase(state),
+              phase: "executing_tool" as const,
+              modelTurn: state.modelTurn,
+              toolCall: state.toolCall,
+              queuedToolCalls: state.queuedToolCalls,
+            }
         : state;
     const sequence = commit(nextState, {
       type: "approval_resolved",
