@@ -6,10 +6,21 @@
 export interface TuiModel {
   // Oldest first. Each id is unique across the transcript and stays the same across updates.
   readonly transcript: readonly TranscriptEntry[];
+  // The Approval awaiting a decision, from approval_requested. The overlay shows it until the
+  // person decides, and the decision goes to onApproval with this approvalId.
+  readonly pendingApproval?: PendingApproval;
   // Planned optional fields:
-  // - pendingApproval (CDA-60): the Approval awaiting a decision, answered through onApproval.
   // - session: the Agent Session status shown outside the transcript.
   // - limitNotice: limit kind, configured limit and observed value from runtime_limit_reached.
+}
+
+// Not exported from index.ts, like TranscriptEntry. Consumers derive this type with
+// NonNullable<TuiModel["pendingApproval"]>.
+export interface PendingApproval {
+  readonly approvalId: string;
+  readonly toolName: string;
+  // The mutation summary of approval_requested, written by the projection.
+  readonly summary: string;
 }
 
 // Not exported from index.ts: the public surface is exactly the four names of ADR 0004 §5.
@@ -37,10 +48,11 @@ export type TranscriptEntry =
       readonly toolName: string;
       // One line describing the call's arguments, written by the projection.
       readonly summary: string;
-      // tool_call_completed outcomes, plus "queued" after tool_call_queued and "executing" after
-      // tool_execution_started. Planned member: "awaiting_approval" (CDA-60).
+      // tool_call_completed outcomes, plus "queued" after tool_call_queued, "awaiting_approval"
+      // after approval_requested and "executing" after tool_execution_started.
       readonly status:
         | "queued"
+        | "awaiting_approval"
         | "executing"
         | "succeeded"
         | "failed"
@@ -59,8 +71,12 @@ export type TranscriptEntry =
 
 // Decisions the person makes in the TUI. onApproval mirrors ADR 0002's resolve_approval command.
 export type TuiHandlers = {
+  // The Coding Task typed in the Prompt, which may hold line breaks.
   onSubmit(text: string): void;
   onCancel(): void;
+  // The overlay closes as soon as the person decides and never opens again for this approvalId,
+  // so one Approval is never decided twice. The host takes the Approval out of the model, or sends
+  // one with a new approvalId when it needs another decision, as when resolve_approval fails.
   onApproval(approvalId: string, decision: "allow" | "deny", reason?: string): void;
 };
 

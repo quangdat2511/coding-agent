@@ -16,8 +16,10 @@ const ESC = "\u001b";
 const INDENT = "  ";
 
 // The marker in front of a Coding Task: on a submitted task's first row here, and in the Prompt
-// while a task is typed, so a task keeps its look once it is submitted.
+// while a task is typed, so a task keeps its look once it is submitted. The task's other rows start
+// under its text rather than under the marker.
 export const TASK_MARKER = "> ";
+export const TASK_CONTINUATION = " ".repeat(TASK_MARKER.length);
 
 // TuiModel entries are readonly, so an entry object keeps its rows until the width changes and an
 // update only wraps the entries it replaced.
@@ -65,11 +67,10 @@ function layoutEntry(entry: TranscriptEntry, columns: number): string[] {
   }
 }
 
-// Wrapped lines continue under the text rather than under the prompt marker.
 function userLines(entry: Entry<"user">, columns: number): string[] {
   const lines = wrap(entry.text, columns - TASK_MARKER.length);
   return (lines.length === 0 ? [""] : lines).map(
-    (line, index) => (index === 0 ? TASK_MARKER : INDENT) + line,
+    (line, index) => (index === 0 ? TASK_MARKER : TASK_CONTINUATION) + line,
   );
 }
 
@@ -89,7 +90,7 @@ function toolCallLines(entry: Entry<"tool_call">, columns: number): string[] {
 
 // Wraps text the way Ink wraps a <Text> (ink/build/wrap-text.js), so a row never needs wrapping
 // again. Empty text takes no rows, as an empty <Text> takes no height.
-function wrap(text: string, columns: number): string[] {
+export function wrap(text: string, columns: number): string[] {
   const display = toDisplayText(text);
   if (display === "") {
     return [];

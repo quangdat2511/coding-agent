@@ -10,6 +10,11 @@ export const KEYS = {
   ctrlC: "\u0003",
   up: "\u001b[A",
   down: "\u001b[B",
+  left: "\u001b[D",
+  right: "\u001b[C",
+  home: "\u001b[H",
+  end: "\u001b[F",
+  delete: "\u001b[3~",
   pageUp: "\u001b[5~",
   pageDown: "\u001b[6~",
 } as const;
@@ -34,6 +39,8 @@ export interface TestTerminal {
   screen(): string[];
   // The character in one cell of the visible screen, or "" for an empty cell.
   cell(row: number, column: number): string;
+  // The row and column of the cursor on the visible screen, or undefined while it is hidden.
+  cursorAt(): Promise<readonly [row: number, column: number] | undefined>;
   isCursorVisible(): Promise<boolean>;
   // Resizes the screen and emits "resize" on stdout, as a real TTY stream does on SIGWINCH.
   resize(columns: number, rows: number): void;
@@ -120,6 +127,13 @@ export function createTestTerminal(columns: number, rows: number): TestTerminal 
         (_, row) => line(row)?.translateToString(false, 0, terminal.cols).trimEnd() ?? "",
       ),
     cell: (row, column) => line(row)?.getCell(column)?.getChars() ?? "",
+    async cursorAt() {
+      if (!(await this.isCursorVisible())) {
+        return undefined;
+      }
+      const buffer = terminal.buffer.active;
+      return [buffer.cursorY, buffer.cursorX] as const;
+    },
     async isCursorVisible() {
       // xterm has no getter for cursor visibility, so ask the terminal with DECRQM for DECTCEM
       // (mode 25). It answers CSI ? 25 ; 1 $ y when the cursor is shown, ; 2 when it is hidden.

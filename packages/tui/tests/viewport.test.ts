@@ -133,7 +133,7 @@ describe("transcript viewport", () => {
     await terminal.press(KEYS.pageUp);
     await tui.flush();
 
-    // The arrow keys are left for the Prompt's own use later; for now they do nothing.
+    // Up and Down move the cursor between the Prompt's rows, and never scroll the transcript.
     await terminal.press(KEYS.up, KEYS.down);
     await tui.flush();
     expect(viewport(terminal)).toEqual(lines(12, 21));
