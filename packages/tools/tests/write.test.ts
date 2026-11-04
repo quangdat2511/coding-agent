@@ -673,7 +673,7 @@ describe("the two phases", () => {
       isError: true,
       error: {
         code: "PATH_OUTSIDE_REPO",
-        message: expect.stringContaining("changed after it was approved"),
+        message: expect.stringContaining("changed after it was prepared"),
       },
     });
     expect(await readdir(repo)).toEqual([]);

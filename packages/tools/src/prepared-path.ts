@@ -1,28 +1,24 @@
-import type { PathResolution, RepoPath, WorkspaceResolver } from "@coding-agent/agent-core";
+import type { PathResolution, RepoPath } from "@coding-agent/agent-core";
 import { quote } from "./messages.ts";
 
-// Re-validates the canonical path an Approval displayed, because waiting for Approval leaves time
-// for the filesystem to change (ADR 0004 §3). Resolving the model's input again instead would let
-// execute act on a path the Approval never saw, so the prepared path is what goes back through the
-// resolver, and it must still resolve to itself.
+// Re-validates the canonical path prepare resolved, because the filesystem may change before
+// execute runs and prepare can wait for Approval in between (ADR 0004 §3). Resolving the model's
+// input again instead would let execute act on a path prepare never validated, so the prepared path
+// is what goes back through the resolver, and it must still resolve to itself.
 export async function revalidatePreparedPath(
-  workspace: WorkspaceResolver,
   paths: readonly RepoPath[],
-  mode: "existing" | "create",
+  resolve: (path: RepoPath) => Promise<PathResolution>,
 ): Promise<PathResolution> {
-  const approved = paths[0];
+  const prepared = paths[0];
   // The file tools prepare exactly one path; a tool that prepares several must validate each one.
-  if (approved === undefined) throw new Error("the prepared call has no path to re-validate");
-  const resolved =
-    mode === "existing"
-      ? await workspace.resolveExisting(approved)
-      : await workspace.resolveForCreate(approved);
+  if (prepared === undefined) throw new Error("the prepared call has no path to re-validate");
+  const resolved = await resolve(prepared);
   if (!resolved.ok) return resolved;
-  if (resolved.path !== approved) {
+  if (resolved.path !== prepared) {
     return {
       ok: false,
       code: "PATH_OUTSIDE_REPO",
-      message: `${quote(approved)} changed after it was approved`,
+      message: `${quote(prepared)} changed after it was prepared`,
     };
   }
   return resolved;

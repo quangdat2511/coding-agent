@@ -413,12 +413,11 @@ describe("the two phases", () => {
     const prepared = await tool.prepare({ path: "a.ts" }, ctx);
     if (!prepared.ok) throw new Error(`expected a prepared call, got: ${prepared.message}`);
 
-    expect(await tool.execute(prepared.prepared, ctx)).toMatchObject({
-      isError: true,
-      error: {
-        code: "PATH_OUTSIDE_REPO",
-        message: expect.stringContaining("changed after it was approved"),
-      },
+    const outcome = await tool.execute(prepared.prepared, ctx);
+    if (!outcome.isError) throw new Error("expected the read to be refused");
+    expect(outcome.error).toEqual({
+      code: "PATH_OUTSIDE_REPO",
+      message: expect.stringContaining("changed after it was prepared"),
     });
   });
 });

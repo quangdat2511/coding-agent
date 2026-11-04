@@ -363,6 +363,29 @@ describe("refusing text it cannot rewrite exactly", () => {
     expect((await readFile(join(repo, "blob.bin"))).equals(original)).toBe(true);
   });
 
+  it.each([
+    ["targetContent", { targetContent: "\uD83D", replacementContent: "Z" }],
+    ["replacementContent", { targetContent: "😀", replacementContent: "\uDE00" }],
+  ])("refuses a %s that is half of a surrogate pair", async (field, input) => {
+    const original = Buffer.from("x😀y\n", "utf8");
+    await writeFile(join(repo, "emoji.ts"), original);
+
+    expect(await edit({ path: "emoji.ts", ...input })).toMatchObject({
+      isError: true,
+      error: { code: "SCHEMA_VIOLATION", message: expect.stringContaining(field) },
+    });
+    expect((await readFile(join(repo, "emoji.ts"))).equals(original)).toBe(true);
+  });
+
+  it("replaces a whole emoji", async () => {
+    await writeFile(join(repo, "emoji.ts"), "x😀y\n");
+
+    expect(
+      await edit({ path: "emoji.ts", targetContent: "😀", replacementContent: "🙂" }),
+    ).toMatchObject({ isError: false });
+    expect((await readFile(join(repo, "emoji.ts"))).equals(Buffer.from("x🙂y\n"))).toBe(true);
+  });
+
   it("keeps a UTF-8 byte order mark when the edit succeeds", async () => {
     const bom = Buffer.from([0xef, 0xbb, 0xbf]);
     await writeFile(join(repo, "bom.ts"), Buffer.concat([bom, Buffer.from("old\n")]));
@@ -567,6 +590,25 @@ describe("the two phases", () => {
     expect(await readFile(join(repo, "a.ts"), "utf8")).toBe("old\n");
   });
 
+  it("maps a parent that is not a directory in prepare to NOT_FOUND", async () => {
+    await writeFile(join(repo, "a.ts"), "old\n");
+    const tool = editToolWith(fs, {
+      ...fs,
+      lstat: async () => {
+        throw Object.assign(new Error("ENOTDIR: not a directory"), { code: "ENOTDIR" });
+      },
+    });
+
+    expect(
+      await prepare({ path: "a.ts", targetContent: "old", replacementContent: "new" }, tool),
+    ).toMatchObject({
+      ok: false,
+      code: "NOT_FOUND",
+      message: expect.stringContaining("a parent is not a directory"),
+    });
+    expect((await readFile(join(repo, "a.ts"))).equals(Buffer.from("old\n"))).toBe(true);
+  });
+
   it("refuses a prepared path that no longer resolves to itself", async () => {
     await writeFile(join(repo, "a.ts"), "old\n");
     const actual = workspace;
@@ -591,7 +633,7 @@ describe("the two phases", () => {
       isError: true,
       error: {
         code: "PATH_OUTSIDE_REPO",
-        message: expect.stringContaining("changed after it was approved"),
+        message: expect.stringContaining("changed after it was prepared"),
       },
     });
     expect((await readFile(join(repo, "a.ts"))).equals(Buffer.from("old\n"))).toBe(true);
@@ -631,7 +673,10 @@ describe("the two phases", () => {
 
     expect(await tool.execute(prepared.prepared, context())).toMatchObject({
       isError: true,
-      error: { code: "NOT_FOUND", message: expect.stringContaining("does not exist") },
+      error: {
+        code: "NOT_FOUND",
+        message: expect.stringContaining("disappeared before it could be written"),
+      },
     });
     expect(await readFile(join(repo, "a.ts"), "utf8")).toBe("old\n");
   });

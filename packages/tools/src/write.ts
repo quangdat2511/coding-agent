@@ -17,8 +17,8 @@ import {
 } from "./atomic-write.ts";
 import { errnoOf } from "./errno.ts";
 import { symbolicLinkFailure } from "./failures.ts";
-import { describeBytes, quote } from "./messages.ts";
-import { FILE_PATH_PATTERN } from "./paths.ts";
+import { describeBytes, displayPath, quote } from "./messages.ts";
+import { checkFilePath, FILE_PATH_PATTERN } from "./paths.ts";
 import { revalidatePreparedPath } from "./prepared-path.ts";
 import { prepareFailure, success, toolError } from "./tool-outcome.ts";
 
@@ -65,7 +65,7 @@ export function writeToolWith(fs: WriteFileSystem): ExecutableTool<typeof WriteP
       if (!target.ok) return prepareFailure<typeof WriteParams>(target.error);
       const creates = target.kind === "missing";
       const createsParents = creates && (await parentMissing(fs, resolved.path));
-      const shown = relative(workspace.repoRoot, resolved.path) || ".";
+      const shown = displayPath(workspace.repoRoot, resolved.path);
       const action = creates ? "create" : "overwrite";
       const parents = createsParents ? "; creates parent directories" : "";
       return {
@@ -78,14 +78,22 @@ export function writeToolWith(fs: WriteFileSystem): ExecutableTool<typeof WriteP
       };
     },
 
-    // Re-validates the path Approval saw, since the filesystem may have changed since prepare.
+    // Re-validates the prepared path, since the filesystem may have changed since prepare.
     async execute(prepared, { workspace, signal }): Promise<ToolOutcome> {
-      const approved = await revalidatePreparedPath(workspace, prepared.paths, "create");
-      if (!approved.ok) {
-        const code = approved.code === "NOT_FOUND" ? "PARENT_CREATION_FAILED" : approved.code;
-        return toolError({ code, message: approved.message });
+      const validated = await revalidatePreparedPath(prepared.paths, (path) =>
+        workspace.resolveForCreate(path),
+      );
+      if (!validated.ok) {
+        const code = validated.code === "NOT_FOUND" ? "PARENT_CREATION_FAILED" : validated.code;
+        return toolError({ code, message: validated.message });
       }
-      return writeAtomically(fs, workspace.repoRoot, approved.path, prepared.input.content, signal);
+      return writeAtomically(
+        fs,
+        workspace.repoRoot,
+        validated.path,
+        prepared.input.content,
+        signal,
+      );
     },
   };
 }
@@ -93,9 +101,8 @@ export function writeToolWith(fs: WriteFileSystem): ExecutableTool<typeof WriteP
 // Schema Validation belongs to Agent Core (ADR 0001 §1); this repeats the schema's path rule so
 // prepare never resolves a path the declaration forbids.
 function checkInput({ path, content }: WriteInput): string | undefined {
-  if (typeof path !== "string" || !FILE_PATH_PATTERN.test(path)) {
-    return `path ${quote(String(path))} must be a non-empty path that names a file, not a directory`;
-  }
+  const invalidPath = checkFilePath(path);
+  if (invalidPath !== undefined) return invalidPath;
   if (typeof content !== "string") return "content must be a string";
   return undefined;
 }

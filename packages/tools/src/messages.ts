@@ -1,7 +1,16 @@
+import { relative } from "node:path";
+import type { RepoPath } from "@coding-agent/agent-core";
+
 // A path or a file's text can hold any character, so every tool result that embeds one quotes it:
 // this keeps a name or a matched line with a newline from passing for a separate result line.
 export function quote(text: string): string {
   return JSON.stringify(text);
+}
+
+// A summary shows the target relative to the repository root, so an absolute path inside the
+// repository reads the same as the relative one the model may have sent. The root itself is ".".
+export function displayPath(repoRoot: RepoPath, path: RepoPath): string {
+  return relative(repoRoot, path) || ".";
 }
 
 // An Approval line names the text an edit replaces and inserts, so a preview stays short enough

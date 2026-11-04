@@ -1,5 +1,4 @@
 import * as nodeFs from "node:fs/promises";
-import { relative } from "node:path";
 import type {
   ExecutableTool,
   PrepareOutcome,
@@ -9,8 +8,8 @@ import type {
 } from "@coding-agent/agent-core";
 import { type Static, Type } from "typebox";
 import { inspectTarget, replaceAtomically, type WriteFileSystem } from "./atomic-write.ts";
-import { describeBytes, preview, quote } from "./messages.ts";
-import { FILE_PATH_PATTERN } from "./paths.ts";
+import { describeBytes, displayPath, preview, quote } from "./messages.ts";
+import { checkFilePath, FILE_PATH_PATTERN } from "./paths.ts";
 import { revalidatePreparedPath } from "./prepared-path.ts";
 import { type ReadFileSystem, readTextFile } from "./text-file.ts";
 import { prepareFailure, success, toolError } from "./tool-outcome.ts";
@@ -59,10 +58,10 @@ export function editToolWith(
       const resolved = await workspace.resolveExisting(input.path);
       if (!resolved.ok) return resolved;
       const target = await inspectTarget(writeFs, resolved.path);
-      if (!target.ok) return prepareFailure<typeof EditParams>(target.error);
+      if (!target.ok) return prepareFailure<typeof EditParams>(asEditError(target.error));
       const replaced = await replaceOnce(readFs, resolved.path, input, signal);
       if (!replaced.ok) return prepareFailure<typeof EditParams>(replaced.error);
-      const shown = relative(workspace.repoRoot, resolved.path) || ".";
+      const shown = displayPath(workspace.repoRoot, resolved.path);
       return {
         ok: true,
         prepared: {
@@ -75,19 +74,21 @@ export function editToolWith(
       };
     },
 
-    // Re-validates the approved path and re-reads the file, since the filesystem may have changed.
+    // Re-validates the prepared path and re-reads the file, since the filesystem may have changed.
     async execute(prepared, { workspace, signal }): Promise<ToolOutcome> {
-      const approved = await revalidatePreparedPath(workspace, prepared.paths, "existing");
-      if (!approved.ok) return toolError(approved);
-      const replaced = await replaceOnce(readFs, approved.path, prepared.input, signal);
+      const validated = await revalidatePreparedPath(prepared.paths, (path) =>
+        workspace.resolveExisting(path),
+      );
+      if (!validated.ok) return toolError({ code: validated.code, message: validated.message });
+      const replaced = await replaceOnce(readFs, validated.path, prepared.input, signal);
       if (!replaced.ok) return toolError(replaced.error);
-      const written = await replaceAtomically(writeFs, approved.path, replaced.content, {
+      const written = await replaceAtomically(writeFs, validated.path, replaced.content, {
         signal,
         createMissing: false,
       });
-      if (!written.ok) return toolError(written.error);
+      if (!written.ok) return toolError(asEditError(written.error));
       return success(
-        `${quote(approved.path)} (1 replacement, ${describeBytes(replaced.content)} written)`,
+        `${quote(validated.path)} (1 replacement, ${describeBytes(replaced.content)} written)`,
       );
     },
   };
@@ -96,15 +97,29 @@ export function editToolWith(
 // Schema Validation belongs to Agent Core (ADR 0001 §1); this repeats the schema's rules so
 // prepare never reads with an argument the declaration forbids.
 function checkInput({ path, targetContent, replacementContent }: EditInput): string | undefined {
-  if (typeof path !== "string" || !FILE_PATH_PATTERN.test(path)) {
-    return `path ${quote(String(path))} must be a non-empty path that names a file, not a directory`;
-  }
+  const invalidPath = checkFilePath(path);
+  if (invalidPath !== undefined) return invalidPath;
   // An empty target matches at every offset, so it could never name one place to replace.
   if (typeof targetContent !== "string" || targetContent === "") {
     return "targetContent must be a non-empty string";
   }
+  // Matching works on UTF-16 code units, so a target that is half of a surrogate pair would split
+  // an emoji and the write would encode both halves as U+FFFD. Well-formed text cannot match
+  // between the halves of a pair, nor end between them.
+  if (!targetContent.isWellFormed()) return "targetContent must be well-formed Unicode text";
   if (typeof replacementContent !== "string") return "replacementContent must be a string";
+  if (!replacementContent.isWellFormed()) {
+    return "replacementContent must be well-formed Unicode text";
+  }
   return undefined;
+}
+
+// Edit's contract has no PARENT_CREATION_FAILED (ADR 0001 §1): it never creates a parent, so a path
+// that cannot be reached is simply not there. The message is kept because it says why.
+function asEditError(error: ToolError): ToolError {
+  return error.code === "PARENT_CREATION_FAILED"
+    ? { code: "NOT_FOUND", message: error.message }
+    : error;
 }
 
 type Replaced =
