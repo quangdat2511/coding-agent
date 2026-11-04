@@ -365,13 +365,59 @@ describe("the two phases", () => {
     if (!prepared.ok) throw new Error(`expected a prepared call, got: ${prepared.message}`);
 
     // O_NOFOLLOW only guards the final component, so a stale prepared path would still read
-    // outside the repository through the swapped parent. Only resolving the input again refuses it.
+    // outside the repository through the swapped parent. Only re-validating it refuses the read.
     await rename(join(repo, "sub"), join(sandbox, "moved"));
     await symlink(join(sandbox, "outside"), join(repo, "sub"));
 
     expect(await tool.execute(prepared.prepared, context())).toMatchObject({
       isError: true,
       error: { code: "PATH_OUTSIDE_REPO" },
+    });
+  });
+
+  it("re-validates the prepared path instead of the input", async () => {
+    await writeFile(join(repo, "a.ts"), "one\n");
+    const actual = workspace;
+    const calls: string[] = [];
+    const recording: WorkspaceResolver = {
+      ...actual,
+      resolveExisting: async (input) => {
+        calls.push(input);
+        return actual.resolveExisting(input);
+      },
+    };
+    const tool = readTool();
+    const ctx = { ...context(), workspace: recording };
+    const prepared = await tool.prepare({ path: "a.ts" }, ctx);
+    if (!prepared.ok) throw new Error(`expected a prepared call, got: ${prepared.message}`);
+
+    expect(await tool.execute(prepared.prepared, ctx)).toMatchObject({ isError: false });
+    expect(calls).toEqual(["a.ts", join(repo, "a.ts")]);
+  });
+
+  it("refuses a prepared path that no longer resolves to itself", async () => {
+    await writeFile(join(repo, "a.ts"), "one\n");
+    await writeFile(join(repo, "b.ts"), "two\n");
+    const actual = workspace;
+    let calls = 0;
+    const moving: WorkspaceResolver = {
+      ...actual,
+      resolveExisting: async (input) => {
+        calls += 1;
+        if (calls === 2) return { ok: true, path: join(repo, "b.ts") as RepoPath };
+        return actual.resolveExisting(input);
+      },
+    };
+    const tool = readTool();
+    const ctx = { ...context(), workspace: moving };
+    const prepared = await tool.prepare({ path: "a.ts" }, ctx);
+    if (!prepared.ok) throw new Error(`expected a prepared call, got: ${prepared.message}`);
+
+    const outcome = await tool.execute(prepared.prepared, ctx);
+    if (!outcome.isError) throw new Error("expected the read to be refused");
+    expect(outcome.error).toEqual({
+      code: "PATH_OUTSIDE_REPO",
+      message: expect.stringContaining("changed after it was prepared"),
     });
   });
 });
