@@ -27,6 +27,7 @@ export function readEnvCredential<V extends string>(
 export function apiKeyFromEnv(name: string, envVars: readonly string[]): ApiKeySource {
   return {
     name,
+    envVars,
     resolve: async () => readEnvCredential(envVars)?.value,
   };
 }

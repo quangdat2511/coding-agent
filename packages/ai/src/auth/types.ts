@@ -1,5 +1,6 @@
 export interface ApiKeySource {
-  name: string;
+  readonly name: string;
+  readonly envVars?: readonly string[];
   resolve(): Promise<string | undefined>;
 }
 

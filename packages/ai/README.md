@@ -163,6 +163,48 @@ export interface StreamOptions {
 models.stream(model, context, { temperature: 0.7, maxTokens: 1000 });
 ```
 
+### 6. Declarative Custom Providers
+
+You can instantiate custom endpoints (Ollama, vLLM, DeepSeek, custom OpenAI or Anthropic compatible proxies) declaratively from in-memory configuration objects:
+
+```typescript
+import { createCustomProvider, createProviderDirectory } from "@coding-agent/ai";
+
+// Create custom provider pointing to a proxy endpoint with environment variable resolution
+const customProvider = createCustomProvider({
+  id: "deepseek",
+  name: "DeepSeek API",
+  variant: "chat_completions",
+  baseUrl: "https://api.deepseek.com",
+  apiKeyEnv: "DEEPSEEK_API_KEY",
+  models: [
+    { id: "deepseek-chat", name: "DeepSeek V3" },
+    { id: "deepseek-reasoner", name: "DeepSeek R1" },
+  ],
+});
+
+// Or unauthenticated local runner (e.g. Ollama or vLLM)
+// If the local runner endpoint does not support parallel tool call control fields,
+// override capabilities: { parallelToolCallControl: false } on the model.
+const localOllama = createCustomProvider({
+  id: "ollama",
+  variant: "chat_completions",
+  baseUrl: "http://localhost:11434/v1",
+  models: [
+    {
+      id: "llama3",
+      capabilities: { parallelToolCallControl: false },
+    },
+  ],
+});
+
+// Register into ProviderDirectory
+const directory = createProviderDirectory();
+directory.setProvider(customProvider);
+directory.setProvider(localOllama);
+```
+
+
 ## Running Examples
 
 A runnable streaming example is available under `examples/stream.ts`. It demonstrates real-time completions across supported providers:
@@ -174,6 +216,10 @@ bun run example
 # Or specify provider, model, and custom prompt
 bun run example google gemini-3.6-flash "Explain TypeScript advantages"
 bun run example openai gpt-4o "Explain monorepo architecture"
+
+# Run custom provider example (e.g. local Ollama / vLLM / custom proxy)
+bun run example:custom
+bun run example:custom http://localhost:11434/v1 llama3 "Explain event loop"
 ```
 
 ## Conformance Test Suite & Fixture Recording
