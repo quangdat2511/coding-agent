@@ -20,9 +20,9 @@ async function main(
     process.stderr.write(`coding-agent: ${resolved.message}\n`);
     return resolved.code === "INVALID_CONFIGURATION" ? 2 : 70;
   }
-  // Temporary: CDA-67 (Join 2) opens the Agent Session from this configuration, CDA-75 (D3.1)
-  // returns exit codes 0 and 1, and CDA-78 (D3.2) returns 130. Until then a valid run has nothing
-  // to run.
+  // Temporary: CDA-67 (Join 2) opens the Agent Session from this configuration, with the system
+  // prompt from assembleSystemPrompt and exit 2 when that fails, CDA-75 (D3.1) returns exit codes 0
+  // and 1, and CDA-78 (D3.2) returns 130. Until then a valid run has nothing to run.
   process.stderr.write(
     "coding-agent: run is not implemented yet; the Agent Session lands in CDA-67 (Join 2)\n",
   );

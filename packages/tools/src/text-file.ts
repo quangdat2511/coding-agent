@@ -25,8 +25,9 @@ export interface ReadTextOptions {
 
 // O_NOFOLLOW refuses a final component swapped for a symbolic link after resolution, and
 // O_NONBLOCK keeps opening a FIFO from waiting for a writer that never comes. Windows defines
-// neither flag, where the resolver still rejects symbolic links before the open.
-const READ_FLAGS =
+// neither flag, where the resolver still rejects symbolic links before the open. Exported so that
+// a caller that reads a file the read tool could read opens it the same way.
+export const READ_OPEN_FLAGS =
   constants.O_RDONLY |
   ((constants.O_NOFOLLOW as number | undefined) ?? 0) |
   ((constants.O_NONBLOCK as number | undefined) ?? 0);
@@ -43,7 +44,7 @@ export async function readTextFile(
 ): Promise<string | ToolError> {
   let handle: ReadHandle;
   try {
-    handle = await fs.open(path, READ_FLAGS);
+    handle = await fs.open(path, READ_OPEN_FLAGS);
   } catch (cause) {
     return openReadFailure(path, cause);
   }

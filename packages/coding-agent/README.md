@@ -75,6 +75,66 @@ and the resolved configuration records them for `run.json`.
 Agent Core always asks for parallel Tool Calls to be disabled. The `ModelPort` passes that request
 to every provider except Google, whose API cannot honour it; Agent Core still accepts a batch.
 
+### System prompt
+
+Every Agent Session starts from one system prompt. `assembleSystemPrompt` in
+`src/system-prompt.ts` builds it
+([ADR 0003 §1 and §2](../../docs/adr/0003-mvp-context-planning-verification-and-session-memory.md)).
+Nothing calls it yet. In CDA-67 (Join 2), the code that opens the Agent Session passes the prompt to
+`openAgentSession`. The prompt contains these parts:
+
+- the planning requirement, which asks for a numbered plan before the first mutating Tool Call
+- the Scratchpad convention, which is the `.scratch/` directory in the repository root
+- the name of each registered tool
+- the working directory, which is the Repository Root, and the platform
+
+The planning requirement names only the mutating tools that are registered. With `write`, `edit`
+and `bash` registered, it is the sentence of ADR 0003 §2 word for word. The prompt does not repeat
+tool descriptions, because each tool definition gives them to the model on every request.
+
+If the repository has Project Instructions, the prompt also contains them. The Coding Agent looks
+for `AGENTS.md` and then `CLAUDE.md` in the Repository Root. It uses the first one that it finds
+and does not read the other. It reads nothing else from the repository at startup. The model uses
+its tools to read other files on demand.
+
+The Path Jail is the rule that keeps tool paths inside the Repository Root and off symbolic links.
+To count as found, a candidate must be a regular file that the `read` tool can open, or a link to
+one:
+
+- If the candidate is a symbolic link, the Coding Agent reads the link's target. The target goes
+  through the Path Jail like any path from the model. Thus a target outside the repository, or a
+  link to another link, is never read.
+- If Git cannot create links, it writes each link as a plain file that holds the target path. This
+  happens on Windows with `core.symlinks=false`. A candidate of one line, with no newline, that
+  names another regular file counts as such a link.
+- The `path` attribute in the prompt names the file that the content came from. For a link, it is
+  the target.
+
+If a candidate is missing, the Coding Agent tries the next one. If a candidate is a directory, is
+empty, or is a link to nothing usable, the Coding Agent also tries the next one. It then adds the
+candidate and the reason to the `skipped` list, which the session factory can report. If the file
+found cannot be read, for example because of its permissions, `assembleSystemPrompt` returns
+`INVALID_CONFIGURATION`, and the session factory opens no Agent Session. After CDA-67, the CLI
+exits 2 on this error, as it does for the configuration errors below.
+
+The packaged instructions are 32,768 UTF-8 bytes at most. A larger file is cut at a character
+boundary, and the marker `[...project instructions truncated...]` follows on a line of its own. The
+marker counts toward the limit. A file that starts with a UTF-16 byte order mark (the two bytes that
+give the byte order) is decoded as UTF-16. Windows PowerShell 5.1 writes files this way. In any
+other file, bytes that are not valid UTF-8 become U+FFFD. The instructions go into the prompt inside
+these tags:
+
+```xml
+<project_context>
+<project_instructions path="AGENTS.md">
+...
+</project_instructions>
+</project_context>
+```
+
+A `<` in the content that opens or closes one of these tags becomes `&lt;`, so the content cannot
+end them early. The escaped form counts toward the limit. The rest of the content stays as it is.
+
 ### Configuration errors
 
 Each of these exits 2 before any Agent Session opens, with the reason on standard error:
