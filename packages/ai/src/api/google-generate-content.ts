@@ -164,8 +164,8 @@ export function buildRequestBody(context: Context): GoogleRequestBody {
     };
   }
 
-// A functionResponse needs the function's name, but a tool_result only holds the call id.  
-const toolNames = new Map<string, string>();
+  // A functionResponse needs the function's name, but a tool_result only holds the call id.
+  const toolNames = new Map<string, string>();
   for (const msg of context.messages) {
     if (msg.role === "user") {
       const parts: GooglePart[] = [];
