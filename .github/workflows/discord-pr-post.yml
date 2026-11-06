@@ -1,7 +1,8 @@
 name: Discord PR Post
 
-# pull_request_target runs this workflow and its script from main, never from the pull request, so
-# no pull request can change what runs with the webhook secret.
+# pull_request_target and workflow_run run this workflow and its script from main, never from the
+# pull request, so no pull request can change what runs with the webhook secret. Reviews arrive
+# through workflow_run because pull_request_review runs with the pull request's code.
 on:
   pull_request_target:
     types:
@@ -10,9 +11,15 @@ on:
       - ready_for_review
       - converted_to_draft
       - review_requested
+      - synchronize
       - closed
     branches:
       - main
+  workflow_run:
+    workflows:
+      - Discord PR Review Relay
+    types:
+      - completed
 
 permissions:
   actions: read
@@ -22,6 +29,11 @@ permissions:
 jobs:
   post:
     name: Post to Discord
+    # A push to a draft has nothing to post, and a failed relay has no review to read.
+    if: >-
+      (github.event_name == 'pull_request_target' &&
+      !(github.event.action == 'synchronize' && github.event.pull_request.draft)) ||
+      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
     runs-on: ubuntu-24.04
     timeout-minutes: 5
 
