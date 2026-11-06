@@ -4,7 +4,8 @@ import {
   mapGoogleFinishReason,
   stream,
 } from "../src/api/google-generate-content.ts";
-import type { Context, Model } from "../src/types.ts";
+import type { AssistantMessage, Context, Model, ToolCallBlock } from "../src/types.ts";
+import { loadFixture, sseResponse, withFixtureFetch } from "./fixtures/fixture-fetch.ts";
 
 const TEST_MODEL: Model = {
   id: "gemini-2.0-flash-lite",
@@ -115,6 +116,7 @@ describe("buildRequestBody", () => {
         { text: "Looking up weather..." },
         {
           functionCall: {
+            id: "call_1",
             name: "get_weather",
             args: { city: "Tokyo" },
           },
@@ -154,8 +156,14 @@ describe("buildRequestBody", () => {
     expect(buildRequestBody(context).contents[1]).toEqual({
       role: "user",
       parts: [
-        { functionResponse: { name: "get_weather", response: { output: '{"temp": 20}' } } },
-        { functionResponse: { name: "read", response: { error: "not found" } } },
+        {
+          functionResponse: {
+            id: "call_1",
+            name: "get_weather",
+            response: { output: '{"temp": 20}' },
+          },
+        },
+        { functionResponse: { id: "call_2", name: "read", response: { error: "not found" } } },
       ],
     });
   });
@@ -180,8 +188,8 @@ describe("buildRequestBody", () => {
     expect(body.contents[1]).toEqual({
       role: "user",
       parts: [
-        { functionResponse: { name: "read", response: { output: "one" } } },
-        { functionResponse: { name: "read", response: { output: "two" } } },
+        { functionResponse: { id: "call_1", name: "read", response: { output: "one" } } },
+        { functionResponse: { id: "call_2", name: "read", response: { output: "two" } } },
       ],
     });
   });
@@ -395,5 +403,154 @@ describe("stream finishReason and usage normalization", () => {
         );
       },
     );
+  });
+});
+
+describe("Gemini 3 thought signatures and call ids", () => {
+  const GEMINI_3: Model = {
+    id: "gemini-3-flash-preview",
+    name: "Gemini 3 Flash Preview",
+    provider: "google",
+  };
+  const SIGNED_FIXTURE = "google/tool-call-thought-signature.txt";
+
+  interface RecordedCallPart {
+    functionCall: { id: string; name: string; args: Record<string, unknown> };
+    thoughtSignature?: string;
+  }
+
+  // The functionCall parts exactly as Gemini sent them: what the next request must carry back.
+  function recordedCallParts(fixture: string): RecordedCallPart[] {
+    return loadFixture(fixture)
+      .split("\n")
+      .filter((line) => line.startsWith("data: "))
+      .flatMap((line) => JSON.parse(line.slice("data: ".length)).candidates?.[0]?.content?.parts)
+      .filter((part) => part?.functionCall !== undefined);
+  }
+
+  async function streamTurn(fixture: string): Promise<AssistantMessage> {
+    let message: AssistantMessage | undefined;
+    await withFixtureFetch(sseResponse(loadFixture(fixture)), async () => {
+      message = await stream(GEMINI_3, { messages: [] }, { apiKey: "test-key" }).result();
+    });
+    if (message === undefined) throw new Error(`${fixture} produced no message`);
+    return message;
+  }
+
+  // Answers every Tool Call of `turn` the way Agent Core does: one user message per Tool Result.
+  function answered(turn: AssistantMessage): Context {
+    const calls = turn.content.filter(
+      (block): block is ToolCallBlock => block.type === "tool_call",
+    );
+    return {
+      messages: [
+        { role: "user", content: "Read the project files" },
+        turn,
+        ...calls.map((call): Context["messages"][number] => ({
+          role: "user",
+          content: [
+            {
+              type: "tool_result",
+              toolCallId: call.toolCallId,
+              content: `contents of ${call.name}`,
+              isError: false,
+            },
+          ],
+        })),
+      ],
+    };
+  }
+
+  // The request body exactly as it goes over the wire.
+  async function sentBody(context: Context): Promise<{ contents: Array<{ parts: unknown[] }> }> {
+    const sent: unknown[] = [];
+    await withFixtureFetch(
+      async (request) => {
+        sent.push(await request.json());
+        return sseResponse(loadFixture("google/text-streaming.txt"));
+      },
+      async () => {
+        await stream(GEMINI_3, context, { apiKey: "test-key" }).result();
+      },
+    );
+    return sent[0] as { contents: Array<{ parts: unknown[] }> };
+  }
+
+  const functionCallParts = (parts: unknown[] = []) =>
+    parts.filter((part) => typeof part === "object" && part !== null && "functionCall" in part);
+
+  it("keeps each call's thought signature and Gemini-issued id on its tool_call block", async () => {
+    const recorded = recordedCallParts(SIGNED_FIXTURE);
+    expect(recorded.some((part) => part.thoughtSignature !== undefined)).toBe(true);
+
+    const turn = await streamTurn(SIGNED_FIXTURE);
+
+    expect(turn.content.filter((block) => block.type === "tool_call")).toEqual(
+      recorded.map(({ functionCall, thoughtSignature }) => ({
+        type: "tool_call",
+        toolCallId: functionCall.id,
+        name: functionCall.name,
+        arguments: JSON.stringify(functionCall.args),
+        ...(thoughtSignature === undefined ? {} : { signature: thoughtSignature }),
+      })),
+    );
+  });
+
+  it("sends a recorded signed turn back verbatim, with each Tool Result under its call's id", async () => {
+    const recorded = recordedCallParts(SIGNED_FIXTURE);
+
+    const body = await sentBody(answered(await streamTurn(SIGNED_FIXTURE)));
+
+    expect(functionCallParts(body.contents[1]?.parts)).toEqual(recorded);
+    expect(body.contents[2]?.parts).toEqual(
+      recorded.map(({ functionCall: { id, name } }) => ({
+        functionResponse: { id, name, response: { output: `contents of ${name}` } },
+      })),
+    );
+  });
+
+  it("sends a thought signature only with the call Gemini signed", () => {
+    const context: Context = {
+      messages: [
+        {
+          role: "assistant",
+          model: GEMINI_3.id,
+          finishReason: { reason: "tool_call", rawReason: "STOP" },
+          content: [
+            {
+              type: "tool_call",
+              toolCallId: "fc_1",
+              name: "read",
+              arguments: '{"path":"a.ts"}',
+              signature: "c2lnbmVk",
+            },
+            { type: "tool_call", toolCallId: "fc_2", name: "read", arguments: '{"path":"b.ts"}' },
+          ],
+        },
+      ],
+    };
+
+    expect(buildRequestBody(context).contents[0]?.parts).toEqual([
+      {
+        functionCall: { id: "fc_1", name: "read", args: { path: "a.ts" } },
+        thoughtSignature: "c2lnbmVk",
+      },
+      { functionCall: { id: "fc_2", name: "read", args: { path: "b.ts" } } },
+    ]);
+  });
+
+  it("never sends the id it synthesized for a call Gemini issued without one", async () => {
+    const turn = await streamTurn("google/tool-call.txt");
+
+    const body = await sentBody(answered(turn));
+
+    expect(body.contents[1]?.parts).toEqual([
+      { functionCall: { name: "get_weather", args: { city: "Tokyo" } } },
+    ]);
+    expect(body.contents[2]?.parts).toEqual([
+      {
+        functionResponse: { name: "get_weather", response: { output: "contents of get_weather" } },
+      },
+    ]);
   });
 });

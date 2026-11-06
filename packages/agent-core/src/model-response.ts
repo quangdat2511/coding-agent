@@ -59,7 +59,8 @@ const isUsableBlock = (block: unknown): boolean =>
   (block.type !== "tool_call" ||
     (isNonEmptyString(block.toolCallId) &&
       isNonEmptyString(block.name) &&
-      isString(block.arguments)));
+      isString(block.arguments) &&
+      isOptional(block.signature, isString)));
 
 const isUsableUsage = (usage: unknown): boolean =>
   isRecord(usage) &&

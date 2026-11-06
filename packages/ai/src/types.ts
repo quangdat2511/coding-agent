@@ -11,6 +11,9 @@ export interface ToolCallBlock {
   toolCallId: string;
   name: string;
   arguments: string;
+  // Provider Signature: opaque, sent back unchanged with this call on the next request. Only the
+  // adapter that produced it reads it.
+  signature?: string;
 }
 
 export interface ToolResultBlock {

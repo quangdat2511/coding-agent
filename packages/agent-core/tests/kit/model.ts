@@ -141,10 +141,11 @@ export function textTurn(...chunks: readonly string[]): readonly ModelStreamEven
   ];
 }
 
-export type ScriptedToolCall = { readonly toolCallId: string; readonly name: string } & (
-  | { readonly input: unknown }
-  | { readonly arguments: string }
-);
+export type ScriptedToolCall = {
+  readonly toolCallId: string;
+  readonly name: string;
+  readonly signature?: string;
+} & ({ readonly input: unknown } | { readonly arguments: string });
 
 export function toolCallMessage(...calls: readonly ScriptedToolCall[]): AssistantMessage {
   const blocks: ToolCallBlock[] = calls.map((call) => ({
@@ -152,6 +153,7 @@ export function toolCallMessage(...calls: readonly ScriptedToolCall[]): Assistan
     toolCallId: call.toolCallId,
     name: call.name,
     arguments: "arguments" in call ? call.arguments : JSON.stringify(call.input),
+    ...(call.signature === undefined ? {} : { signature: call.signature }),
   }));
   return {
     role: "assistant",
