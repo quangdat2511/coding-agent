@@ -1,5 +1,4 @@
 import { describe, expect, it } from "bun:test";
-import type { SessionCommand } from "../src/index.ts";
 import { openTestSession } from "./kit/index.ts";
 
 const task = { objective: "Fix the failing test" };
@@ -37,16 +36,16 @@ describe("dispatching commands", () => {
     expect(session.snapshot().task).toEqual(task);
   });
 
-  it.each<{ name: string; command: SessionCommand }>([
-    {
-      name: "an Approval decision while no Approval is pending",
-      command: { type: "resolve_approval", approvalId: "approval-1", decision: "allow" },
-    },
-    { name: "cancel before start", command: { type: "cancel" } },
-  ])("rejects $name as INVALID_STATE and emits no Session Event", async ({ command }) => {
+  it("rejects an Approval decision while no Approval is pending as INVALID_STATE and emits no Session Event", async () => {
     const { session } = openTestSession();
 
-    expect(await session.dispatch(command)).toEqual({
+    expect(
+      await session.dispatch({
+        type: "resolve_approval",
+        approvalId: "approval-1",
+        decision: "allow",
+      }),
+    ).toEqual({
       accepted: false,
       code: "INVALID_STATE",
       message: expect.any(String),

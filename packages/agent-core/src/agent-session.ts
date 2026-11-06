@@ -5,15 +5,17 @@ import type {
   UserMessage,
 } from "@coding-agent/ai";
 import { createEventLog } from "./event-log.ts";
-import type { SessionEvent, SessionEventType } from "./events.ts";
+import type { SessionEvent, SessionEventType, SkipReason } from "./events.ts";
 import { isRecord, messageOf } from "./guards.ts";
 import { readModelResponse } from "./model-response.ts";
 import type { AgentFailure, AgentResult, UsageTotals } from "./result.ts";
 import type { AgentSession, CommandResult, OpenSessionConfig, SessionCommand } from "./session.ts";
 import type {
+  AgentPhase,
   AgentState,
   AssistantMessageDraft,
   AssistantMessageRef,
+  CancellablePhase,
   ExecutingToolState,
   ModelTurnRef,
   NormalizedToolCall,
@@ -70,6 +72,24 @@ interface PendingApprovalResolver {
   readonly toolCallId: string;
   readonly draft: AssistantMessageDraft;
   resolve(decision: ApprovalDecision): void;
+}
+
+interface ActiveModelTurnContext {
+  readonly modelTurn: ModelTurnRef;
+  readonly messageId: string;
+  draft: AssistantMessageDraft;
+  messageCompleted: boolean;
+  queuedToolCalls: readonly QueuedToolCall[];
+  currentToolCall?: QueuedToolCall;
+  currentToolExecutionStarted: boolean;
+  lastMessage?: AssistantMessage;
+}
+
+interface ActiveVerificationContext {
+  readonly verification: {
+    readonly verificationId: string;
+    readonly candidate: AssistantMessageRef;
+  };
 }
 
 const rejectedResult = ({ id, name }: QueuedToolCall, error: ToolError): ToolResult => ({
@@ -131,6 +151,10 @@ function withoutPhase(state: AgentState): StateWithoutPhase {
 export function createAgentSession(config: OpenSessionConfig, initial: ReadyState): AgentSession {
   const log = createEventLog();
   let state: AgentState = initial;
+  const phase = (): AgentPhase => state.phase;
+  const isTerminal = (): boolean =>
+    state.phase === "succeeded" || state.phase === "failed" || state.phase === "cancelled";
+
   let queueTail: Promise<unknown> = Promise.resolve();
   const settled = Promise.withResolvers<AgentResult>();
   const abortEffects = new AbortController();
@@ -144,10 +168,28 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
     workspace: config.workspace,
     signal: abortEffects.signal,
   };
+
   let pendingApproval: PendingApprovalResolver | undefined;
+  let activeModelTurn: ActiveModelTurnContext | undefined;
+  let activeVerification: ActiveVerificationContext | undefined;
+  let cancellationReason: string | undefined;
+  let graceTimer: ReturnType<typeof setTimeout> | undefined;
+
+  let lastOccurredAt = "";
+  try {
+    lastOccurredAt = config.clock.now();
+  } catch {
+    // If initial read throws, start with empty string
+  }
 
   function commit(next: AgentState, event: EventDraft): number {
-    const occurredAt = config.clock.now();
+    let occurredAt: string;
+    try {
+      occurredAt = config.clock.now();
+      lastOccurredAt = occurredAt;
+    } catch {
+      occurredAt = lastOccurredAt;
+    }
     const sequence = log.lastSequence + 1;
     state = { ...next, lastSequence: sequence };
     log.append({ sessionId: state.sessionId, sequence, occurredAt, ...event });
@@ -165,7 +207,42 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
     }
   }
 
+  function startGraceTimer(): void {
+    if (graceTimer !== undefined) return;
+    graceTimer = setTimeout(() => {
+      graceTimer = undefined;
+      if (!isTerminal()) {
+        closeActiveWork({
+          kind: "failed",
+          failure: {
+            code: "CANCELLATION_TIMEOUT",
+            message: `cancellation grace period of ${config.limits.cancellationGraceMs}ms expired while waiting for active work to quiesce`,
+          },
+        });
+      }
+    }, config.limits.cancellationGraceMs);
+    if (
+      typeof graceTimer === "object" &&
+      graceTimer !== null &&
+      "unref" in graceTimer &&
+      typeof (graceTimer as { unref: () => void }).unref === "function"
+    ) {
+      (graceTimer as { unref: () => void }).unref();
+    }
+  }
+
+  function clearGraceTimer(): void {
+    if (graceTimer !== undefined) {
+      clearTimeout(graceTimer);
+      graceTimer = undefined;
+    }
+  }
+
   function settle(settlement: Settlement): "settled" {
+    if (isTerminal()) {
+      return "settled";
+    }
+    clearGraceTimer();
     const result: AgentResult = {
       ...settlement,
       usage: state.usage,
@@ -173,13 +250,214 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
       partialChangesPossible: state.partialChangesPossible,
       lastSequence: log.lastSequence + 1,
     };
-    commit(terminal(result), { type: "session_settled", data: { result } });
-    log.close();
-    settled.resolve(result);
+    try {
+      commit(terminal(result), { type: "session_settled", data: { result } });
+    } finally {
+      log.close();
+      settled.resolve(result);
+    }
     return "settled";
   }
 
   const fail = (failure: AgentFailure) => settle({ outcome: "failed", failure });
+
+  function closeActiveWork(
+    mode:
+      | { readonly kind: "cancel"; readonly reason?: string }
+      | { readonly kind: "failed"; readonly failure: AgentFailure },
+  ): void {
+    if (isTerminal()) {
+      return;
+    }
+    clearGraceTimer();
+
+    if (state.workspaceChanged) {
+      state = { ...state, partialChangesPossible: true };
+    }
+
+    // 1. Pending Approval
+    if (pendingApproval !== undefined) {
+      const { approvalId, toolCallId, resolve } = pendingApproval;
+      pendingApproval = undefined;
+      if (mode.kind === "cancel") {
+        commit(state, {
+          type: "approval_resolved",
+          data: {
+            approvalId,
+            toolCallId,
+            status: "cancelled",
+            decidedBy: "user",
+            ...(mode.reason === undefined ? {} : { reason: mode.reason }),
+          },
+        });
+      } else {
+        commit(state, {
+          type: "approval_resolved",
+          data: {
+            approvalId,
+            toolCallId,
+            status: "denied",
+            decidedBy: "policy",
+            reason: mode.failure.message,
+          },
+        });
+      }
+      resolve({
+        decision: "deny",
+        ...(mode.kind === "cancel" ? { reason: "cancelled" } : { reason: mode.failure.message }),
+      });
+    }
+
+    // 2. Active Model Turn
+    if (activeModelTurn !== undefined) {
+      const {
+        modelTurn,
+        messageId,
+        draft,
+        messageCompleted,
+        currentToolCall,
+        currentToolExecutionStarted,
+        queuedToolCalls,
+        lastMessage,
+      } = activeModelTurn;
+
+      const skipReason: SkipReason = mode.kind === "cancel" ? "CANCELLED" : mode.failure.code;
+
+      if (currentToolCall !== undefined) {
+        if (currentToolExecutionStarted) {
+          commit(state, {
+            type: "tool_call_completed",
+            data: {
+              toolCallId: currentToolCall.id,
+              outcome: mode.kind === "cancel" ? "cancelled" : "failed",
+            },
+          });
+        } else {
+          commit(state, {
+            type: "tool_call_completed",
+            data: {
+              toolCallId: currentToolCall.id,
+              outcome: "skipped",
+              reason: skipReason,
+            },
+          });
+        }
+      }
+
+      for (const call of queuedToolCalls) {
+        if (call.id !== currentToolCall?.id) {
+          commit(state, {
+            type: "tool_call_completed",
+            data: {
+              toolCallId: call.id,
+              outcome: "skipped",
+              reason: skipReason,
+            },
+          });
+        }
+      }
+
+      if (!messageCompleted) {
+        if (mode.kind === "cancel") {
+          const message: AssistantMessage = {
+            role: "assistant",
+            content: draft.blocks.map(({ text }) => ({ type: "text", text })),
+            model: model.id,
+            finishReason: { reason: "other", rawReason: "cancelled" },
+          };
+          commit(state, {
+            type: "assistant_message_completed",
+            data: { messageId, outcome: "cancelled", message },
+          });
+          state = { ...state, usage: addUsage(state.usage, usageOf(message)) };
+          commit(state, {
+            type: "model_turn_completed",
+            data: {
+              modelTurnId: modelTurn.modelTurnId,
+              outcome: "cancelled",
+              usage: usageOf(message),
+            },
+          });
+        } else {
+          const message = partialMessage(draft, mode.failure);
+          commit(state, {
+            type: "assistant_message_completed",
+            data: { messageId, outcome: "failed", message, failure: mode.failure },
+          });
+          state = { ...state, usage: addUsage(state.usage, usageOf(message)) };
+          commit(state, {
+            type: "model_turn_completed",
+            data: {
+              modelTurnId: modelTurn.modelTurnId,
+              outcome: "failed",
+              usage: usageOf(message),
+              failure: mode.failure,
+            },
+          });
+        }
+      } else {
+        const usage = lastMessage ? usageOf(lastMessage) : { inputTokens: 0, outputTokens: 0 };
+        state = { ...state, usage: addUsage(state.usage, usage) };
+        if (mode.kind === "cancel") {
+          commit(state, {
+            type: "model_turn_completed",
+            data: {
+              modelTurnId: modelTurn.modelTurnId,
+              outcome: "cancelled",
+              usage,
+            },
+          });
+        } else {
+          commit(state, {
+            type: "model_turn_completed",
+            data: {
+              modelTurnId: modelTurn.modelTurnId,
+              outcome: "failed",
+              usage,
+              failure: mode.failure,
+            },
+          });
+        }
+      }
+
+      activeModelTurn = undefined;
+    }
+
+    // 3. Active Verification
+    if (activeVerification !== undefined) {
+      const { verification } = activeVerification;
+      if (mode.kind === "cancel") {
+        commit(state, {
+          type: "verification_completed",
+          data: {
+            verificationId: verification.verificationId,
+            outcome: "cancelled",
+            evidence: [],
+          },
+        });
+      } else {
+        commit(state, {
+          type: "verification_completed",
+          data: {
+            verificationId: verification.verificationId,
+            outcome: "failed",
+            evidence: [],
+          },
+        });
+      }
+      activeVerification = undefined;
+    }
+
+    // 4. Settle terminal
+    if (mode.kind === "cancel") {
+      settle({
+        outcome: "cancelled",
+        cancellation: { ...(mode.reason === undefined ? {} : { reason: mode.reason }) },
+      });
+    } else {
+      fail(mode.failure);
+    }
+  }
 
   function streaming(
     modelTurn: ModelTurnRef,
@@ -274,9 +552,27 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
     queue: readonly QueuedToolCall[],
   ): Promise<AgentFailure | undefined> {
     for (const [index, toolCall] of queue.entries()) {
+      if (phase() === "cancelling" || isTerminal()) {
+        return undefined;
+      }
+
+      if (activeModelTurn !== undefined) {
+        activeModelTurn.currentToolCall = toolCall;
+        activeModelTurn.currentToolExecutionStarted = false;
+        activeModelTurn.queuedToolCalls = queue.slice(index);
+      }
+
       const preflight = await preflightToolCall(toolCall, preflightContext);
+
+      if (phase() === "cancelling" || isTerminal()) {
+        return undefined;
+      }
+
       const mutating = preflight.ok && preflight.tool.mutation === "mutating";
       const remaining = queue.slice(index + 1);
+      if (activeModelTurn !== undefined) {
+        activeModelTurn.queuedToolCalls = remaining;
+      }
 
       let result: ToolResult;
       let outcome: "succeeded" | "failed" | "denied";
@@ -292,6 +588,9 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
           remaining,
           preflight.prepared.summary,
         );
+        if (phase() === "cancelling" || isTerminal()) {
+          return undefined;
+        }
         if (decision.decision === "deny") {
           result = denialResult(toolCall, decision.reason);
           outcome = "denied";
@@ -309,11 +608,22 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
             preflight,
             approval,
           );
+          if (phase() === "cancelling" || isTerminal()) {
+            return undefined;
+          }
           outcome = result.isError ? "failed" : "succeeded";
         }
       } else {
         result = await executeToolCall(modelTurn, draft, toolCall, remaining, preflight);
+        if (phase() === "cancelling" || isTerminal()) {
+          return undefined;
+        }
         outcome = result.isError ? "failed" : "succeeded";
+      }
+
+      if (activeModelTurn !== undefined) {
+        activeModelTurn.currentToolCall = undefined;
+        activeModelTurn.currentToolExecutionStarted = false;
       }
 
       commit(
@@ -368,6 +678,12 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
       (mutation === "mutating"
         ? approveByPolicy(modelTurn, draft, toolCall.id, prepared.summary)
         : undefined);
+
+    if (activeModelTurn !== undefined) {
+      activeModelTurn.currentToolCall = toolCall;
+      activeModelTurn.currentToolExecutionStarted = true;
+    }
+
     commit(
       {
         ...withoutPhase(state),
@@ -425,6 +741,16 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
     const messageId = config.ids.next("assistant_message");
     let draft: AssistantMessageDraft = { messageId, blocks: [] };
 
+    const turnContext: ActiveModelTurnContext = {
+      modelTurn,
+      messageId,
+      draft,
+      messageCompleted: false,
+      queuedToolCalls: [],
+      currentToolExecutionStarted: false,
+    };
+    activeModelTurn = turnContext;
+
     commit(
       { ...streaming(modelTurn, draft), counters: incremented("modelTurns") },
       { type: "model_turn_started", data: { ...modelTurn, model } },
@@ -449,12 +775,18 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
         const block = blocks[blockIndex];
         blocks[blockIndex] = { kind: "text", text: (block?.text ?? "") + delta };
         draft = { messageId, blocks };
+        turnContext.draft = draft;
         commit(streaming(modelTurn, draft), {
           type: "assistant_content_delta",
           data: { messageId, blockIndex, kind: "text", delta },
         });
       },
     );
+
+    if (state.phase === "cancelling") {
+      closeActiveWork({ kind: "cancel", reason: cancellationReason });
+      return "settled";
+    }
 
     const completeTurn = (usage: UsageTotals, failure?: AgentFailure) =>
       commit(
@@ -471,34 +803,57 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
     if (!response.ok) {
       const { failure } = response;
       const message = response.message ?? partialMessage(draft, failure);
+      turnContext.messageCompleted = true;
+      turnContext.lastMessage = message;
       commit(streaming(modelTurn, draft), {
         type: "assistant_message_completed",
         data: { messageId, outcome: "failed", message, failure },
       });
       completeTurn(usageOf(message), failure);
+      activeModelTurn = undefined;
       return fail(failure);
     }
 
     const { message } = response;
+    turnContext.messageCompleted = true;
+    turnContext.lastMessage = message;
     commit(
       { ...streaming(modelTurn, draft), transcript: [...state.transcript, message] },
       { type: "assistant_message_completed", data: { messageId, outcome: "completed", message } },
     );
+
+    if (isTerminal()) {
+      return "settled";
+    }
+
+    if (phase() === "cancelling") {
+      closeActiveWork({ kind: "cancel", reason: cancellationReason });
+      return "settled";
+    }
+
     const toolCalls = message.content.filter((block) => block.type === "tool_call");
     if (toolCalls.length > 0) {
-      const failure = await resolveToolCalls(
-        modelTurn,
-        draft,
-        queueToolCalls(modelTurn, draft, toolCalls),
-      );
+      const queued = queueToolCalls(modelTurn, draft, toolCalls);
+      turnContext.queuedToolCalls = queued;
+      const failure = await resolveToolCalls(modelTurn, draft, queued);
+      if (isTerminal()) {
+        return "settled";
+      }
+      if (phase() === "cancelling") {
+        closeActiveWork({ kind: "cancel", reason: cancellationReason });
+        return "settled";
+      }
       completeTurn(usageOf(message), failure);
+      activeModelTurn = undefined;
       return failure === undefined ? "continue" : fail(failure);
     }
+
     commit(streaming(modelTurn, draft), {
       type: "candidate_completion_detected",
       data: { modelTurnId, messageId },
     });
     completeTurn(usageOf(message));
+    activeModelTurn = undefined;
     return { modelTurnId, messageId, message };
   }
 
@@ -511,6 +866,7 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
       candidate: messageRef,
     };
     const { verificationId } = verification;
+    activeVerification = { verification };
     commit(
       { ...withoutPhase(state), phase: "verifying", verification },
       { type: "verification_started", data: verification },
@@ -529,6 +885,14 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
         ),
       );
     } catch (error) {
+      if (isTerminal()) {
+        return "settled";
+      }
+      if (phase() === "cancelling") {
+        closeActiveWork({ kind: "cancel", reason: cancellationReason });
+        return "settled";
+      }
+      activeVerification = undefined;
       commit(state, {
         type: "verification_completed",
         data: { verificationId, outcome: "failed", evidence: [] },
@@ -539,6 +903,15 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
       });
     }
 
+    if (isTerminal()) {
+      return "settled";
+    }
+    if (phase() === "cancelling") {
+      closeActiveWork({ kind: "cancel", reason: cancellationReason });
+      return "settled";
+    }
+
+    activeVerification = undefined;
     const summary = { outcome: decision.outcome, evidence: decision.evidence };
     switch (decision.outcome) {
       case "continue": {
@@ -565,15 +938,27 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
 
   async function run(): Promise<void> {
     for (;;) {
+      if (isTerminal()) {
+        return;
+      }
       const turn = await runModelTurn();
-      if (turn === "settled") return;
-      if (turn !== "continue" && (await verifyCandidate(turn)) === "settled") return;
+      if (turn === "settled" || isTerminal()) {
+        return;
+      }
+      if (turn !== "continue") {
+        const verified = await verifyCandidate(turn);
+        if (verified === "settled" || isTerminal()) {
+          return;
+        }
+      }
     }
   }
 
   function start({ objective }: CodingTask): CommandResult {
-    if (state.task !== undefined) {
-      return refuse("ALREADY_STARTED", "the session has already started");
+    if (state.phase !== "ready" || state.task !== undefined) {
+      return state.task !== undefined
+        ? refuse("ALREADY_STARTED", "the session has already started")
+        : refuse("INVALID_STATE", `the session is in ${state.phase}`);
     }
     const task: CodingTask = { objective };
     const sequence = commit(
@@ -581,7 +966,10 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
       { type: "session_started", data: { task } },
     );
     run().catch((error: unknown) => {
-      fail({ code: "INTERNAL_ERROR", message: messageOf(error) });
+      closeActiveWork({
+        kind: "failed",
+        failure: { code: "INTERNAL_ERROR", message: messageOf(error) },
+      });
     });
     return { accepted: true, sequence };
   }
@@ -633,10 +1021,46 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
         return start(command.task);
       case "resolve_approval":
         return resolveApproval(command);
-      case "cancel":
-        return state.phase === "succeeded" || state.phase === "failed"
-          ? refuse("ALREADY_SETTLED", `the session has already ${state.phase}`)
-          : refuse("INVALID_STATE", `cannot cancel a session in ${state.phase}`);
+      case "cancel": {
+        if (state.phase === "succeeded" || state.phase === "failed") {
+          return refuse("ALREADY_SETTLED", `the session has already ${state.phase}`);
+        }
+        if (state.phase === "cancelling" || state.phase === "cancelled") {
+          return { accepted: true, sequence: state.lastSequence };
+        }
+
+        const requestedFrom = state.phase as CancellablePhase;
+        const reason = normalizeReason(command.reason);
+        cancellationReason = reason;
+
+        const partialChangesPossible = state.partialChangesPossible || state.workspaceChanged;
+        const sequence = commit(
+          {
+            ...withoutPhase(state),
+            phase: "cancelling",
+            requestedFrom,
+            partialChangesPossible,
+            ...(reason === undefined ? {} : { reason }),
+          },
+          {
+            type: "cancellation_requested",
+            data: {
+              requestedFrom,
+              ...(reason === undefined ? {} : { reason }),
+            },
+          },
+        );
+
+        abortEffects.abort();
+
+        if (requestedFrom === "ready" || requestedFrom === "awaiting_approval") {
+          closeActiveWork({ kind: "cancel", reason });
+        } else {
+          startGraceTimer();
+        }
+
+        return { accepted: true, sequence };
+      }
     }
   }
 

@@ -100,3 +100,19 @@ _Avoid_: System prompt, context file, rules
 **Scratchpad**:
 A temporary in-repository workspace or file (such as `.scratch/`) used by the agent for planning and intermediate notes.
 _Avoid_: Memory, workspace cache, draft directory
+
+**Cancellation**:
+The commanded termination of an Agent Session from any nonterminal state, which halts further execution, signals active adapters, and quiesces before settling.
+_Avoid_: Abort, stop, kill, interruption
+
+**Quiescence**:
+The state where all in-flight asynchronous effects (model streaming, tool execution, or verification) have completely finished, aborted, or timed out before terminal settlement.
+_Avoid_: Inactivity, idle, drain
+
+**Cancellation Grace Period**:
+The time window an Agent Session allows active effects to quiesce after cancellation before forcefully settling as failed with `CANCELLATION_TIMEOUT`.
+_Avoid_: Cancellation timeout, abort window, grace delay
+
+**Skipped Tool Call**:
+An unstarted queued Tool Call that is terminated with reason `CANCELLED` (or failure code) without executing or producing a Tool Result because the session is terminating.
+_Avoid_: Cancelled call, dropped call, abandoned call
