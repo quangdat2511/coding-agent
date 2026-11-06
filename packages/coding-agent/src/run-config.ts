@@ -1,14 +1,5 @@
 import { constants, type Stats } from "node:fs";
-import {
-  access,
-  chmod,
-  type FileHandle,
-  mkdir,
-  open,
-  realpath,
-  rmdir,
-  stat,
-} from "node:fs/promises";
+import { access, chmod, mkdir, open, realpath, rmdir, stat } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import type { SessionLimits } from "@coding-agent/agent-core";
 import {
@@ -17,7 +8,8 @@ import {
   PROVIDER_CREDENTIAL_ENV_VARS_BY_PROVIDER,
   readEnvCredential,
 } from "@coding-agent/ai";
-import { normalizeWindowsShellPath } from "@coding-agent/tools";
+import { errnoOf, normalizeWindowsShellPath } from "@coding-agent/tools";
+import { readAtMost } from "./files.ts";
 import type { Profile, ProviderId, RunArgs } from "./run-args.ts";
 
 // The ADR 0003 §4 defaults. CDA-59 chose cancellationGraceMs: long enough for a tool or
@@ -127,11 +119,6 @@ const refuse = (field: string, message: string): Refusal => ({
   message,
 });
 
-const errnoOf = (error: unknown): string | undefined =>
-  error instanceof Error && "code" in error && typeof error.code === "string"
-    ? error.code
-    : undefined;
-
 // Resolve a command-line path, accepting the Git Bash, MSYS, Cygwin, and WSL drive spelling on
 // Windows.
 function resolveInput(cwd: string, given: string): string {
@@ -188,18 +175,6 @@ function unfitTaskFile(found: Stats): string | undefined {
   if (!found.isFile()) return "is not a regular file";
   if (found.size > MAX_TASK_FILE_BYTES) return tooLarge;
   return undefined;
-}
-
-// Reads from the start of the file until it ends or `limit` bytes have arrived.
-async function readAtMost(handle: FileHandle, limit: number): Promise<Uint8Array> {
-  const buffer = new Uint8Array(limit);
-  let length = 0;
-  while (length < limit) {
-    const { bytesRead } = await handle.read(buffer, length, limit - length, length);
-    if (bytesRead === 0) break;
-    length += bytesRead;
-  }
-  return buffer.subarray(0, length);
 }
 
 const utf8 = new TextDecoder("utf-8", { fatal: true });

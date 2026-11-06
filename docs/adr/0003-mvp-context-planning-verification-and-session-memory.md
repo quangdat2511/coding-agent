@@ -140,6 +140,12 @@ On 2026-09-16, the consecutive-failure counter scoping amendment ([CDA-35](https
 
 - **Consecutive-failure counter scope** (§4): stated that the counter increments for each error Tool Result, resets after a successful Tool Result, and is never incremented by a Verification `continue`. The field name `maxConsecutiveRecoverableFailures` remains unchanged.
 
+On 2026-11-05, [CDA-53](https://datn-fit-hcmus.atlassian.net/browse/CDA-53) amended this record:
+
+- **Discovery stop condition** (§1): discovery stops at the first candidate that yields instructions: a regular file with non-whitespace content, or a link whose target is one and passes the Path Jail. A directory, an empty or whitespace-only file, or an unusable link is passed over and reported in `skipped`.
+- **Planning requirement** (§2): the sentence names the registered mutating tools instead of a fixed list. With `write`, `edit` and `bash` registered, it is the quoted sentence verbatim.
+- **Tool snippets** (§1): the prompt lists the name of each registered tool. Each tool's description and parameters reach the model through its tool definition on every request, so the prompt does not repeat them.
+
 ## Consequences
 
 - **Architectural Simplicity**: Keeps `Agent Core` deep and minimal, relying on model prompt capabilities for planning and file conventions for scratchpad notes.
