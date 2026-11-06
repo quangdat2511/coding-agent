@@ -76,27 +76,44 @@ or computed module specifiers.
 ## Discord PR posts
 
 The `Discord PR Post` workflow runs `scripts/notify-discord.ts` on pull requests into `main`. When a
-pull request is opened ready for review, or a draft is marked ready, it creates a post in the team's
-`#ticket-forum` Discord channel. The post is titled with the pull request title, links the pull
-request, and mentions its author and requested reviewers. Nothing is written on the pull request:
-the workflow uploads the post's thread ID as an artifact named `discord-thread-pr-<number>`, kept
-for 90 days, and later events find the post through it. A reviewer requested afterwards is
-mentioned, marking the pull request ready again lists the reviewers, and converting it back to a
-draft, reopening, merging, or closing adds a note, all in the same post. A reviewer requested within two minutes of the post and
-already mentioned in it is not mentioned twice. Posts created before the artifact kept the thread
-ID in a hidden marker on a `github-actions[bot]` comment; the script still reads that marker when a
-pull request has no artifact. A pull request that stays open longer than 90 days loses its artifact,
-so later events no longer reach its post.
+pull request opens ready for review, or a draft becomes ready, the workflow creates a post in the
+`#ticket-forum` Discord channel. The post has the title of the pull request. It links the pull
+request and mentions the author and the requested reviewers.
 
-Settings live in the repository's Settings → Secrets and variables → Actions:
+Nothing is written on the pull request. The workflow uploads the thread ID of the post as an
+artifact named `discord-thread-pr-<number>` and keeps it for 90 days. Later events find the post
+through this artifact and add a note to it. These events are a reviewer requested later, a return
+to draft, a new ready for review, a reopen, a merge, and a close. If the pull request becomes ready
+again, the note lists the reviewers. A reviewer requested within two minutes of the post, and
+already mentioned in it, gets no second mention.
+
+Posts created before the artifact keep the thread ID in a hidden marker on a `github-actions[bot]`
+comment. If a pull request has no artifact, the script reads that marker. If a pull request stays
+open longer than 90 days, it loses its artifact, and later events no longer reach its post.
+
+Two more events add a note to the post. When a reviewer submits a review, the note names the
+verdict (approved, changes requested, or commented) and mentions the pull request author. Reviews
+by the author, such as replies to review threads, and reviews by bots get no note. When the author
+pushes to a pull request that is ready for review, the note shows the new head commit. It mentions
+the requested reviewers and everyone who already reviewed. A push to a draft gets no note. If the
+pull request title changes, the post keeps its first title, because a webhook cannot rename a
+thread.
+
+Store these values on the Settings → Secrets and variables → Actions page of the repository:
 
 | Name | Kind | Value |
 |------|------|-------|
-| `DISCORD_WEBHOOK_URL` | Secret | Webhook of `#ticket-forum`. Without it the workflow skips. |
+| `DISCORD_WEBHOOK_URL` | Secret | Webhook of `#ticket-forum`. If it is not set, the workflow skips. |
 | `DISCORD_USER_IDS` | Variable | JSON object from GitHub login to Discord user ID, such as `{"quangdat2511": "123456789012345678"}`. An unmapped login appears as plain `@login` text. |
-| `DISCORD_FORUM_TAG_ID` | Variable | Optional ID of the forum tag applied to new posts. If Discord rejects the tag, for example after the tag was deleted, the post is created without it and the run shows a warning. |
+| `DISCORD_FORUM_TAG_ID` | Variable | Optional ID of the forum tag for new posts. If Discord rejects the tag, for example after the tag was deleted, the post has no tag and the run shows a warning. |
 
-The workflow uses `pull_request_target`, so it runs the script from `main`: a change to the script
-or the workflow takes effect only after it merges. The posting step uses `continue-on-error`, so a
-Discord failure or a bad setting leaves the pull request's checks green and shows the error in the
-job log. Run `bun test scripts/tests/notify-discord.test.ts` for the unit tests.
+The workflow uses `pull_request_target`, so it runs the script from `main`. A change to the script
+or the workflow takes effect only after it merges. Reviews come through a second workflow,
+`Discord PR Review Relay`. GitHub runs `pull_request_review` with the code of the pull request, so
+the relay gets no secrets. It uploads only the pull request number and the review ID. The
+`Discord PR Post` workflow then starts from `main` through `workflow_run` and reads the review back
+from GitHub.
+
+The posting step uses `continue-on-error`. A Discord failure or a wrong secret or variable leaves
+the checks of the pull request green and shows the error in the job log. Run
+`bun test scripts/tests/notify-discord.test.ts` for the unit tests.

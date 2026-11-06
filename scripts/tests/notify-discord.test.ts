@@ -10,6 +10,8 @@ import {
   parseRecord,
   parseUserIds,
   planEvent,
+  planPush,
+  planReview,
   readZipEntry,
   run,
   type ThreadRecord,
@@ -222,6 +224,66 @@ describe("planEvent", () => {
   });
 });
 
+describe("planPush", () => {
+  const push = { sha: "abcdef1234567890", title: "fix the summary", reviewers: ["bob", "carol"] };
+
+  it("notes the head commit and pings the reviewers", () => {
+    const plan = planPush(event({ action: "synchronize" }), record(), config, push);
+    if (plan.kind !== "note") throw new Error(`expected note, got ${plan.kind}`);
+    expect(plan.message.content).toBe(
+      "Chủ PR vừa push code mới: `abcdef1` fix the summary\nReviewer: <@222>, @carol",
+    );
+    expect(plan.message.allowed_mentions.users).toEqual(["222"]);
+  });
+
+  it("skips drafts, pull requests without a post, and missing details", () => {
+    expect(planPush(event({ action: "synchronize" }, true), record(), config, push).kind).toBe(
+      "skip",
+    );
+    expect(planPush(event({ action: "synchronize" }), undefined, config, push).kind).toBe("skip");
+    expect(planPush(event({ action: "synchronize" }), record(), config, undefined).kind).toBe(
+      "skip",
+    );
+  });
+});
+
+describe("planReview", () => {
+  it("names the verdict and pings only the author", () => {
+    const approved = planReview("Alice", { state: "APPROVED", login: "bob" }, record(), config);
+    if (approved.kind !== "note") throw new Error(`expected note, got ${approved.kind}`);
+    expect(approved.message.content).toBe("<@222> đã approve. <@111>");
+    expect(approved.message.allowed_mentions.users).toEqual(["111"]);
+
+    const changes = planReview(
+      "Alice",
+      { state: "CHANGES_REQUESTED", login: "carol" },
+      record(),
+      config,
+    );
+    if (changes.kind !== "note") throw new Error(`expected note, got ${changes.kind}`);
+    expect(changes.message.content).toBe("@carol yêu cầu sửa. <@111>");
+
+    const comment = planReview("Alice", { state: "COMMENTED", login: "bob" }, record(), config);
+    if (comment.kind !== "note") throw new Error(`expected note, got ${comment.kind}`);
+    expect(comment.message.content).toBe("<@222> đã comment review. <@111>");
+  });
+
+  it("skips the author's own replies, bots, dismissed reviews, and missing posts", () => {
+    expect(planReview("Alice", { state: "COMMENTED", login: "alice" }, record(), config).kind).toBe(
+      "skip",
+    );
+    expect(
+      planReview("Alice", { state: "COMMENTED", login: "copilot[bot]" }, record(), config).kind,
+    ).toBe("skip");
+    expect(planReview("Alice", { state: "DISMISSED", login: "bob" }, record(), config).kind).toBe(
+      "skip",
+    );
+    expect(planReview("Alice", { state: "APPROVED", login: "bob" }, undefined, config).kind).toBe(
+      "skip",
+    );
+  });
+});
+
 describe("run", () => {
   const directories: string[] = [];
 
@@ -235,6 +297,9 @@ describe("run", () => {
     artifacts?: Artifact[][];
     blobs?: Record<number, Uint8Array>;
     comments?: unknown[][];
+    // Other GitHub API responses, by full URL.
+    responses?: Record<string, unknown>;
+    eventName?: string;
   };
 
   const API = "https://api.github.test/repos/acme/repo";
@@ -244,7 +309,7 @@ describe("run", () => {
     return { id, name: "discord-thread-pr-7", expired, created_at: createdAt };
   }
 
-  async function setup(payload: PullRequestEvent, fixture: Fixture = {}) {
+  async function setup(payload: unknown, fixture: Fixture = {}) {
     const directory = await mkdtemp(join(tmpdir(), "notify-discord-"));
     directories.push(directory);
     const eventPath = join(directory, "event.json");
@@ -275,6 +340,8 @@ describe("run", () => {
         if (url === `${API}/issues/7/comments?per_page=100`) {
           return Response.json(commentListings.shift() ?? []);
         }
+        const response = fixture.responses?.[url];
+        if (response !== undefined) return Response.json(response);
         return new Response("unexpected request", { status: 500 });
       },
       sleep: async (ms) => {
@@ -285,6 +352,7 @@ describe("run", () => {
     const env = {
       DISCORD_WEBHOOK_URL: WEBHOOK,
       DISCORD_USER_IDS: '{"alice":"111","bob":"222"}',
+      GITHUB_EVENT_NAME: fixture.eventName ?? "pull_request_target",
       GITHUB_EVENT_PATH: eventPath,
       GITHUB_OUTPUT: join(directory, "output"),
       GITHUB_REPOSITORY: "acme/repo",
@@ -437,5 +505,79 @@ describe("run", () => {
 
     await expect(run(env, rejecting)).rejects.toThrow("Discord webhook failed with 400.");
     expect(posts).toBe(1);
+  });
+
+  it("notes a push and pings the requested reviewers and the people who reviewed", async () => {
+    const pushed = event({ action: "synchronize", after: "abcdef1234567890" });
+    const { calls, dependencies, env } = await setup(pushed, {
+      artifacts: [[artifact(7, "2026-11-02T00:00:00Z")]],
+      blobs: { 7: zip(JSON.stringify(record()), 0) },
+      responses: {
+        [`${API}/commits/abcdef1234567890`]: { commit: { message: "fix the summary\n\nDetails." } },
+        [`${API}/pulls/7/reviews?per_page=100`]: [
+          { user: { login: "dave" } },
+          { user: { login: "Alice" } },
+          { user: { login: "bob" } },
+          { user: { login: "copilot[bot]" } },
+        ],
+      },
+    });
+
+    expect(await run(env, dependencies)).toBe("Posted to thread 999.");
+    expect(calls.at(-1)?.url).toBe(`${WEBHOOK}?thread_id=999`);
+    expect(calls.at(-1)?.body).toMatchObject({
+      content:
+        "Chủ PR vừa push code mới: `abcdef1` fix the summary\nReviewer: <@222>, @carol, @dave",
+      allowed_mentions: { parse: [], users: ["222"] },
+    });
+  });
+
+  it("does not read the push when the pull request has no post", async () => {
+    const pushed = event({ action: "synchronize", after: "abcdef1234567890" });
+    const { calls, dependencies, env } = await setup(pushed);
+    expect(await run(env, dependencies)).toBe("No post for this pull request.");
+    expect(calls.some((call) => call.url.includes("/commits/"))).toBe(false);
+  });
+
+  function relay(review: unknown) {
+    return {
+      eventName: "workflow_run",
+      artifacts: [[artifact(7, "2026-11-02T00:00:00Z")]],
+      blobs: { 7: zip(JSON.stringify(record()), 0), 50: zip(JSON.stringify(review), 0) },
+      responses: {
+        [`${API}/actions/runs/123/artifacts`]: {
+          artifacts: [
+            { id: 50, name: "discord-review-event", expired: false, created_at: "2026-11-02" },
+          ],
+        },
+        [`${API}/pulls/7`]: { base: { ref: "main" }, user: { login: "Alice" } },
+        [`${API}/pulls/7/reviews/55`]: { state: "APPROVED", user: { login: "bob" } },
+      },
+    };
+  }
+
+  it("posts a relayed review after reading it back from GitHub", async () => {
+    const fixture = relay({ pull_request: { number: 7 }, review: { id: 55 } });
+    const { calls, dependencies, env } = await setup({ workflow_run: { id: 123 } }, fixture);
+
+    expect(await run(env, dependencies)).toBe("Posted to thread 999.");
+    expect(calls.at(-1)?.url).toBe(`${WEBHOOK}?thread_id=999`);
+    expect(calls.at(-1)?.body).toMatchObject({
+      content: "<@222> đã approve. <@111>",
+      allowed_mentions: { parse: [], users: ["111"] },
+    });
+  });
+
+  it("ignores a relayed review on a pull request that does not target main", async () => {
+    const fixture = relay({ pull_request: { number: 7 }, review: { id: 55 } });
+    fixture.responses[`${API}/pulls/7`] = { base: { ref: "develop" }, user: { login: "Alice" } };
+    const { dependencies, env } = await setup({ workflow_run: { id: 123 } }, fixture);
+    expect(await run(env, dependencies)).toBe("The pull request does not target main.");
+  });
+
+  it("rejects a relayed review without a numeric pull request and review ID", async () => {
+    const fixture = relay({ pull_request: { number: "7" }, review: { id: 55 } });
+    const { dependencies, env } = await setup({ workflow_run: { id: 123 } }, fixture);
+    await expect(run(env, dependencies)).rejects.toThrow("no pull request number or review ID");
   });
 });

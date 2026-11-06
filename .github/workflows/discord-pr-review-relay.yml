@@ -1,0 +1,32 @@
+name: Discord PR Review Relay
+
+# pull_request_review runs with the pull request's code, so this workflow gets no secrets and no
+# token permissions. It only hands the pull request number and the review ID to the Discord PR
+# Post workflow, which runs from main and reads the review back from GitHub.
+on:
+  pull_request_review:
+    types:
+      - submitted
+
+permissions: {}
+
+jobs:
+  relay:
+    name: Relay the review
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+
+    steps:
+      - name: Keep the pull request number and review ID
+        run: >-
+          jq '{pull_request: {number: .pull_request.number}, review: {id: .review.id}}'
+          "$GITHUB_EVENT_PATH" > "$RUNNER_TEMP/review.json"
+
+      - name: Upload the review
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: discord-review-event
+          path: ${{ runner.temp }}/review.json
+          retention-days: 1
+          compression-level: 0
+          if-no-files-found: error

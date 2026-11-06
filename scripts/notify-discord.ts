@@ -11,7 +11,15 @@ const MARKER = /<!-- discord-thread: (\{.*?\}) -->/;
 const BOT_LOGIN = "github-actions[bot]";
 const WEBHOOK_USERNAME = "GitHub PR";
 const THREAD_NAME_LIMIT = 100;
+const COMMIT_TITLE_LIMIT = 150;
 const RECORD_FILE = "discord-thread.json";
+// The Discord PR Review Relay workflow uploads the submitted review under this name.
+const RELAY_ARTIFACT = "discord-review-event";
+const REVIEW_VERDICTS: Record<string, string> = {
+  APPROVED: "đã approve",
+  CHANGES_REQUESTED: "yêu cầu sửa",
+  COMMENTED: "đã comment review",
+};
 // GitHub sends review_requested right after opened when reviewers are picked while creating the
 // pull request. Those reviewers are already mentioned in the new post.
 const CREATION_WINDOW_MS = 2 * 60 * 1000;
@@ -25,6 +33,8 @@ export type PullRequestEvent = {
   action: string;
   number: number;
   requested_reviewer?: User;
+  // The head commit after a synchronize event.
+  after?: string;
   pull_request: {
     title: string;
     html_url: string;
@@ -50,6 +60,10 @@ export type Plan =
   | { kind: "note"; message: DiscordMessage };
 
 export type Config = { userIds: Record<string, string>; tagId?: string };
+
+export type Push = { sha: string; title: string; reviewers: string[] };
+
+export type Review = { state: string; login: string };
 
 export function parseUserIds(raw: string | undefined): Record<string, string> {
   if (!raw?.trim()) return {};
@@ -218,6 +232,42 @@ export function planEvent(
   }
 }
 
+export function planPush(
+  event: PullRequestEvent,
+  record: ThreadRecord | undefined,
+  config: Config,
+  push: Push | undefined,
+): Plan {
+  if (event.pull_request.draft) return { kind: "skip", reason: "Draft pull request." };
+  if (!record) return { kind: "skip", reason: "No post for this pull request." };
+  if (!push) return { kind: "skip", reason: "No details about the push." };
+  const content = [
+    `Chủ PR vừa push code mới: \`${push.sha.slice(0, 7)}\` ${push.title}`,
+    `Reviewer: ${people(push.reviewers, config.userIds)}`,
+  ].join("\n");
+  return { kind: "note", message: message(content, push.reviewers, config) };
+}
+
+export function planReview(
+  author: string,
+  review: Review,
+  record: ThreadRecord | undefined,
+  config: Config,
+): Plan {
+  const verdict = REVIEW_VERDICTS[review.state];
+  if (verdict === undefined) {
+    return { kind: "skip", reason: `Nothing to post for a ${review.state} review.` };
+  }
+  // The author's replies to review threads also arrive as reviews.
+  if (!review.login || review.login.toLowerCase() === author.toLowerCase()) {
+    return { kind: "skip", reason: "The review is not from a reviewer." };
+  }
+  if (review.login.endsWith("[bot]")) return { kind: "skip", reason: "A bot reviewed." };
+  if (!record) return { kind: "skip", reason: "No post for this pull request." };
+  const content = `${mention(review.login, config.userIds)} ${verdict}. ${mention(author, config.userIds)}`;
+  return { kind: "note", message: message(content, [author], config) };
+}
+
 type Fetch = (url: string, init?: RequestInit) => Promise<Response>;
 
 export type Dependencies = {
@@ -258,6 +308,16 @@ async function github(context: GitHubContext, path: string): Promise<unknown> {
 
 type Artifact = { id: number; name: string; expired: boolean; created_at: string };
 
+async function downloadArtifact(context: GitHubContext, id: number): Promise<string> {
+  // GitHub redirects to signed storage, which must not receive the GitHub token.
+  const path = `/actions/artifacts/${id}/zip`;
+  let download = await githubFetch(context, path, { redirect: "manual" });
+  const location = download.headers.get("location");
+  if (location !== null) download = await context.fetch(location);
+  if (!download.ok) throw new Error(`GitHub ${path} failed with ${download.status}.`);
+  return readZipEntry(new Uint8Array(await download.arrayBuffer()));
+}
+
 async function findArtifactRecord(context: GitHubContext): Promise<ThreadRecord | undefined> {
   const name = artifactName(context.number);
   const { artifacts } = (await github(context, `/actions/artifacts?name=${name}&per_page=100`)) as {
@@ -268,14 +328,7 @@ async function findArtifactRecord(context: GitHubContext): Promise<ThreadRecord 
     .filter((candidate) => candidate.name === name && !candidate.expired)
     .sort((a, b) => a.created_at.localeCompare(b.created_at));
   if (artifact === undefined) return undefined;
-
-  // GitHub redirects to signed storage, which must not receive the GitHub token.
-  const path = `/actions/artifacts/${artifact.id}/zip`;
-  let download = await githubFetch(context, path, { redirect: "manual" });
-  const location = download.headers.get("location");
-  if (location !== null) download = await context.fetch(location);
-  if (!download.ok) throw new Error(`GitHub ${path} failed with ${download.status}.`);
-  return parseRecordJson(readZipEntry(new Uint8Array(await download.arrayBuffer())));
+  return parseRecordJson(await downloadArtifact(context, artifact.id));
 }
 
 async function findCommentRecord(context: GitHubContext): Promise<ThreadRecord | undefined> {
@@ -293,6 +346,82 @@ async function findCommentRecord(context: GitHubContext): Promise<ThreadRecord |
 
 async function findRecord(context: GitHubContext): Promise<ThreadRecord | undefined> {
   return (await findArtifactRecord(context)) ?? (await findCommentRecord(context));
+}
+
+// The requested reviewers and everyone who already reviewed, without the author or bots.
+async function pushDetails(context: GitHubContext, event: PullRequestEvent): Promise<Push> {
+  const sha = event.after;
+  if (!sha) throw new Error("The synchronize event has no head commit.");
+  const commit = (await github(context, `/commits/${sha}`)) as { commit?: { message?: string } };
+  const [title = ""] = (commit.commit?.message ?? "").split("\n");
+  const reviews = (await github(
+    context,
+    `/pulls/${context.number}/reviews?per_page=100`,
+  )) as Array<{
+    user?: User | null;
+  }>;
+  const author = event.pull_request.user.login.toLowerCase();
+  const reviewers: string[] = [];
+  const candidates = [
+    ...event.pull_request.requested_reviewers.map((reviewer) => reviewer.login),
+    ...reviews.map((review) => review.user?.login),
+  ];
+  for (const login of candidates) {
+    if (!login || login.toLowerCase() === author || login.endsWith("[bot]")) continue;
+    if (reviewers.some((known) => known.toLowerCase() === login.toLowerCase())) continue;
+    reviewers.push(login);
+  }
+  const short =
+    title.length <= COMMIT_TITLE_LIMIT ? title : `${title.slice(0, COMMIT_TITLE_LIMIT - 1)}…`;
+  return { sha, title: short, reviewers };
+}
+
+type WorkflowRunEvent = { workflow_run: { id: number } };
+
+// The relay workflow ran with the pull request's code, so only the pull request number and the
+// review ID come from its artifact. The review itself is read back from GitHub.
+async function postReview(
+  env: Record<string, string | undefined>,
+  dependencies: Dependencies,
+  webhook: string,
+  config: Config,
+  event: WorkflowRunEvent,
+): Promise<string> {
+  const repository: GitHubContext = { env, fetch: dependencies.fetch, number: 0 };
+  const { artifacts } = (await github(
+    repository,
+    `/actions/runs/${event.workflow_run.id}/artifacts`,
+  )) as { artifacts: Artifact[] };
+  const artifact = artifacts.find((candidate) => candidate.name === RELAY_ARTIFACT);
+  if (artifact === undefined) return "The relay run left no review.";
+  const relayed = JSON.parse(await downloadArtifact(repository, artifact.id)) as {
+    pull_request?: { number?: unknown };
+    review?: { id?: unknown };
+  };
+  const number = relayed.pull_request?.number;
+  const reviewId = relayed.review?.id;
+  if (!Number.isInteger(number) || !Number.isInteger(reviewId)) {
+    throw new Error("The relayed review has no pull request number or review ID.");
+  }
+
+  const context: GitHubContext = { ...repository, number: number as number };
+  const pr = (await github(context, `/pulls/${number}`)) as { base: { ref: string }; user: User };
+  if (pr.base.ref !== "main") return "The pull request does not target main.";
+  const review = (await github(context, `/pulls/${number}/reviews/${reviewId}`)) as {
+    state: string;
+    user?: User | null;
+  };
+  const record = await findRecord(context);
+  const plan = planReview(
+    pr.user.login,
+    { state: review.state, login: review.user?.login ?? "" },
+    record,
+    config,
+  );
+  if (plan.kind === "skip") return plan.reason;
+  if (plan.kind !== "note" || !record) return "Nothing to post.";
+  await postToDiscord(dependencies.fetch, webhook, { thread_id: record.id }, plan.message);
+  return `Posted to thread ${record.id}.`;
 }
 
 // The workflow's next step uploads the written file as the pull request's artifact.
@@ -368,11 +497,16 @@ export async function run(
   if (!webhook) return "DISCORD_WEBHOOK_URL is not set; skipping.";
   if (!env.GITHUB_EVENT_PATH) throw new Error("GITHUB_EVENT_PATH is not set.");
 
-  const event = JSON.parse(await readFile(env.GITHUB_EVENT_PATH, "utf8")) as PullRequestEvent;
+  const payload: unknown = JSON.parse(await readFile(env.GITHUB_EVENT_PATH, "utf8"));
   const config: Config = {
     userIds: parseUserIds(env.DISCORD_USER_IDS),
     tagId: env.DISCORD_FORUM_TAG_ID?.trim() || undefined,
   };
+  if (env.GITHUB_EVENT_NAME === "workflow_run") {
+    return postReview(env, dependencies, webhook, config, payload as WorkflowRunEvent);
+  }
+
+  const event = payload as PullRequestEvent;
   const context: GitHubContext = { env, fetch: dependencies.fetch, number: event.number };
 
   let record = await findRecord(context);
@@ -383,7 +517,13 @@ export async function run(
     }
   }
 
-  const plan = planEvent(event, record, config, dependencies.now());
+  let plan: Plan;
+  if (event.action === "synchronize") {
+    const ready = record && !event.pull_request.draft;
+    plan = planPush(event, record, config, ready ? await pushDetails(context, event) : undefined);
+  } else {
+    plan = planEvent(event, record, config, dependencies.now());
+  }
   if (plan.kind === "skip") return plan.reason;
   if (plan.kind === "note" && record) {
     await postToDiscord(dependencies.fetch, webhook, { thread_id: record.id }, plan.message);
