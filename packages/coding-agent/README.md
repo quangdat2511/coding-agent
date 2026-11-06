@@ -150,3 +150,59 @@ Each of these exits 2 before any Agent Session opens, with the reason on standar
 Checks run in that order and the first problem wins. The output directory is created only once every
 other check has passed, and whatever it created is removed again if it then proves unusable, so a
 configuration error writes nothing.
+
+## Process hardening
+
+On Linux, the Coding Agent process marks itself non-dumpable as soon as its arguments parse. This
+is rule 2 of [ADR 0001 §8](../../docs/adr/0001-tool-contracts-and-safety-policy.md). Right after
+argument parsing, `main` in `src/cli.ts` calls `markProcessNonDumpable` from `src/non-dumpable.ts`.
+A usage error exits 2 before this step and starts no child. The step comes before configuration
+and command dispatch. Thus it precedes every Tool Call and Verification child, on both entry points
+and under both Approval Policies. When they load, the modules that `src/cli.ts` imports must not
+start a child, because they run before `main`.
+
+Rule 1 of the same section removes the provider credentials from the environment of each `bash`
+and Verification child. That removal blocks only the inherited copy. The credential stays in the
+`/proc/<pid>/environ` and the memory of the Coding Agent process. A delete inside the process does
+not rewrite the environment region that `execve` fixed. A same-user process can read those files
+of a dumpable process. A non-dumpable process denies a same-user process without `CAP_SYS_PTRACE`
+its `/proc/<pid>/environ`, its `/proc/<pid>/mem` and the links in its `/proc/<pid>/fd`.
+
+The call goes through `bun:ffi` to `prctl(PR_SET_DUMPABLE, SUID_DUMP_DISABLE)` in the C library, and
+then reads the flag back with `PR_GET_DUMPABLE`. If either step fails, the Coding Agent starts
+nothing and exits 70. The message names the `errno` of a failed `prctl`.
+
+The guarantee has these limits:
+
+- A child with `CAP_SYS_PTRACE` can still read these files, for example root with the full
+  capability set on a host.
+- The guarantee does not hold for a Coding Agent that runs as root. A root child without
+  `CAP_SYS_PTRACE`, as in a default Docker container, can still read the `/proc/<pid>/environ` of
+  a non-dumpable root process. It cannot open the memory or follow the fd links. This was seen on
+  Linux 6.18 under WSL2. The ADR 0005 §7 root task containers are this case.
+- A caller with DAC override (permission to bypass file modes), such as root or a holder of
+  `CAP_DAC_OVERRIDE` or `CAP_DAC_READ_SEARCH`, can still list the fd numbers in `/proc/<pid>/fd`.
+  It cannot follow the links. A non-root holder of these capabilities gets no access to the
+  environment.
+- It protects only the Coding Agent process. An ancestor that still holds the credential stays
+  readable, for example the shell that exported it. Under `"auto-approve"`, the startup ancestor
+  check of CDA-72 will refuse that launch. Under `"ask"`, ADR 0001 §8 accepts this residual.
+- A child is dumpable again after its own `execve`, so this call does not protect it. The scrubbed
+  environment of rule 1 protects the child instead.
+- Only Linux has this control. On macOS, a same-user process can read the startup environment of
+  another process through `KERN_PROCARGS2` and `ps`, and macOS has no equivalent of
+  `PR_SET_DUMPABLE`. On macOS and Windows the call does nothing, and the guarantee is not claimed.
+- A non-dumpable process writes no core dump.
+
+`tests/non-dumpable.test.ts` shows the guarantee on Linux. A same-uid child reads the environment of
+a process that is not marked, which proves that the test can see a leak. The same child then gets
+`EACCES` on the environment, the memory and the fd links of the Coding Agent process. The test lifts
+Yama's `ptrace_scope` 1 for its target. It checks the `mem` result only where dumpability alone
+decides it: with no Yama, at scope 0, or at scope 1 once the lift succeeded. This part is skipped on
+other platforms. If the tests run with `CAP_SYS_PTRACE`, it is also skipped. If the tests run as
+root without `CAP_SYS_PTRACE`, the environment check fails, because the guarantee does not hold
+there.
+
+On every platform, the same file checks each failure of `markProcessNonDumpable` with a fake C
+library. It also preloads `tests/support/fail-hardening.ts` into the executable, which makes the
+hardening fail, and checks that the run exits 70 before it resolves the configuration.
