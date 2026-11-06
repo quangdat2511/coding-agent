@@ -398,26 +398,15 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
       } else {
         const usage = lastMessage ? usageOf(lastMessage) : { inputTokens: 0, outputTokens: 0 };
         state = { ...state, usage: addUsage(state.usage, usage) };
-        if (mode.kind === "cancel") {
-          commit(state, {
-            type: "model_turn_completed",
-            data: {
-              modelTurnId: modelTurn.modelTurnId,
-              outcome: "cancelled",
-              usage,
-            },
-          });
-        } else {
-          commit(state, {
-            type: "model_turn_completed",
-            data: {
-              modelTurnId: modelTurn.modelTurnId,
-              outcome: "failed",
-              usage,
-              failure: mode.failure,
-            },
-          });
-        }
+        commit(state, {
+          type: "model_turn_completed",
+          data: {
+            modelTurnId: modelTurn.modelTurnId,
+            outcome: mode.kind === "cancel" ? "cancelled" : "failed",
+            usage,
+            ...(mode.kind === "failed" ? { failure: mode.failure } : {}),
+          },
+        });
       }
 
       activeModelTurn = undefined;
@@ -425,26 +414,14 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
 
     // 3. Active Verification
     if (activeVerification !== undefined) {
-      const { verification } = activeVerification;
-      if (mode.kind === "cancel") {
-        commit(state, {
-          type: "verification_completed",
-          data: {
-            verificationId: verification.verificationId,
-            outcome: "cancelled",
-            evidence: [],
-          },
-        });
-      } else {
-        commit(state, {
-          type: "verification_completed",
-          data: {
-            verificationId: verification.verificationId,
-            outcome: "failed",
-            evidence: [],
-          },
-        });
-      }
+      commit(state, {
+        type: "verification_completed",
+        data: {
+          verificationId: activeVerification.verification.verificationId,
+          outcome: mode.kind === "cancel" ? "cancelled" : "failed",
+          evidence: [],
+        },
+      });
       activeVerification = undefined;
     }
 

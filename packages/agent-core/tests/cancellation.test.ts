@@ -426,7 +426,7 @@ describe("Session Cancellation (CDA-73)", () => {
     });
   });
 
-  describe("Safety net hardening and port exception handling (Đăng Hoàng CDA-64 review)", () => {
+  describe("Safety net hardening and port exception handling during cancellation and settlement", () => {
     it("guarantees session_settled and result resolution even when clock.now throws during commit", async () => {
       let throwClock = false;
       const stubbornTool: ExecutableTool = {
