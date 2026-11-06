@@ -379,7 +379,7 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
             },
           });
         } else {
-          const message = partialMessage(draft, mode.failure);
+          const message = lastMessage ?? partialMessage(draft, mode.failure);
           commit(state, {
             type: "assistant_message_completed",
             data: { messageId, outcome: "failed", message, failure: mode.failure },
@@ -434,6 +434,19 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
     } else {
       fail(mode.failure);
     }
+  }
+
+  const isCancellingOrTerminal = (): boolean => isTerminal() || phase() === "cancelling";
+
+  function quiesceIfCancelling(): boolean {
+    if (isTerminal()) {
+      return true;
+    }
+    if (phase() === "cancelling") {
+      closeActiveWork({ kind: "cancel", reason: cancellationReason });
+      return true;
+    }
+    return false;
   }
 
   function streaming(
@@ -529,7 +542,7 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
     queue: readonly QueuedToolCall[],
   ): Promise<AgentFailure | undefined> {
     for (const [index, toolCall] of queue.entries()) {
-      if (phase() === "cancelling" || isTerminal()) {
+      if (isCancellingOrTerminal()) {
         return undefined;
       }
 
@@ -541,7 +554,7 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
 
       const preflight = await preflightToolCall(toolCall, preflightContext);
 
-      if (phase() === "cancelling" || isTerminal()) {
+      if (isCancellingOrTerminal()) {
         return undefined;
       }
 
@@ -565,7 +578,7 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
           remaining,
           preflight.prepared.summary,
         );
-        if (phase() === "cancelling" || isTerminal()) {
+        if (isCancellingOrTerminal()) {
           return undefined;
         }
         if (decision.decision === "deny") {
@@ -585,14 +598,14 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
             preflight,
             approval,
           );
-          if (phase() === "cancelling" || isTerminal()) {
+          if (isCancellingOrTerminal()) {
             return undefined;
           }
           outcome = result.isError ? "failed" : "succeeded";
         }
       } else {
         result = await executeToolCall(modelTurn, draft, toolCall, remaining, preflight);
-        if (phase() === "cancelling" || isTerminal()) {
+        if (isCancellingOrTerminal()) {
           return undefined;
         }
         outcome = result.isError ? "failed" : "succeeded";
@@ -760,8 +773,7 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
       },
     );
 
-    if (state.phase === "cancelling") {
-      closeActiveWork({ kind: "cancel", reason: cancellationReason });
+    if (quiesceIfCancelling()) {
       return "settled";
     }
 
@@ -780,15 +792,9 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
     if (!response.ok) {
       const { failure } = response;
       const message = response.message ?? partialMessage(draft, failure);
-      turnContext.messageCompleted = true;
       turnContext.lastMessage = message;
-      commit(streaming(modelTurn, draft), {
-        type: "assistant_message_completed",
-        data: { messageId, outcome: "failed", message, failure },
-      });
-      completeTurn(usageOf(message), failure);
-      activeModelTurn = undefined;
-      return fail(failure);
+      closeActiveWork({ kind: "failed", failure });
+      return "settled";
     }
 
     const { message } = response;
@@ -799,12 +805,7 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
       { type: "assistant_message_completed", data: { messageId, outcome: "completed", message } },
     );
 
-    if (isTerminal()) {
-      return "settled";
-    }
-
-    if (phase() === "cancelling") {
-      closeActiveWork({ kind: "cancel", reason: cancellationReason });
+    if (quiesceIfCancelling()) {
       return "settled";
     }
 
@@ -813,11 +814,7 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
       const queued = queueToolCalls(modelTurn, draft, toolCalls);
       turnContext.queuedToolCalls = queued;
       const failure = await resolveToolCalls(modelTurn, draft, queued);
-      if (isTerminal()) {
-        return "settled";
-      }
-      if (phase() === "cancelling") {
-        closeActiveWork({ kind: "cancel", reason: cancellationReason });
+      if (quiesceIfCancelling()) {
         return "settled";
       }
       completeTurn(usageOf(message), failure);
@@ -838,6 +835,9 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
     message,
     ...messageRef
   }: Candidate): Promise<"continue" | "settled"> {
+    if (quiesceIfCancelling()) {
+      return "settled";
+    }
     const verification = {
       verificationId: config.ids.next("verification"),
       candidate: messageRef,
@@ -862,29 +862,20 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
         ),
       );
     } catch (error) {
-      if (isTerminal()) {
+      if (quiesceIfCancelling()) {
         return "settled";
       }
-      if (phase() === "cancelling") {
-        closeActiveWork({ kind: "cancel", reason: cancellationReason });
-        return "settled";
-      }
-      activeVerification = undefined;
-      commit(state, {
-        type: "verification_completed",
-        data: { verificationId, outcome: "failed", evidence: [] },
+      closeActiveWork({
+        kind: "failed",
+        failure: {
+          code: "INTERNAL_ERROR",
+          message: `the Verification Policy threw: ${messageOf(error)}`,
+        },
       });
-      return fail({
-        code: "INTERNAL_ERROR",
-        message: `the Verification Policy threw: ${messageOf(error)}`,
-      });
-    }
-
-    if (isTerminal()) {
       return "settled";
     }
-    if (phase() === "cancelling") {
-      closeActiveWork({ kind: "cancel", reason: cancellationReason });
+
+    if (quiesceIfCancelling()) {
       return "settled";
     }
 
@@ -923,6 +914,9 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
         return;
       }
       if (turn !== "continue") {
+        if (quiesceIfCancelling()) {
+          return;
+        }
         const verified = await verifyCandidate(turn);
         if (verified === "settled" || isTerminal()) {
           return;
@@ -943,6 +937,13 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
       { type: "session_started", data: { task } },
     );
     run().catch((error: unknown) => {
+      if (isTerminal()) {
+        return;
+      }
+      if (phase() === "cancelling") {
+        closeActiveWork({ kind: "cancel", reason: cancellationReason });
+        return;
+      }
       closeActiveWork({
         kind: "failed",
         failure: { code: "INTERNAL_ERROR", message: messageOf(error) },

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import type { ExecutableTool } from "../src/index.ts";
+import type { AgentPhase, AgentSession, ExecutableTool } from "../src/index.ts";
 import {
   abortIgnoringTool,
   collect,
@@ -14,7 +14,24 @@ import {
 
 const task = { objective: "Cancel session test task" };
 
-describe("Session Cancellation (CDA-73)", () => {
+function waitForAbort(signal: AbortSignal): Promise<void> {
+  return new Promise<void>((resolve) => {
+    if (signal.aborted) {
+      resolve();
+      return;
+    }
+    signal.addEventListener("abort", () => resolve(), { once: true });
+  });
+}
+
+async function waitForPhase(session: AgentSession, targetPhase: AgentPhase): Promise<void> {
+  if (session.snapshot().phase === targetPhase) return;
+  for await (const _event of session.events()) {
+    if (session.snapshot().phase === targetPhase) return;
+  }
+}
+
+describe("cancelling an Agent Session", () => {
   describe("Cancellation from ready state", () => {
     it("settles as cancelled synchronously with cancellation_requested and session_settled events", async () => {
       const { session } = openTestSession();
@@ -73,16 +90,8 @@ describe("Session Cancellation (CDA-73)", () => {
                   index: 0,
                   delta: { type: "text_delta", text: "Working on it..." },
                 };
-                // Wait until aborted
-                await new Promise<void>((resolve) => {
-                  const check = setInterval(() => {
-                    if (session.snapshot().phase === "cancelling") {
-                      aborted = true;
-                      clearInterval(check);
-                      resolve();
-                    }
-                  }, 10);
-                });
+                await waitForPhase(session, "cancelling");
+                aborted = true;
                 yield { type: "content_block_stop", index: 0 };
                 throw new Error("model stream aborted");
               }),
@@ -193,17 +202,8 @@ describe("Session Cancellation (CDA-73)", () => {
       const stubbornTool: ExecutableTool = {
         ...fakeTool({ name: "long_task", mutation: "mutating" }),
         async execute(_prepared, ctx) {
-          await new Promise<void>((resolve) => {
-            if (ctx.signal.aborted) {
-              toolAborted = true;
-              resolve();
-              return;
-            }
-            ctx.signal.addEventListener("abort", () => {
-              toolAborted = true;
-              resolve();
-            });
-          });
+          await waitForAbort(ctx.signal);
+          toolAborted = true;
           return {
             isError: true,
             content: "aborted during execution",
@@ -261,23 +261,14 @@ describe("Session Cancellation (CDA-73)", () => {
     });
 
     it("records tool call as skipped if cancelled during preflight before tool_execution_started", async () => {
-      let prepareStarted = false;
       let prepareSignalAborted = false;
+      const prepareStarted = Promise.withResolvers<void>();
       const slowPreflightTool: ExecutableTool = {
         ...fakeTool({ name: "slow_prepare" }),
         async prepare(input, ctx) {
-          prepareStarted = true;
-          await new Promise<void>((resolve) => {
-            if (ctx.signal.aborted) {
-              prepareSignalAborted = true;
-              resolve();
-              return;
-            }
-            ctx.signal.addEventListener("abort", () => {
-              prepareSignalAborted = true;
-              resolve();
-            });
-          });
+          prepareStarted.resolve();
+          await waitForAbort(ctx.signal);
+          prepareSignalAborted = true;
           return { ok: true, prepared: { input, paths: [], summary: "slow_prepare" } };
         },
       };
@@ -290,10 +281,7 @@ describe("Session Cancellation (CDA-73)", () => {
       });
 
       await session.dispatch({ type: "start", task });
-      // Wait until prepare is entered
-      while (!prepareStarted) {
-        await new Promise((r) => setTimeout(r, 5));
-      }
+      await prepareStarted.promise;
 
       await session.dispatch({ type: "cancel", reason: "cancelled during prepare" });
       const terminalResult = await session.result();
@@ -318,15 +306,8 @@ describe("Session Cancellation (CDA-73)", () => {
       const { session } = openTestSession({
         verification: [
           async (_candidate) => {
-            await new Promise<void>((resolve) => {
-              const check = setInterval(() => {
-                if (session.snapshot().phase === "cancelling") {
-                  verificationAborted = true;
-                  clearInterval(check);
-                  resolve();
-                }
-              }, 10);
-            });
+            await waitForPhase(session, "cancelling");
+            verificationAborted = true;
             return { outcome: "succeeded", evidence: [] };
           },
         ],
@@ -426,8 +407,28 @@ describe("Session Cancellation (CDA-73)", () => {
     });
   });
 
-  describe("Safety net hardening and port exception handling during cancellation and settlement", () => {
-    it("guarantees session_settled and result resolution even when clock.now throws during commit", async () => {
+  describe("safety net hardening and port exception handling during cancellation and settlement", () => {
+    it("guarantees session_settled and result resolution even when clock.now throws during cancellation", async () => {
+      let throwClock = false;
+      const { session, clock } = openTestSession();
+
+      const originalNow = clock.now;
+      clock.now = () => {
+        if (throwClock) {
+          throw new Error("clock hardware failure");
+        }
+        return originalNow();
+      };
+
+      throwClock = true;
+      const cancelResult = await session.dispatch({ type: "cancel" });
+      expect(cancelResult.accepted).toBe(true);
+
+      const result = await session.result();
+      expect(result.outcome).toBe("cancelled");
+    });
+
+    it("guarantees session_settled and result resolution even when clock.now throws during fatal tool failure", async () => {
       let throwClock = false;
       const stubbornTool: ExecutableTool = {
         ...fakeTool({ name: "may_throw" }),
