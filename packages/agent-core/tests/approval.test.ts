@@ -5,10 +5,13 @@ import {
   fakeTool,
   fakeWorkspace,
   fakeWriteTool,
+  objective,
   openTestSession,
   resultOf,
   textTurn,
+  toolCallMessage,
   toolCallTurn,
+  toolResultMessage,
   waitForEvent,
 } from "./kit/index.ts";
 
@@ -23,7 +26,7 @@ const expectedDeniedResult = (
   return {
     toolCallId,
     toolName,
-    content: message,
+    content: reason === undefined ? message : `approval denied by user: ${reason}`,
     isError: true,
     error: {
       code: "APPROVAL_DENIED",
@@ -304,7 +307,7 @@ describe("waiting for Approval under the ask policy", () => {
         return { isError: false, content: "ok" };
       },
     };
-    const { session } = openTestSession({
+    const { session, model } = openTestSession({
       tools: [write],
       model: {
         turns: [
@@ -360,7 +363,14 @@ describe("waiting for Approval under the ask policy", () => {
       expectedDeniedResult("tool_call-1", "write", "do not modify this file"),
     );
 
-    // 4. Workspace flags were untouched
+    // 4. Next Model Turn receives the denial feedback so the model can adapt
+    expect(model.requests[1]?.context.messages).toEqual([
+      objective,
+      toolCallMessage({ toolCallId: "call-1", name: "write", input: { path: "src/a.ts" } }),
+      toolResultMessage("call-1", "approval denied by user: do not modify this file"),
+    ]);
+
+    // 5. Workspace flags were untouched
     expect(result.workspaceChanged).toBe(false);
     expect(result.partialChangesPossible).toBe(false);
   });

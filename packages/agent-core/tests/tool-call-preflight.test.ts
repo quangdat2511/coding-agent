@@ -1,11 +1,12 @@
 import { describe, expect, it } from "bun:test";
-import type { Message, UserMessage } from "@coding-agent/ai";
+import type { Message } from "@coding-agent/ai";
 import { Type } from "typebox";
 import type { ExecutableTool, PrepareOutcome, ToolErrorCode, ToolResult } from "../src/index.ts";
 import {
   collect,
   fakeTool,
   fakeWriteTool,
+  objective,
   openTestSession,
   resultOf,
   type ScriptedToolCall,
@@ -13,17 +14,11 @@ import {
   throwingTool,
   toolCallMessage,
   toolCallTurn,
+  toolResultMessage,
   waitForEvent,
 } from "./kit/index.ts";
 
 const task = { objective: "Fix the failing test" };
-
-const objective = { role: "user", content: "Fix the failing test" } as const;
-
-const toolResultMessage = (toolCallId: string, content: string): UserMessage => ({
-  role: "user",
-  content: [{ type: "tool_result", toolCallId, content, isError: true }],
-});
 
 const errorResult = (toolName: string, code: ToolErrorCode, message: string): ToolResult => ({
   toolCallId: "tool_call-1",

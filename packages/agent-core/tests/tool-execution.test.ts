@@ -1,5 +1,4 @@
 import { describe, expect, it } from "bun:test";
-import type { UserMessage } from "@coding-agent/ai";
 import type { AgentState, ExecutableTool, ToolOutcome } from "../src/index.ts";
 import {
   collect,
@@ -13,16 +12,12 @@ import {
   throwingTool,
   toolCallMessage,
   toolCallTurn,
+  toolResultMessage,
 } from "./kit/index.ts";
 
 const task = { objective: "Fix the failing test" };
 
 const usage = { inputTokens: 10, outputTokens: 5 };
-
-const toolResultMessage = (toolCallId: string, content: string, isError: boolean): UserMessage => ({
-  role: "user",
-  content: [{ type: "tool_result", toolCallId, content, isError }],
-});
 
 describe("executing auto-approved Tool Calls", () => {
   it("drives a Coding Task from start to succeeded through a read-only Tool Call", async () => {

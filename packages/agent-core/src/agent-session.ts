@@ -91,7 +91,7 @@ const denialResult = ({ id, name }: QueuedToolCall, rawReason?: string): ToolRes
   return {
     toolCallId: id,
     toolName: name,
-    content: message,
+    content: reason === undefined ? message : `approval denied by user: ${reason}`,
     isError: true,
     error: {
       code: "APPROVAL_DENIED",
