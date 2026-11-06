@@ -1,5 +1,6 @@
 import type {
   AssistantMessage,
+  FinishReason,
   ToolCallBlock,
   ToolDeclaration,
   UserMessage,
@@ -175,20 +176,32 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
   let cancellationReason: string | undefined;
   let graceTimer: ReturnType<typeof setTimeout> | undefined;
 
-  let lastOccurredAt = "";
+  let lastOccurredAt: string | undefined;
   try {
     lastOccurredAt = config.clock.now();
   } catch {
-    // If initial read throws, start with empty string
+    // If initial clock read throws, lastOccurredAt remains undefined so commit will surface port error
   }
+  let isClosingWork = false;
 
   function commit(next: AgentState, event: EventDraft): number {
     let occurredAt: string;
     try {
       occurredAt = config.clock.now();
       lastOccurredAt = occurredAt;
-    } catch {
-      occurredAt = lastOccurredAt;
+    } catch (error) {
+      if (
+        lastOccurredAt !== undefined &&
+        (isClosingWork ||
+          isCancellingOrTerminal() ||
+          next.phase === "cancelling" ||
+          next.phase === "failed" ||
+          event.type === "session_settled")
+      ) {
+        occurredAt = lastOccurredAt;
+      } else {
+        throw error;
+      }
     }
     const sequence = log.lastSequence + 1;
     state = { ...next, lastSequence: sequence };
@@ -221,14 +234,7 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
         });
       }
     }, config.limits.cancellationGraceMs);
-    if (
-      typeof graceTimer === "object" &&
-      graceTimer !== null &&
-      "unref" in graceTimer &&
-      typeof (graceTimer as { unref: () => void }).unref === "function"
-    ) {
-      (graceTimer as { unref: () => void }).unref();
-    }
+    graceTimer?.unref?.();
   }
 
   function clearGraceTimer(): void {
@@ -269,6 +275,7 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
     if (isTerminal()) {
       return;
     }
+    isClosingWork = true;
     clearGraceTimer();
 
     if (state.workspaceChanged) {
@@ -358,43 +365,34 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
       }
 
       if (!messageCompleted) {
-        if (mode.kind === "cancel") {
-          const message: AssistantMessage = {
-            role: "assistant",
-            content: draft.blocks.map(({ text }) => ({ type: "text", text })),
-            model: model.id,
-            finishReason: { reason: "other", rawReason: "cancelled" },
-          };
-          commit(state, {
-            type: "assistant_message_completed",
-            data: { messageId, outcome: "cancelled", message },
-          });
-          state = { ...state, usage: addUsage(state.usage, usageOf(message)) };
-          commit(state, {
-            type: "model_turn_completed",
-            data: {
-              modelTurnId: modelTurn.modelTurnId,
-              outcome: "cancelled",
-              usage: usageOf(message),
-            },
-          });
-        } else {
-          const message = lastMessage ?? partialMessage(draft, mode.failure);
-          commit(state, {
-            type: "assistant_message_completed",
-            data: { messageId, outcome: "failed", message, failure: mode.failure },
-          });
-          state = { ...state, usage: addUsage(state.usage, usageOf(message)) };
-          commit(state, {
-            type: "model_turn_completed",
-            data: {
-              modelTurnId: modelTurn.modelTurnId,
-              outcome: "failed",
-              usage: usageOf(message),
-              failure: mode.failure,
-            },
-          });
-        }
+        const message =
+          lastMessage ??
+          partialMessage(
+            draft,
+            mode.kind === "cancel"
+              ? { reason: "other", rawReason: "cancelled" }
+              : { reason: "error", rawReason: mode.failure.code },
+          );
+        const outcome = mode.kind === "cancel" ? "cancelled" : "failed";
+        commit(state, {
+          type: "assistant_message_completed",
+          data: {
+            messageId,
+            outcome,
+            message,
+            ...(mode.kind === "failed" ? { failure: mode.failure } : {}),
+          },
+        });
+        state = { ...state, usage: addUsage(state.usage, usageOf(message)) };
+        commit(state, {
+          type: "model_turn_completed",
+          data: {
+            modelTurnId: modelTurn.modelTurnId,
+            outcome,
+            usage: usageOf(message),
+            ...(mode.kind === "failed" ? { failure: mode.failure } : {}),
+          },
+        });
       } else {
         const usage = lastMessage ? usageOf(lastMessage) : { inputTokens: 0, outputTokens: 0 };
         state = { ...state, usage: addUsage(state.usage, usage) };
@@ -477,12 +475,19 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
     [counter]: state.counters[counter] + 1,
   });
 
-  function partialMessage(draft: AssistantMessageDraft, failure: AgentFailure): AssistantMessage {
+  function partialMessage(
+    draft: AssistantMessageDraft,
+    reasonOrFailure: FinishReason | AgentFailure,
+  ): AssistantMessage {
+    const finishReason: FinishReason =
+      "reason" in reasonOrFailure
+        ? reasonOrFailure
+        : { reason: "error", rawReason: reasonOrFailure.code };
     return {
       role: "assistant",
       content: draft.blocks.map(({ text }) => ({ type: "text", text })),
       model: model.id,
-      finishReason: { reason: "error", rawReason: failure.code },
+      finishReason,
     };
   }
 

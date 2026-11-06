@@ -571,4 +571,37 @@ describe("executing auto-approved Tool Calls", () => {
     expect(types).not.toContain("approval_requested");
     expect(types).not.toContain("approval_resolved");
   });
+
+  it("guarantees session_settled and result resolution even when clock.now throws during fatal tool failure", async () => {
+    let throwClock = false;
+    const stubbornTool: ExecutableTool = {
+      ...fakeTool({ name: "may_throw" }),
+      async execute() {
+        throwClock = true;
+        throw new Error("fatal tool failure");
+      },
+    };
+
+    const { session, clock } = openTestSession({
+      tools: [stubbornTool],
+      approvalPolicy: "auto-approve",
+      model: {
+        turns: [toolCallTurn({ toolCallId: "call-1", name: "may_throw", input: {} })],
+      },
+    });
+
+    const originalNow = clock.now;
+    clock.now = () => {
+      if (throwClock) {
+        throw new Error("clock hardware failure");
+      }
+      return originalNow();
+    };
+
+    await session.dispatch({ type: "start", task });
+
+    const result = await session.result();
+    expect(result).toBeDefined();
+    expect(result.outcome).toBe("failed");
+  });
 });

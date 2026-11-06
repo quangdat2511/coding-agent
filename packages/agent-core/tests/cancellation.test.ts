@@ -407,7 +407,7 @@ describe("cancelling an Agent Session", () => {
     });
   });
 
-  describe("safety net hardening and port exception handling during cancellation and settlement", () => {
+  describe("safety net hardening during cancellation and settlement", () => {
     it("guarantees session_settled and result resolution even when clock.now throws during cancellation", async () => {
       let throwClock = false;
       const { session, clock } = openTestSession();
@@ -426,40 +426,6 @@ describe("cancelling an Agent Session", () => {
 
       const result = await session.result();
       expect(result.outcome).toBe("cancelled");
-    });
-
-    it("guarantees session_settled and result resolution even when clock.now throws during fatal tool failure", async () => {
-      let throwClock = false;
-      const stubbornTool: ExecutableTool = {
-        ...fakeTool({ name: "may_throw" }),
-        async execute() {
-          throwClock = true;
-          throw new Error("fatal tool failure");
-        },
-      };
-
-      const { session, clock } = openTestSession({
-        tools: [stubbornTool],
-        approvalPolicy: "auto-approve",
-        model: {
-          turns: [toolCallTurn({ toolCallId: "call-1", name: "may_throw", input: {} })],
-        },
-      });
-
-      // Override clock.now to throw after tool execution starts
-      const originalNow = clock.now;
-      clock.now = () => {
-        if (throwClock) {
-          throw new Error("clock hardware failure");
-        }
-        return originalNow();
-      };
-
-      await session.dispatch({ type: "start", task });
-
-      const result = await session.result();
-      expect(result).toBeDefined();
-      expect(result.outcome).toBe("failed");
     });
   });
 });
