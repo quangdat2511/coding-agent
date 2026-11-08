@@ -572,28 +572,38 @@ describe("executing auto-approved Tool Calls", () => {
     expect(types).not.toContain("approval_resolved");
   });
 
-  it("guarantees session_settled and result resolution even when clock.now throws during fatal tool failure", async () => {
-    let throwClock = false;
-    const stubbornTool: ExecutableTool = {
-      ...fakeTool({ name: "may_throw" }),
-      async execute() {
-        throwClock = true;
-        throw new Error("fatal tool failure");
-      },
-    };
+  it("completes started call as failed, skips queued calls, and settles when a port throws after tool_execution_started", async () => {
+    let throwClockNow = false;
+    let monotonicCalls = 0;
 
     const { session, clock } = openTestSession({
-      tools: [stubbornTool],
+      tools: [fakeTool({ name: "first" }), fakeTool({ name: "second" })],
       approvalPolicy: "auto-approve",
       model: {
-        turns: [toolCallTurn({ toolCallId: "call-1", name: "may_throw", input: {} })],
+        turns: [
+          toolCallTurn(
+            { toolCallId: "call-1", name: "first", input: {} },
+            { toolCallId: "call-2", name: "second", input: {} },
+          ),
+        ],
       },
     });
 
+    const originalMonotonic = clock.monotonicMs;
+    clock.monotonicMs = () => {
+      monotonicCalls++;
+      // Call 1 is startedMs (before executeTool). Call 2 is after executeTool
+      if (monotonicCalls >= 2) {
+        throwClockNow = true;
+        throw new Error("clock hardware failure after tool_execution_started");
+      }
+      return originalMonotonic();
+    };
+
     const originalNow = clock.now;
     clock.now = () => {
-      if (throwClock) {
-        throw new Error("clock hardware failure");
+      if (throwClockNow) {
+        throw new Error("clock hardware failure during settlement");
       }
       return originalNow();
     };
@@ -601,7 +611,31 @@ describe("executing auto-approved Tool Calls", () => {
     await session.dispatch({ type: "start", task });
 
     const result = await session.result();
-    expect(result).toBeDefined();
-    expect(result.outcome).toBe("failed");
+    expect(result).toMatchObject({
+      outcome: "failed",
+      failure: { code: "INTERNAL_ERROR" },
+    });
+
+    const events = await collect(session.events());
+    const started = events.find((e) => e.type === "tool_execution_started");
+    expect(started?.data.toolCallId).toBe("tool_call-1");
+
+    const completions = events.filter((e) => e.type === "tool_call_completed");
+    expect(completions).toHaveLength(2);
+    expect(completions[0]?.data).toEqual({
+      toolCallId: "tool_call-1",
+      outcome: "failed",
+    });
+    expect(completions[1]?.data).toEqual({
+      toolCallId: "tool_call-2",
+      outcome: "skipped",
+      reason: "INTERNAL_ERROR",
+    });
+
+    const turnCompleted = events.find((e) => e.type === "model_turn_completed");
+    expect(turnCompleted?.data.outcome).toBe("failed");
+
+    const settled = events.find((e) => e.type === "session_settled");
+    expect(settled).toBeDefined();
   });
 });
