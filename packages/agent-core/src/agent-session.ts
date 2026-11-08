@@ -176,12 +176,8 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
   let cancellationReason: string | undefined;
   let graceTimer: ReturnType<typeof setTimeout> | undefined;
 
+  const SAFE_FALLBACK_TIMESTAMP = "1970-01-01T00:00:00.000Z";
   let lastOccurredAt: string | undefined;
-  try {
-    lastOccurredAt = config.clock.now();
-  } catch {
-    // If initial clock read throws, lastOccurredAt remains undefined so commit will surface port error
-  }
   let isClosingWork = false;
 
   function commit(next: AgentState, event: EventDraft): number {
@@ -191,14 +187,13 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
       lastOccurredAt = occurredAt;
     } catch (error) {
       if (
-        lastOccurredAt !== undefined &&
-        (isClosingWork ||
-          isCancellingOrTerminal() ||
-          next.phase === "cancelling" ||
-          next.phase === "failed" ||
-          event.type === "session_settled")
+        isClosingWork ||
+        isCancellingOrTerminal() ||
+        next.phase === "cancelling" ||
+        next.phase === "failed" ||
+        event.type === "session_settled"
       ) {
-        occurredAt = lastOccurredAt;
+        occurredAt = lastOccurredAt ?? SAFE_FALLBACK_TIMESTAMP;
       } else {
         throw error;
       }
@@ -282,33 +277,22 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
       state = { ...state, partialChangesPossible: true };
     }
 
+    const outcome = mode.kind === "cancel" ? "cancelled" : "failed";
+
     // 1. Pending Approval
     if (pendingApproval !== undefined) {
       const { approvalId, toolCallId, resolve } = pendingApproval;
       pendingApproval = undefined;
-      if (mode.kind === "cancel") {
-        commit(state, {
-          type: "approval_resolved",
-          data: {
-            approvalId,
-            toolCallId,
-            status: "cancelled",
-            decidedBy: "user",
-            ...(mode.reason === undefined ? {} : { reason: mode.reason }),
-          },
-        });
-      } else {
-        commit(state, {
-          type: "approval_resolved",
-          data: {
-            approvalId,
-            toolCallId,
-            status: "denied",
-            decidedBy: "policy",
-            reason: mode.failure.message,
-          },
-        });
-      }
+      commit(state, {
+        type: "approval_resolved",
+        data: {
+          approvalId,
+          toolCallId,
+          status: "cancelled",
+          decidedBy: "user",
+          ...(mode.kind === "cancel" && mode.reason !== undefined ? { reason: mode.reason } : {}),
+        },
+      });
       resolve({
         decision: "deny",
         ...(mode.kind === "cancel" ? { reason: "cancelled" } : { reason: mode.failure.message }),
@@ -336,7 +320,7 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
             type: "tool_call_completed",
             data: {
               toolCallId: currentToolCall.id,
-              outcome: mode.kind === "cancel" ? "cancelled" : "failed",
+              outcome,
             },
           });
         } else {
@@ -369,11 +353,8 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
           lastMessage ??
           partialMessage(
             draft,
-            mode.kind === "cancel"
-              ? { reason: "other", rawReason: "cancelled" }
-              : { reason: "error", rawReason: mode.failure.code },
+            mode.kind === "cancel" ? { reason: "other", rawReason: "cancelled" } : mode.failure,
           );
-        const outcome = mode.kind === "cancel" ? "cancelled" : "failed";
         commit(state, {
           type: "assistant_message_completed",
           data: {
@@ -400,7 +381,7 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
           type: "model_turn_completed",
           data: {
             modelTurnId: modelTurn.modelTurnId,
-            outcome: mode.kind === "cancel" ? "cancelled" : "failed",
+            outcome,
             usage,
             ...(mode.kind === "failed" ? { failure: mode.failure } : {}),
           },
@@ -416,7 +397,7 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
         type: "verification_completed",
         data: {
           verificationId: activeVerification.verification.verificationId,
-          outcome: mode.kind === "cancel" ? "cancelled" : "failed",
+          outcome,
           evidence: [],
         },
       });
@@ -942,11 +923,7 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
       { type: "session_started", data: { task } },
     );
     run().catch((error: unknown) => {
-      if (isTerminal()) {
-        return;
-      }
-      if (phase() === "cancelling") {
-        closeActiveWork({ kind: "cancel", reason: cancellationReason });
+      if (quiesceIfCancelling()) {
         return;
       }
       closeActiveWork({

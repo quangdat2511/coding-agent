@@ -576,7 +576,7 @@ describe("executing auto-approved Tool Calls", () => {
     let throwClockNow = false;
     let monotonicCalls = 0;
 
-    const { session, clock } = openTestSession({
+    const { session, clock, config } = openTestSession({
       tools: [fakeTool({ name: "first" }), fakeTool({ name: "second" })],
       approvalPolicy: "auto-approve",
       model: {
@@ -595,6 +595,9 @@ describe("executing auto-approved Tool Calls", () => {
       // Call 1 is startedMs (before executeTool). Call 2 is after executeTool
       if (monotonicCalls >= 2) {
         throwClockNow = true;
+        config.ids.next = () => {
+          throw new Error("ids hardware failure after tool_execution_started");
+        };
         throw new Error("clock hardware failure after tool_execution_started");
       }
       return originalMonotonic();

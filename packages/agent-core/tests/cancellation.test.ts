@@ -260,6 +260,58 @@ describe("cancelling an Agent Session", () => {
       });
     });
 
+    it("records executing tool call as cancelled when execute rejects after abort, skipping unstarted queued calls", async () => {
+      let toolAborted = false;
+      const rejectingTool: ExecutableTool = {
+        ...fakeTool({ name: "exploding_task", mutation: "mutating" }),
+        async execute(_prepared, ctx) {
+          await waitForAbort(ctx.signal);
+          toolAborted = true;
+          throw new Error("adapter exploded during cancellation abort");
+        },
+      };
+
+      const { session } = openTestSession({
+        tools: [rejectingTool],
+        approvalPolicy: "auto-approve",
+        model: {
+          turns: [
+            toolCallTurn(
+              { toolCallId: "call-1", name: "exploding_task", input: {} },
+              { toolCallId: "call-2", name: "exploding_task", input: {} },
+            ),
+          ],
+        },
+      });
+
+      await session.dispatch({ type: "start", task });
+      await waitForEvent(session, "tool_execution_started");
+      expect(session.snapshot().phase).toBe("executing_tool");
+
+      const cancelResult = await session.dispatch({
+        type: "cancel",
+        reason: "aborted by developer",
+      });
+      expect(cancelResult.accepted).toBe(true);
+
+      const terminalResult = await session.result();
+      expect(terminalResult.outcome).toBe("cancelled");
+      expect(toolAborted).toBe(true);
+
+      const events = await collect(session.events());
+      const toolCompletions = events.filter((e) => e.type === "tool_call_completed");
+      expect(toolCompletions).toHaveLength(2);
+      expect(toolCompletions[0]?.data).toEqual({
+        toolCallId: "tool_call-1",
+        outcome: "cancelled",
+      });
+      expect(toolCompletions[1]?.data).toEqual({
+        toolCallId: "tool_call-2",
+        outcome: "skipped",
+        reason: "CANCELLED",
+      });
+    });
+
     it("records tool call as skipped if cancelled during preflight before tool_execution_started", async () => {
       let prepareSignalAborted = false;
       const prepareStarted = Promise.withResolvers<void>();
@@ -426,6 +478,24 @@ describe("cancelling an Agent Session", () => {
 
       const result = await session.result();
       expect(result.outcome).toBe("cancelled");
+    });
+
+    it("guarantees session_settled even when clock.now throws from startup before any timestamp is recorded", async () => {
+      const { session, clock } = openTestSession();
+      clock.now = () => {
+        throw new Error("clock hardware failure at startup");
+      };
+
+      const cancelResult = await session.dispatch({ type: "cancel" });
+      expect(cancelResult.accepted).toBe(true);
+
+      const result = await session.result();
+      expect(result.outcome).toBe("cancelled");
+
+      const events = await collect(session.events());
+      const settled = events.find((e) => e.type === "session_settled");
+      expect(settled).toBeDefined();
+      expect(settled?.occurredAt).toBe("1970-01-01T00:00:00.000Z");
     });
   });
 });
