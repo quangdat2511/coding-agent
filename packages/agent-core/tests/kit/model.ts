@@ -6,6 +6,7 @@ import type {
   ModelStream,
   ModelStreamEvent,
   ToolCallBlock,
+  UserMessage,
 } from "@coding-agent/ai";
 import type { ModelPort } from "../../src/index.ts";
 
@@ -175,4 +176,17 @@ export function toolCallTurn(...calls: readonly ScriptedToolCall[]): readonly Mo
     ]),
     { type: "turn_end", message },
   ];
+}
+
+export const objective: UserMessage = { role: "user", content: "Fix the failing test" };
+
+export function toolResultMessage(
+  toolCallId: string,
+  content: string,
+  isError = true,
+): UserMessage {
+  return {
+    role: "user",
+    content: [{ type: "tool_result", toolCallId, content, isError }],
+  };
 }

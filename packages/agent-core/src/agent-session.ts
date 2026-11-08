@@ -60,15 +60,14 @@ type PreflightPassed = Extract<PreflightOutcome, { ok: true }>;
 
 type Approval = NonNullable<NonNullable<ToolResult["metadata"]>["approval"]>;
 
-interface ApprovalDecision {
-  // CDA-70 will expand this union to "allow" | "deny"
-  readonly decision: "allow";
-  readonly reason?: string;
-}
+type ApprovalDecision =
+  | { readonly decision: "allow"; readonly reason?: string }
+  | { readonly decision: "deny"; readonly reason?: string };
 
 interface PendingApprovalResolver {
   readonly approvalId: string;
   readonly toolCallId: string;
+  readonly draft: AssistantMessageDraft;
   resolve(decision: ApprovalDecision): void;
 }
 
@@ -79,6 +78,35 @@ const rejectedResult = ({ id, name }: QueuedToolCall, error: ToolError): ToolRes
   isError: true,
   error,
 });
+
+const normalizeReason = (reason?: string): string | undefined => {
+  if (reason === undefined) return undefined;
+  const trimmed = reason.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+};
+
+const denialResult = ({ id, name }: QueuedToolCall, rawReason?: string): ToolResult => {
+  const reason = normalizeReason(rawReason);
+  const message = reason ?? "approval denied by user";
+  return {
+    toolCallId: id,
+    toolName: name,
+    content: reason === undefined ? message : `approval denied by user: ${reason}`,
+    isError: true,
+    error: {
+      code: "APPROVAL_DENIED",
+      message,
+    },
+    metadata: {
+      durationMs: 0,
+      approval: {
+        status: "denied",
+        decidedBy: "user",
+        ...(reason === undefined ? {} : { reason }),
+      },
+    },
+  };
+};
 
 const toolResultMessage = (providerId: string, { content, isError }: ToolResult): UserMessage => ({
   role: "user",
@@ -214,6 +242,7 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
 
   async function awaitUserApproval(
     modelTurn: ModelTurnRef,
+    draft: AssistantMessageDraft,
     toolCall: QueuedToolCall,
     queuedToolCalls: readonly QueuedToolCall[],
     summary: string,
@@ -234,7 +263,7 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
         data: { approvalId, toolCallId: toolCall.id, summary, policy: config.approvalPolicy },
       },
     );
-    pendingApproval = { approvalId, toolCallId: toolCall.id, resolve: resolver.resolve };
+    pendingApproval = { approvalId, toolCallId: toolCall.id, draft, resolve: resolver.resolve };
     return resolver.promise;
   }
 
@@ -249,8 +278,7 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
       const remaining = queue.slice(index + 1);
 
       let result: ToolResult;
-      // CDA-70 will expand outcome to include "denied"
-      let outcome: "succeeded" | "failed";
+      let outcome: "succeeded" | "failed" | "denied";
 
       if (!preflight.ok) {
         result = rejectedResult(toolCall, preflight.error);
@@ -258,18 +286,30 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
       } else if (mutating && config.approvalPolicy === "ask") {
         const decision = await awaitUserApproval(
           modelTurn,
+          draft,
           toolCall,
           remaining,
           preflight.prepared.summary,
         );
-        // CDA-70 will branch on decision.decision === "deny" to produce an APPROVAL_DENIED ToolResult
-        const approval: Approval = {
-          status: "allowed",
-          decidedBy: "user",
-          ...(decision.reason === undefined ? {} : { reason: decision.reason }),
-        };
-        result = await executeToolCall(modelTurn, draft, toolCall, remaining, preflight, approval);
-        outcome = result.isError ? "failed" : "succeeded";
+        if (decision.decision === "deny") {
+          result = denialResult(toolCall, decision.reason);
+          outcome = "denied";
+        } else {
+          const approval: Approval = {
+            status: "allowed",
+            decidedBy: "user",
+            ...(decision.reason === undefined ? {} : { reason: decision.reason }),
+          };
+          result = await executeToolCall(
+            modelTurn,
+            draft,
+            toolCall,
+            remaining,
+            preflight,
+            approval,
+          );
+          outcome = result.isError ? "failed" : "succeeded";
+        }
       } else {
         result = await executeToolCall(modelTurn, draft, toolCall, remaining, preflight);
         outcome = result.isError ? "failed" : "succeeded";
@@ -541,33 +581,32 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
         `Approval ${command.approvalId} does not match the pending Approval ${pendingApproval.approvalId}`,
       );
     }
-    // CDA-70 (A3.2) will handle "deny": resolving with status "denied" and outcome "denied"
-    if (command.decision === "deny") {
-      return refuse("INVALID_STATE", "denials are not supported yet");
-    }
+    const reason = normalizeReason(command.reason);
     const nextState =
       state.phase === "awaiting_approval"
-        ? {
-            ...withoutPhase(state),
-            phase: "executing_tool" as const,
-            modelTurn: state.modelTurn,
-            toolCall: state.toolCall,
-            queuedToolCalls: state.queuedToolCalls,
-          }
+        ? command.decision === "deny" && state.queuedToolCalls.length === 0
+          ? streaming(state.modelTurn, pendingApproval.draft)
+          : {
+              ...withoutPhase(state),
+              phase: "executing_tool" as const,
+              modelTurn: state.modelTurn,
+              toolCall: state.toolCall,
+              queuedToolCalls: state.queuedToolCalls,
+            }
         : state;
     const sequence = commit(nextState, {
       type: "approval_resolved",
       data: {
         approvalId: pendingApproval.approvalId,
         toolCallId: pendingApproval.toolCallId,
-        status: "allowed",
+        status: command.decision === "allow" ? "allowed" : "denied",
         decidedBy: "user" as ApprovalDecider,
-        ...(command.reason === undefined ? {} : { reason: command.reason }),
+        ...(reason === undefined ? {} : { reason }),
       },
     });
     const { resolve } = pendingApproval;
     pendingApproval = undefined;
-    resolve({ decision: "allow", reason: command.reason });
+    resolve({ decision: command.decision, ...(reason === undefined ? {} : { reason }) });
     return { accepted: true, sequence };
   }
 
