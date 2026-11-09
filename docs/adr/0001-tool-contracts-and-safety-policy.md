@@ -2,7 +2,7 @@
 
 Status: accepted
 
-Date: 2026-09-11 (Refined: 2026-09-12; Amended: 2026-09-13)
+Date: 2026-09-11 (Refined: 2026-09-12; Amended: 2026-09-13, 2026-11-09)
 
 ## Context
 
@@ -138,6 +138,13 @@ On 2026-09-13, the [package API decision](./0004-package-apis-and-dependency-dir
 On 2026-09-13, the [credential-isolation decision](https://datn-fit-hcmus.atlassian.net/browse/CDA-29) amended this record:
 
 - **Credential isolation** (§8): a new section constrains how the provider credentials Coding Agent uses may be reached from a process started for a Tool Call or by the Verification Runner — an enforceable contract under `"auto-approve"`, and a bounded, accepted residual under `"ask"`.
+
+On 2026-11-09, [CDA-63](https://datn-fit-hcmus.atlassian.net/browse/CDA-63) amended this record:
+
+- **Shared output budget** (§3): the byte-exact 40 KiB budget is shared by every tool, not only
+  `bash`. `read` output is capped with the same marker and head-and-tail split, and the budget
+  helper is reusable by `bash` and the Verification Runner. Both ends are kept, so the final error
+  survives truncation.
 
 ### 8. Credential Isolation for Tool and Verification Processes
 

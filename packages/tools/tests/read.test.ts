@@ -23,6 +23,7 @@ import type {
 } from "@coding-agent/agent-core";
 import { Value } from "typebox/value";
 import { createWorkspaceResolver, ReadParams, readTool } from "../src/index.ts";
+import { MAX_TOOL_OUTPUT_BYTES, TOOL_OUTPUT_TRUNCATION_MARKER } from "../src/output-budget.ts";
 import { readToolWith } from "../src/read.ts";
 
 let sandbox: string;
@@ -155,6 +156,82 @@ describe("reading a file", () => {
       "1 | first\r",
       "2 | second\r",
     ]);
+  });
+});
+
+describe("bounding the read output", () => {
+  // ADR 0001 §3's per-end budget, counted in bytes.
+  const END_BUDGET_BYTES = 20_467;
+  const encoder = new TextEncoder();
+
+  // An independent character-by-character reference: the longest prefix and suffix that fit in the
+  // shared end budget without splitting a character. A read that over-truncates fails the equality.
+  function codePointHalves(text: string): { head: string; tail: string } {
+    const characters = [...text];
+    let head = "";
+    let headBytes = 0;
+    for (const character of characters) {
+      const bytes = encoder.encode(character).byteLength;
+      if (headBytes + bytes > END_BUDGET_BYTES) break;
+      head += character;
+      headBytes += bytes;
+    }
+    let tail = "";
+    let tailBytes = 0;
+    for (let index = characters.length - 1; index >= 0; index -= 1) {
+      const character = characters[index] ?? "";
+      const bytes = encoder.encode(character).byteLength;
+      if (tailBytes + bytes > END_BUDGET_BYTES) break;
+      tail = character + tail;
+      tailBytes += bytes;
+    }
+    return { head, tail };
+  }
+
+  // 400 lines of 200 ASCII characters: reading the default 300 renders well over the budget.
+  function longFile(): string {
+    return Array.from(
+      { length: 400 },
+      (_, index) => `${String(index + 1).padStart(3, "0")}${"x".repeat(197)}`,
+    ).join("\n");
+  }
+
+  it("caps a long read at exactly 40,960 UTF-8 bytes, keeping both ends", async () => {
+    const content = longFile();
+    const fileLines = content.split("\n");
+    await writeFile(join(repo, "long.txt"), `${content}\n`);
+    const rendered = [
+      `${JSON.stringify(join(repo, "long.txt"))} (lines 1-300 of 400)`,
+      ...fileLines.slice(0, 300).map((line, index) => `${String(index + 1).padStart(3)} | ${line}`),
+      "[100 more lines; continue with offset 301]",
+    ].join("\n");
+
+    const outcome = await read({ path: "long.txt" });
+
+    expect(outcome).toEqual({
+      isError: false,
+      content: rendered.slice(0, 20_467) + TOOL_OUTPUT_TRUNCATION_MARKER + rendered.slice(-20_467),
+      truncated: true,
+    });
+    expect(new TextEncoder().encode(outcome.content).byteLength).toBe(MAX_TOOL_OUTPUT_BYTES);
+  });
+
+  it("caps a multi-byte read on code point boundaries, byte-exactly", async () => {
+    const text = "é".repeat(30_000);
+    await writeFile(join(repo, "wide.txt"), text);
+    // A cut inside a character drops that whole character, so a multi-byte read can end a few
+    // bytes under 40,960 while never splitting one.
+    const rendered = `${JSON.stringify(join(repo, "wide.txt"))} (lines 1-1 of 1)\n1 | ${text}`;
+    const { head, tail } = codePointHalves(rendered);
+    const expected = `${head}${TOOL_OUTPUT_TRUNCATION_MARKER}${tail}`;
+
+    const outcome = await read({ path: "wide.txt" });
+
+    expect(outcome).toEqual({ isError: false, content: expected, truncated: true });
+    expect(new TextEncoder().encode(outcome.content).byteLength).toBe(
+      new TextEncoder().encode(head).byteLength + 26 + new TextEncoder().encode(tail).byteLength,
+    );
+    expect(outcome.content).not.toContain("\uFFFD");
   });
 });
 
