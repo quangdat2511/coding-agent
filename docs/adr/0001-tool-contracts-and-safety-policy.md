@@ -2,7 +2,7 @@
 
 Status: accepted
 
-Date: 2026-09-11 (Refined: 2026-09-12; Amended: 2026-09-13)
+Date: 2026-09-11 (Refined: 2026-09-12; Amended: 2026-09-13, 2026-11-09)
 
 ## Context
 
@@ -46,13 +46,14 @@ All filesystem operations must remain strictly bounded to the active repository 
 
 Agent Core owns the path-validation step: it decides when validation runs (during preflight, before Approval), what the step guarantees, and how a failure becomes a `ToolResult`. The filesystem code that performs the checks need not live in the Agent Core package; it may be injected through a port, and the [package API decision](./0004-package-apis-and-dependency-direction.md) places it in `@coding-agent/tools`.
 
-### 3. Bash Command Execution Bounds and Byte-Exact Budget
+### 3. Bash Command Execution Bounds and UTF-8 Output Budget
 
 - **Timeout**: `timeoutMs` is measured in milliseconds, like every other duration field (for example `durationMs`). The default command execution timeout is 30,000 ms (30 seconds), with an enforced hard maximum cap of 120,000 ms (120 seconds) if a custom timeout is requested by the model.
-- **Byte-Exact Output Budget**:
+- **UTF-8 Output Budget**:
   - The returned command `content` is strictly bounded at **40 KiB (40,960 UTF-8 bytes)**, *inclusive* of the truncation marker: `\n[...output truncated...]\n`.
   - When raw output exceeds 40 KiB, head and tail budgets are calculated dynamically from the remaining budget after reserving the UTF-8 byte length of the marker: `headBudget = tailBudget = (40,960 - markerBytes) / 2`.
   - The limit is measured strictly in UTF-8 bytes, not line counts.
+  - A cut that lands inside a multi-byte character moves to the character boundary, so the returned content can be up to six bytes under the budget, three bytes per end.
 - **Execution Mode**: Commands execute in a non-interactive shell environment (`CI=1`, `TERM=dumb`) with `stdin` closed to prevent hanging on interactive prompts or REPLs.
 
 ### 4. Mutation Classification, Approval Policy, and Denial
@@ -139,6 +140,14 @@ On 2026-09-13, the [credential-isolation decision](https://datn-fit-hcmus.atlass
 
 - **Credential isolation** (§8): a new section constrains how the provider credentials Coding Agent uses may be reached from a process started for a Tool Call or by the Verification Runner — an enforceable contract under `"auto-approve"`, and a bounded, accepted residual under `"ask"`.
 
+On 2026-11-09, [CDA-63](https://datn-fit-hcmus.atlassian.net/browse/CDA-63) amended this record:
+
+- **Shared output budget** (§3): the 40 KiB budget, capped at 40,960 bytes including the marker
+  (and up to six bytes less when a cut lands inside a character), is shared by every tool, not only
+  `bash`. `read` output is capped with the same marker and head-and-tail split, and the budget
+  helper is reusable by `bash` and the Verification Runner. Both ends are kept, so the final error
+  survives truncation.
+
 ### 8. Credential Isolation for Tool and Verification Processes
 
 Coding Agent authenticates to Model Providers with credentials it reads from its own environment: the provider API-key variables that `@coding-agent/ai` defines. `bash` Tool Calls (§3) and the Verification Runner ([ADR 0003](./0003-mvp-context-planning-verification-and-session-memory.md) §3) start child processes on the model's behalf. Under the `"auto-approve"` policy (§4) with network access these children run unattended, so one that obtains a credential can send it anywhere; even under `"ask"`, a credential copied into a Tool Result enters the transcript, the Session Event log, and any exported trajectory. The credential reaches Coding Agent only because a launching process placed it in the environment Coding Agent inherits, so how the launcher holds it is part of the problem and cannot be fully solved inside Coding Agent. What this section can require therefore depends on the Approval Policy, and the guarantee is stated per policy below rather than as one absolute.
@@ -170,6 +179,6 @@ An automated test enforces the `"auto-approve"` path: on each backend an evaluat
 - **TypeBox adoption**: Packages declaring or validating tools will standardize on `typebox` (TypeBox 1.x).
 - **Downstream unblocking**:
   - CDA-20 can define clean package boundaries knowing Agent Core owns execution, the path-validation step (§2), and approval states, while AI owns only schema types and raw streaming.
-  - CDA-23 can model context budgeting based on the byte-exact 40 KiB output cap and 300-line read defaults.
+  - CDA-23 can model context budgeting based on the 40 KiB output cap measured in UTF-8 bytes and 300-line read defaults.
   - CDA-24 can implement the TerminalBench evaluation runner using `approvalPolicy: "auto-approve"`, once §8's credential isolation is enforced and tested per ADR 0005.
 - **Credential isolation cost** (§8): the composition root marks the process non-dumpable through a `prctl` call (via `bun:ffi`) before the first Tool Call or Verification child, `@coding-agent/tools` strips the AI-declared credential variables from every such child, and under `"auto-approve"` the composition root walks its ancestor chain at startup and refuses to run if an ancestor still holds a credential. The full cross-process guarantee is Linux-only and scoped to `"auto-approve"`; under `"ask"` the launching shell may still hold the credential, a residual bounded by the `read` path jail (§2) and by Approval gating of `bash` (§4); a child with `CAP_SYS_PTRACE` and non-Linux platforms are out of scope.
