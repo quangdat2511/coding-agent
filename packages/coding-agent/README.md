@@ -176,14 +176,17 @@ The guarantee has these limits:
 
 - A child with `CAP_SYS_PTRACE` can still read these files, for example root with the full
   capability set on a host.
-- The guarantee does not hold for a Coding Agent that runs as root. A root child without
-  `CAP_SYS_PTRACE`, as in a default Docker container, can still read the `/proc/<pid>/environ` of
-  a non-dumpable root process. It cannot open the memory or follow the fd links. This was seen on
-  Linux 6.18 under WSL2. The ADR 0005 §7 root task containers are this case.
+- A reader with `CAP_SYS_ADMIN` or `CAP_PERFMON` can still open `/proc/<pid>/environ`, but not the
+  memory or the fd links. If the ptrace check fails for read access, the kernel accepts these
+  capabilities instead (`perfmon_capable()` in `mm_access`). The file belongs to root once the process is
+  non-dumpable. Thus such a reader must also be root or hold `CAP_DAC_OVERRIDE` or
+  `CAP_DAC_READ_SEARCH`.
+- Docker's default capability set has neither `CAP_SYS_ADMIN` nor `CAP_PERFMON`. Thus root in a
+  default container gets `EACCES` on all three files. This was tested on Linux 6.18 under WSL2,
+  with Docker's default capability set applied through `capsh`.
 - A caller with DAC override (permission to bypass file modes), such as root or a holder of
   `CAP_DAC_OVERRIDE` or `CAP_DAC_READ_SEARCH`, can still list the fd numbers in `/proc/<pid>/fd`.
-  It cannot follow the links. A non-root holder of these capabilities gets no access to the
-  environment.
+  It cannot follow the links.
 - It protects only the Coding Agent process. An ancestor that still holds the credential stays
   readable, for example the shell that exported it. Under `"auto-approve"`, the startup ancestor
   check of CDA-72 will refuse that launch. Under `"ask"`, ADR 0001 §8 accepts this residual.
@@ -199,9 +202,8 @@ a process that is not marked, which proves that the test can see a leak. The sam
 `EACCES` on the environment, the memory and the fd links of the Coding Agent process. The test lifts
 Yama's `ptrace_scope` 1 for its target. It checks the `mem` result only where dumpability alone
 decides it: with no Yama, at scope 0, or at scope 1 once the lift succeeded. This part is skipped on
-other platforms. If the tests run with `CAP_SYS_PTRACE`, it is also skipped. If the tests run as
-root without `CAP_SYS_PTRACE`, the environment check fails, because the guarantee does not hold
-there.
+other platforms. If the tests run with `CAP_SYS_PTRACE`, `CAP_SYS_ADMIN` or `CAP_PERFMON`, it is
+also skipped. A reader with one of them can pass at least one of the checks.
 
 On every platform, the same file checks each failure of `markProcessNonDumpable` with a fake C
 library. It also preloads `tests/support/fail-hardening.ts` into the executable, which makes the

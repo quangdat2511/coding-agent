@@ -10,10 +10,11 @@
 // Limits of the guarantee (see also the package README):
 // - A child with CAP_SYS_PTRACE can still read these files, for example root with the full
 //   capability set on a host.
-// - It does not hold when this process runs as root. On Linux 6.18 (WSL2), a root child without
-//   CAP_SYS_PTRACE, as in a default Docker container, still read the environ of a non-dumpable
-//   root process, though not its mem or fd links. The root task containers of ADR 0005 §7 are
-//   this case.
+// - A reader with CAP_SYS_ADMIN or CAP_PERFMON can still open /proc/<pid>/environ, though not
+//   mem or the fd links: mm_access falls back to perfmon_capable() for read access. The file is
+//   root-owned once this process is non-dumpable, so such a reader must also be root or hold
+//   CAP_DAC_OVERRIDE or CAP_DAC_READ_SEARCH. Docker's default capability set has neither
+//   CAP_SYS_ADMIN nor CAP_PERFMON, so root in a default container is denied all three files.
 // - A caller with DAC override, such as root or a holder of CAP_DAC_OVERRIDE or
 //   CAP_DAC_READ_SEARCH, can still list the fd numbers in /proc/<pid>/fd. It cannot follow them.
 // - It protects only this process. An ancestor that still holds the credential, such as the shell

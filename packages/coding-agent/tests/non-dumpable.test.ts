@@ -147,14 +147,19 @@ interface ProcAccess {
   readonly ptracerLifted: boolean;
 }
 
-// Bit 19 of CapEff. A reader with CAP_SYS_PTRACE passes the check that non-dumpable adds, as
-// ADR 0001 §8 states, so the guarantee cannot be shown when the tests run with it. Root without
-// it, as in a default Docker container, still runs the test. read-proc.ts follows the fd links,
-// which root cannot, instead of only listing them, which root can. The environ check then fails,
-// because a root child can read the environ of a non-dumpable root process (seen on Linux 6.18).
-function holdsCapSysPtrace(): boolean {
+// CapEff bits of CAP_SYS_PTRACE, CAP_SYS_ADMIN and CAP_PERFMON. A reader with CAP_SYS_PTRACE passes
+// the check that non-dumpable adds, as ADR 0001 §8 states. A reader with CAP_SYS_ADMIN or
+// CAP_PERFMON can still open environ, because mm_access falls back to perfmon_capable() for read
+// access. So the guarantee cannot be shown when the tests run with any of them. Root without them,
+// as in a default Docker container, still runs the test: read-proc.ts follows the fd links, which
+// root cannot, instead of only listing them, which root can.
+const bypassBits = [19n, 21n, 38n];
+
+function holdsBypassCapability(): boolean {
   const capEff = /^CapEff:\s*([0-9a-f]+)$/m.exec(readFileSync("/proc/self/status", "utf8"))?.[1];
-  return capEff !== undefined && (BigInt(`0x${capEff}`) & (1n << 19n)) !== 0n;
+  if (capEff === undefined) return false;
+  const effective = BigInt(`0x${capEff}`);
+  return bypassBits.some((bit) => (effective & (1n << bit)) !== 0n);
 }
 
 function yamaPtraceScope(): number | undefined {
@@ -173,7 +178,7 @@ function memShowsDumpability(access: ProcAccess): boolean {
   return scope === undefined || scope === 0 || (scope === 1 && access.ptracerLifted);
 }
 
-const provable = process.platform === "linux" && !holdsCapSysPtrace();
+const provable = process.platform === "linux" && !holdsBypassCapability();
 
 // Runs the target in a temporary directory with a credential in its environment. The probe in the
 // target starts a same-uid child against it as the target exits, and the child's report comes back.
