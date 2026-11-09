@@ -87,4 +87,19 @@ describe("bounding tool output", () => {
     });
     expect(bytesOf(bounded.content)).toBe(MAX_TOOL_OUTPUT_BYTES);
   });
+
+  it("counts long runs of lone surrogates by the bytes they encode to", () => {
+    // Each lone surrogate encodes as the three-byte U+FFFD, so this is 60,000 bytes even though
+    // Buffer.byteLength reports only 40,000 of them on Bun 1.3.14.
+    const content = "\ud800".repeat(20_000);
+    const replacement = "\uFFFD".repeat(6_822);
+
+    const bounded = boundToolOutput(content);
+
+    expect(bounded).toEqual({
+      content: `${replacement}${TOOL_OUTPUT_TRUNCATION_MARKER}${replacement}`,
+      truncated: true,
+    });
+    expect(bytesOf(bounded.content)).toBe(MAX_TOOL_OUTPUT_BYTES - 2);
+  });
 });

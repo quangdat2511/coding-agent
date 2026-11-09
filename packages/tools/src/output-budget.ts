@@ -8,9 +8,10 @@ export const MAX_TOOL_OUTPUT_BYTES = 40_960;
 // ADR 0001 §3's marker, counted against the budget.
 export const TOOL_OUTPUT_TRUNCATION_MARKER = "\n[...output truncated...]\n";
 
-// Bun 1.3.14's TextEncoder.encode returns one byte too few, with a zero byte, for long rope
-// strings that end in a multi-byte character (for example "a".repeat(n) + "é"). The repo pins that
-// version in .bun-version, so measure and cut with Buffer, whose UTF-8 encoder is byte-exact.
+// Bun 1.3.14, the version pinned in .bun-version, miscounts some long strings: TextEncoder.encode
+// drops a trailing multi-byte character on a rope, and Buffer.byteLength counts a lone surrogate as
+// one byte instead of the three bytes its U+FFFD replacement occupies. Encoding once with
+// Buffer.from gives the real bytes for both the budget check and the cuts.
 // ignoreBOM keeps a byte order mark that falls at a cut, as readTextFile keeps one at the start.
 const decoder = new TextDecoder("utf-8", { ignoreBOM: true });
 
@@ -25,10 +26,8 @@ export interface BoundedOutput {
 // error. The budgets are measured in bytes, and each cut moves to the nearest code point boundary
 // so a decoded half never starts or ends inside a multi-byte character.
 export function boundToolOutput(content: string): BoundedOutput {
-  if (Buffer.byteLength(content, "utf8") <= MAX_TOOL_OUTPUT_BYTES) {
-    return { content, truncated: false };
-  }
   const bytes = Buffer.from(content, "utf8");
+  if (bytes.byteLength <= MAX_TOOL_OUTPUT_BYTES) return { content, truncated: false };
   // ADR 0001 §3 splits what remains evenly: the 26-byte marker leaves 20,467 bytes for each end.
   const half = Math.floor((MAX_TOOL_OUTPUT_BYTES - MARKER_BYTES) / 2);
   const headEnd = codePointStartAtOrBefore(bytes, half);
