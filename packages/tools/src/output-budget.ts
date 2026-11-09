@@ -9,13 +9,14 @@ export const MAX_TOOL_OUTPUT_BYTES = 40_960;
 export const TOOL_OUTPUT_TRUNCATION_MARKER = "\n[...output truncated...]\n";
 
 // Bun 1.3.14, the version pinned in .bun-version, miscounts some long strings: TextEncoder.encode
-// drops a trailing multi-byte character on a rope, and Buffer.byteLength counts a lone surrogate as
-// one byte instead of the three bytes its U+FFFD replacement occupies. Encoding once with
-// Buffer.from gives the real bytes for both the budget check and the cuts.
+// reports 40,960 bytes for "a".repeat(40_959) + "é" (with a trailing zero byte) instead of 40,961,
+// and Buffer.byteLength reports 40,000 bytes for 20,000 lone surrogates whose U+FFFD replacements
+// encode to 60,000. Encoding once with Buffer.from gives the real bytes for both the check and the
+// cuts.
 // ignoreBOM keeps a byte order mark that falls at a cut, as readTextFile keeps one at the start.
 const decoder = new TextDecoder("utf-8", { ignoreBOM: true });
 
-const MARKER_BYTES = Buffer.byteLength(TOOL_OUTPUT_TRUNCATION_MARKER, "utf8");
+const MARKER_BYTES = Buffer.from(TOOL_OUTPUT_TRUNCATION_MARKER, "utf8").byteLength;
 
 export interface BoundedOutput {
   readonly content: string;

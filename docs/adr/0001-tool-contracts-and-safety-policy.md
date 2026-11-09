@@ -53,6 +53,7 @@ Agent Core owns the path-validation step: it decides when validation runs (durin
   - The returned command `content` is strictly bounded at **40 KiB (40,960 UTF-8 bytes)**, *inclusive* of the truncation marker: `\n[...output truncated...]\n`.
   - When raw output exceeds 40 KiB, head and tail budgets are calculated dynamically from the remaining budget after reserving the UTF-8 byte length of the marker: `headBudget = tailBudget = (40,960 - markerBytes) / 2`.
   - The limit is measured strictly in UTF-8 bytes, not line counts.
+  - A cut that lands inside a multi-byte character moves to the character boundary, so the returned content can be up to six bytes under the budget, three bytes per end.
 - **Execution Mode**: Commands execute in a non-interactive shell environment (`CI=1`, `TERM=dumb`) with `stdin` closed to prevent hanging on interactive prompts or REPLs.
 
 ### 4. Mutation Classification, Approval Policy, and Denial
@@ -141,10 +142,10 @@ On 2026-09-13, the [credential-isolation decision](https://datn-fit-hcmus.atlass
 
 On 2026-11-09, [CDA-63](https://datn-fit-hcmus.atlassian.net/browse/CDA-63) amended this record:
 
-- **Shared output budget** (§3): the byte-exact 40 KiB budget is shared by every tool, not only
-  `bash`. `read` output is capped with the same marker and head-and-tail split, and the budget
-  helper is reusable by `bash` and the Verification Runner. Both ends are kept, so the final error
-  survives truncation.
+- **Shared output budget** (§3): the 40 KiB budget, capped at 40,960 bytes including the marker,
+  is shared by every tool, not only `bash`. `read` output is capped with the same marker and
+  head-and-tail split, and the budget helper is reusable by `bash` and the Verification Runner.
+  Both ends are kept, so the final error survives truncation.
 
 ### 8. Credential Isolation for Tool and Verification Processes
 
@@ -177,6 +178,6 @@ An automated test enforces the `"auto-approve"` path: on each backend an evaluat
 - **TypeBox adoption**: Packages declaring or validating tools will standardize on `typebox` (TypeBox 1.x).
 - **Downstream unblocking**:
   - CDA-20 can define clean package boundaries knowing Agent Core owns execution, the path-validation step (§2), and approval states, while AI owns only schema types and raw streaming.
-  - CDA-23 can model context budgeting based on the byte-exact 40 KiB output cap and 300-line read defaults.
+  - CDA-23 can model context budgeting based on the 40 KiB output cap measured in UTF-8 bytes and 300-line read defaults.
   - CDA-24 can implement the TerminalBench evaluation runner using `approvalPolicy: "auto-approve"`, once §8's credential isolation is enforced and tested per ADR 0005.
 - **Credential isolation cost** (§8): the composition root marks the process non-dumpable through a `prctl` call (via `bun:ffi`) before the first Tool Call or Verification child, `@coding-agent/tools` strips the AI-declared credential variables from every such child, and under `"auto-approve"` the composition root walks its ancestor chain at startup and refuses to run if an ancestor still holds a credential. The full cross-process guarantee is Linux-only and scoped to `"auto-approve"`; under `"ask"` the launching shell may still hold the credential, a residual bounded by the `read` path jail (§2) and by Approval gating of `bash` (§4); a child with `CAP_SYS_PTRACE` and non-Linux platforms are out of scope.

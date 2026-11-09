@@ -1,12 +1,14 @@
 import { describe, expect, it } from "bun:test";
+import { Buffer } from "node:buffer";
 import {
   boundToolOutput,
   MAX_TOOL_OUTPUT_BYTES,
   TOOL_OUTPUT_TRUNCATION_MARKER,
 } from "../src/output-budget.ts";
 
-const encoder = new TextEncoder();
-const bytesOf = (text: string): number => encoder.encode(text).byteLength;
+// Buffer.from is byte-exact on the pinned Bun; TextEncoder.encode undercounts some long ropes
+// there, which is the runtime bug the helper works around.
+const bytesOf = (text: string): number => Buffer.from(text, "utf8").byteLength;
 
 describe("bounding tool output", () => {
   it("returns output at exactly the budget unchanged and without a marker", () => {
@@ -89,10 +91,14 @@ describe("bounding tool output", () => {
   });
 
   it("counts long runs of lone surrogates by the bytes they encode to", () => {
-    // Each lone surrogate encodes as the three-byte U+FFFD, so this is 60,000 bytes even though
-    // Buffer.byteLength reports only 40,000 of them on Bun 1.3.14.
+    // Each lone surrogate encodes as the three-byte U+FFFD, so 20,000 of them are 60,000 bytes.
+    // The pinned Bun 1.3.14 reports 40,000 through Buffer.byteLength, which let the old check
+    // pass; newer Bun versions report the full count, so CI is what keeps this regression covered.
+    const markerBytes = bytesOf(TOOL_OUTPUT_TRUNCATION_MARKER);
+    const endBudget = Math.floor((MAX_TOOL_OUTPUT_BYTES - markerBytes) / 2);
+    const replacementCount = Math.floor(endBudget / 3);
+    const replacement = "\uFFFD".repeat(replacementCount);
     const content = "\ud800".repeat(20_000);
-    const replacement = "\uFFFD".repeat(6_822);
 
     const bounded = boundToolOutput(content);
 
@@ -100,6 +106,27 @@ describe("bounding tool output", () => {
       content: `${replacement}${TOOL_OUTPUT_TRUNCATION_MARKER}${replacement}`,
       truncated: true,
     });
-    expect(bytesOf(bounded.content)).toBe(MAX_TOOL_OUTPUT_BYTES - 2);
+    expect(bytesOf(bounded.content)).toBe(replacementCount * 3 * 2 + markerBytes);
+  });
+
+  it("drops one four-byte character at each cut, landing six bytes under the budget", () => {
+    const markerBytes = bytesOf(TOOL_OUTPUT_TRUNCATION_MARKER);
+    const endBudget = Math.floor((MAX_TOOL_OUTPUT_BYTES - markerBytes) / 2);
+    // A four-byte character can leave three bytes inside an end budget; moving the cut to its
+    // start drops those three bytes, so both ends together lose six.
+    const droppedPerEnd = 3;
+    const textStart = endBudget - droppedPerEnd;
+    const textEnd = endBudget - droppedPerEnd;
+    const head = `${"a".repeat(textStart)}😀`;
+    const tail = `😀${"c".repeat(textEnd)}`;
+    const content = `${head}${"b".repeat(100_000 - bytesOf(head) - bytesOf(tail))}${tail}`;
+
+    const bounded = boundToolOutput(content);
+
+    expect(bounded).toEqual({
+      content: `${"a".repeat(textStart)}${TOOL_OUTPUT_TRUNCATION_MARKER}${"c".repeat(textEnd)}`,
+      truncated: true,
+    });
+    expect(bytesOf(bounded.content)).toBe(MAX_TOOL_OUTPUT_BYTES - 2 * droppedPerEnd);
   });
 });
