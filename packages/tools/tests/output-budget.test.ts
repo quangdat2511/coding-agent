@@ -9,6 +9,8 @@ import {
 // Buffer.from is byte-exact on the pinned Bun; TextEncoder.encode undercounts some long ropes
 // there, which is the runtime bug the helper works around.
 const bytesOf = (text: string): number => Buffer.from(text, "utf8").byteLength;
+const MARKER_BYTES = bytesOf(TOOL_OUTPUT_TRUNCATION_MARKER);
+const END_BUDGET_BYTES = Math.floor((MAX_TOOL_OUTPUT_BYTES - MARKER_BYTES) / 2);
 
 describe("bounding tool output", () => {
   it("returns output at exactly the budget unchanged and without a marker", () => {
@@ -94,9 +96,7 @@ describe("bounding tool output", () => {
     // Each lone surrogate encodes as the three-byte U+FFFD, so 20,000 of them are 60,000 bytes.
     // The pinned Bun 1.3.14 reports 40,000 through Buffer.byteLength, which let the old check
     // pass; newer Bun versions report the full count, so CI is what keeps this regression covered.
-    const markerBytes = bytesOf(TOOL_OUTPUT_TRUNCATION_MARKER);
-    const endBudget = Math.floor((MAX_TOOL_OUTPUT_BYTES - markerBytes) / 2);
-    const replacementCount = Math.floor(endBudget / 3);
+    const replacementCount = Math.floor(END_BUDGET_BYTES / 3);
     const replacement = "\uFFFD".repeat(replacementCount);
     const content = "\ud800".repeat(20_000);
 
@@ -106,25 +106,23 @@ describe("bounding tool output", () => {
       content: `${replacement}${TOOL_OUTPUT_TRUNCATION_MARKER}${replacement}`,
       truncated: true,
     });
-    expect(bytesOf(bounded.content)).toBe(replacementCount * 3 * 2 + markerBytes);
+    expect(bytesOf(bounded.content)).toBe(replacementCount * 3 * 2 + MARKER_BYTES);
   });
 
   it("drops one four-byte character at each cut, landing six bytes under the budget", () => {
-    const markerBytes = bytesOf(TOOL_OUTPUT_TRUNCATION_MARKER);
-    const endBudget = Math.floor((MAX_TOOL_OUTPUT_BYTES - markerBytes) / 2);
     // A four-byte character can leave three bytes inside an end budget; moving the cut to its
     // start drops those three bytes, so both ends together lose six.
-    const droppedPerEnd = 3;
-    const textStart = endBudget - droppedPerEnd;
-    const textEnd = endBudget - droppedPerEnd;
-    const head = `${"a".repeat(textStart)}😀`;
-    const tail = `😀${"c".repeat(textEnd)}`;
-    const content = `${head}${"b".repeat(100_000 - bytesOf(head) - bytesOf(tail))}${tail}`;
+    const droppedPerEnd = bytesOf("😀") - 1;
+    const textLength = END_BUDGET_BYTES - droppedPerEnd;
+    const head = `${"a".repeat(textLength)}😀`;
+    const tail = `😀${"c".repeat(textLength)}`;
+    // Three end budgets leave one for each end and a middle between the two cuts.
+    const content = `${head}${"b".repeat(3 * END_BUDGET_BYTES - bytesOf(head) - bytesOf(tail))}${tail}`;
 
     const bounded = boundToolOutput(content);
 
     expect(bounded).toEqual({
-      content: `${"a".repeat(textStart)}${TOOL_OUTPUT_TRUNCATION_MARKER}${"c".repeat(textEnd)}`,
+      content: `${"a".repeat(textLength)}${TOOL_OUTPUT_TRUNCATION_MARKER}${"c".repeat(textLength)}`,
       truncated: true,
     });
     expect(bytesOf(bounded.content)).toBe(MAX_TOOL_OUTPUT_BYTES - 2 * droppedPerEnd);

@@ -46,10 +46,10 @@ All filesystem operations must remain strictly bounded to the active repository 
 
 Agent Core owns the path-validation step: it decides when validation runs (during preflight, before Approval), what the step guarantees, and how a failure becomes a `ToolResult`. The filesystem code that performs the checks need not live in the Agent Core package; it may be injected through a port, and the [package API decision](./0004-package-apis-and-dependency-direction.md) places it in `@coding-agent/tools`.
 
-### 3. Bash Command Execution Bounds and Byte-Exact Budget
+### 3. Bash Command Execution Bounds and UTF-8 Output Budget
 
 - **Timeout**: `timeoutMs` is measured in milliseconds, like every other duration field (for example `durationMs`). The default command execution timeout is 30,000 ms (30 seconds), with an enforced hard maximum cap of 120,000 ms (120 seconds) if a custom timeout is requested by the model.
-- **Byte-Exact Output Budget**:
+- **UTF-8 Output Budget**:
   - The returned command `content` is strictly bounded at **40 KiB (40,960 UTF-8 bytes)**, *inclusive* of the truncation marker: `\n[...output truncated...]\n`.
   - When raw output exceeds 40 KiB, head and tail budgets are calculated dynamically from the remaining budget after reserving the UTF-8 byte length of the marker: `headBudget = tailBudget = (40,960 - markerBytes) / 2`.
   - The limit is measured strictly in UTF-8 bytes, not line counts.
@@ -142,10 +142,11 @@ On 2026-09-13, the [credential-isolation decision](https://datn-fit-hcmus.atlass
 
 On 2026-11-09, [CDA-63](https://datn-fit-hcmus.atlassian.net/browse/CDA-63) amended this record:
 
-- **Shared output budget** (§3): the 40 KiB budget, capped at 40,960 bytes including the marker,
-  is shared by every tool, not only `bash`. `read` output is capped with the same marker and
-  head-and-tail split, and the budget helper is reusable by `bash` and the Verification Runner.
-  Both ends are kept, so the final error survives truncation.
+- **Shared output budget** (§3): the 40 KiB budget, capped at 40,960 bytes including the marker
+  (and up to six bytes less when a cut lands inside a character), is shared by every tool, not only
+  `bash`. `read` output is capped with the same marker and head-and-tail split, and the budget
+  helper is reusable by `bash` and the Verification Runner. Both ends are kept, so the final error
+  survives truncation.
 
 ### 8. Credential Isolation for Tool and Verification Processes
 
