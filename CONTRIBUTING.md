@@ -191,18 +191,18 @@ Quy ước của nhóm: nếu conflict nằm ở phần code của người khá
 
 | Mục | Nội dung |
 |-----|----------|
-| Tóm tắt | Trước, sau, vì sao, phần chưa làm, mã ticket (ví dụ `CDA-12`, GitHub tự chuyển thành link Jira). Nếu PR nằm trong một chuỗi ticket thì ghi thêm ticket mà PR dựa trên và mở đường cho |
+| Tóm tắt | Trước, sau, vì sao, phần chưa làm, mã ticket (ví dụ `CDA-12`, GitHub tự chuyển thành link Jira). Mỗi dòng tối đa 2 câu. Chưa làm là chỗ duy nhất ghi việc để lại cho sau. Dòng Ticket ghi thêm ticket mà PR dựa trên và mở đường cho, nếu PR nằm trong một chuỗi ticket. Nếu acceptance criteria (AC) của ticket đã sửa trong lúc làm thì ghi AC nào đổi. |
 | Ví dụ | Hành vi mới qua một ví dụ cụ thể: output TUI/CLI, Tool Result, chuỗi Session Event, ... Nếu sửa hành vi có sẵn thì để cả trước và sau. PR không có hành vi mới thì ghi `Không có: <lý do>` |
 | Thay đổi | Bản đồ diff, thứ tự nên đọc, thay đổi interface giữa các package |
 | Flow | Sơ đồ Mermaid, bắt buộc khi PR thêm hoặc đổi luồng chạy qua từ 2 thành phần trở lên, thêm hoặc đổi trạng thái của Agent Session, hoặc có vấn đề về thứ tự xử lý, chạy đồng thời |
 | Quyết định thiết kế | Chỗ ticket/ADR không quy định sẵn: đã chọn gì, vì sao, phương án bị loại, nhược điểm còn lại |
 | Kiểm thử | Lệnh test riêng, kịch bản được bao phủ, phần chưa kiểm thử được (nếu có thay đổi code) |
-| Rủi ro và ngoài phạm vi | Rủi ro đã biết, việc để lại kèm mã ticket theo dõi |
-| Checklist | 4 ô chủ PR tự đánh giá, là những việc CI không kiểm được |
+| Rủi ro | Rủi ro đã biết của phần được merge. Không chép lại việc để lại cho sau (đã ở Chưa làm) hay phần chưa kiểm thử (đã ở Kiểm thử). |
+| Checklist | 5 ô chủ PR tự đánh giá và một dòng ghi docs nào đã cập nhật hoặc vì sao không cần. Đây đều là những việc CI không kiểm được. |
 
-**Tóm tắt** luôn phải có. **Ví dụ** luôn giữ tiêu đề mục. Các mục khác không áp dụng thì xóa. Không cần ghi lại loại thay đổi (đã có trong tiêu đề PR) hay liệt kê lại các lệnh mà CI đã chạy.
+**Tóm tắt** luôn phải có. **Ví dụ** luôn giữ tiêu đề mục. Các mục khác không áp dụng thì xóa. Mỗi ý chỉ ghi ở một mục, mục khác cần nhắc tới thì trỏ sang thay vì chép lại. Không cần ghi lại loại thay đổi (đã có trong tiêu đề PR) hay liệt kê lại các lệnh mà CI đã chạy.
 
-PR tham khảo cách viết: [#61](https://github.com/quangdat2511/coding-agent/pull/61) (bảng quyết định thiết kế) và [#57](https://github.com/quangdat2511/coding-agent/pull/57) (Flow gồm `flowchart` và `sequenceDiagram`; PR đã đóng nhưng phần Flow vẫn đáng tham khảo). Hai PR này viết theo template cũ nên tên mục khác, nhưng nội dung đúng tinh thần của template hiện tại.
+PR tham khảo cách viết: [#76](https://github.com/quangdat2511/coding-agent/pull/76) cho mục Ví dụ và bảng Quyết định thiết kế. [#71](https://github.com/quangdat2511/coding-agent/pull/71) cho mục Flow, sơ đồ chỉ đúng chỗ Gemini từng trả lỗi 400. Hai PR này viết theo bản template trước, khi mục cuối còn tên là Rủi ro và ngoài phạm vi.
 
 > **Lưu ý:** Có thể dùng AI hỗ trợ soạn tiêu đề và mô tả PR, nhưng chủ PR phải **đọc lại toàn bộ trước khi chuyển PR sang Ready for review**, đảm bảo nội dung phản ánh đúng và đầy đủ thay đổi thực tế.
 
