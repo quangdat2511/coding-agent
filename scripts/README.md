@@ -73,6 +73,38 @@ Also verified: `require("@coding-agent/ai")`, `import("@coding-agent/ai")`, and
 `"@coding-agent/ai"` passes. These checks inspect reachable emitted code, not unused source imports
 or computed module specifiers.
 
+## Tools child-process launch check
+
+`bun run ci:check` also enforces CDA-68's shared launch path through Biome. The `tools` package
+cannot import `bun`, `node:child_process`, or `child_process`, including dynamic imports. Production
+files under `packages/tools/src/`, except `child-process.ts`, cannot reference the `Bun` global or
+reach it through `globalThis`, `global`, or `require`. The broader global restriction prevents
+aliasing the raw spawning API; ordinary filesystem work uses the existing `node:fs` APIs.
+Tests can still use `bun:test` and Bun's test-fixture APIs.
+
+The composition root passes AI's complete credential-name set to `createChildProcessLauncher`.
+Future bash and Verification adapters receive that configured launcher and use `launch` rather
+than spawning directly. Its interface has no environment override, and it copies and filters the
+current parent environment for every child. The one permitted launch module is responsible for
+passing that filtered environment to Bun; review and process-level tests cover that module.
+These lint rules constrain ordinary source code; they are not a sandbox for arbitrary generated
+JavaScript or native code.
+
+### CDA-68 acceptance demonstration
+
+Temporarily add `packages/tools/src/probe.ts`:
+
+```ts
+import { spawn } from "node:child_process";
+
+export const nodeChild = () => spawn("echo", ["probe"]);
+export const bunChild = () => Bun.spawn(["echo", "probe"]);
+```
+
+`bunx biome check packages/tools/src/probe.ts` exits 1 with `noRestrictedImports` and
+`noRestrictedGlobals` errors. The same rules run in the existing CI lint step and staged-file
+pre-commit check. Remove the probe afterwards; `child-process.ts` itself passes the lint check.
+
 ## Discord PR posts
 
 The `Discord PR Post` workflow runs `scripts/notify-discord.ts` on pull requests into `main`. When a

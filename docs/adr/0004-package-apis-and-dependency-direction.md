@@ -373,6 +373,13 @@ export function createWorkspaceResolver(
 >;
 
 export function normalizeWindowsShellPath(input: string): string;
+export function createChildEnvironmentBuilder(
+  credentialEnvVars: readonly string[],
+  platform?: NodeJS.Platform,
+): CreateChildEnvironmentResult;
+export function createChildProcessLauncher(
+  credentialEnvVars: readonly string[],
+): CreateChildProcessLauncherResult;
 export function readTool(): ExecutableTool<typeof ReadParams>;
 export function writeTool(): ExecutableTool<typeof WriteParams>;
 export function editTool(): ExecutableTool<typeof EditParams>;
@@ -409,6 +416,16 @@ following each platform's environment-variable naming rules. On Windows every ma
 removed, including when an input object contains multiple case variants. Nonmatching names keep
 their original spelling and values; prefix matches such as `OPENAI_API_KEY_BACKUP` are preserved.
 The declared MVP names are ASCII, so this decision does not require broader Unicode case folding.
+
+`createChildEnvironmentBuilder` returns either the configuration error above or an `ok: true`
+result with a `build(parent)` function; each call returns an independent filtered environment.
+Its optional platform argument permits testing Windows name matching on every host. The actual
+launcher always uses the host platform. `createChildProcessLauncher` returns the same failure
+shape or an `ok: true` result with a `ChildProcessLauncher`. Its `launch(command, { cwd }?)`
+accepts an executable and argument array and returns the Bun child handle with piped stdout and
+stderr, closed stdin, and an exit promise. Shell selection, tool timeouts, output budgeting, and
+Verification result mapping belong to the later adapters; this factory does not execute a shell
+or start any child during construction.
 
 `createWorkspaceResolver` canonicalizes and validates `repoRoot` once, which satisfies ADR 0002's
 requirement that `repoRoot` be valid before the Agent Session reaches `ready`. Tools take no

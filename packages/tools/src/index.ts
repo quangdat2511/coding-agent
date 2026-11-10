@@ -1,3 +1,12 @@
+export type { ChildEnvironment, CreateChildEnvironmentResult } from "./child-environment.ts";
+export { createChildEnvironmentBuilder } from "./child-environment.ts";
+export type {
+  ChildLaunchOptions,
+  ChildProcess,
+  ChildProcessLauncher,
+  CreateChildProcessLauncherResult,
+} from "./child-process.ts";
+export { createChildProcessLauncher } from "./child-process.ts";
 export { EditParams, editTool } from "./edit.ts";
 export { errnoOf } from "./errno.ts";
 export { normalizeWindowsShellPath } from "./paths.ts";
