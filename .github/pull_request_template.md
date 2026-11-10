@@ -41,6 +41,7 @@ PR không có hành vi mới (chỉ sửa docs, refactor, config) thì ghi "Khô
 Bản đồ diff theo file hoặc module, không kể lại code từng dòng.
 - Ghi rõ phần cốt lõi cần soi kỹ, phần cơ học (đổi tên, test kit, docs) và thứ tự nên đọc.
 - Nếu đổi type được export hoặc hợp đồng giữa các package: ghi cũ → mới và package nào bị ảnh hưởng.
+- Nếu PR không sửa docs, ADR hay CONTEXT.md bị ảnh hưởng thì ghi một dòng "Docs không cần sửa: <lý do>".
 -->
 
 ## Flow
@@ -113,4 +114,3 @@ thử (đã ghi ở Kiểm thử).
 - [ ] Không có file nhạy cảm hay code debug
 - [ ] PR chỉ phục vụ một mục đích
 - [ ] Mô tả và Flow khớp với code hiện tại, sẽ cập nhật nếu code đổi trong lúc review
-- **Docs, ADR, CONTEXT.md:** <!-- File đã cập nhật, hoặc "Không cần: <lý do>". -->
