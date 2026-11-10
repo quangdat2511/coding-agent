@@ -373,12 +373,30 @@ export function createWorkspaceResolver(
 >;
 
 export function normalizeWindowsShellPath(input: string): string;
-export function createDefaultTools(): ToolRegistry;
 export function readTool(): ExecutableTool<typeof ReadParams>;
 export function writeTool(): ExecutableTool<typeof WriteParams>;
 export function editTool(): ExecutableTool<typeof EditParams>;
-export function bashTool(): ExecutableTool<typeof BashParams>;
 ```
+
+`createDefaultTools`, `bashTool`, and the Verification Runner also form part of the public API.
+Factories that include process execution receive a configured shared child launcher from the
+composition root, rather than constructing their own launch path. This replaces the original
+zero-argument sketches for `createDefaultTools` and `bashTool`; it does not add timeout options.
+
+The composition root reads the complete `PROVIDER_CREDENTIAL_ENV_VARS` export from `ai` and
+supplies it to the launcher's factory in `tools`. The set includes all six credential variable
+names of the MVP providers, including providers not selected for the current run. OpenCode and
+Custom Provider credential names are outside that declared MVP set; extending the set belongs
+with adding CLI support for them. `tools` receives names, never imports `ai`, and never discovers
+additional names by prefix or by scanning for secret-looking values.
+
+Every child started by `bash` or the Verification Runner goes through this shared launcher. At
+each launch it copies Coding Agent's current environment and removes exactly the configured
+credential names. The name set stays fixed after construction; the environment is not a
+session-start snapshot. Filtering does not change Coding Agent's own environment. Other variables,
+including a task's `GH_TOKEN` and same-prefixed names outside the set, retain their current values
+through filtering. Execution-mode requirements such as `CI=1` and `TERM=dumb` remain governed by
+ADR 0001 §3; they are separate from the credential-filtering step.
 
 `createWorkspaceResolver` canonicalizes and validates `repoRoot` once, which satisfies ADR 0002's
 requirement that `repoRoot` be valid before the Agent Session reaches `ready`. Tools take no
@@ -596,6 +614,21 @@ amended this record:
   Gemini 3 attaches its `thoughtSignature` to the `functionCall` part itself and rejects a replay
   without it, so the value lives on the Tool Call rather than in the research's separate opaque
   block.
+
+On 2026-11-10,
+[Build the credential-free child environment](https://datn-fit-hcmus.atlassian.net/browse/CDA-68)
+amended this record:
+
+- **Shared child launch dependency** (§4): the composition root configures one launch path for
+  `bash` and the Verification Runner with AI's complete declared MVP credential-name set. This
+  replaces relying on each caller to remember a standalone filtering helper, and replaces the
+  zero-argument sketches for factories that include process execution.
+- **Environment timing** (§4): children receive a newly filtered copy of the current parent
+  environment at each launch, rather than a session-start snapshot. The configured credential-name
+  set is fixed; other variables can change between launches.
+
+The standalone logic prototype and its accepted Q1–Q3 verdict are preserved on branch
+`CDA-68-prototype-child-environment`, commit `b8007bd`, under `packages/tools/prototype/`.
 
 ## Consequences
 
