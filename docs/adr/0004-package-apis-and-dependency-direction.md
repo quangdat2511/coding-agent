@@ -398,6 +398,18 @@ including a task's `GH_TOKEN` and same-prefixed names outside the set, retain th
 through filtering. Execution-mode requirements such as `CI=1` and `TERM=dumb` remain governed by
 ADR 0001 §3; they are separate from the credential-filtering step.
 
+Callers cannot pass a per-launch environment map to replace or extend the launcher's environment.
+The launcher owns construction of the child environment, applies execution-mode settings before
+the final credential filtering, and supplies that environment explicitly when starting the child.
+No caller can merge variables into it after filtering. An absent or empty configured name set is
+an `INVALID_CONFIGURATION` failure during launcher construction, before any child is started.
+
+Credential names are matched case-insensitively on Windows and exactly on Linux and macOS,
+following each platform's environment-variable naming rules. On Windows every matching key is
+removed, including when an input object contains multiple case variants. Nonmatching names keep
+their original spelling and values; prefix matches such as `OPENAI_API_KEY_BACKUP` are preserved.
+The declared MVP names are ASCII, so this decision does not require broader Unicode case folding.
+
 `createWorkspaceResolver` canonicalizes and validates `repoRoot` once, which satisfies ADR 0002's
 requirement that `repoRoot` be valid before the Agent Session reaches `ready`. Tools take no
 `repoRoot` argument; it arrives through `ctx.workspace`. `normalizeWindowsShellPath` converts the
@@ -626,6 +638,11 @@ amended this record:
 - **Environment timing** (§4): children receive a newly filtered copy of the current parent
   environment at each launch, rather than a session-start snapshot. The configured credential-name
   set is fixed; other variables can change between launches.
+- **Environment ownership** (§4): process callers cannot supply a replacement or supplemental
+  environment map. The shared launcher constructs and explicitly supplies the filtered environment.
+- **Platform name matching** (§4): Windows uses case-insensitive credential-name matching,
+  removing all matching case variants; Linux and macOS use exact matching. Other names and values
+  are preserved.
 
 The standalone logic prototype and its accepted Q1–Q3 verdict are preserved on branch
 `CDA-68-prototype-child-environment`, commit `b8007bd`, under `packages/tools/prototype/`.
