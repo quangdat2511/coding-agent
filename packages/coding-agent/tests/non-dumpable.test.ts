@@ -3,19 +3,16 @@ import { readFileSync } from "node:fs";
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { type Libc, markProcessNonDumpable } from "../src/non-dumpable.ts";
-import { firstLine, runProcess, withTemporaryDirectory } from "./support/process.ts";
+import {
+  bunLikeShebang as bun,
+  firstLine,
+  runProcess,
+  withTemporaryDirectory,
+} from "./support/process.ts";
 
 const cli = join(import.meta.dir, "..", "src", "cli.ts");
 const probe = join(import.meta.dir, "support", "proc-access-probe.ts");
 const failHardening = join(import.meta.dir, "support", "fail-hardening.ts");
-
-// The flags of the executable's shebang, so no bunfig.toml or .env of the host takes part. Bun
-// 1.3.14 on Windows crashes on --config=/dev/null, so Windows runs without that flag.
-const bun = [
-  process.execPath,
-  "--no-env-file",
-  ...(process.platform === "win32" ? [] : ["--config=/dev/null"]),
-];
 
 const credentialName = "ANTHROPIC_API_KEY";
 const credential = { [credentialName]: "sk-test-credential-value" };

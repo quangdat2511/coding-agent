@@ -17,6 +17,18 @@ export function replay(fixture: string): Respond {
     });
 }
 
+// Read by replay-provider.ts: the fixtures to replay, in order, separated by commas.
+export const REPLAY_FIXTURES_ENV_VAR = "CODING_AGENT_TEST_REPLAY_FIXTURES";
+
+export function replayInOrder(fixtures: readonly string[]): Respond {
+  const remaining = [...fixtures];
+  return (request) => {
+    const next = remaining.shift();
+    if (next === undefined) throw new Error("no recorded response is left for this request");
+    return replay(next)(request);
+  };
+}
+
 export const hang: Respond = ({ signal }) =>
   new Promise((_, reject) => {
     const abort = () => reject(signal?.reason ?? new DOMException("aborted", "AbortError"));
@@ -24,14 +36,8 @@ export const hang: Respond = ({ signal }) =>
     signal?.addEventListener("abort", abort, { once: true });
   });
 
-// Every provider adapter, SDK-backed or not, sends through globalThis.fetch.
-export async function withProvider(
-  respond: Respond,
-  run: (sent: readonly SentRequest[]) => Promise<void>,
-): Promise<void> {
-  const sent: SentRequest[] = [];
-  const original = globalThis.fetch;
-  globalThis.fetch = Object.assign(
+export function providerFetch(respond: Respond, sent: SentRequest[] = []): typeof fetch {
+  return Object.assign(
     async (input: string | URL | Request, init?: RequestInit) => {
       const raw =
         input instanceof Request ? new Request(input, init) : new Request(input.toString(), init);
@@ -44,8 +50,18 @@ export async function withProvider(
       sent.push(request);
       return respond(request);
     },
-    { preconnect: original.preconnect },
+    { preconnect: globalThis.fetch.preconnect },
   );
+}
+
+// Every provider adapter, SDK-backed or not, sends through globalThis.fetch.
+export async function withProvider(
+  respond: Respond,
+  run: (sent: readonly SentRequest[]) => Promise<void>,
+): Promise<void> {
+  const sent: SentRequest[] = [];
+  const original = globalThis.fetch;
+  globalThis.fetch = providerFetch(respond, sent);
   try {
     await run(sent);
   } finally {

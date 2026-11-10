@@ -3,6 +3,15 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+// Bun with the flags of the executable's shebang, so no bunfig.toml or .env of the host takes part,
+// for a test that must add a flag such as --preload. Bun 1.3.14 on Windows crashes on
+// --config=/dev/null, so Windows runs without that flag.
+export const bunLikeShebang: readonly string[] = [
+  process.execPath,
+  "--no-env-file",
+  ...(process.platform === "win32" ? [] : ["--config=/dev/null"]),
+];
+
 export const firstLine = (text: string): string => text.split("\n")[0] ?? "";
 
 export async function withTemporaryDirectory<T>(
