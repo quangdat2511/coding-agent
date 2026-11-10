@@ -2,6 +2,7 @@
 // Exit 2 means no Agent Session was opened (ADR 0005 §3). Usage errors are decided before any file
 // or environment access, and configuration errors before any Agent Session opens; a run that opens
 // none removes the output directory it created.
+import { checkAncestorCredentials } from "./ancestor-credentials.ts";
 import { createConfiguredChildLauncher } from "./child-launcher.ts";
 import { runHeadless } from "./headless.ts";
 import { markProcessNonDumpable } from "./non-dumpable.ts";
@@ -38,6 +39,18 @@ async function main(
   // Bun reports a write to a closed pipe as an "error" event, which would end the run with exit 1.
   process.stdout.on("error", () => undefined);
   process.stderr.on("error", () => undefined);
+  // ADR 0001 §8, startup verification. Before configuration, so that a refused launch writes
+  // nothing, and before any Agent Session opens. It does nothing unless the policy is
+  // "auto-approve" and the platform is Linux.
+  const ancestors = await checkAncestorCredentials(parsed.args.approvalPolicy);
+  if (!ancestors.ok) {
+    const prefix =
+      ancestors.code === "CHECK_FAILED"
+        ? "cannot check the ancestor processes for a provider credential: "
+        : "";
+    process.stderr.write(`coding-agent: ${prefix}${ancestors.message}\n`);
+    return ancestors.code === "CREDENTIAL_IN_ANCESTOR" ? 2 : 70;
+  }
   // Temporary: CDA-75 (D3.1) writes the run's files, and CDA-78 (D3.2) cancels on a signal.
   const { exitCode } = await runHeadless({
     args: parsed.args,

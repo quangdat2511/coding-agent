@@ -221,6 +221,9 @@ Checks run in that order and the first problem wins. The output directory is cre
 other check has passed, and whatever it created is removed again if it then proves unusable, so a
 configuration error writes nothing.
 
+The [ancestor check](#ancestor-check) runs before all of these. When it finds a credential in an
+ancestor process, it also exits 2 and writes nothing.
+
 ## Process hardening
 
 On Linux, the Coding Agent process marks itself non-dumpable as soon as its arguments parse. This
@@ -258,8 +261,9 @@ The guarantee has these limits:
   `CAP_DAC_OVERRIDE` or `CAP_DAC_READ_SEARCH`, can still list the fd numbers in `/proc/<pid>/fd`.
   It cannot follow the links.
 - It protects only the Coding Agent process. An ancestor that still holds the credential stays
-  readable, for example the shell that exported it. Under `"auto-approve"`, the startup ancestor
-  check of CDA-72 will refuse that launch. Under `"ask"`, ADR 0001 §8 accepts this residual.
+  readable, for example the shell that exported it. Under `"auto-approve"`, the
+  [ancestor check](#ancestor-check) refuses that launch. Under `"ask"`, ADR 0001 §8 accepts this
+  residual.
 - A child is dumpable again after its own `execve`, so this call does not protect it. The scrubbed
   environment of rule 1 protects the child instead.
 - Only Linux has this control. On macOS, a same-user process can read the startup environment of
@@ -278,3 +282,56 @@ also skipped. A reader with one of them can pass at least one of the checks.
 On every platform, the same file checks each failure of `markProcessNonDumpable` with a fake C
 library. It also preloads `tests/support/fail-hardening.ts` into the executable, which makes the
 hardening fail, and checks that the run exits 70 before it resolves the configuration.
+
+## Ancestor check
+
+This check applies under `"auto-approve"` on Linux. If a process above the Coding Agent still
+holds a provider credential, the Coding Agent refuses to run. This is the startup check of
+[ADR 0001 §8](../../docs/adr/0001-tool-contracts-and-safety-policy.md). A launcher that starts the
+Coding Agent as a child keeps the credential in its own `/proc/<pid>/environ`. A Tool Call child
+runs as the same user, so it can read that file. Coding Agent cannot scrub or mark a process that
+it did not start. The launcher must replace itself with the Coding Agent through `exec`, and this
+check makes that rule a checked precondition.
+
+`main` in `src/cli.ts` calls `checkAncestorCredentials` from `src/ancestor-credentials.ts` right
+after the hardening step and before it resolves the configuration. The check reads the parent from
+field 4 of `/proc/self/stat`. For each ancestor up to the end of the chain, it reads
+`/proc/<pid>/environ` and then goes on to that ancestor's parent. The credential variables are all
+the names in `PROVIDER_CREDENTIAL_ENV_VARS` from `@coding-agent/ai`, not only those of the chosen
+provider. A blank value counts as none.
+
+The check has these outcomes:
+
+- If an ancestor holds a credential, the run exits 2 and writes nothing. The message names the
+  process ID, the process name and the variable, but never the value.
+- If the environment of an ancestor is denied with `EACCES` or `EPERM`, the check goes on to the
+  parent of that ancestor. A root-owned `init` and a non-dumpable process are examples. A Tool
+  Call child has the same user and capabilities as the Coding Agent, so the child is denied the
+  same file.
+- If an ancestor exits during the walk, the chain ends there.
+- If `/proc/self/stat` cannot be read, or another read fails, the run exits 70. The check fails
+  closed, because it cannot show that no ancestor holds a credential.
+
+The check has these limits:
+
+- It does not run under `"ask"`. ADR 0001 §8 accepts the residual there: the shell that exported
+  the key stays a readable ancestor. Two controls bound that residual. The `read` tool is jailed to
+  the Repository Root, so it cannot open a `/proc` path. Every mutating `bash` call waits for an
+  Approval, so a human allows each command that can read `/proc`.
+- It does not run on macOS or Windows. On those platforms `"auto-approve"` has no protection
+  against an ancestor that holds a credential. On macOS a same-user process can read the startup
+  environment of another process through `KERN_PROCARGS2` and `ps`. Run unattended evaluations
+  under `"auto-approve"` in a Linux container, as ADR 0005 does.
+- It walks only the ancestor chain. A sibling that holds the credential, such as another stage of
+  a pipeline, stays the launcher's responsibility.
+- Bun loads a `.env` file into `process.env`, but that does not change `/proc/<pid>/environ`. Thus
+  only variables in the environment that `execve` received count.
+
+`tests/ancestor-credentials.test.ts` checks every outcome with a fake `/proc` on every platform. On
+Linux it also starts the executable from two `/bin/sh` launchers that hold a credential. The first
+launcher runs `exec`, and the run continues to the configuration. The second launcher stays as the
+parent, and the run exits 2. That part is skipped on other platforms, so it runs in CI on Ubuntu.
+The test runner is itself an ancestor of each run. If the shell that started `bun test` exported a
+provider key, the test of the `exec` launcher is skipped, because the check rightly refuses every
+run. Under that shell, the other tests that start the executable under `"auto-approve"` also fail
+on Linux. Unset the key before you run the tests.
