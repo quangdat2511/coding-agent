@@ -44,11 +44,7 @@ async function main(
   // "auto-approve" and the platform is Linux.
   const ancestors = await checkAncestorCredentials(parsed.args.approvalPolicy);
   if (!ancestors.ok) {
-    const prefix =
-      ancestors.code === "CHECK_FAILED"
-        ? "cannot check the ancestor processes for a provider credential: "
-        : "";
-    process.stderr.write(`coding-agent: ${prefix}${ancestors.message}\n`);
+    process.stderr.write(`coding-agent: ${ancestors.message}\n`);
     return ancestors.code === "CREDENTIAL_IN_ANCESTOR" ? 2 : 70;
   }
   // Temporary: CDA-75 (D3.1) writes the run's files, and CDA-78 (D3.2) cancels on a signal.

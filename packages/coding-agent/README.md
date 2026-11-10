@@ -261,9 +261,9 @@ The guarantee has these limits:
   `CAP_DAC_OVERRIDE` or `CAP_DAC_READ_SEARCH`, can still list the fd numbers in `/proc/<pid>/fd`.
   It cannot follow the links.
 - It protects only the Coding Agent process. An ancestor that still holds the credential stays
-  readable, for example the shell that exported it. Under `"auto-approve"`, the
-  [ancestor check](#ancestor-check) refuses that launch. Under `"ask"`, ADR 0001 §8 accepts this
-  residual.
+  readable, for example the shell that exported it. The [ancestor check](#ancestor-check) refuses
+  that launch under `"auto-approve"`. It finds a credential in the environment or the arguments of
+  an ancestor. It cannot see a credential that an ancestor set after it started. Under `"ask"`, ADR 0001 §8 accepts this residual.
 - A child is dumpable again after its own `execve`, so this call does not protect it. The scrubbed
   environment of rule 1 protects the child instead.
 - Only Linux has this control. On macOS, a same-user process can read the startup environment of
@@ -296,19 +296,27 @@ check makes that rule a checked precondition.
 `main` in `src/cli.ts` calls `checkAncestorCredentials` from `src/ancestor-credentials.ts` right
 after the hardening step and before it resolves the configuration. The check reads the parent from
 field 4 of `/proc/self/stat`. For each ancestor up to the end of the chain, it reads
-`/proc/<pid>/environ` and then goes on to that ancestor's parent. The credential variables are all
-the names in `PROVIDER_CREDENTIAL_ENV_VARS` from `@coding-agent/ai`, not only those of the chosen
-provider. A blank value counts as none.
+`/proc/<pid>/environ` and `/proc/<pid>/cmdline`. Then it reads the stat again and goes on to that
+ancestor's parent. The credential variables are all the names in `PROVIDER_CREDENTIAL_ENV_VARS`
+from `@coding-agent/ai`, not only those of the chosen provider. In the environment, a blank value
+counts as none, by the rule of `readEnvCredential`. In the arguments, an assignment such as
+`ANTHROPIC_API_KEY=sk-...` counts, because every process can read `/proc/<pid>/cmdline`.
 
 The check has these outcomes:
 
 - If an ancestor holds a credential, the run exits 2 and writes nothing. The message names the
-  process ID, the process name and the variable, but never the value.
+  process ID, the process name and the variable, but never the value. The name is shown as UTF-8,
+  and its control characters are escaped.
 - If the environment of an ancestor is denied with `EACCES` or `EPERM`, the check goes on to the
   parent of that ancestor. A root-owned `init` and a non-dumpable process are examples. A Tool
   Call child has the same user and capabilities as the Coding Agent, so the child is denied the
   same file.
-- If an ancestor exits during the walk, the chain ends there.
+- If an ancestor exits after its first stat read, the check goes on to the parent from that read.
+  The second stat read finds this case: the process is gone, or its start time (field 22) changed
+  because another process reused the pid. The files read in between then do not count.
+- If the stat of an ancestor cannot be read, the run exits 70, also when the ancestor is gone or
+  `hidepid` hides it. The processes above it can still hold the credential, and the walk can no
+  longer find them.
 - If `/proc/self/stat` cannot be read, or another read fails, the run exits 70. The check fails
   closed, because it cannot show that no ancestor holds a credential.
 
@@ -324,14 +332,24 @@ The check has these limits:
   under `"auto-approve"` in a Linux container, as ADR 0005 does.
 - It walks only the ancestor chain. A sibling that holds the credential, such as another stage of
   a pipeline, stays the launcher's responsibility.
-- Bun loads a `.env` file into `process.env`, but that does not change `/proc/<pid>/environ`. Thus
-  only variables in the environment that `execve` received count.
+- It sees only the environment that `execve` gave each ancestor, and the arguments. An ancestor
+  that set the variable after it started keeps it only in its memory. Examples are a shell where
+  you typed `export ANTHROPIC_API_KEY=...`, and a Python launcher that sets `os.environ` and then
+  calls `subprocess.run`. The check passes such a launch. If Yama allows it, for example at
+  `ptrace_scope` 0, a same-uid Tool Call can still read that memory through `/proc/<pid>/mem`.
+  Start the Coding Agent with `exec`, or pass the key only in the environment of the Coding Agent.
+- For the same reason, Bun loads a `.env` file into `process.env`, but that does not change
+  `/proc/<pid>/environ`.
 
-`tests/ancestor-credentials.test.ts` checks every outcome with a fake `/proc` on every platform. On
-Linux it also starts the executable from two `/bin/sh` launchers that hold a credential. The first
-launcher runs `exec`, and the run continues to the configuration. The second launcher stays as the
-parent, and the run exits 2. That part is skipped on other platforms, so it runs in CI on Ubuntu.
+`tests/ancestor-credentials.test.ts` checks every outcome with a fake `/proc` on every platform. It
+also preloads `tests/support/fail-ancestor-check.ts` into the executable, which makes the check
+fail, and checks that the run exits 70 and writes nothing. On Linux it also starts the executable
+from two `/bin/sh` launchers that hold a credential. The first launcher runs `exec`, and the run
+continues to the configuration. The second launcher stays as the parent, and the run exits 2. That
+part is skipped on other platforms, so it runs in CI on Ubuntu.
+
 The test runner is itself an ancestor of each run. If the shell that started `bun test` exported a
-provider key, the test of the `exec` launcher is skipped, because the check rightly refuses every
-run. Under that shell, the other tests that start the executable under `"auto-approve"` also fail
-on Linux. Unset the key before you run the tests.
+provider key, the check rightly refuses every run. `runnerChainIsClean` in
+`tests/support/ancestor-chain.ts` finds this case, and the tests that need a run to get past the
+check are then skipped. In CI, a test asserts that the runner's chain is clean, so a check that
+wrongly refuses the runner fails instead of skipping.

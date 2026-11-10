@@ -2,6 +2,7 @@ import { describe, expect, it } from "bun:test";
 import { existsSync, statSync } from "node:fs";
 import { cp, readdir } from "node:fs/promises";
 import { join } from "node:path";
+import { runnerChainIsClean } from "./support/ancestor-chain.ts";
 import { NAMED_TASK_FILE, NAMED_TASK_REPO, READ_ONLY_RUN } from "./support/named-task.ts";
 import { noModeBits, onWindows } from "./support/platform.ts";
 import {
@@ -11,6 +12,9 @@ import {
   withTemporaryDirectory,
 } from "./support/process.ts";
 import { REPLAY_FIXTURES_ENV_VAR } from "./support/recorded-provider.ts";
+
+// A run that gets past argument parsing meets the ancestor check first.
+const cleanChain = await runnerChainIsClean();
 
 const packageRoot = join(import.meta.dir, "..");
 
@@ -135,7 +139,7 @@ describe("the coding-agent executable", () => {
     },
   );
 
-  it.each<ConfigurationErrorCase>([
+  it.skipIf(!cleanChain).each<ConfigurationErrorCase>([
     {
       name: "an unknown model",
       flags: { "--model": "no-such-model" },
@@ -183,42 +187,48 @@ describe("the coding-agent executable", () => {
     },
   );
 
-  it("exits 0 on the named task against recorded Google responses, with read as the only tool", async () => {
-    await withTemporaryDirectory(async (directory) => {
-      await cp(NAMED_TASK_REPO, join(directory, "repo"), { recursive: true });
-      const { exitCode, stdout, stderr } = await runProcess(
-        [
-          ...bunLikeShebang,
-          "--preload",
-          replayProvider,
-          bin,
-          ...validRun({
-            "--task-file": NAMED_TASK_FILE,
-            "--provider": READ_ONLY_RUN.provider,
-            "--model": READ_ONLY_RUN.model,
-            "--repo-root": "repo",
-          }),
-        ],
-        {
-          cwd: directory,
-          env: {
-            GOOGLE_API_KEY: secret,
-            [REPLAY_FIXTURES_ENV_VAR]: READ_ONLY_RUN.fixtures.join(","),
+  it.skipIf(!cleanChain)(
+    "exits 0 on the named task against recorded Google responses, with read as the only tool",
+    async () => {
+      await withTemporaryDirectory(async (directory) => {
+        await cp(NAMED_TASK_REPO, join(directory, "repo"), { recursive: true });
+        const { exitCode, stdout, stderr } = await runProcess(
+          [
+            ...bunLikeShebang,
+            "--preload",
+            replayProvider,
+            bin,
+            ...validRun({
+              "--task-file": NAMED_TASK_FILE,
+              "--provider": READ_ONLY_RUN.provider,
+              "--model": READ_ONLY_RUN.model,
+              "--repo-root": "repo",
+            }),
+          ],
+          {
+            cwd: directory,
+            env: {
+              GOOGLE_API_KEY: secret,
+              [REPLAY_FIXTURES_ENV_VAR]: READ_ONLY_RUN.fixtures.join(","),
+            },
           },
-        },
-      );
+        );
 
-      expect(stderr).toBe("coding-agent: succeeded; workspace changed: no\n");
-      expect(exitCode).toBe(0);
-      expect(stdout).toStartWith("I have read `src/slugify.ts`.");
-      expect(stdout).not.toContain(secret);
-      expect((await readdir(directory)).sort()).toEqual(["out", "repo"]);
-    });
-  });
+        expect(stderr).toBe("coding-agent: succeeded; workspace changed: no\n");
+        expect(exitCode).toBe(0);
+        expect(stdout).toStartWith("I have read `src/slugify.ts`.");
+        expect(stdout).not.toContain(secret);
+        expect((await readdir(directory)).sort()).toEqual(["out", "repo"]);
+      });
+    },
+  );
 
   // A shell pipeline is the simplest way to close the reading end before the run prints, and Windows
-  // reports a closed pipe differently, so this is POSIX only.
-  it.skipIf(onWindows)(
+  // reports a closed pipe differently, so this is POSIX only. The shell stays alive as an ancestor,
+  // so it must not receive the key in its environment, or the ancestor check refuses the run. It
+  // reads the key from a file and exports it, which keeps the key out of its /proc environ and
+  // arguments.
+  it.skipIf(onWindows || !cleanChain)(
     "exits 0 on a succeeded run after the reader of its standard output has gone",
     async () => {
       await withTemporaryDirectory(async (directory) => {
@@ -235,67 +245,70 @@ describe("the coding-agent executable", () => {
             "--repo-root": "repo",
           }),
         ];
-        const { stderr } = await runProcess(
-          ["sh", "-c", '("$@"; echo "exit $?" >&2) | true', "sh", ...agentCommand],
-          {
-            cwd: directory,
-            env: {
-              GOOGLE_API_KEY: secret,
-              [REPLAY_FIXTURES_ENV_VAR]: READ_ONLY_RUN.fixtures.join(","),
-            },
-          },
-        );
+        await Bun.write(join(directory, "key"), secret);
+        const script =
+          'GOOGLE_API_KEY="$(cat key)"; export GOOGLE_API_KEY; ("$@"; echo "exit $?" >&2) | true';
+        const { stderr } = await runProcess(["sh", "-c", script, "sh", ...agentCommand], {
+          cwd: directory,
+          env: { [REPLAY_FIXTURES_ENV_VAR]: READ_ONLY_RUN.fixtures.join(",") },
+        });
 
         expect(stderr).toBe("coding-agent: succeeded; workspace changed: no\nexit 0\n");
       });
     },
   );
 
-  it("exits 70 without the credential or an output directory when the session factory throws", async () => {
-    await withTemporaryDirectory(async (directory) => {
-      await cp(NAMED_TASK_REPO, join(directory, "repo"), { recursive: true });
-      const { exitCode, stdout, stderr } = await runProcess(
-        [
-          ...bunLikeShebang,
-          "--preload",
-          failSessionFactory,
-          bin,
-          ...validRun({
-            "--task-file": NAMED_TASK_FILE,
-            "--provider": READ_ONLY_RUN.provider,
-            "--model": READ_ONLY_RUN.model,
-            "--repo-root": "repo",
-          }),
-        ],
-        { cwd: directory, env: { GOOGLE_API_KEY: secret } },
-      );
+  it.skipIf(!cleanChain)(
+    "exits 70 without the credential or an output directory when the session factory throws",
+    async () => {
+      await withTemporaryDirectory(async (directory) => {
+        await cp(NAMED_TASK_REPO, join(directory, "repo"), { recursive: true });
+        const { exitCode, stdout, stderr } = await runProcess(
+          [
+            ...bunLikeShebang,
+            "--preload",
+            failSessionFactory,
+            bin,
+            ...validRun({
+              "--task-file": NAMED_TASK_FILE,
+              "--provider": READ_ONLY_RUN.provider,
+              "--model": READ_ONLY_RUN.model,
+              "--repo-root": "repo",
+            }),
+          ],
+          { cwd: directory, env: { GOOGLE_API_KEY: secret } },
+        );
 
-      expect(exitCode).toBe(70);
-      expect(stdout).toBe("");
-      expect(stderr).toBe("coding-agent: internal error: forced by the test, key [redacted]\n");
-      expect(await readdir(directory)).toEqual(["repo"]);
-    });
-  });
+        expect(exitCode).toBe(70);
+        expect(stdout).toBe("");
+        expect(stderr).toBe("coding-agent: internal error: forced by the test, key [redacted]\n");
+        expect(await readdir(directory)).toEqual(["repo"]);
+      });
+    },
+  );
 
   // Temporary: CDA-79 (D3.3) gives terminalbench its limits. Until then it is not a configuration
   // error, so it must not exit 2, which Harbor reads as an invalid invocation.
-  it("exits 70 on --profile terminalbench without leaving an output directory behind", async () => {
-    await withTemporaryDirectory(async (directory) => {
-      await Bun.write(join(directory, "task.md"), "Add a failing test, then make it pass.\n");
-      const { exitCode, stdout, stderr } = await run(
-        validRun({ "--profile": "terminalbench" }),
-        directory,
-        { ANTHROPIC_API_KEY: secret },
-      );
+  it.skipIf(!cleanChain)(
+    "exits 70 on --profile terminalbench without leaving an output directory behind",
+    async () => {
+      await withTemporaryDirectory(async (directory) => {
+        await Bun.write(join(directory, "task.md"), "Add a failing test, then make it pass.\n");
+        const { exitCode, stdout, stderr } = await run(
+          validRun({ "--profile": "terminalbench" }),
+          directory,
+          { ANTHROPIC_API_KEY: secret },
+        );
 
-      expect(exitCode).toBe(70);
-      expect(firstLine(stderr)).toBe(
-        "coding-agent: --profile terminalbench is not implemented yet; CDA-79 (D3.3) adds its limits",
-      );
-      expect(stdout).toBe("");
-      expect(await readdir(directory)).toEqual(["task.md"]);
-    });
-  });
+        expect(exitCode).toBe(70);
+        expect(firstLine(stderr)).toBe(
+          "coding-agent: --profile terminalbench is not implemented yet; CDA-79 (D3.3) adds its limits",
+        );
+        expect(stdout).toBe("");
+        expect(await readdir(directory)).toEqual(["task.md"]);
+      });
+    },
+  );
 
   it("writes nothing before it refuses a usage error", async () => {
     await withTemporaryDirectory(async (directory) => {
