@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { createConfiguredChildLauncher } from "../src/index.ts";
+import { createConfiguredChildLauncher } from "../src/child-launcher.ts";
 
 describe("configuring the child launcher in the composition root", () => {
   it("removes all six MVP credential names while preserving variables outside that set", async () => {

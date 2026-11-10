@@ -46,12 +46,9 @@ describe("launching a child process", () => {
     const configured = createChildProcessLauncher(["CDA68_PROVIDER_KEY"]);
     if (!configured.ok) throw new Error(configured.message);
 
-    const child = configured.launcher.launch(printEnvironment);
-    const [exitCode, stdout, stderr] = await Promise.all([
-      child.exited,
-      new Response(child.stdout).text(),
-      new Response(child.stderr).text(),
-    ]);
+    const { exitCode, stdout, stderr } = await readChild(
+      configured.launcher.launch(printEnvironment),
+    );
 
     expect({ exitCode, environment: JSON.parse(stdout), stderr }).toEqual({
       exitCode: 0,
