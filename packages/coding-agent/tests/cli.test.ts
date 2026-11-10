@@ -1,8 +1,8 @@
 import { describe, expect, it } from "bun:test";
 import { existsSync, statSync } from "node:fs";
-import { mkdtemp, readdir, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { readdir } from "node:fs/promises";
 import { join } from "node:path";
+import { firstLine, runProcess, withTemporaryDirectory } from "./support/process.ts";
 
 const packageRoot = join(import.meta.dir, "..");
 
@@ -30,33 +30,8 @@ const required = [
 
 const secret = "sk-test-credential-value";
 
-// Children get only PATH (to find bun) plus what a test adds, so a developer's own provider keys
-// never decide whether a credential is present.
-async function run(args: readonly string[], cwd = packageRoot, env: Record<string, string> = {}) {
-  const child = Bun.spawn([bin, ...args], {
-    cwd,
-    env: { PATH: process.env.PATH ?? "", ...env },
-    stdout: "pipe",
-    stderr: "pipe",
-  });
-  const [exitCode, stdout, stderr] = await Promise.all([
-    child.exited,
-    new Response(child.stdout).text(),
-    new Response(child.stderr).text(),
-  ]);
-  return { exitCode, stdout, stderr };
-}
-
-const firstLine = (stderr: string): string => stderr.split("\n")[0] ?? "";
-
-async function withTemporaryDirectory(body: (directory: string) => Promise<void>): Promise<void> {
-  const directory = await mkdtemp(join(tmpdir(), "coding-agent-cli-"));
-  try {
-    await body(directory);
-  } finally {
-    await rm(directory, { recursive: true, force: true });
-  }
-}
+const run = (args: readonly string[], cwd = packageRoot, env: Record<string, string> = {}) =>
+  runProcess([bin, ...args], { cwd, env });
 
 // Relative paths, resolved against the working directory each test runs in.
 const validFlags = {
