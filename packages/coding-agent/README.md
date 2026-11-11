@@ -76,6 +76,14 @@ GOOGLE_API_KEY=... packages/coding-agent/src/cli.ts run \
 environment. No file in the repository or the working directory can configure the agent: the
 executable does not autoload `.env` or `bunfig.toml`.
 
+On Linux and macOS the `coding-agent` bin entry does this through its shebang,
+`bun --no-env-file --config=/dev/null`. On Windows, run the executable compiled with the ADR 0005 §2
+autoload flags (`bun build src/cli.ts --compile --no-compile-autoload-dotenv
+--no-compile-autoload-bunfig`). The bin entry cannot start there, because Bun's Windows bin shim
+does not understand `env -S`, and Bun 1.3.14 on Windows accepts no empty device as `--config`
+(`/dev/null` fails to open and `NUL` crashes Bun). A `bun src/cli.ts` run there loads a
+`bunfig.toml` preload from the working directory.
+
 Relative paths in `--task-file`, `--output-dir` and `--repo-root` resolve against the working
 directory. `--model` must be listed for `--provider` in the `@coding-agent/ai` provider directory.
 
