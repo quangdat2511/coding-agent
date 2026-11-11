@@ -3,6 +3,7 @@ import { existsSync, statSync } from "node:fs";
 import { cp, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { NAMED_TASK_FILE, NAMED_TASK_REPO, READ_ONLY_RUN } from "./support/named-task.ts";
+import { noModeBits, onWindows } from "./support/platform.ts";
 import {
   bunLikeShebang,
   firstLine,
@@ -26,7 +27,6 @@ const replayProvider = join(import.meta.dir, "support", "replay-provider.ts");
 const failSessionFactory = join(import.meta.dir, "support", "fail-session-factory.ts");
 
 // Windows cannot start a file by its shebang or mode bits, so there the bin runs under this Bun.
-const onWindows = process.platform === "win32";
 const command = onWindows ? [...bunLikeShebang, bin] : [bin];
 
 const required = [
@@ -75,11 +75,11 @@ describe("the coding-agent executable", () => {
     expect(source.split("\n")[0]).toBe("#!/usr/bin/env -S bun --no-env-file --config=/dev/null");
   });
 
-  it.skipIf(onWindows)("marks the bin entry executable", () => {
+  it.skipIf(noModeBits)("marks the bin entry executable", () => {
     expect(statSync(bin).mode & 0o111).not.toBe(0);
   });
 
-  // Without --config=/dev/null, which Bun 1.3.14 crashes on there, Windows still loads the preload.
+  // Bun on Windows accepts no empty device as --config, so a working-directory preload loads there.
   it.skipIf(onWindows)("ignores a bunfig.toml preload in the working directory", async () => {
     await withTemporaryDirectory(async (directory) => {
       await Bun.write(join(directory, "bunfig.toml"), 'preload = ["./preload.ts"]\n');
@@ -218,7 +218,7 @@ describe("the coding-agent executable", () => {
 
   // A shell pipeline is the simplest way to close the reading end before the run prints, and Windows
   // reports a closed pipe differently, so this is POSIX only.
-  it.skipIf(process.platform === "win32")(
+  it.skipIf(onWindows)(
     "exits 0 on a succeeded run after the reader of its standard output has gone",
     async () => {
       await withTemporaryDirectory(async (directory) => {

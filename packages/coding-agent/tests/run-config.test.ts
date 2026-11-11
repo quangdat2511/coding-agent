@@ -14,14 +14,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { RunArgs } from "../src/run-args.ts";
 import { MAX_TASK_FILE_BYTES, parentIsFile, resolveRunConfig } from "../src/run-config.ts";
+import { noFifos, permissionsIgnored } from "./support/platform.ts";
 
 const secret = "sk-test-credential-value";
-
-// Permission checks cannot fail for root, which CI containers may run as, or on Windows, which
-// keeps only a read-only attribute where these tests need POSIX mode bits and a umask.
-const permissionsIgnored = process.getuid?.() === 0 || process.platform === "win32";
-// Windows has no FIFOs; Git Bash's mkfifo makes an MSYS emulation that Bun sees as missing.
-const noFifos = process.platform === "win32";
 
 let directory: string;
 

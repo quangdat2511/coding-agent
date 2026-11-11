@@ -5,7 +5,8 @@ const onWindows = process.platform === "win32";
 export const noFifos = onWindows;
 // Windows keeps only a read-only attribute, not POSIX mode bits.
 export const noModeBits = onWindows;
-// Root ignores file permissions and Windows has no POSIX ones, so those tests simulate a refusal.
+// Root ignores file permissions and Windows has no POSIX ones, so some tests simulate a refusal
+// and the rest skip.
 export const permissionsIgnored = process.getuid?.() === 0 || onWindows;
 // Win32 file names cannot hold control characters such as a newline.
 export const noNewlineNames = onWindows;
