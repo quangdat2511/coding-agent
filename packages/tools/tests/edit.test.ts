@@ -27,11 +27,7 @@ import type { Static } from "typebox";
 import { Value } from "typebox/value";
 import { editToolWith } from "../src/edit.ts";
 import { createWorkspaceResolver, EditParams, editTool } from "../src/index.ts";
-
-// Windows has no FIFOs; Git Bash's mkfifo makes an MSYS emulation that Bun sees as missing.
-const noFifos = process.platform === "win32";
-// Windows keeps only a read-only attribute, not POSIX mode bits.
-const noModeBits = process.platform === "win32";
+import { noFifos, noModeBits } from "./platform.ts";
 
 let sandbox: string;
 let repo: string;

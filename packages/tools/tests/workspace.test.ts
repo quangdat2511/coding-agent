@@ -6,12 +6,7 @@ import { join } from "node:path";
 import type { RepoPath, WorkspaceResolver } from "@coding-agent/agent-core";
 import { createWorkspaceResolver } from "../src/index.ts";
 import { createWorkspaceResolverWith, type WorkspaceFileSystem } from "../src/workspace.ts";
-
-// Root ignores directory permissions and Windows has no POSIX ones, so those tests simulate a
-// refusal.
-const permissionsIgnored = process.getuid?.() === 0 || process.platform === "win32";
-// Windows reports a component longer than the file system allows as missing, not ENAMETOOLONG.
-const noNameTooLong = process.platform === "win32";
+import { noNameTooLong, permissionsIgnored } from "./platform.ts";
 
 let sandbox: string;
 

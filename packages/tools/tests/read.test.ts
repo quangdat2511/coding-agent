@@ -25,16 +25,7 @@ import { Value } from "typebox/value";
 import { createWorkspaceResolver, ReadParams, readTool } from "../src/index.ts";
 import { MAX_TOOL_OUTPUT_BYTES, TOOL_OUTPUT_TRUNCATION_MARKER } from "../src/output-budget.ts";
 import { readToolWith } from "../src/read.ts";
-
-// Windows has no FIFOs; Git Bash's mkfifo makes an MSYS emulation that Bun sees as missing.
-const noFifos = process.platform === "win32";
-// Win32 file names cannot hold control characters such as a newline.
-const noNewlineNames = process.platform === "win32";
-// Root ignores file permissions and Windows has no POSIX ones, so those tests simulate a refusal.
-const permissionsIgnored = process.getuid?.() === 0 || process.platform === "win32";
-// Windows refuses to inspect a Unix-domain socket file, so the resolver refuses it before read can
-// see its type.
-const socketRefusal = process.platform === "win32" ? "permission denied" : "not a regular file";
+import { noFifos, noNewlineNames, permissionsIgnored, socketRefusal } from "./platform.ts";
 
 let sandbox: string;
 let repo: string;

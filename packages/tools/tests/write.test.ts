@@ -28,11 +28,7 @@ import type { Static } from "typebox";
 import { Value } from "typebox/value";
 import { createWorkspaceResolver, WriteParams, writeTool } from "../src/index.ts";
 import { writeToolWith } from "../src/write.ts";
-
-// Windows has no FIFOs; Git Bash's mkfifo makes an MSYS emulation that Bun sees as missing.
-const noFifos = process.platform === "win32";
-// Windows keeps only a read-only attribute, not POSIX mode bits.
-const noModeBits = process.platform === "win32";
+import { noFifos, noModeBits, permissionsIgnored } from "./platform.ts";
 
 let sandbox: string;
 let repo: string;
@@ -275,7 +271,7 @@ describe("refusing a write", () => {
     expect(await readFile(join(repo, "a.ts"), "utf8")).toBe("old\n");
   });
 
-  it.skipIf(process.getuid?.() === 0 || noModeBits)(
+  it.skipIf(permissionsIgnored)(
     "refuses a file this process cannot write even with a group write bit",
     async () => {
       await writeFile(join(repo, "a.ts"), "old\n");
