@@ -259,6 +259,7 @@ function failingAt(path: string, code: string): WorkspaceFileSystem {
   return {
     access: fs.access,
     stat: fs.stat,
+    readdir: (target) => fs.readdir(target),
     lstat: async (target) => {
       fail(target);
       return fs.lstat(target);
@@ -348,10 +349,10 @@ describe("resolving a path the filesystem refuses", () => {
       lstat: overrides.lstat ?? fs.lstat,
     });
 
-    async function resolveWith(repo: string, files: WorkspaceFileSystem) {
+    async function resolveWith(repo: string, files: WorkspaceFileSystem, input = "a.ts") {
       const created = await createWorkspaceResolverWith(repo, files);
       if (!created.ok) throw new Error(`expected a resolver, got: ${created.message}`);
-      return created.workspace.resolveExisting("a.ts");
+      return created.workspace.resolveExisting(input);
     }
 
     it("resolves the file through its canonical parent", async () => {
@@ -361,6 +362,27 @@ describe("resolving a path the filesystem refuses", () => {
       expect(await resolveWith(repo, unopenable(repo))).toEqual({
         ok: true,
         path: join(repo, "a.ts") as RepoPath,
+      });
+    });
+
+    it("rejects a name whose case differs from the file on disk", async () => {
+      const repo = await makeRepo();
+      await writeFile(join(repo, "a.ts"), "");
+      // A case-insensitive filesystem finds "A.ts", and realpath cannot open it to correct the case.
+      const caseInsensitive: WorkspaceFileSystem = {
+        ...fs,
+        realpath: async (target) => {
+          if (target === join(repo, "A.ts")) {
+            throw Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" });
+          }
+          return fs.realpath(target);
+        },
+        lstat: (target) => fs.lstat(target === join(repo, "A.ts") ? join(repo, "a.ts") : target),
+      };
+
+      expect(await resolveWith(repo, caseInsensitive, "A.ts")).toMatchObject({
+        ok: false,
+        code: "PATH_OUTSIDE_REPO",
       });
     });
 
