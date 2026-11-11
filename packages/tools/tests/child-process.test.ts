@@ -58,9 +58,10 @@ describe("launching a child process", () => {
         ),
       );
 
-      expect(result).toEqual({
+      // Windows can report cwd with an 8.3 alias such as RUNNER~1; compare canonical paths.
+      expect({ ...result, stdout: await realpath(result.stdout.trim()) }).toEqual({
         exitCode: 0,
-        stdout: `${await realpath(directory)}\n`,
+        stdout: await realpath(directory),
         stderr: "",
       });
     } finally {
