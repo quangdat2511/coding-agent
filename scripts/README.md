@@ -76,10 +76,15 @@ or computed module specifiers.
 ## Tools child-process launch check
 
 `bun run ci:check` also enforces CDA-68's shared launch path through Biome. The `tools` package
-cannot import `bun`, `node:child_process`, or `child_process`, including dynamic imports. Production
+cannot import `bun`, `bun:ffi`, `node:child_process`/`child_process`, `node:cluster`/`cluster`, or
+`node:worker_threads`/`worker_threads`, including literal dynamic imports. Production
 files under `packages/tools/src/`, except `child-process.ts`, cannot reference the `Bun` global or
-reach it through `globalThis`, `global`, or `require`. The broader global restriction prevents
-aliasing the raw spawning API; ordinary filesystem work uses the existing `node:fs` APIs.
+reach it through `globalThis`, `global`, `self`, or `require`. The broader global restriction
+blocks these direct aliases of the raw spawning API; ordinary filesystem work uses the existing
+`node:fs` APIs. `bun run check:import-boundaries` additionally rejects access to `getBuiltinModule`
+and `import.meta.require` in those production files, including literal computed properties and
+local aliases. It parses transpiled source, so comments and strings are not treated as loader
+access. Both Lefthook and CI run this check; `child-process.ts` is the single trusted exception.
 Tests can still use `bun:test` and Bun's test-fixture APIs.
 
 The composition root passes AI's complete credential-name set to `createChildProcessLauncher`.

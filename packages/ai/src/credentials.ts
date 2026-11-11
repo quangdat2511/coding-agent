@@ -8,6 +8,8 @@
 //
 // Only MVP providers are listed. `opencode` keeps its adapter but is not
 // among the MVP provider values (ADR 0006 §2), so its variables are excluded.
+// ADR 0001 §8 explicitly records inherited OpenCode and configurable Custom
+// Provider credentials as outside the MVP isolation guarantee under both policies.
 // ---------------------------------------------------------------------------
 
 /**

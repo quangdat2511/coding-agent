@@ -160,7 +160,16 @@
                     "message": "ADR 0004 §1 forbids this dependency from tools. Wire collaborators through coding-agent instead."
                   },
                   {
-                    "group": ["node:child_process", "child_process", "bun"],
+                    "group": [
+                      "node:child_process",
+                      "child_process",
+                      "node:cluster",
+                      "cluster",
+                      "node:worker_threads",
+                      "worker_threads",
+                      "bun",
+                      "bun:ffi"
+                    ],
                     "message": "CDA-68: launch children through the configured ChildProcessLauncher; raw process APIs bypass credential filtering."
                   }
                 ]
@@ -181,6 +190,7 @@
                 "deniedGlobals": {
                   "Bun": "CDA-68: only child-process.ts may use Bun to start a child; use the injected ChildProcessLauncher.",
                   "globalThis": "CDA-68: do not access raw process APIs through globalThis; use the injected ChildProcessLauncher.",
+                  "self": "CDA-68: do not access raw process APIs through self; use the injected ChildProcessLauncher.",
                   "global": "CDA-68: do not access raw process APIs through global; use the injected ChildProcessLauncher.",
                   "require": "CDA-68: do not load raw process APIs through require; use the injected ChildProcessLauncher."
                 }

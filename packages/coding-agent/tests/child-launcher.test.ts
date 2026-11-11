@@ -12,6 +12,7 @@ describe("configuring the child launcher in the composition root", () => {
       XAI_API_KEY: "fake-xai",
       GH_TOKEN: "fake-task-token",
       GOOGLE_API_KEY_BACKUP: "task-owned-backup",
+      // ADR 0001 §8's MVP credential residual: OpenCode is not CLI-selectable, so it is inherited.
       OPENCODE_API_KEY: "outside-the-mvp-set",
     };
     const saved = Object.fromEntries(Object.keys(fixture).map((key) => [key, process.env[key]]));

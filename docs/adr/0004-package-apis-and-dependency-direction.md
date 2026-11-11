@@ -373,6 +373,7 @@ export function createWorkspaceResolver(
 >;
 
 export function normalizeWindowsShellPath(input: string): string;
+export function createDefaultTools(): ToolRegistry;
 export function createChildEnvironmentBuilder(
   credentialEnvVars: readonly string[],
   platform?: NodeJS.Platform,
@@ -385,16 +386,21 @@ export function writeTool(): ExecutableTool<typeof WriteParams>;
 export function editTool(): ExecutableTool<typeof EditParams>;
 ```
 
-`createDefaultTools`, `bashTool`, and the Verification Runner also form part of the public API.
-Factories that include process execution receive a configured shared child launcher from the
-composition root, rather than constructing their own launch path. This replaces the original
-zero-argument sketches for `createDefaultTools` and `bashTool`; it does not add timeout options.
+`createDefaultTools()` currently registers only `read`, `write`, and `edit`, and keeps its
+zero-argument signature. The target API for CDA-71 is
+`createDefaultTools(launcher: ChildProcessLauncher): ToolRegistry` and
+`bashTool(launcher: ChildProcessLauncher): ExecutableTool<typeof BashParams>`. CDA-74 will add the
+Verification Runner with the same configured launcher dependency. These are planned signatures,
+not exports implemented by CDA-68. They replace the original zero-argument sketches when process
+execution is added; they do not add tool timeout options.
 
 The composition root reads the complete `PROVIDER_CREDENTIAL_ENV_VARS` export from `ai` and
 supplies it to the launcher's factory in `tools`. The set includes all six credential variable
 names of the MVP providers, including providers not selected for the current run. OpenCode and
 Custom Provider credential names are outside that declared MVP set; extending the set belongs
-with adding CLI support for them. `tools` receives names, never imports `ai`, and never discovers
+with adding CLI support for them. ADR 0001 §8 explicitly records the resulting inherited OpenCode
+and Custom Provider credentials as a residual under both Approval Policies. `tools` receives
+names, never imports `ai`, and never discovers
 additional names by prefix or by scanning for secret-looking values.
 
 Every child started by `bash` or the Verification Runner goes through this shared launcher. At
@@ -421,11 +427,19 @@ The declared MVP names are ASCII, so this decision does not require broader Unic
 result with a `build(parent)` function; each call returns an independent filtered environment.
 Its optional platform argument permits testing Windows name matching on every host. The actual
 launcher always uses the host platform. `createChildProcessLauncher` returns the same failure
-shape or an `ok: true` result with a `ChildProcessLauncher`. Its `launch(command, { cwd }?)`
+shape or an `ok: true` result with a `ChildProcessLauncher`. Its
+`launch(command, { cwd, detached }?)`
 accepts an executable and argument array and returns the Bun child handle with piped stdout and
 stderr, closed stdin, and an exit promise. Shell selection, tool timeouts, output budgeting, and
 Verification result mapping belong to the later adapters; this factory does not execute a shell
-or start any child during construction.
+or start any child during construction. `detached` defaults to false and forwards Bun's process
+creation option: on POSIX it creates a new session and process group, allowing a later adapter to
+signal the group rather than only the shell. On Windows it uses Bun's detached-process behavior;
+it does not promise POSIX group signaling. The option does not unref the child or terminate its
+descendants. CDA-71 and CDA-74 remain responsible for timeout, cancellation, descendant cleanup,
+and bounded output draining. This avoids requiring those adapters to bypass the launcher just to
+request process isolation. The credential filter and `CI`/`TERM` override share one internal
+`environmentKeyOf` helper; this helper is not re-exported from the package entry point.
 
 `createWorkspaceResolver` canonicalizes and validates `repoRoot` once, which satisfies ADR 0002's
 requirement that `repoRoot` be valid before the Agent Session reaches `ready`. Tools take no
@@ -579,7 +593,7 @@ re-exports:
 | Package | Names checked | Exact matches with a Pi public export |
 | --- | --- | --- |
 | `agent-core` | the ADR 0001 and ADR 0002 types it exports and the names in §3 (41 names) | `AgentSession` (`pi-coding-agent`), `AgentState` (`pi-agent-core`), `JsonValue` (`pi-agent-core`, `pi-ai`), `IdGenerator` (`pi-agent-core`) |
-| `tools` | `createWorkspaceResolver`, `createDefaultTools`, `readTool`, `writeTool`, `editTool`, `bashTool`, `ReadParams`, `WriteParams`, `EditParams`, `BashParams` | none |
+| `tools` | `createWorkspaceResolver`, `createDefaultTools`, `readTool`, `writeTool`, `editTool`, `bashTool`, `ReadParams`, `WriteParams`, `EditParams`, `BashParams`, `createChildEnvironmentBuilder`, `createChildProcessLauncher`, `ChildEnvironment`, `CreateChildEnvironmentResult`, `ChildLaunchOptions`, `ChildProcess`, `ChildProcessLauncher`, `CreateChildProcessLauncherResult` | none |
 | `tui` | `renderTui`, `TuiModel`, `TuiHandlers`, `TuiHandle` | none |
 | `coding-agent` | `runInteractive`, `runHeadless`, `projectSessionEvent`, `CliOptions`, `HeadlessOptions`, `HeadlessResult` | none |
 
@@ -589,6 +603,12 @@ re-exports:
 | `AgentState` | kept: Agent Core glossary term, fixed by ADR 0002 |
 | `JsonValue` | kept: generic name for ADR 0002's JSON value type; it encodes no design choice |
 | `IdGenerator` | renamed to `IdSource` (§3) |
+
+CDA-68's eight child-environment and launcher exports were checked again on 2026-11-11 against
+the same Pi commit, `9841914c71a74d81abe07f751aefd271fd924e63`, including its package subpaths.
+Seven names do not occur in the four packages' source. `ChildProcess` occurs as an imported Node
+type and in internal implementation code, but is not a Pi public export. The package therefore
+keeps these eight names; the shared internal helper above adds no package export.
 
 A later public export that matches a Pi export is renamed, or kept with its reason recorded in the
 decision that introduces it. The renamed symbols have no consumers outside `packages/ai`, so the

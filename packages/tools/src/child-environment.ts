@@ -1,5 +1,10 @@
 export type ChildEnvironment = Readonly<Record<string, string | undefined>>;
 
+/** Internal to tools: keep credential and execution-mode matching on the same platform rule. */
+export function environmentKeyOf(name: string, platform: NodeJS.Platform): string {
+  return platform === "win32" ? name.toUpperCase() : name;
+}
+
 export type CreateChildEnvironmentResult =
   | {
       readonly ok: true;
@@ -30,7 +35,7 @@ export function createChildEnvironmentBuilder(
       message: "credentialEnvVars must be a non-empty array of valid environment variable names",
     };
   }
-  const keyOf = (name: string): string => (platform === "win32" ? name.toUpperCase() : name);
+  const keyOf = (name: string): string => environmentKeyOf(name, platform);
   const names = new Set(credentialEnvVars.map(keyOf));
   return {
     ok: true,

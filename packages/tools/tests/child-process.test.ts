@@ -1,4 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { mkdtemp, realpath, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { type ChildProcess, createChildProcessLauncher } from "../src/index.ts";
 
 const keys = ["CDA68_PROVIDER_KEY", "GH_TOKEN", "CI", "TERM"] as const;
@@ -42,6 +45,53 @@ async function readChild(child: ChildProcess) {
 }
 
 describe("launching a child process", () => {
+  it("runs the child in the requested working directory", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "child-launcher-cwd-"));
+    try {
+      const configured = createChildProcessLauncher(["CDA68_PROVIDER_KEY"]);
+      if (!configured.ok) throw new Error(configured.message);
+
+      const result = await readChild(
+        configured.launcher.launch(
+          [process.execPath, "--no-env-file", "-e", "console.log(process.cwd());"],
+          { cwd: directory },
+        ),
+      );
+
+      expect(result).toEqual({
+        exitCode: 0,
+        stdout: `${await realpath(directory)}\n`,
+        stderr: "",
+      });
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it.skipIf(process.platform === "win32")(
+    "can start a POSIX child as the leader of a separate process group",
+    async () => {
+      const configured = createChildProcessLauncher(["CDA68_PROVIDER_KEY"]);
+      if (!configured.ok) throw new Error(configured.message);
+
+      const result = await readChild(
+        configured.launcher.launch(
+          [
+            process.execPath,
+            "--no-env-file",
+            "-e",
+            `const group = Bun.spawnSync(["ps", "-o", "pgid=", "-p", String(process.pid)]);
+             if (group.exitCode !== 0) process.exit(1);
+             console.log(Number(group.stdout.toString().trim()) === process.pid);`,
+          ],
+          { detached: true },
+        ),
+      );
+
+      expect(result).toEqual({ exitCode: 0, stdout: "true\n", stderr: "" });
+    },
+  );
+
   it("passes a filtered, non-interactive environment without changing the parent's environment", async () => {
     const configured = createChildProcessLauncher(["CDA68_PROVIDER_KEY"]);
     if (!configured.ok) throw new Error(configured.message);

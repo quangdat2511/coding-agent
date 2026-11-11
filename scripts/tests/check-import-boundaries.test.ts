@@ -28,6 +28,55 @@ afterEach(async () => {
 });
 
 describe("findImportViolations", () => {
+  it.each([
+    'process.getBuiltinModule("node:child_process");',
+    'process["getBuiltinModule"]("node:cluster");',
+    "const load = process.getBuiltinModule;",
+    "const { getBuiltinModule: load } = process;",
+    'import { getBuiltinModule as load } from "node:process"; load("node:cluster");',
+  ])("rejects builtin-module loader access in tools source: %s", async (source) => {
+    const root = await repository({ "packages/tools/src/probe.ts": source });
+
+    expect(await findImportViolations(root)).toEqual([
+      "packages/tools/src/probe.ts: getBuiltinModule bypasses the shared child launcher; use the injected ChildProcessLauncher",
+    ]);
+  });
+
+  it.each([
+    'import.meta.require("node:child_process");',
+    'import.meta["require"]("node:cluster");',
+    "const load = import.meta.require;",
+    "const { require: load } = import.meta;",
+  ])("rejects import.meta loader access in tools source: %s", async (source) => {
+    const root = await repository({ "packages/tools/src/probe.ts": source });
+
+    expect(await findImportViolations(root)).toEqual([
+      "packages/tools/src/probe.ts: import.meta.require bypasses the shared child launcher; use the injected ChildProcessLauncher",
+    ]);
+  });
+
+  it("does not treat comments or strings as raw module-loader access", async () => {
+    const root = await repository({
+      "packages/tools/src/probe.ts": [
+        "// process.getBuiltinModule and import.meta.require are forbidden.",
+        'export const documentation = "process.getBuiltinModule and import.meta.require";',
+      ].join("\n"),
+    });
+
+    expect(await findImportViolations(root)).toEqual([]);
+  });
+
+  it("keeps loader restrictions scoped to tools production files outside the launch module", async () => {
+    const source = 'process.getBuiltinModule("node:child_process");';
+    const root = await repository({
+      "packages/tools/src/child-process.ts": source,
+      "packages/tools/tests/probe.test.ts": source,
+      "packages/agent-core/src/probe.ts": source,
+    });
+
+    expect(await findImportViolations(root)).toEqual([]);
+  });
+
   it("accepts relative imports that stay inside the package", async () => {
     const root = await repository({
       "packages/tools/src/index.ts": 'export { read } from "./tools/read.ts";\n',
@@ -84,6 +133,7 @@ describe("findImportViolations", () => {
     expect(await findImportViolations(root)).toEqual([
       'packages/tools/src/index.ts:1: "../../agent-core/src/events.ts" resolves outside packages/tools; import that package by name',
       'packages/tools/src/index.ts:2: "../../agent-core/src/events.ts" resolves outside packages/tools; import that package by name',
+      "packages/tools/src/index.ts: import.meta.require bypasses the shared child launcher; use the injected ChildProcessLauncher",
     ]);
   });
 
