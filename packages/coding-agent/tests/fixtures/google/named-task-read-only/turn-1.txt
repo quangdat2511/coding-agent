@@ -1,0 +1,4 @@
+data: {"candidates": [{"content": {"parts": [{"functionCall": {"name": "read","args": {"path": "src/slugify.ts"},"id": "call_13517463171985281475"},"thoughtSignature": "EmAKXgFpFH0TlOEYoewDwpdu3vlMRAge43bnbQ0FW+f3gZ0Wd71Xqkr0KCGDmpqMo/vjHhhtJ8BaKLH1u4g755bpWKyYXMCTy+qDYkYPZvZyWThQeDRWORqu1lYLzOppipY="}],"role": "model"},"index": 0}],"usageMetadata": {"promptTokenCount": 704,"candidatesTokenCount": 19,"totalTokenCount": 723,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 704}],"serviceTier": "standard"},"modelVersion": "gemini-3.5-flash-lite","responseId": "67DyasGjA-6z2roPgN3WoQM"}
+
+data: {"candidates": [{"content": {"parts": [{"text": ""}],"role": "model"},"finishReason": "STOP","index": 0}],"usageMetadata": {"promptTokenCount": 704,"candidatesTokenCount": 19,"totalTokenCount": 723,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 704}],"serviceTier": "standard"},"modelVersion": "gemini-3.5-flash-lite","responseId": "67DyasGjA-6z2roPgN3WoQM"}
+

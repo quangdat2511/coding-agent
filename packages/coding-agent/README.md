@@ -4,6 +4,72 @@ The composition root: the `coding-agent` executable that turns a command line in
 Session. The command line, exit codes and files written are its external contract
 ([ADR 0005 §3](../../docs/adr/0005-terminalbench-evaluation-protocol.md)).
 
+## Running a task
+
+`coding-agent run` resolves the configuration, opens one Agent Session, starts the Coding Task from
+the task file, and waits for the Agent Result. `runHeadless` in `src/headless.ts` implements this.
+`src/cli.ts` parses the arguments and hardens the process first.
+
+| Agent Result | Exit code |
+| --- | --- |
+| `succeeded` | 0 |
+| `failed` | 1 |
+| `cancelled` | 130 |
+
+The run prints the final assistant message on standard output. On standard error it prints one
+line with the outcome and whether the workspace changed, for example
+`coding-agent: succeeded; workspace changed: no`. A failed run adds a second line with the failure
+code and message. Both streams are diagnostic only
+([ADR 0005 §3](../../docs/adr/0005-terminalbench-evaluation-protocol.md)), so a write that fails,
+for example because the reader of a pipe has gone, does not change the exit code. A provider error or a
+file that the model read can carry the credential, so the run replaces the credential value with
+`[redacted]` in everything it prints.
+
+This is the walking skeleton of
+[ADR 0006](../../docs/adr/0006-implementation-order-and-mvp-completion-checklist.md) (Join 2).
+These parts are still to come:
+
+- The run writes no files yet. CDA-75 (D3.1) adds `run.json`, `events.jsonl` and `result.json`.
+- `SIGINT` and `SIGTERM` do not cancel the Agent Session yet, so no run settles `cancelled`.
+  CDA-78 (D3.2) adds this.
+- `read` is the only registered tool, and Verification is a stand-in. CDA-80 (D5) replaces both.
+- The session limits are resolved but not enforced. Agent Core does not yet compare its counters
+  with `maxModelTurns`, `maxToolCalls` or `maxDurationMs`, so a live run whose model keeps calling
+  tools runs until the process is killed, and spends tokens all the while. CDA-76 (A4.2) enforces
+  the limits. Until CDA-78, `SIGINT` and `SIGTERM` stop such a run only by ending the process.
+
+### Session factory
+
+`openSession` in `src/session-factory.ts` is the one place that builds an Agent Session.
+`runHeadless` uses it now, and the interactive entry point will use it too. It builds the Workspace
+Resolver, the tool registry, the system prompt and the `ModelPort`, and it supplies the clock and
+the identifiers. Two temporary parts are isolated in it:
+
+- It registers `read` only. A run can therefore change no file and start no child process.
+- Its Verification Policy is a stand-in that returns a non-gating `succeeded` with
+  `no_command_configured` evidence. The stand-in runs no command. If
+  `CODING_AGENT_VERIFICATION_COMMAND` is set, the factory opens no Agent Session and the run exits
+  70, because skipping the command would report a check that never ran.
+
+When the factory opens no Agent Session, the run removes the output directory it created, as a
+configuration error does.
+
+### Named task
+
+`tests/fixtures/named-task/` holds the named fixture task, "add a failing test, then make it pass",
+and the fixture repository it runs against. Both are fixed artifacts:
+[its README](tests/fixtures/named-task/README.md) says why and gives the rules for changing them.
+
+To run the task against Google on a copy of the fixture repository:
+
+```sh
+cp -R packages/coding-agent/tests/fixtures/named-task/repo /tmp/named-task-repo
+GOOGLE_API_KEY=... packages/coding-agent/src/cli.ts run \
+  --task-file packages/coding-agent/tests/fixtures/named-task/task.md \
+  --provider google --model gemini-3.5-flash-lite --approval-policy auto-approve \
+  --output-dir /tmp/named-task-out --repo-root /tmp/named-task-repo
+```
+
 ## Configuring a run
 
 `coding-agent run` takes exactly the flags ADR 0005 §3 lists, and everything else comes from the
@@ -44,6 +110,9 @@ choice, never the repository's:
   ([ADR 0003 §3](../../docs/adr/0003-mvp-context-planning-verification-and-session-memory.md));
 - set but blank is a configuration error.
 
+No command runs yet. Until CDA-80 (D5) wires in the Verification Policy, a run with the variable set
+exits 70 before its first Model Turn (see [Session factory](#session-factory)).
+
 The interactive path and the end-to-end test configure a command this way. The headless evaluation
 path leaves it unset ([ADR 0005 §5](../../docs/adr/0005-terminalbench-evaluation-protocol.md)).
 
@@ -80,8 +149,8 @@ to every provider except Google, whose API cannot honour it; Agent Core still ac
 Every Agent Session starts from one system prompt. `assembleSystemPrompt` in
 `src/system-prompt.ts` builds it
 ([ADR 0003 §1 and §2](../../docs/adr/0003-mvp-context-planning-verification-and-session-memory.md)).
-Nothing calls it yet. In CDA-67 (Join 2), the code that opens the Agent Session passes the prompt to
-`openAgentSession`. The prompt contains these parts:
+The session factory calls it and passes the prompt to `openAgentSession`. The prompt contains these
+parts:
 
 - the planning requirement, which asks for a numbered plan before the first mutating Tool Call
 - the Scratchpad convention, which is the `.scratch/` directory in the repository root
@@ -112,10 +181,10 @@ one:
 
 If a candidate is missing, the Coding Agent tries the next one. If a candidate is a directory, is
 empty, or is a link to nothing usable, the Coding Agent also tries the next one. It then adds the
-candidate and the reason to the `skipped` list, which the session factory can report. If the file
-found cannot be read, for example because of its permissions, `assembleSystemPrompt` returns
-`INVALID_CONFIGURATION`, and the session factory opens no Agent Session. After CDA-67, the CLI
-exits 2 on this error, as it does for the configuration errors below.
+candidate and the reason to the `skipped` list, and the run prints each entry on standard error. If
+the file found cannot be read, for example because of its permissions, `assembleSystemPrompt`
+returns `INVALID_CONFIGURATION`, and the session factory opens no Agent Session. The CLI exits 2 on
+this error, as it does for the configuration errors below.
 
 The packaged instructions are 32,768 UTF-8 bytes at most. A larger file is cut at a character
 boundary, and the marker `[...project instructions truncated...]` follows on a line of its own. The
@@ -145,7 +214,8 @@ Each of these exits 2 before any Agent Session opens, with the reason on standar
 - a repository root that does not exist, is not a directory, cannot be listed, or is not writable;
 - a task file that does not exist, is not a regular file, is larger than 1 MiB, cannot be read, is
   not UTF-8, or is blank;
-- an output directory that cannot be created or is not writable.
+- an output directory that cannot be created or is not writable;
+- Project Instructions that are found but cannot be read (see [System prompt](#system-prompt)).
 
 Checks run in that order and the first problem wins. The output directory is created only once every
 other check has passed, and whatever it created is removed again if it then proves unusable, so a

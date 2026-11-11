@@ -1,0 +1,107 @@
+import type { AgentResult } from "@coding-agent/agent-core";
+import type { RunArgs } from "./run-args.ts";
+import { removeCreated, resolveRunConfig } from "./run-config.ts";
+import { openSession } from "./session-factory.ts";
+
+export type ExitCode = 0 | 1 | 2 | 70 | 130;
+
+export interface HeadlessOptions {
+  readonly args: RunArgs;
+  readonly cwd: string;
+  readonly env: Readonly<Record<string, string | undefined>>;
+  readonly stdout: (text: string) => void;
+  readonly stderr: (text: string) => void;
+}
+
+export interface HeadlessResult {
+  readonly exitCode: ExitCode;
+  // Absent when no Agent Session settled.
+  readonly result?: AgentResult;
+}
+
+const EXIT_CODE_BY_OUTCOME = {
+  succeeded: 0,
+  failed: 1,
+  cancelled: 130,
+} as const satisfies Record<AgentResult["outcome"], ExitCode>;
+
+// A setting that is valid but not built yet is not the caller's error, so it exits 70, not 2.
+const EXIT_CODE_BY_REFUSAL = {
+  INVALID_CONFIGURATION: 2,
+  NOT_IMPLEMENTED: 70,
+} as const satisfies Record<"INVALID_CONFIGURATION" | "NOT_IMPLEMENTED", ExitCode>;
+
+interface Refusal {
+  readonly code: keyof typeof EXIT_CODE_BY_REFUSAL;
+  readonly message: string;
+}
+
+const diagnostic = (message: string): string => `coding-agent: ${message}\n`;
+
+function refuse({ code, message }: Refusal, stderr: (text: string) => void): HeadlessResult {
+  stderr(diagnostic(message));
+  return { exitCode: EXIT_CODE_BY_REFUSAL[code] };
+}
+
+function finalText({ finalMessage }: AgentResult): string {
+  return (finalMessage?.content ?? [])
+    .flatMap((block) => (block.type === "text" ? [block.text] : []))
+    .join("");
+}
+
+function describeOutcome(result: AgentResult): string {
+  const changed = result.workspaceChanged ? "yes" : "no";
+  const outcome = diagnostic(`${result.outcome}; workspace changed: ${changed}`);
+  if (result.outcome !== "failed") return outcome;
+  return outcome + diagnostic(`${result.failure.code}: ${result.failure.message}`);
+}
+
+// The two streams are diagnostic only (ADR 0005 §3): a failed write must not change the exit code.
+function printer(write: (text: string) => void, redact: (text: string) => string) {
+  return (text: string): void => {
+    try {
+      write(redact(text));
+    } catch {}
+  };
+}
+
+export async function runHeadless(options: HeadlessOptions): Promise<HeadlessResult> {
+  const resolved = await resolveRunConfig(options.args, options);
+  if (!resolved.ok)
+    return refuse(
+      resolved,
+      printer(options.stderr, (text) => text),
+    );
+  const { config, createdDirectories } = resolved;
+  // A provider error or a file the model read can carry the credential into the text printed here.
+  const redact = (text: string) => text.replaceAll(config.credential.reveal(), "[redacted]");
+  const stdout = printer(options.stdout, redact);
+  const stderr = printer(options.stderr, redact);
+
+  let running = false;
+  try {
+    const opened = await openSession(config);
+    if (!opened.ok) {
+      await removeCreated(createdDirectories);
+      return refuse(opened, stderr);
+    }
+    const { session, skippedInstructions } = opened;
+    for (const { path, reason } of skippedInstructions) {
+      stderr(diagnostic(`Project Instructions candidate ${path} skipped: ${reason}`));
+    }
+
+    const task = { objective: config.objective };
+    const started = await session.dispatch({ type: "start", task });
+    if (!started.accepted) throw new Error(`the Agent Session did not start: ${started.message}`);
+    running = true;
+
+    const result = await session.result();
+    const text = finalText(result);
+    if (text !== "") stdout(text.endsWith("\n") ? text : `${text}\n`);
+    stderr(describeOutcome(result));
+    return { exitCode: EXIT_CODE_BY_OUTCOME[result.outcome], result };
+  } catch (error) {
+    if (!running) await removeCreated(createdDirectories);
+    throw new Error(redact(error instanceof Error ? error.message : String(error)));
+  }
+}

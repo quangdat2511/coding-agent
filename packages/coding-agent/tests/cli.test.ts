@@ -1,8 +1,15 @@
 import { describe, expect, it } from "bun:test";
 import { existsSync, statSync } from "node:fs";
-import { readdir } from "node:fs/promises";
+import { cp, readdir } from "node:fs/promises";
 import { join } from "node:path";
-import { firstLine, runProcess, withTemporaryDirectory } from "./support/process.ts";
+import { NAMED_TASK_FILE, NAMED_TASK_REPO, READ_ONLY_RUN } from "./support/named-task.ts";
+import {
+  bunLikeShebang,
+  firstLine,
+  runProcess,
+  withTemporaryDirectory,
+} from "./support/process.ts";
+import { REPLAY_FIXTURES_ENV_VAR } from "./support/recorded-provider.ts";
 
 const packageRoot = join(import.meta.dir, "..");
 
@@ -14,6 +21,9 @@ const declared = manifest.bin?.["coding-agent"];
 if (declared === undefined) throw new Error("package.json declares no coding-agent bin entry");
 
 const bin = join(packageRoot, declared);
+
+const replayProvider = join(import.meta.dir, "support", "replay-provider.ts");
+const failSessionFactory = join(import.meta.dir, "support", "fail-session-factory.ts");
 
 const required = [
   "--task-file",
@@ -165,21 +175,97 @@ describe("the coding-agent executable", () => {
     },
   );
 
-  // Temporary: CDA-67 (Join 2) opens the Agent Session, and CDA-75 (D3.1) and CDA-78 (D3.2)
-  // replace exit 70 with the real exit codes. Nothing should come to depend on 70.
-  it("exits 70 once the configuration resolves, because the run itself is not implemented yet", async () => {
+  it("exits 0 on the named task against recorded Google responses, with read as the only tool", async () => {
     await withTemporaryDirectory(async (directory) => {
-      await Bun.write(join(directory, "task.md"), "Add a failing test, then make it pass.\n");
-      const { exitCode, stdout, stderr } = await run(validRun(), directory, {
-        ANTHROPIC_API_KEY: secret,
+      await cp(NAMED_TASK_REPO, join(directory, "repo"), { recursive: true });
+      const { exitCode, stdout, stderr } = await runProcess(
+        [
+          ...bunLikeShebang,
+          "--preload",
+          replayProvider,
+          bin,
+          ...validRun({
+            "--task-file": NAMED_TASK_FILE,
+            "--provider": READ_ONLY_RUN.provider,
+            "--model": READ_ONLY_RUN.model,
+            "--repo-root": "repo",
+          }),
+        ],
+        {
+          cwd: directory,
+          env: {
+            GOOGLE_API_KEY: secret,
+            [REPLAY_FIXTURES_ENV_VAR]: READ_ONLY_RUN.fixtures.join(","),
+          },
+        },
+      );
+
+      expect(stderr).toBe("coding-agent: succeeded; workspace changed: no\n");
+      expect(exitCode).toBe(0);
+      expect(stdout).toStartWith("I have read `src/slugify.ts`.");
+      expect(stdout).not.toContain(secret);
+      expect((await readdir(directory)).sort()).toEqual(["out", "repo"]);
+    });
+  });
+
+  // A shell pipeline is the simplest way to close the reading end before the run prints, and Windows
+  // reports a closed pipe differently, so this is POSIX only.
+  it.skipIf(process.platform === "win32")(
+    "exits 0 on a succeeded run after the reader of its standard output has gone",
+    async () => {
+      await withTemporaryDirectory(async (directory) => {
+        await cp(NAMED_TASK_REPO, join(directory, "repo"), { recursive: true });
+        const command = [
+          ...bunLikeShebang,
+          "--preload",
+          replayProvider,
+          bin,
+          ...validRun({
+            "--task-file": NAMED_TASK_FILE,
+            "--provider": READ_ONLY_RUN.provider,
+            "--model": READ_ONLY_RUN.model,
+            "--repo-root": "repo",
+          }),
+        ];
+        const { stderr } = await runProcess(
+          ["sh", "-c", '("$@"; echo "exit $?" >&2) | true', "sh", ...command],
+          {
+            cwd: directory,
+            env: {
+              GOOGLE_API_KEY: secret,
+              [REPLAY_FIXTURES_ENV_VAR]: READ_ONLY_RUN.fixtures.join(","),
+            },
+          },
+        );
+
+        expect(stderr).toBe("coding-agent: succeeded; workspace changed: no\nexit 0\n");
       });
+    },
+  );
+
+  it("exits 70 without the credential or an output directory when the session factory throws", async () => {
+    await withTemporaryDirectory(async (directory) => {
+      await cp(NAMED_TASK_REPO, join(directory, "repo"), { recursive: true });
+      const { exitCode, stdout, stderr } = await runProcess(
+        [
+          ...bunLikeShebang,
+          "--preload",
+          failSessionFactory,
+          bin,
+          ...validRun({
+            "--task-file": NAMED_TASK_FILE,
+            "--provider": READ_ONLY_RUN.provider,
+            "--model": READ_ONLY_RUN.model,
+            "--repo-root": "repo",
+          }),
+        ],
+        { cwd: directory, env: { GOOGLE_API_KEY: secret } },
+      );
 
       expect(exitCode).toBe(70);
-      expect(stderr).toContain("CDA-67");
-      expect(stdout + stderr).not.toContain(secret);
-      // The output directory is the one thing a resolved configuration writes.
-      expect((await readdir(directory)).sort()).toEqual(["out", "task.md"]);
-      expect(await readdir(join(directory, "out"))).toEqual([]);
+      expect(stdout).toBe("");
+      expect(stderr).toBe("coding-agent: internal error: forced by the test, key [redacted]\n");
+      expect(await readdir(directory)).toEqual(["repo"]);
     });
   });
 

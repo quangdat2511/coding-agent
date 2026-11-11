@@ -218,7 +218,7 @@ describe("the ADR 0005 §3 contract", () => {
 });
 
 describe("public runtime surface", () => {
-  it("exports nothing yet, because ADR 0004 §6 pins the surface to the three entry points", () => {
-    expect(Object.keys(surface)).toEqual([]);
+  it("exports only runHeadless, the first of the three entry points ADR 0004 §6 pins it to", () => {
+    expect(Object.keys(surface)).toEqual(["runHeadless"]);
   });
 });

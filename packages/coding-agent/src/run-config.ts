@@ -85,7 +85,12 @@ export interface RunConfig {
 }
 
 export type ResolveRunConfigResult =
-  | { readonly ok: true; readonly config: RunConfig }
+  | {
+      readonly ok: true;
+      readonly config: RunConfig;
+      // The output directories this run created, for removeCreated when no Agent Session opens.
+      readonly createdDirectories: readonly string[];
+    }
   | {
       readonly ok: false;
       readonly code: "INVALID_CONFIGURATION";
@@ -256,7 +261,7 @@ export async function parentIsFile(path: string, statPath: DirectoryStat = stat)
 // them leaves nothing behind. They are this run's own, so each first gets owner rwx back in case
 // the umask created it read-only. rmdir never removes a directory something else has filled, and a
 // failure leaves the rest in place: the refusal is what the caller reports.
-async function removeCreated(created: readonly string[]): Promise<void> {
+export async function removeCreated(created: readonly string[]): Promise<void> {
   for (const dir of created) {
     await stat(dir)
       .then(({ mode }) => chmod(dir, (mode & 0o7777) | 0o700))
@@ -366,6 +371,7 @@ export async function resolveRunConfig(
   const { variable, value } = credential;
   return {
     ok: true,
+    createdDirectories: outputDir.value.created,
     config: {
       objective: task.value.objective,
       taskFile: task.value.path,
