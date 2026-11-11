@@ -17,8 +17,11 @@ import { MAX_TASK_FILE_BYTES, parentIsFile, resolveRunConfig } from "../src/run-
 
 const secret = "sk-test-credential-value";
 
-// Permission checks cannot fail for root, which CI containers may run as.
-const asRoot = process.getuid?.() === 0;
+// Permission checks cannot fail for root, which CI containers may run as, or on Windows, which
+// keeps only a read-only attribute where these tests need POSIX mode bits and a umask.
+const permissionsIgnored = process.getuid?.() === 0 || process.platform === "win32";
+// Windows has no FIFOs; Git Bash's mkfifo makes an MSYS emulation that Bun sees as missing.
+const noFifos = process.platform === "win32";
 
 let directory: string;
 
@@ -253,7 +256,7 @@ describe("resolving the repository root", () => {
     );
   });
 
-  it.skipIf(asRoot)("refuses a root that cannot be listed", async () => {
+  it.skipIf(permissionsIgnored)("refuses a root that cannot be listed", async () => {
     await chmod(join(directory, "repo"), 0o300);
     try {
       await expectRefused(
@@ -266,7 +269,7 @@ describe("resolving the repository root", () => {
     }
   });
 
-  it.skipIf(asRoot)("refuses a root that is not writable", async () => {
+  it.skipIf(permissionsIgnored)("refuses a root that is not writable", async () => {
     await chmod(join(directory, "repo"), 0o555);
     try {
       await expectRefused(await resolveWith(), "--repo-root", '--repo-root "repo" is not writable');
@@ -313,14 +316,14 @@ describe("reading the task file", () => {
     expect(resolved.config.objective).toHaveLength(MAX_TASK_FILE_BYTES);
   });
 
-  it("refuses a named pipe instead of waiting for a writer", async () => {
+  it.skipIf(noFifos)("refuses a named pipe instead of waiting for a writer", async () => {
     expect(Bun.spawnSync(["mkfifo", join(directory, "pipe")]).exitCode).toBe(0);
     expect(await resolveWith({ taskFile: "pipe" })).toStrictEqual(
       refusal("--task-file", '--task-file "pipe" is not a regular file'),
     );
   });
 
-  it.skipIf(asRoot)("refuses a file that cannot be read", async () => {
+  it.skipIf(permissionsIgnored)("refuses a file that cannot be read", async () => {
     await chmod(join(directory, "task.md"), 0o000);
     await expectRefused(
       await resolveWith(),
@@ -360,22 +363,25 @@ describe("preparing the output directory", () => {
     );
   });
 
-  it.skipIf(asRoot)("refuses an output directory that cannot be created", async () => {
+  it.skipIf(permissionsIgnored)("refuses an output directory that cannot be created", async () => {
     await mkdir(join(directory, "locked"), { mode: 0o555 });
     expect(await resolveWith({ outputDir: "locked/out" })).toStrictEqual(
       refusal("--output-dir", '--output-dir "locked/out" cannot be created: permission denied'),
     );
   });
 
-  it.skipIf(asRoot)("refuses an existing output directory that is not writable", async () => {
-    await mkdir(join(directory, "out"), { mode: 0o555 });
-    expect(await resolveWith()).toStrictEqual(
-      refusal("--output-dir", '--output-dir "out" is not writable'),
-    );
-  });
+  it.skipIf(permissionsIgnored)(
+    "refuses an existing output directory that is not writable",
+    async () => {
+      await mkdir(join(directory, "out"), { mode: 0o555 });
+      expect(await resolveWith()).toStrictEqual(
+        refusal("--output-dir", '--output-dir "out" is not writable'),
+      );
+    },
+  );
 
   // A umask that drops the owner's write bit creates directories this run cannot write into.
-  describe.skipIf(asRoot)("under a umask that makes new directories read-only", () => {
+  describe.skipIf(permissionsIgnored)("under a umask that makes new directories read-only", () => {
     let previous: number;
     beforeEach(() => {
       previous = process.umask(0o222);

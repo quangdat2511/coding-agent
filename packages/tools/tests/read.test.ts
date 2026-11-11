@@ -26,6 +26,13 @@ import { createWorkspaceResolver, ReadParams, readTool } from "../src/index.ts";
 import { MAX_TOOL_OUTPUT_BYTES, TOOL_OUTPUT_TRUNCATION_MARKER } from "../src/output-budget.ts";
 import { readToolWith } from "../src/read.ts";
 
+// Windows has no FIFOs; Git Bash's mkfifo makes an MSYS emulation that Bun sees as missing.
+const noFifos = process.platform === "win32";
+// Win32 file names cannot hold control characters such as a newline.
+const noNewlineNames = process.platform === "win32";
+// Root ignores file permissions and Windows has no POSIX ones, so those tests simulate a refusal.
+const permissionsIgnored = process.getuid?.() === 0 || process.platform === "win32";
+
 let sandbox: string;
 let repo: string;
 let workspace: WorkspaceResolver;
@@ -95,7 +102,7 @@ describe("reading a file", () => {
 
     expect(await read({ path: "a.ts" })).toEqual({
       isError: false,
-      content: `"${join(repo, "a.ts")}" (lines 1-3 of 3)\n1 | first\n2 | second\n3 | third`,
+      content: `${JSON.stringify(join(repo, "a.ts"))} (lines 1-3 of 3)\n1 | first\n2 | second\n3 | third`,
     });
   });
 
@@ -117,7 +124,7 @@ describe("reading a file", () => {
     expect(await read({ path: "a.ts", offset: 3, limit: 2 })).toEqual({
       isError: false,
       content:
-        `"${join(repo, "a.ts")}" (lines 3-4 of 10)\n3 | line 3\n4 | line 4\n` +
+        `${JSON.stringify(join(repo, "a.ts"))} (lines 3-4 of 10)\n3 | line 3\n4 | line 4\n` +
         "[6 more lines; continue with offset 5]",
     });
   });
@@ -127,7 +134,9 @@ describe("reading a file", () => {
 
     const outcome = await read({ path: "a.ts" });
 
-    expect(outcome.content).toStartWith(`"${join(repo, "a.ts")}" (lines 1-300 of 301)\n`);
+    expect(outcome.content).toStartWith(
+      `${JSON.stringify(join(repo, "a.ts"))} (lines 1-300 of 301)\n`,
+    );
     expect(outcome.content).toEndWith("300 | line 300\n[1 more lines; continue with offset 301]");
   });
 
@@ -142,7 +151,7 @@ describe("reading a file", () => {
 
     expect(await read({ path: "empty.ts" })).toEqual({
       isError: false,
-      content: `"${join(repo, "empty.ts")}" (empty file)`,
+      content: `${JSON.stringify(join(repo, "empty.ts"))} (empty file)`,
     });
   });
 
@@ -152,7 +161,7 @@ describe("reading a file", () => {
     const outcome = await read({ path: "crlf.ts" });
 
     expect(outcome.content.split("\n")).toEqual([
-      `"${join(repo, "crlf.ts")}" (lines 1-2 of 2)`,
+      `${JSON.stringify(join(repo, "crlf.ts"))} (lines 1-2 of 2)`,
       "1 | first\r",
       "2 | second\r",
     ]);
@@ -300,15 +309,13 @@ describe("refusing a read", () => {
 
   it("reports a file it cannot open as PERMISSION_DENIED", async () => {
     await writeFile(join(repo, "secret.ts"), "secret\n");
-    // A process running as root ignores file permissions, so it simulates the refusal.
-    const tool =
-      process.getuid?.() === 0
-        ? readToolWith({
-            open: async () => {
-              throw Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" });
-            },
-          })
-        : await chmod(join(repo, "secret.ts"), 0o000).then(() => readTool());
+    const tool = permissionsIgnored
+      ? readToolWith({
+          open: async () => {
+            throw Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" });
+          },
+        })
+      : await chmod(join(repo, "secret.ts"), 0o000).then(() => readTool());
 
     expect(await read({ path: "secret.ts" }, tool)).toMatchObject({
       isError: true,
@@ -331,7 +338,7 @@ describe("refusing a read", () => {
     });
   });
 
-  it("refuses a FIFO without waiting for a writer", async () => {
+  it.skipIf(noFifos)("refuses a FIFO without waiting for a writer", async () => {
     expect(Bun.spawnSync(["mkfifo", join(repo, "pipe")]).exitCode).toBe(0);
 
     expect(await read({ path: "pipe" })).toMatchObject({
@@ -355,16 +362,19 @@ describe("refusing a read", () => {
     }
   });
 
-  it("quotes the path so a newline in a file name cannot pass for a numbered line", async () => {
-    await writeFile(join(repo, "evil\n2 | injected"), "real\n");
+  it.skipIf(noNewlineNames)(
+    "quotes the path so a newline in a file name cannot pass for a numbered line",
+    async () => {
+      await writeFile(join(repo, "evil\n2 | injected"), "real\n");
 
-    const outcome = await read({ path: "evil\n2 | injected" });
+      const outcome = await read({ path: "evil\n2 | injected" });
 
-    expect(outcome.content.split("\n")).toEqual([
-      `${JSON.stringify(join(repo, "evil\n2 | injected"))} (lines 1-1 of 1)`,
-      "1 | real",
-    ]);
-  });
+      expect(outcome.content.split("\n")).toEqual([
+        `${JSON.stringify(join(repo, "evil\n2 | injected"))} (lines 1-1 of 1)`,
+        "1 | real",
+      ]);
+    },
+  );
 
   it("returns the read even when closing the file fails", async () => {
     await writeFile(join(repo, "a.ts"), "kept\n");

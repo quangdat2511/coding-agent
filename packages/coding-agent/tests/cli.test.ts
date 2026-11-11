@@ -25,6 +25,10 @@ const bin = join(packageRoot, declared);
 const replayProvider = join(import.meta.dir, "support", "replay-provider.ts");
 const failSessionFactory = join(import.meta.dir, "support", "fail-session-factory.ts");
 
+// Windows cannot start a file by its shebang or mode bits, so there the bin runs under this Bun.
+const onWindows = process.platform === "win32";
+const command = onWindows ? [...bunLikeShebang, bin] : [bin];
+
 const required = [
   "--task-file",
   "/tmp/task.md",
@@ -41,7 +45,7 @@ const required = [
 const secret = "sk-test-credential-value";
 
 const run = (args: readonly string[], cwd = packageRoot, env: Record<string, string> = {}) =>
-  runProcess([bin, ...args], { cwd, env });
+  runProcess([...command, ...args], { cwd, env });
 
 // Relative paths, resolved against the working directory each test runs in.
 const validFlags = {
@@ -65,11 +69,14 @@ interface ConfigurationErrorCase {
 }
 
 describe("the coding-agent executable", () => {
-  it("is declared as an executable bin entry whose shebang disables Bun's autoload", async () => {
+  it("is declared as a bin entry whose shebang disables Bun's autoload", async () => {
     expect(existsSync(bin)).toBe(true);
-    expect(statSync(bin).mode & 0o111).not.toBe(0);
     const source = await Bun.file(bin).text();
     expect(source.split("\n")[0]).toBe("#!/usr/bin/env -S bun --no-env-file --config=/dev/null");
+  });
+
+  it.skipIf(onWindows)("marks the bin entry executable", () => {
+    expect(statSync(bin).mode & 0o111).not.toBe(0);
   });
 
   it("ignores a bunfig.toml preload in the working directory", async () => {
@@ -215,7 +222,7 @@ describe("the coding-agent executable", () => {
     async () => {
       await withTemporaryDirectory(async (directory) => {
         await cp(NAMED_TASK_REPO, join(directory, "repo"), { recursive: true });
-        const command = [
+        const agentCommand = [
           ...bunLikeShebang,
           "--preload",
           replayProvider,
@@ -228,7 +235,7 @@ describe("the coding-agent executable", () => {
           }),
         ];
         const { stderr } = await runProcess(
-          ["sh", "-c", '("$@"; echo "exit $?" >&2) | true', "sh", ...command],
+          ["sh", "-c", '("$@"; echo "exit $?" >&2) | true', "sh", ...agentCommand],
           {
             cwd: directory,
             env: {
