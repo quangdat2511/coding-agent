@@ -225,9 +225,9 @@ describe("the coding-agent executable", () => {
 
   // A shell pipeline is the simplest way to close the reading end before the run prints, and Windows
   // reports a closed pipe differently, so this is POSIX only. The shell stays alive as an ancestor,
-  // so it must not receive the key in its environment, or the ancestor check refuses the run. It
-  // reads the key from a file and exports it, which keeps the key out of its /proc environ and
-  // arguments.
+  // so it must not receive the key in its environment, or the ancestor check refuses the run. A
+  // script file reads the key from another file and exports it. That keeps the key out of the
+  // shell's /proc environ, and keeps the assignment out of its arguments, which the check also reads.
   it.skipIf(onWindows || !cleanChain)(
     "exits 0 on a succeeded run after the reader of its standard output has gone",
     async () => {
@@ -246,9 +246,11 @@ describe("the coding-agent executable", () => {
           }),
         ];
         await Bun.write(join(directory, "key"), secret);
-        const script =
-          'GOOGLE_API_KEY="$(cat key)"; export GOOGLE_API_KEY; ("$@"; echo "exit $?" >&2) | true';
-        const { stderr } = await runProcess(["sh", "-c", script, "sh", ...agentCommand], {
+        await Bun.write(
+          join(directory, "launch.sh"),
+          'GOOGLE_API_KEY="$(cat key)"\nexport GOOGLE_API_KEY\n("$@"; echo "exit $?" >&2) | true\n',
+        );
+        const { stderr } = await runProcess(["sh", "launch.sh", ...agentCommand], {
           cwd: directory,
           env: { [REPLAY_FIXTURES_ENV_VAR]: READ_ONLY_RUN.fixtures.join(",") },
         });
