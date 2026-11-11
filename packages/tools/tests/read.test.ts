@@ -305,6 +305,7 @@ describe("refusing a read", () => {
     await writeFile(join(repo, "secret.ts"), "secret\n");
     const tool = permissionsIgnored
       ? readToolWith({
+          lstat: fs.lstat,
           open: async () => {
             throw Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" });
           },
@@ -321,6 +322,7 @@ describe("refusing a read", () => {
     await writeFile(join(repo, "a.ts"), "");
     // The swap cannot be timed between resolution and open, so the open reports it as it would.
     const tool = readToolWith({
+      lstat: fs.lstat,
       open: async () => {
         throw Object.assign(new Error("ELOOP: too many symbolic links"), { code: "ELOOP" });
       },
@@ -373,6 +375,7 @@ describe("refusing a read", () => {
   it("returns the read even when closing the file fails", async () => {
     await writeFile(join(repo, "a.ts"), "kept\n");
     const tool = readToolWith({
+      lstat: fs.lstat,
       open: async (path, flags) => {
         const handle = await fs.open(path, flags);
         return {
@@ -389,9 +392,25 @@ describe("refusing a read", () => {
     expect(await read({ path: "a.ts" }, tool)).toMatchObject({ isError: false });
   });
 
+  it("returns EOPNOTSUPP for a regular file as a rejection, not as a file of the wrong type", async () => {
+    await writeFile(join(repo, "a.ts"), "");
+    // A network or FUSE mount can refuse an open flag such as O_NOFOLLOW for an ordinary file.
+    const tool = readToolWith({
+      lstat: fs.lstat,
+      open: async () => {
+        throw Object.assign(new Error("EOPNOTSUPP: operation not supported"), {
+          code: "EOPNOTSUPP",
+        });
+      },
+    });
+
+    await expect(read({ path: "a.ts" }, tool)).rejects.toThrow("EOPNOTSUPP");
+  });
+
   it("returns an unexpected failure as a rejection for Agent Core to report", async () => {
     await writeFile(join(repo, "a.ts"), "");
     const tool = readToolWith({
+      lstat: fs.lstat,
       open: async () => {
         throw Object.assign(new Error("EIO: i/o error"), { code: "EIO" });
       },
@@ -405,6 +424,7 @@ describe("the two phases", () => {
   it("prepares without opening the file, returning the validated path and a summary", async () => {
     await writeFile(join(repo, "a.ts"), "");
     const tool = readToolWith({
+      lstat: fs.lstat,
       open: async () => {
         throw new Error("prepare must not open the file");
       },
