@@ -269,20 +269,26 @@ describe("refusing a path", () => {
     expect(await readdir(repo)).toEqual(["pipe"]);
   });
 
-  it.skipIf(process.getuid?.() === 0)(
-    "reports an unreadable file as PERMISSION_DENIED",
-    async () => {
-      await writeFile(join(repo, "a.ts"), "old\n");
-      await chmod(join(repo, "a.ts"), 0o000);
+  it("reports a file it cannot open for reading as PERMISSION_DENIED", async () => {
+    await writeFile(join(repo, "a.ts"), "old\n");
+    // A chmod would also clear the write bits and stop at the read-only check before the read.
+    const tool = editToolWith(
+      {
+        ...fs,
+        open: async () => {
+          throw Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" });
+        },
+      },
+      fs,
+    );
 
-      expect(
-        await edit({ path: "a.ts", targetContent: "old", replacementContent: "new" }),
-      ).toMatchObject({
-        isError: true,
-        error: { code: "PERMISSION_DENIED" },
-      });
-    },
-  );
+    expect(
+      await edit({ path: "a.ts", targetContent: "old", replacementContent: "new" }, tool),
+    ).toMatchObject({
+      isError: true,
+      error: { code: "PERMISSION_DENIED", message: expect.stringContaining("cannot be read") },
+    });
+  });
 
   it("refuses to replace a read-only file before Approval", async () => {
     const original = Buffer.from("old\n");
