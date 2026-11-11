@@ -232,6 +232,6 @@ function withCreatedDirectories(
   created: readonly RepoPath[],
 ): string {
   if (created.length === 0) return message;
-  const shown = created.map((directory) => quote(relative(repoRoot, directory))).join(", ");
+  const shown = created.map((directory) => quote(displayPath(repoRoot, directory))).join(", ");
   return `${message}; created directories: ${shown}`;
 }

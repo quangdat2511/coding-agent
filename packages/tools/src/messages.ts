@@ -7,10 +7,16 @@ export function quote(text: string): string {
   return JSON.stringify(text);
 }
 
+// A repository-relative path in a message reads the same on every platform, and the same as the
+// "/"-separated path a model usually sends. POSIX keeps "\", which can be part of a file name.
+export function toPortablePath(path: string, platform: NodeJS.Platform = process.platform): string {
+  return platform === "win32" ? path.replaceAll("\\", "/") : path;
+}
+
 // A summary shows the target relative to the repository root, so an absolute path inside the
 // repository reads the same as the relative one the model may have sent. The root itself is ".".
 export function displayPath(repoRoot: RepoPath, path: RepoPath): string {
-  return relative(repoRoot, path) || ".";
+  return toPortablePath(relative(repoRoot, path)) || ".";
 }
 
 // An Approval line names the text an edit replaces and inserts, so a preview stays short enough

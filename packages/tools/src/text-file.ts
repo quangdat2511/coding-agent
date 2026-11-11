@@ -35,7 +35,7 @@ export const READ_OPEN_FLAGS =
 // Reads a regular text file. Opens before checking the file's type, so the check applies to the
 // file actually read. The resolver does not check readability, so EACCES and EPERM from the open
 // itself are mapped here. A FIFO reaches the stat below because O_NONBLOCK makes the open succeed;
-// a socket does not, because the kernel refuses to open it with ENXIO.
+// a socket does not, because the kernel refuses to open it.
 export async function readTextFile(
   fs: ReadFileSystem,
   path: RepoPath,
@@ -78,7 +78,9 @@ function openReadFailure(path: RepoPath, cause: unknown): ToolError {
     case "EISDIR":
       return directoryFailure(path);
     case "ENXIO":
-      // The kernel reports a socket this way; like a FIFO, it is not a regular file.
+    case "EOPNOTSUPP":
+      // Linux reports a socket with ENXIO and macOS with EOPNOTSUPP; like a FIFO, it is not a
+      // regular file.
       return notRegularFileFailure(path);
     case "ELOOP":
       return symbolicLinkFailure(path);

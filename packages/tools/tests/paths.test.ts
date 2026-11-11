@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test";
+import { toPortablePath } from "../src/messages.ts";
 import { namesDirectory, normalizeWindowsShellPath } from "../src/paths.ts";
 
 describe("normalizeWindowsShellPath", () => {
@@ -47,5 +48,15 @@ describe("namesDirectory", () => {
 
   it.each(["src", "src\\", "src\\."])("does not treat %s as a directory on POSIX", (input) => {
     expect(namesDirectory(input, "linux")).toBe(false);
+  });
+});
+
+describe("toPortablePath", () => {
+  it("writes a Windows relative path with forward slashes", () => {
+    expect(toPortablePath("src\\new\\a.ts", "win32")).toBe("src/new/a.ts");
+  });
+
+  it("keeps a backslash on POSIX, where it can be part of a file name", () => {
+    expect(toPortablePath("src/a\\b.ts", "linux")).toBe("src/a\\b.ts");
   });
 });

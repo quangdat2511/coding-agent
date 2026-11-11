@@ -7,6 +7,12 @@ import type { RepoPath, WorkspaceResolver } from "@coding-agent/agent-core";
 import { createWorkspaceResolver } from "../src/index.ts";
 import { createWorkspaceResolverWith, type WorkspaceFileSystem } from "../src/workspace.ts";
 
+// Root ignores directory permissions and Windows has no POSIX ones, so those tests simulate a
+// refusal.
+const permissionsIgnored = process.getuid?.() === 0 || process.platform === "win32";
+// Windows reports a component longer than the file system allows as missing, not ENAMETOOLONG.
+const noNameTooLong = process.platform === "win32";
+
 let sandbox: string;
 
 beforeEach(async () => {
@@ -51,16 +57,14 @@ describe("creating a workspace resolver", () => {
 
   it("refuses a Repository Root that cannot be searched", async () => {
     const repo = await makeRepo();
-    // A process running as root ignores directory permissions, so it simulates the refusal.
-    const created =
-      process.getuid?.() === 0
-        ? await createWorkspaceResolverWith(repo, {
-            ...fs,
-            access: async () => {
-              throw Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" });
-            },
-          })
-        : await chmod(repo, 0o600).then(() => createWorkspaceResolver(repo));
+    const created = permissionsIgnored
+      ? await createWorkspaceResolverWith(repo, {
+          ...fs,
+          access: async () => {
+            throw Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" });
+          },
+        })
+      : await chmod(repo, 0o600).then(() => createWorkspaceResolver(repo));
 
     expect(created).toMatchObject({ ok: false, code: "INVALID_CONFIGURATION", field: "repoRoot" });
   });
@@ -225,7 +229,7 @@ describe("resolving a path that cannot be reached", () => {
     });
   });
 
-  it.each([
+  it.skipIf(noNameTooLong).each([
     [
       "resolveExisting",
       (workspace: WorkspaceResolver, input: string) => workspace.resolveExisting(input),
@@ -276,11 +280,9 @@ describe("resolving a path the filesystem refuses", () => {
     const repo = await makeRepo();
     await mkdir(join(repo, "locked"));
     await writeFile(join(repo, "locked/a.ts"), "");
-    // A process running as root ignores directory permissions, so it simulates the refusal.
-    const created =
-      process.getuid?.() === 0
-        ? await createWorkspaceResolverWith(repo, failingAt(join(repo, "locked/a.ts"), "EACCES"))
-        : await chmod(join(repo, "locked"), 0o000).then(() => createWorkspaceResolver(repo));
+    const created = permissionsIgnored
+      ? await createWorkspaceResolverWith(repo, failingAt(join(repo, "locked/a.ts"), "EACCES"))
+      : await chmod(join(repo, "locked"), 0o000).then(() => createWorkspaceResolver(repo));
     if (!created.ok) throw new Error(`expected a resolver, got: ${created.message}`);
 
     expect(await created.workspace.resolveExisting("locked/a.ts")).toMatchObject({
@@ -333,6 +335,67 @@ describe("resolving a path the filesystem refuses", () => {
     expect(await created.workspace.resolveExisting("a.ts")).toMatchObject({
       ok: false,
       code: "PATH_OUTSIDE_REPO",
+    });
+  });
+
+  describe("when realpath cannot open the file, as on macOS and Windows", () => {
+    const unopenable = (
+      repo: string,
+      overrides: Partial<WorkspaceFileSystem> = {},
+    ): WorkspaceFileSystem => ({
+      ...fs,
+      realpath: async (target) => {
+        if (target === join(repo, "a.ts")) {
+          throw Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" });
+        }
+        return (overrides.realpath ?? fs.realpath)(target);
+      },
+      lstat: overrides.lstat ?? fs.lstat,
+    });
+
+    async function resolveWith(repo: string, files: WorkspaceFileSystem) {
+      const created = await createWorkspaceResolverWith(repo, files);
+      if (!created.ok) throw new Error(`expected a resolver, got: ${created.message}`);
+      return created.workspace.resolveExisting("a.ts");
+    }
+
+    it("resolves the file through its canonical parent", async () => {
+      const repo = await makeRepo();
+      await writeFile(join(repo, "a.ts"), "");
+
+      expect(await resolveWith(repo, unopenable(repo))).toEqual({
+        ok: true,
+        path: join(repo, "a.ts") as RepoPath,
+      });
+    });
+
+    it("rejects the file once a symbolic link is swapped in after the walk", async () => {
+      const repo = await makeRepo();
+      await writeFile(join(repo, "a.ts"), "");
+      let calls = 0;
+      const lstat: WorkspaceFileSystem["lstat"] = async (target) => {
+        const stats = await fs.lstat(target);
+        if (target !== join(repo, "a.ts") || ++calls === 1) return stats;
+        return Object.assign(stats, { isSymbolicLink: () => true });
+      };
+
+      expect(await resolveWith(repo, unopenable(repo, { lstat }))).toMatchObject({
+        ok: false,
+        code: "PATH_OUTSIDE_REPO",
+      });
+    });
+
+    it("rejects the file once its parent's canonical form changes after the walk", async () => {
+      const repo = await makeRepo();
+      await writeFile(join(repo, "a.ts"), "");
+      let calls = 0;
+      const realpath: WorkspaceFileSystem["realpath"] = async (target) =>
+        target === repo && ++calls > 1 ? join(repo, "docs") : fs.realpath(target);
+
+      expect(await resolveWith(repo, unopenable(repo, { realpath }))).toMatchObject({
+        ok: false,
+        code: "PATH_OUTSIDE_REPO",
+      });
     });
   });
 
