@@ -1,4 +1,4 @@
-import { relative } from "node:path";
+import { posix, win32 } from "node:path";
 import type { RepoPath } from "@coding-agent/agent-core";
 
 // A path or a file's text can hold any character, so every tool result that embeds one quotes it:
@@ -15,8 +15,14 @@ export function toPortablePath(path: string, platform: NodeJS.Platform = process
 
 // A summary shows the target relative to the repository root, so an absolute path inside the
 // repository reads the same as the relative one the model may have sent. The root itself is ".".
-export function displayPath(repoRoot: RepoPath, path: RepoPath): string {
-  return toPortablePath(relative(repoRoot, path)) || ".";
+// The optional platform is a test seam; callers use the current one.
+export function displayPath(
+  repoRoot: RepoPath,
+  path: RepoPath,
+  platform: NodeJS.Platform = process.platform,
+): string {
+  const { relative } = platform === "win32" ? win32 : posix;
+  return toPortablePath(relative(repoRoot, path), platform) || ".";
 }
 
 // An Approval line names the text an edit replaces and inserts, so a preview stays short enough

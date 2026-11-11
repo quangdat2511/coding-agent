@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
-import { toPortablePath } from "../src/messages.ts";
+import type { RepoPath } from "@coding-agent/agent-core";
+import { displayPath, toPortablePath } from "../src/messages.ts";
 import { namesDirectory, normalizeWindowsShellPath } from "../src/paths.ts";
 
 describe("normalizeWindowsShellPath", () => {
@@ -58,5 +59,22 @@ describe("toPortablePath", () => {
 
   it("keeps a backslash on POSIX, where it can be part of a file name", () => {
     expect(toPortablePath("src/a\\b.ts", "linux")).toBe("src/a\\b.ts");
+  });
+});
+
+describe("displayPath", () => {
+  const repo = (path: string) => path as RepoPath;
+
+  it("shows a Windows path relative to the root with forward slashes", () => {
+    expect(displayPath(repo("C:\\repo"), repo("C:\\repo\\src\\a.ts"), "win32")).toBe("src/a.ts");
+  });
+
+  it.each(["win32", "linux"] as const)("shows the root itself as . on %s", (platform) => {
+    const root = platform === "win32" ? "C:\\repo" : "/repo";
+    expect(displayPath(repo(root), repo(root), platform)).toBe(".");
+  });
+
+  it("keeps a backslash in a POSIX file name", () => {
+    expect(displayPath(repo("/repo"), repo("/repo/src/a\\b.ts"), "linux")).toBe("src/a\\b.ts");
   });
 });
