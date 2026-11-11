@@ -54,7 +54,9 @@ MSYS, Cygwin, and WSL drive paths are normalized before resolution, junctions ar
 symbolic links, and the future `bash` tool should resolve Git Bash first with an optional
 PowerShell tool, without requiring WSL. Windows-specific path handling is unit-tested on every
 host, and CI runs the full test suite on Linux, macOS and Windows. A test that cannot run on
-Windows is skipped there with `skipIf` and a comment giving the reason.
+Windows is skipped there with `skipIf` and a comment giving the reason. The `coding-agent` bin
+entry does not start on Windows yet: Bun's Windows bin shim cannot run its `env -S` shebang, and
+Bun there accepts no empty device as `--config` (CDA-111).
 
 ## Architecture
 
