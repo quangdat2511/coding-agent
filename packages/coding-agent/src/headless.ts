@@ -56,15 +56,29 @@ function describeOutcome(result: AgentResult): string {
   return outcome + diagnostic(`${result.failure.code}: ${result.failure.message}`);
 }
 
+// The two streams are diagnostic only (ADR 0005 §3): a failed write must not change the exit code.
+function printer(write: (text: string) => void, redact: (text: string) => string) {
+  return (text: string): void => {
+    try {
+      write(redact(text));
+    } catch {}
+  };
+}
+
 export async function runHeadless(options: HeadlessOptions): Promise<HeadlessResult> {
   const resolved = await resolveRunConfig(options.args, options);
-  if (!resolved.ok) return refuse(resolved, options.stderr);
+  if (!resolved.ok)
+    return refuse(
+      resolved,
+      printer(options.stderr, (text) => text),
+    );
   const { config, createdDirectories } = resolved;
   // A provider error or a file the model read can carry the credential into the text printed here.
   const redact = (text: string) => text.replaceAll(config.credential.reveal(), "[redacted]");
-  const stdout = (text: string) => options.stdout(redact(text));
-  const stderr = (text: string) => options.stderr(redact(text));
+  const stdout = printer(options.stdout, redact);
+  const stderr = printer(options.stderr, redact);
 
+  let running = false;
   try {
     const opened = await openSession(config);
     if (!opened.ok) {
@@ -79,6 +93,7 @@ export async function runHeadless(options: HeadlessOptions): Promise<HeadlessRes
     const task = { objective: config.objective };
     const started = await session.dispatch({ type: "start", task });
     if (!started.accepted) throw new Error(`the Agent Session did not start: ${started.message}`);
+    running = true;
 
     const result = await session.result();
     const text = finalText(result);
@@ -86,6 +101,7 @@ export async function runHeadless(options: HeadlessOptions): Promise<HeadlessRes
     stderr(describeOutcome(result));
     return { exitCode: EXIT_CODE_BY_OUTCOME[result.outcome], result };
   } catch (error) {
+    if (!running) await removeCreated(createdDirectories);
     throw new Error(redact(error instanceof Error ? error.message : String(error)));
   }
 }

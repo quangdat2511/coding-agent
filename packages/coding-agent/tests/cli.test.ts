@@ -23,6 +23,7 @@ if (declared === undefined) throw new Error("package.json declares no coding-age
 const bin = join(packageRoot, declared);
 
 const replayProvider = join(import.meta.dir, "support", "replay-provider.ts");
+const failSessionFactory = join(import.meta.dir, "support", "fail-session-factory.ts");
 
 const required = [
   "--task-file",
@@ -204,6 +205,67 @@ describe("the coding-agent executable", () => {
       expect(stdout).toStartWith("I have read `src/slugify.ts`.");
       expect(stdout).not.toContain(secret);
       expect((await readdir(directory)).sort()).toEqual(["out", "repo"]);
+    });
+  });
+
+  // A shell pipeline is the simplest way to close the reading end before the run prints, and Windows
+  // reports a closed pipe differently, so this is POSIX only.
+  it.skipIf(process.platform === "win32")(
+    "exits 0 on a succeeded run after the reader of its standard output has gone",
+    async () => {
+      await withTemporaryDirectory(async (directory) => {
+        await cp(NAMED_TASK_REPO, join(directory, "repo"), { recursive: true });
+        const command = [
+          ...bunLikeShebang,
+          "--preload",
+          replayProvider,
+          bin,
+          ...validRun({
+            "--task-file": NAMED_TASK_FILE,
+            "--provider": READ_ONLY_RUN.provider,
+            "--model": READ_ONLY_RUN.model,
+            "--repo-root": "repo",
+          }),
+        ];
+        const { stderr } = await runProcess(
+          ["sh", "-c", '("$@"; echo "exit $?" >&2) | true', "sh", ...command],
+          {
+            cwd: directory,
+            env: {
+              GOOGLE_API_KEY: secret,
+              [REPLAY_FIXTURES_ENV_VAR]: READ_ONLY_RUN.fixtures.join(","),
+            },
+          },
+        );
+
+        expect(stderr).toBe("coding-agent: succeeded; workspace changed: no\nexit 0\n");
+      });
+    },
+  );
+
+  it("exits 70 without the credential or an output directory when the session factory throws", async () => {
+    await withTemporaryDirectory(async (directory) => {
+      await cp(NAMED_TASK_REPO, join(directory, "repo"), { recursive: true });
+      const { exitCode, stdout, stderr } = await runProcess(
+        [
+          ...bunLikeShebang,
+          "--preload",
+          failSessionFactory,
+          bin,
+          ...validRun({
+            "--task-file": NAMED_TASK_FILE,
+            "--provider": READ_ONLY_RUN.provider,
+            "--model": READ_ONLY_RUN.model,
+            "--repo-root": "repo",
+          }),
+        ],
+        { cwd: directory, env: { GOOGLE_API_KEY: secret } },
+      );
+
+      expect(exitCode).toBe(70);
+      expect(stdout).toBe("");
+      expect(stderr).toBe("coding-agent: internal error: forced by the test, key [redacted]\n");
+      expect(await readdir(directory)).toEqual(["repo"]);
     });
   });
 

@@ -88,7 +88,7 @@ describe("a headless run of the named task on Google", () => {
       expect(toolResponses(sent[1])).toEqual([
         {
           output:
-            `"${join(repoRoot, "src", "slugify.ts")}" (lines 1-3 of 3)\n` +
+            `${JSON.stringify(join(repoRoot, "src", "slugify.ts"))} (lines 1-3 of 3)\n` +
             "1 | export function slugify(title: string): string {\n" +
             '2 |   return title.trim().toLowerCase().replace(/\\s+/g, "-");\n' +
             "3 | }",
@@ -163,13 +163,20 @@ describe("a headless run of the named task on Google", () => {
     });
   });
 
-  it("keeps the credential out of an internal error", async () => {
-    const run = runNamedTask(replayInOrder(readOnlyRun), () => undefined, {
-      stdout: () => {
-        throw new Error(`cannot write, key ${secret}`);
+  it("keeps the exit code of the Agent Result when printing fails", async () => {
+    await runNamedTask(
+      replayInOrder(readOnlyRun),
+      ({ result, stderr }) => {
+        expect(result.exitCode).toBe(0);
+        expect(result.result?.outcome).toBe("succeeded");
+        expect(stderr).toBe("coding-agent: succeeded; workspace changed: no\n");
       },
-    });
-    await expect(run).rejects.toThrow("cannot write, key [redacted]");
+      {
+        stdout: () => {
+          throw new Error("the reader has gone");
+        },
+      },
+    );
   });
 
   it("says which Project Instructions candidate it passed over", async () => {

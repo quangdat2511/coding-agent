@@ -20,7 +20,8 @@ The run prints the final assistant message on standard output. On standard error
 line with the outcome and whether the workspace changed, for example
 `coding-agent: succeeded; workspace changed: no`. A failed run adds a second line with the failure
 code and message. Both streams are diagnostic only
-([ADR 0005 §3](../../docs/adr/0005-terminalbench-evaluation-protocol.md)). A provider error or a
+([ADR 0005 §3](../../docs/adr/0005-terminalbench-evaluation-protocol.md)), so a write that fails,
+for example because the reader of a pipe has gone, does not change the exit code. A provider error or a
 file that the model read can carry the credential, so the run replaces the credential value with
 `[redacted]` in everything it prints.
 
@@ -32,6 +33,10 @@ These parts are still to come:
 - `SIGINT` and `SIGTERM` do not cancel the Agent Session yet, so no run settles `cancelled`.
   CDA-78 (D3.2) adds this.
 - `read` is the only registered tool, and Verification is a stand-in. CDA-80 (D5) replaces both.
+- The session limits are resolved but not enforced. Agent Core does not yet compare its counters
+  with `maxModelTurns`, `maxToolCalls` or `maxDurationMs`, so a live run whose model keeps calling
+  tools runs until the process is killed, and spends tokens all the while. CDA-76 (A4.2) enforces
+  the limits. Until CDA-78, `SIGINT` and `SIGTERM` stop such a run only by ending the process.
 
 ### Session factory
 

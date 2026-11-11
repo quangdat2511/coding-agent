@@ -27,6 +27,9 @@ async function main(
     );
     return 70;
   }
+  // Bun reports a write to a closed pipe as an "error" event, which would end the run with exit 1.
+  process.stdout.on("error", () => undefined);
+  process.stderr.on("error", () => undefined);
   // Temporary: CDA-75 (D3.1) writes the run's files, and CDA-78 (D3.2) cancels on a signal.
   const { exitCode } = await runHeadless({
     args: parsed.args,
