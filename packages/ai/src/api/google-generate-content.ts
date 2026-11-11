@@ -12,7 +12,7 @@
  * - No `[DONE]` sentinel; the stream closes after the last data line
  * - Roles: `user` / `model` (not `user` / `assistant`)
  * - System prompt lives in `system_instruction`, not a `system` message
- * - Usage fields: `promptTokenCount` / `candidatesTokenCount`
+ * - Usage fields: `promptTokenCount` / `candidatesTokenCount` (+ `thoughtsTokenCount`, counted as output)
  */
 
 import type {
@@ -71,6 +71,7 @@ interface GoogleCandidate {
 interface GoogleUsageMetadata {
   promptTokenCount?: number;
   candidatesTokenCount?: number;
+  thoughtsTokenCount?: number;
   totalTokenCount?: number;
   cachedContentTokenCount?: number;
 }
@@ -84,10 +85,14 @@ function extractUsage(meta?: GoogleUsageMetadata): Usage | undefined {
   if (!meta) return undefined;
   const usage: Usage = {
     inputTokens: meta.promptTokenCount ?? 0,
-    outputTokens: meta.candidatesTokenCount ?? 0,
+    // Gemini reports thinking tokens apart from candidatesTokenCount, but bills them as output.
+    outputTokens: (meta.candidatesTokenCount ?? 0) + (meta.thoughtsTokenCount ?? 0),
   };
   if (meta.cachedContentTokenCount !== undefined) {
     usage.cachedInputTokens = meta.cachedContentTokenCount;
+  }
+  if (meta.thoughtsTokenCount !== undefined) {
+    usage.reasoningTokens = meta.thoughtsTokenCount;
   }
   return usage;
 }

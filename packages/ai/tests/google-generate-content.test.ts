@@ -331,6 +331,39 @@ describe("stream finishReason and usage normalization", () => {
     });
   });
 
+  it("adds thoughtsTokenCount to outputTokens and reports it as reasoningTokens", async () => {
+    const rawSse =
+      'data: {"candidates":[{"content":{"parts":[{"text":"Thought about it"}]},"finishReason":"STOP","index":0}],"usageMetadata":{"promptTokenCount":100,"candidatesTokenCount":20,"thoughtsTokenCount":30,"totalTokenCount":150}}\n\n';
+
+    await withFixtureFetch(sseResponse(rawSse), async () => {
+      const ms = stream(TEST_MODEL, { messages: [] }, { apiKey: "test-key" });
+      const msg = await ms.result();
+
+      expect(msg.usage).toEqual({
+        inputTokens: 100,
+        outputTokens: 50,
+        reasoningTokens: 30,
+      });
+    });
+  });
+
+  it("counts the thoughts of a recorded Gemini 3 turn in outputTokens", async () => {
+    await withFixtureFetch(
+      sseResponse(loadFixture("google/tool-call-thought-signature.txt")),
+      async () => {
+        const ms = stream(TEST_MODEL, { messages: [] }, { apiKey: "test-key" });
+        const msg = await ms.result();
+
+        // The recording reports 74 prompt + 32 candidate + 85 thoughts tokens = 191 total.
+        expect(msg.usage).toEqual({
+          inputTokens: 74,
+          outputTokens: 117,
+          reasoningTokens: 85,
+        });
+      },
+    );
+  });
+
   it("generates unique synthetic toolCallId across turns with google-fc- prefix", async () => {
     const { loadFixture, sseResponse, withFixtureFetch } = await import(
       "./fixtures/fixture-fetch.ts"
