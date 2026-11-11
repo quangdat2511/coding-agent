@@ -27,6 +27,7 @@ import type { Static } from "typebox";
 import { Value } from "typebox/value";
 import { editToolWith } from "../src/edit.ts";
 import { createWorkspaceResolver, EditParams, editTool } from "../src/index.ts";
+import { noFifos, noModeBits } from "./platform.ts";
 
 let sandbox: string;
 let repo: string;
@@ -112,7 +113,7 @@ describe("editing a file", () => {
 
     expect(await edit({ path: "a.ts", targetContent: "42", replacementContent: "43" })).toEqual({
       isError: false,
-      content: `"${join(repo, "a.ts")}" (1 replacement, 17 bytes written)`,
+      content: `${JSON.stringify(join(repo, "a.ts"))} (1 replacement, 17 bytes written)`,
     });
     expect((await readFile(join(repo, "a.ts"))).equals(Buffer.from("let answer = 43;\n"))).toBe(
       true,
@@ -152,7 +153,7 @@ describe("editing a file", () => {
       }),
     ).toEqual({
       isError: false,
-      content: `"${join(repo, "a.ts")}" (1 replacement, 4 bytes written)`,
+      content: `${JSON.stringify(join(repo, "a.ts"))} (1 replacement, 4 bytes written)`,
     });
     expect(await readFile(join(repo, "a.ts"), "utf8")).toBe("new\n");
   });
@@ -164,7 +165,7 @@ describe("editing a file", () => {
       await edit({ path: "a.ts", targetContent: "drop this line\n", replacementContent: "" }),
     ).toEqual({
       isError: false,
-      content: `"${join(repo, "a.ts")}" (1 replacement, 10 bytes written)`,
+      content: `${JSON.stringify(join(repo, "a.ts"))} (1 replacement, 10 bytes written)`,
     });
     expect(await readFile(join(repo, "a.ts"), "utf8")).toBe("keep\nkeep\n");
   });
@@ -174,7 +175,7 @@ describe("editing a file", () => {
 
     expect(await edit({ path: "a.ts", targetContent: "héllo", replacementContent: "😀" })).toEqual({
       isError: false,
-      content: `"${join(repo, "a.ts")}" (1 replacement, 5 bytes written)`,
+      content: `${JSON.stringify(join(repo, "a.ts"))} (1 replacement, 5 bytes written)`,
     });
     expect(await readFile(join(repo, "a.ts"), "utf8")).toBe("😀\n");
   });
@@ -184,7 +185,7 @@ describe("refusing a match", () => {
   it("fails with NO_MATCH and leaves the file byte-identical", async () => {
     const original = Buffer.from("let answer = 42;\n");
     await writeFile(join(repo, "a.ts"), original);
-    const message = `targetContent does not occur in "${join(repo, "a.ts")}"`;
+    const message = `targetContent does not occur in ${JSON.stringify(join(repo, "a.ts"))}`;
 
     expect(await edit({ path: "a.ts", targetContent: "41", replacementContent: "43" })).toEqual({
       isError: true,
@@ -198,7 +199,7 @@ describe("refusing a match", () => {
     const original = Buffer.from("return 1;\nreturn 1;\n");
     await writeFile(join(repo, "a.ts"), original);
     const message =
-      `targetContent occurs 2 times in "${join(repo, "a.ts")}"; ` +
+      `targetContent occurs 2 times in ${JSON.stringify(join(repo, "a.ts"))}; ` +
       "add surrounding text to make it unique";
 
     expect(
@@ -243,7 +244,7 @@ describe("refusing a path", () => {
 
   it("reports a directory as IS_DIRECTORY", async () => {
     await mkdir(join(repo, "src"));
-    const message = `"${join(repo, "src")}" is a directory`;
+    const message = `${JSON.stringify(join(repo, "src"))} is a directory`;
 
     expect(await edit({ path: "src", targetContent: "a", replacementContent: "b" })).toEqual({
       isError: true,
@@ -253,7 +254,7 @@ describe("refusing a path", () => {
     expect(await readdir(repo)).toEqual(["src"]);
   });
 
-  it("reports a FIFO as PERMISSION_DENIED", async () => {
+  it.skipIf(noFifos)("reports a FIFO as PERMISSION_DENIED", async () => {
     expect(Bun.spawnSync(["mkfifo", join(repo, "pipe")]).exitCode).toBe(0);
 
     expect(await edit({ path: "pipe", targetContent: "a", replacementContent: "b" })).toMatchObject(
@@ -268,20 +269,26 @@ describe("refusing a path", () => {
     expect(await readdir(repo)).toEqual(["pipe"]);
   });
 
-  it.skipIf(process.getuid?.() === 0)(
-    "reports an unreadable file as PERMISSION_DENIED",
-    async () => {
-      await writeFile(join(repo, "a.ts"), "old\n");
-      await chmod(join(repo, "a.ts"), 0o000);
+  it("reports a file it cannot open for reading as PERMISSION_DENIED", async () => {
+    await writeFile(join(repo, "a.ts"), "old\n");
+    // A chmod would also clear the write bits and stop at the read-only check before the read.
+    const tool = editToolWith(
+      {
+        ...fs,
+        open: async () => {
+          throw Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" });
+        },
+      },
+      fs,
+    );
 
-      expect(
-        await edit({ path: "a.ts", targetContent: "old", replacementContent: "new" }),
-      ).toMatchObject({
-        isError: true,
-        error: { code: "PERMISSION_DENIED" },
-      });
-    },
-  );
+    expect(
+      await edit({ path: "a.ts", targetContent: "old", replacementContent: "new" }, tool),
+    ).toMatchObject({
+      isError: true,
+      error: { code: "PERMISSION_DENIED", message: expect.stringContaining("cannot be read") },
+    });
+  });
 
   it("refuses to replace a read-only file before Approval", async () => {
     const original = Buffer.from("old\n");
@@ -431,7 +438,7 @@ describe("writing atomically", () => {
     expect(await readdir(repo)).toEqual(["a.ts"]);
   });
 
-  it("preserves the permissions of the file it edits", async () => {
+  it.skipIf(noModeBits)("preserves the permissions of the file it edits", async () => {
     await writeFile(join(repo, "run.sh"), "#!/bin/sh\necho old\n");
     await chmod(join(repo, "run.sh"), 0o751);
 

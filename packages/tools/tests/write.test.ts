@@ -28,6 +28,7 @@ import type { Static } from "typebox";
 import { Value } from "typebox/value";
 import { createWorkspaceResolver, WriteParams, writeTool } from "../src/index.ts";
 import { writeToolWith } from "../src/write.ts";
+import { noFifos, noModeBits, permissionsIgnored } from "./platform.ts";
 
 let sandbox: string;
 let repo: string;
@@ -98,7 +99,7 @@ describe("writing a file", () => {
   it("creates a missing file and reports the canonical path and bytes written", async () => {
     expect(await write({ path: "a.ts", content: "export const a = 1;\n" })).toEqual({
       isError: false,
-      content: `"${join(repo, "a.ts")}" (20 bytes written)`,
+      content: `${JSON.stringify(join(repo, "a.ts"))} (20 bytes written)`,
     });
     expect(await readFile(join(repo, "a.ts"), "utf8")).toBe("export const a = 1;\n");
   });
@@ -106,7 +107,7 @@ describe("writing a file", () => {
   it("accepts an absolute path inside the repository", async () => {
     expect(await write({ path: join(repo, "a.ts"), content: "inside\n" })).toEqual({
       isError: false,
-      content: `"${join(repo, "a.ts")}" (7 bytes written)`,
+      content: `${JSON.stringify(join(repo, "a.ts"))} (7 bytes written)`,
     });
     expect(await readFile(join(repo, "a.ts"), "utf8")).toBe("inside\n");
   });
@@ -120,7 +121,7 @@ describe("writing a file", () => {
     });
     expect(await write({ path: "lone.ts", content })).toEqual({
       isError: false,
-      content: `"${join(repo, "lone.ts")}" (3 bytes written)`,
+      content: `${JSON.stringify(join(repo, "lone.ts"))} (3 bytes written)`,
     });
     expect((await stat(join(repo, "lone.ts"))).size).toBe(3);
   });
@@ -143,7 +144,7 @@ describe("writing a file", () => {
   it("creates an empty file", async () => {
     expect(await write({ path: "empty.ts", content: "" })).toEqual({
       isError: false,
-      content: `"${join(repo, "empty.ts")}" (0 bytes written)`,
+      content: `${JSON.stringify(join(repo, "empty.ts"))} (0 bytes written)`,
     });
     expect(await readFile(join(repo, "empty.ts"), "utf8")).toBe("");
   });
@@ -217,7 +218,7 @@ describe("writing a file", () => {
     expect(renameSawSync).toBe(true);
   });
 
-  it("preserves the permissions of the file it replaces", async () => {
+  it.skipIf(noModeBits)("preserves the permissions of the file it replaces", async () => {
     await writeFile(join(repo, "run.sh"), "#!/bin/sh\n");
     await chmod(join(repo, "run.sh"), 0o751);
 
@@ -239,7 +240,7 @@ describe("refusing a write", () => {
     expect(await readdir(repo)).toEqual(["src"]);
   });
 
-  it("refuses to replace a FIFO as PERMISSION_DENIED", async () => {
+  it.skipIf(noFifos)("refuses to replace a FIFO as PERMISSION_DENIED", async () => {
     expect(Bun.spawnSync(["mkfifo", join(repo, "pipe")]).exitCode).toBe(0);
 
     expect(await prepare({ path: "pipe", content: "x" })).toMatchObject({
@@ -270,7 +271,7 @@ describe("refusing a write", () => {
     expect(await readFile(join(repo, "a.ts"), "utf8")).toBe("old\n");
   });
 
-  it.skipIf(process.getuid?.() === 0)(
+  it.skipIf(permissionsIgnored)(
     "refuses a file this process cannot write even with a group write bit",
     async () => {
       await writeFile(join(repo, "a.ts"), "old\n");

@@ -60,7 +60,7 @@ function violations(
     const target = relative(join(root, packageDirectory), resolve(root, dirname(file), specifier));
     if (target === ".." || target.startsWith(`..${sep}`)) {
       found.push(
-        `${shown}:${line}: "${specifier}" resolves outside ${packageDirectory}; import that package by name`,
+        `${shown}:${line}: "${specifier}" resolves outside ${displayPath(packageDirectory)}; import that package by name`,
       );
     }
   }

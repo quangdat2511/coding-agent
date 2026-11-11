@@ -2,7 +2,7 @@
 
 Status: accepted
 
-Date: 2026-09-11 (Refined: 2026-09-12; Amended: 2026-09-13, 2026-11-09)
+Date: 2026-09-11 (Refined: 2026-09-12; Amended: 2026-09-13, 2026-11-09, 2026-11-11)
 
 ## Context
 
@@ -147,6 +147,16 @@ On 2026-11-09, [CDA-63](https://datn-fit-hcmus.atlassian.net/browse/CDA-63) amen
   `bash`. `read` output is capped with the same marker and head-and-tail split, and the budget
   helper is reusable by `bash` and the Verification Runner. Both ends are kept, so the final error
   survives truncation.
+
+On 2026-11-11, [CDA-110](https://datn-fit-hcmus.atlassian.net/browse/CDA-110) amended this record:
+
+- **Existing paths that `fs.realpath` cannot open** (§2): on macOS and Windows, `fs.realpath` opens
+  the path, so it fails for a file this process cannot read and for a socket. For such a final
+  component that is not a directory, the resolver canonicalizes its parent with `fs.realpath`,
+  requires the component's exact name among the parent's entries, and checks it again with
+  `lstat`. A symbolic link swapped in after the walk, or a name that differs from the one on disk
+  only in case or as a Windows short name, is still rejected, and readability stays the opening
+  tool's check.
 
 ### 8. Credential Isolation for Tool and Verification Processes
 

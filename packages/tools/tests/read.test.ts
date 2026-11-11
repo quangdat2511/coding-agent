@@ -25,6 +25,7 @@ import { Value } from "typebox/value";
 import { createWorkspaceResolver, ReadParams, readTool } from "../src/index.ts";
 import { MAX_TOOL_OUTPUT_BYTES, TOOL_OUTPUT_TRUNCATION_MARKER } from "../src/output-budget.ts";
 import { readToolWith } from "../src/read.ts";
+import { noFifos, noNewlineNames, permissionsIgnored, socketRefusal } from "./platform.ts";
 
 let sandbox: string;
 let repo: string;
@@ -95,7 +96,7 @@ describe("reading a file", () => {
 
     expect(await read({ path: "a.ts" })).toEqual({
       isError: false,
-      content: `"${join(repo, "a.ts")}" (lines 1-3 of 3)\n1 | first\n2 | second\n3 | third`,
+      content: `${JSON.stringify(join(repo, "a.ts"))} (lines 1-3 of 3)\n1 | first\n2 | second\n3 | third`,
     });
   });
 
@@ -117,7 +118,7 @@ describe("reading a file", () => {
     expect(await read({ path: "a.ts", offset: 3, limit: 2 })).toEqual({
       isError: false,
       content:
-        `"${join(repo, "a.ts")}" (lines 3-4 of 10)\n3 | line 3\n4 | line 4\n` +
+        `${JSON.stringify(join(repo, "a.ts"))} (lines 3-4 of 10)\n3 | line 3\n4 | line 4\n` +
         "[6 more lines; continue with offset 5]",
     });
   });
@@ -127,7 +128,9 @@ describe("reading a file", () => {
 
     const outcome = await read({ path: "a.ts" });
 
-    expect(outcome.content).toStartWith(`"${join(repo, "a.ts")}" (lines 1-300 of 301)\n`);
+    expect(outcome.content).toStartWith(
+      `${JSON.stringify(join(repo, "a.ts"))} (lines 1-300 of 301)\n`,
+    );
     expect(outcome.content).toEndWith("300 | line 300\n[1 more lines; continue with offset 301]");
   });
 
@@ -142,7 +145,7 @@ describe("reading a file", () => {
 
     expect(await read({ path: "empty.ts" })).toEqual({
       isError: false,
-      content: `"${join(repo, "empty.ts")}" (empty file)`,
+      content: `${JSON.stringify(join(repo, "empty.ts"))} (empty file)`,
     });
   });
 
@@ -152,7 +155,7 @@ describe("reading a file", () => {
     const outcome = await read({ path: "crlf.ts" });
 
     expect(outcome.content.split("\n")).toEqual([
-      `"${join(repo, "crlf.ts")}" (lines 1-2 of 2)`,
+      `${JSON.stringify(join(repo, "crlf.ts"))} (lines 1-2 of 2)`,
       "1 | first\r",
       "2 | second\r",
     ]);
@@ -300,15 +303,14 @@ describe("refusing a read", () => {
 
   it("reports a file it cannot open as PERMISSION_DENIED", async () => {
     await writeFile(join(repo, "secret.ts"), "secret\n");
-    // A process running as root ignores file permissions, so it simulates the refusal.
-    const tool =
-      process.getuid?.() === 0
-        ? readToolWith({
-            open: async () => {
-              throw Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" });
-            },
-          })
-        : await chmod(join(repo, "secret.ts"), 0o000).then(() => readTool());
+    const tool = permissionsIgnored
+      ? readToolWith({
+          lstat: fs.lstat,
+          open: async () => {
+            throw Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" });
+          },
+        })
+      : await chmod(join(repo, "secret.ts"), 0o000).then(() => readTool());
 
     expect(await read({ path: "secret.ts" }, tool)).toMatchObject({
       isError: true,
@@ -320,6 +322,7 @@ describe("refusing a read", () => {
     await writeFile(join(repo, "a.ts"), "");
     // The swap cannot be timed between resolution and open, so the open reports it as it would.
     const tool = readToolWith({
+      lstat: fs.lstat,
       open: async () => {
         throw Object.assign(new Error("ELOOP: too many symbolic links"), { code: "ELOOP" });
       },
@@ -331,7 +334,7 @@ describe("refusing a read", () => {
     });
   });
 
-  it("refuses a FIFO without waiting for a writer", async () => {
+  it.skipIf(noFifos)("refuses a FIFO without waiting for a writer", async () => {
     expect(Bun.spawnSync(["mkfifo", join(repo, "pipe")]).exitCode).toBe(0);
 
     expect(await read({ path: "pipe" })).toMatchObject({
@@ -347,7 +350,7 @@ describe("refusing a read", () => {
         isError: true,
         error: {
           code: "PERMISSION_DENIED",
-          message: expect.stringContaining("not a regular file"),
+          message: expect.stringContaining(socketRefusal),
         },
       });
     } finally {
@@ -355,20 +358,24 @@ describe("refusing a read", () => {
     }
   });
 
-  it("quotes the path so a newline in a file name cannot pass for a numbered line", async () => {
-    await writeFile(join(repo, "evil\n2 | injected"), "real\n");
+  it.skipIf(noNewlineNames)(
+    "quotes the path so a newline in a file name cannot pass for a numbered line",
+    async () => {
+      await writeFile(join(repo, "evil\n2 | injected"), "real\n");
 
-    const outcome = await read({ path: "evil\n2 | injected" });
+      const outcome = await read({ path: "evil\n2 | injected" });
 
-    expect(outcome.content.split("\n")).toEqual([
-      `${JSON.stringify(join(repo, "evil\n2 | injected"))} (lines 1-1 of 1)`,
-      "1 | real",
-    ]);
-  });
+      expect(outcome.content.split("\n")).toEqual([
+        `${JSON.stringify(join(repo, "evil\n2 | injected"))} (lines 1-1 of 1)`,
+        "1 | real",
+      ]);
+    },
+  );
 
   it("returns the read even when closing the file fails", async () => {
     await writeFile(join(repo, "a.ts"), "kept\n");
     const tool = readToolWith({
+      lstat: fs.lstat,
       open: async (path, flags) => {
         const handle = await fs.open(path, flags);
         return {
@@ -385,9 +392,25 @@ describe("refusing a read", () => {
     expect(await read({ path: "a.ts" }, tool)).toMatchObject({ isError: false });
   });
 
+  it("returns EOPNOTSUPP for a regular file as a rejection, not as a file of the wrong type", async () => {
+    await writeFile(join(repo, "a.ts"), "");
+    // A network or FUSE mount can refuse an open flag such as O_NOFOLLOW for an ordinary file.
+    const tool = readToolWith({
+      lstat: fs.lstat,
+      open: async () => {
+        throw Object.assign(new Error("EOPNOTSUPP: operation not supported"), {
+          code: "EOPNOTSUPP",
+        });
+      },
+    });
+
+    await expect(read({ path: "a.ts" }, tool)).rejects.toThrow("EOPNOTSUPP");
+  });
+
   it("returns an unexpected failure as a rejection for Agent Core to report", async () => {
     await writeFile(join(repo, "a.ts"), "");
     const tool = readToolWith({
+      lstat: fs.lstat,
       open: async () => {
         throw Object.assign(new Error("EIO: i/o error"), { code: "EIO" });
       },
@@ -401,6 +424,7 @@ describe("the two phases", () => {
   it("prepares without opening the file, returning the validated path and a summary", async () => {
     await writeFile(join(repo, "a.ts"), "");
     const tool = readToolWith({
+      lstat: fs.lstat,
       open: async () => {
         throw new Error("prepare must not open the file");
       },

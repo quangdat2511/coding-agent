@@ -8,6 +8,7 @@ import { quote } from "./messages.ts";
 // simulate failures, such as EACCES, that a process running as root cannot produce.
 export interface ReadFileSystem {
   open(path: RepoPath, flags: number): Promise<ReadHandle>;
+  lstat(path: RepoPath): Promise<{ isSocket(): boolean }>;
 }
 
 export interface ReadHandle {
@@ -35,7 +36,7 @@ export const READ_OPEN_FLAGS =
 // Reads a regular text file. Opens before checking the file's type, so the check applies to the
 // file actually read. The resolver does not check readability, so EACCES and EPERM from the open
 // itself are mapped here. A FIFO reaches the stat below because O_NONBLOCK makes the open succeed;
-// a socket does not, because the kernel refuses to open it with ENXIO.
+// a socket does not, because the kernel refuses to open it.
 export async function readTextFile(
   fs: ReadFileSystem,
   path: RepoPath,
@@ -46,6 +47,11 @@ export async function readTextFile(
   try {
     handle = await fs.open(path, READ_OPEN_FLAGS);
   } catch (cause) {
+    // macOS refuses to open a socket with EOPNOTSUPP, which a network or FUSE mount can also
+    // return for an ordinary file that does not support one of the open flags.
+    if (errnoOf(cause) === "EOPNOTSUPP" && (await isSocket(fs, path))) {
+      return notRegularFileFailure(path);
+    }
     return openReadFailure(path, cause);
   }
   try {
@@ -69,6 +75,14 @@ export async function readTextFile(
   }
 }
 
+async function isSocket(fs: ReadFileSystem, path: RepoPath): Promise<boolean> {
+  try {
+    return (await fs.lstat(path)).isSocket();
+  } catch {
+    return false;
+  }
+}
+
 // Anything other than the expected failures is rethrown so Agent Core reports TOOL_INTERNAL_ERROR.
 function openReadFailure(path: RepoPath, cause: unknown): ToolError {
   switch (errnoOf(cause)) {
@@ -78,7 +92,7 @@ function openReadFailure(path: RepoPath, cause: unknown): ToolError {
     case "EISDIR":
       return directoryFailure(path);
     case "ENXIO":
-      // The kernel reports a socket this way; like a FIFO, it is not a regular file.
+      // Linux reports a socket this way; like a FIFO, it is not a regular file.
       return notRegularFileFailure(path);
     case "ELOOP":
       return symbolicLinkFailure(path);

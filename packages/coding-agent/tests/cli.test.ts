@@ -3,6 +3,7 @@ import { existsSync, statSync } from "node:fs";
 import { cp, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { NAMED_TASK_FILE, NAMED_TASK_REPO, READ_ONLY_RUN } from "./support/named-task.ts";
+import { noModeBits, onWindows } from "./support/platform.ts";
 import {
   bunLikeShebang,
   firstLine,
@@ -25,6 +26,9 @@ const bin = join(packageRoot, declared);
 const replayProvider = join(import.meta.dir, "support", "replay-provider.ts");
 const failSessionFactory = join(import.meta.dir, "support", "fail-session-factory.ts");
 
+// Windows cannot start a file by its shebang or mode bits, so there the bin runs under this Bun.
+const command = onWindows ? [...bunLikeShebang, bin] : [bin];
+
 const required = [
   "--task-file",
   "/tmp/task.md",
@@ -41,7 +45,7 @@ const required = [
 const secret = "sk-test-credential-value";
 
 const run = (args: readonly string[], cwd = packageRoot, env: Record<string, string> = {}) =>
-  runProcess([bin, ...args], { cwd, env });
+  runProcess([...command, ...args], { cwd, env });
 
 // Relative paths, resolved against the working directory each test runs in.
 const validFlags = {
@@ -65,14 +69,18 @@ interface ConfigurationErrorCase {
 }
 
 describe("the coding-agent executable", () => {
-  it("is declared as an executable bin entry whose shebang disables Bun's autoload", async () => {
+  it("is declared as a bin entry whose shebang disables Bun's autoload", async () => {
     expect(existsSync(bin)).toBe(true);
-    expect(statSync(bin).mode & 0o111).not.toBe(0);
     const source = await Bun.file(bin).text();
     expect(source.split("\n")[0]).toBe("#!/usr/bin/env -S bun --no-env-file --config=/dev/null");
   });
 
-  it("ignores a bunfig.toml preload in the working directory", async () => {
+  it.skipIf(noModeBits)("marks the bin entry executable", () => {
+    expect(statSync(bin).mode & 0o111).not.toBe(0);
+  });
+
+  // Bun on Windows accepts no empty device as --config, so a working-directory preload loads there.
+  it.skipIf(onWindows)("ignores a bunfig.toml preload in the working directory", async () => {
     await withTemporaryDirectory(async (directory) => {
       await Bun.write(join(directory, "bunfig.toml"), 'preload = ["./preload.ts"]\n');
       await Bun.write(join(directory, "preload.ts"), 'process.stderr.write("preloaded\\n");\n');
@@ -210,12 +218,12 @@ describe("the coding-agent executable", () => {
 
   // A shell pipeline is the simplest way to close the reading end before the run prints, and Windows
   // reports a closed pipe differently, so this is POSIX only.
-  it.skipIf(process.platform === "win32")(
+  it.skipIf(onWindows)(
     "exits 0 on a succeeded run after the reader of its standard output has gone",
     async () => {
       await withTemporaryDirectory(async (directory) => {
         await cp(NAMED_TASK_REPO, join(directory, "repo"), { recursive: true });
-        const command = [
+        const agentCommand = [
           ...bunLikeShebang,
           "--preload",
           replayProvider,
@@ -228,7 +236,7 @@ describe("the coding-agent executable", () => {
           }),
         ];
         const { stderr } = await runProcess(
-          ["sh", "-c", '("$@"; echo "exit $?" >&2) | true', "sh", ...command],
+          ["sh", "-c", '("$@"; echo "exit $?" >&2) | true', "sh", ...agentCommand],
           {
             cwd: directory,
             env: {

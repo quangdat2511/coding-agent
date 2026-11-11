@@ -1,6 +1,6 @@
 import { constants } from "node:fs";
 import * as nodeFs from "node:fs/promises";
-import { isAbsolute, join, relative, resolve, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type {
   OpenSessionResult,
   PathResolution,
@@ -8,6 +8,7 @@ import type {
   WorkspaceResolver,
 } from "@coding-agent/agent-core";
 import { errnoOf } from "./errno.ts";
+import { toPortablePath } from "./messages.ts";
 import { namesDirectory, normalizeWindowsShellPath } from "./paths.ts";
 
 // The same failure shape openAgentSession reports, narrowed to the one field this factory checks.
@@ -20,6 +21,7 @@ export type CreateWorkspaceResult =
 export interface WorkspaceFileSystem {
   access(path: string, mode: number): Promise<void>;
   lstat(path: string): Promise<{ isSymbolicLink(): boolean; isDirectory(): boolean }>;
+  readdir(path: string): Promise<string[]>;
   realpath(path: string): Promise<string>;
   stat(path: string): Promise<{ isDirectory(): boolean }>;
 }
@@ -77,7 +79,7 @@ async function resolvePath(jail: Jail, input: string, mode: Mode): Promise<PathR
     if (walked.file !== undefined) return notDirectory(input, walked.file);
     if (mode === "existing" && walked.missing.length > 0) return notFound(input, "does not exist");
     if (walked.missing.length === 0 && target.directory && !walked.isDirectory) {
-      return notDirectory(input, join(...walked.existing));
+      return notDirectory(input, toPortablePath(join(...walked.existing)));
     }
     // Every component was checked with lstat, so the canonical form of the deepest existing one is
     // itself; anything else means a symbolic link appeared after the walk. Comparing for equality
@@ -88,7 +90,7 @@ async function resolvePath(jail: Jail, input: string, mode: Mode): Promise<PathR
     // but a parent directory can still be swapped for a symbolic link, since tools do not openat
     // relative to a held directory. ADR 0004 has execute re-resolve to keep that window small.
     const reached = join(jail.root, ...walked.existing);
-    if ((await jail.fs.realpath(reached)) !== reached) {
+    if (!(await isCanonical(jail, reached, walked.isDirectory))) {
       return outside(
         `${quote(input)} changed while being resolved; symbolic links are not followed`,
       );
@@ -97,6 +99,23 @@ async function resolvePath(jail: Jail, input: string, mode: Mode): Promise<PathR
   } catch (error) {
     return unreachable(input, error);
   }
+}
+
+// realpath on macOS and Windows opens the path, which fails for a file this process cannot read
+// and for a socket. Such a file is checked through its canonical parent, its exact name in that
+// directory, and a fresh lstat instead, so readability stays the opening tool's check.
+const UNOPENABLE = new Set(["EACCES", "EPERM", "EOPNOTSUPP"]);
+
+async function isCanonical(jail: Jail, path: string, isDirectory: boolean): Promise<boolean> {
+  try {
+    return (await jail.fs.realpath(path)) === path;
+  } catch (error) {
+    if (isDirectory || !UNOPENABLE.has(errnoOf(error) ?? "")) throw error;
+  }
+  const parent = dirname(path);
+  if ((await jail.fs.realpath(parent)) !== parent) return false;
+  if (!(await jail.fs.readdir(parent)).includes(basename(path))) return false;
+  return !(await jail.fs.lstat(path)).isSymbolicLink();
 }
 
 type Located =
@@ -153,7 +172,12 @@ async function walk(jail: Jail, path: string): Promise<Walk> {
   for (let index = 0; index < segments.length; index++) {
     const existing = segments.slice(0, index + 1);
     if (!isDirectory) {
-      return { file: join(...segments.slice(0, index)), existing, missing: [], isDirectory };
+      return {
+        file: toPortablePath(join(...segments.slice(0, index))),
+        existing,
+        missing: [],
+        isDirectory,
+      };
     }
     let stats: Awaited<ReturnType<WorkspaceFileSystem["lstat"]>>;
     try {
@@ -163,7 +187,7 @@ async function walk(jail: Jail, path: string): Promise<Walk> {
       return { existing: segments.slice(0, index), missing: segments.slice(index), isDirectory };
     }
     if (stats.isSymbolicLink())
-      return { link: join(...existing), existing, missing: [], isDirectory };
+      return { link: toPortablePath(join(...existing)), existing, missing: [], isDirectory };
     isDirectory = stats.isDirectory();
   }
   return { existing: segments, missing: [], isDirectory };

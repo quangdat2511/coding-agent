@@ -93,8 +93,8 @@ còn lại. Gợi ý dạng bảng:
 Không liệt kê lại test, typecheck, lint, build mà CI đã chạy. Ghi:
 - Lệnh test riêng cho thay đổi này và kết quả.
 - Kịch bản mà test mới bao phủ: luồng chính và các edge case quan trọng.
-- Phần chưa kiểm thử được và lý do. CI không có Windows runner, nên chỉ nhắc Windows khi PR đụng
-  tới path, process hoặc file system.
+- Phần chưa kiểm thử được và lý do. CI chạy test trên Linux, macOS và Windows, nên chỉ cần ghi
+  test nào bị skip trên hệ điều hành nào và vì sao.
 - Cách reviewer tự tái hiện bằng tay, nếu có.
 Xóa mục này nếu PR không đổi code.
 -->
