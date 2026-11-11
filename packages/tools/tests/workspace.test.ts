@@ -248,6 +248,33 @@ describe("resolving a path that cannot be reached", () => {
       });
     },
   );
+
+  it.skipIf(!noNameTooLong)(
+    "resolveExisting reports a name that is too long as missing",
+    async () => {
+      const repo = await makeRepo();
+      const workspace = await resolverFor(repo);
+
+      expect(await workspace.resolveExisting("x".repeat(300))).toEqual({
+        ok: false,
+        code: "NOT_FOUND",
+        message: `"${"x".repeat(120)}"... (180 more characters) does not exist`,
+      });
+    },
+  );
+
+  it.skipIf(!noNameTooLong)(
+    "resolveForCreate accepts a name that is too long, leaving the write to refuse it",
+    async () => {
+      const repo = await makeRepo();
+      const workspace = await resolverFor(repo);
+
+      expect(await workspace.resolveForCreate("x".repeat(300))).toEqual({
+        ok: true,
+        path: join(repo, "x".repeat(300)) as RepoPath,
+      });
+    },
+  );
 });
 
 function failingAt(path: string, code: string): WorkspaceFileSystem {
@@ -337,12 +364,16 @@ describe("resolving a path the filesystem refuses", () => {
   describe("when realpath cannot open the file, as on macOS and Windows", () => {
     const unopenable = (
       repo: string,
-      overrides: Partial<WorkspaceFileSystem> = {},
+      {
+        code = "EACCES",
+        name = "a.ts",
+        ...overrides
+      }: Partial<WorkspaceFileSystem> & { code?: string; name?: string } = {},
     ): WorkspaceFileSystem => ({
       ...fs,
       realpath: async (target) => {
-        if (target === join(repo, "a.ts")) {
-          throw Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" });
+        if (target === join(repo, name)) {
+          throw Object.assign(new Error(`${code}: realpath ${target}`), { code });
         }
         return (overrides.realpath ?? fs.realpath)(target);
       },
@@ -362,6 +393,36 @@ describe("resolving a path the filesystem refuses", () => {
       expect(await resolveWith(repo, unopenable(repo))).toEqual({
         ok: true,
         path: join(repo, "a.ts") as RepoPath,
+      });
+    });
+
+    it.each(["EPERM", "EOPNOTSUPP"])(
+      "falls back the same way when realpath fails with %s",
+      async (code) => {
+        const repo = await makeRepo();
+        await writeFile(join(repo, "a.ts"), "");
+
+        expect(await resolveWith(repo, unopenable(repo, { code }))).toEqual({
+          ok: true,
+          path: join(repo, "a.ts") as RepoPath,
+        });
+      },
+    );
+
+    it("rethrows a realpath failure it does not expect for the calling tool to report", async () => {
+      const repo = await makeRepo();
+      await writeFile(join(repo, "a.ts"), "");
+
+      await expect(resolveWith(repo, unopenable(repo, { code: "EIO" }))).rejects.toThrow("EIO");
+    });
+
+    it("does not fall back for a directory realpath cannot open", async () => {
+      const repo = await makeRepo();
+      await mkdir(join(repo, "src"));
+
+      expect(await resolveWith(repo, unopenable(repo, { name: "src" }), "src")).toMatchObject({
+        ok: false,
+        code: "PERMISSION_DENIED",
       });
     });
 
