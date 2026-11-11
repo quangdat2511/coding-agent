@@ -32,6 +32,9 @@ const noFifos = process.platform === "win32";
 const noNewlineNames = process.platform === "win32";
 // Root ignores file permissions and Windows has no POSIX ones, so those tests simulate a refusal.
 const permissionsIgnored = process.getuid?.() === 0 || process.platform === "win32";
+// Windows refuses to inspect a Unix-domain socket file, so the resolver refuses it before read can
+// see its type.
+const socketRefusal = process.platform === "win32" ? "permission denied" : "not a regular file";
 
 let sandbox: string;
 let repo: string;
@@ -354,7 +357,7 @@ describe("refusing a read", () => {
         isError: true,
         error: {
           code: "PERMISSION_DENIED",
-          message: expect.stringContaining("not a regular file"),
+          message: expect.stringContaining(socketRefusal),
         },
       });
     } finally {
