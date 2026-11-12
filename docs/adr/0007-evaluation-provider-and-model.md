@@ -40,14 +40,18 @@ The recorded job runs **`opencode`** — the OpenCode Go gateway — with **`dee
 
 2. **A subscription, because the job is re-run.** Go costs $10 a month and includes $100 of
    DeepSeek V4.1 Flash usage at the allowance's list prices ($0.15 and $0.60 per million input
-   and output tokens off-peak, cache reads at $0.003), which covers roughly 38 jobs of this shape,
-   against roughly 7.7 jobs for the same $10 spent pay-per-use. One job consumes about $2.6 of
-   that allowance — roughly 25M cached input, 6M uncached input, and 2.6M output tokens — inside
-   the 5-hour window at 20% of the monthly allowance. The allowance is metered per model in three
-   windows (5 hours at 20%, weekly at 50%, monthly at 100%) and otherwise publishes request
-   estimates in the tens of thousands per window for this model, far above the roughly 2,600
-   requests one job issues, so the allowance binds and request rate does not. Concurrency stays
-   Harbor's `-n` and changes wall-clock time only (protocol §7).
+   and output tokens off-peak, cache reads at $0.003). A typical job consumes about $2.6 of that
+   allowance — roughly 25M cached input, 6M uncached input, and 2.6M output tokens — so one month
+   covers roughly 38 such jobs, against roughly 7.7 for the same $10 spent pay-per-use at $1.3 a
+   job. That comparison assumes the allowance is used; a single job costs $10 either way.
+   **The bound matters as much as the typical case.** At the 250-turn ceiling and peak rates the
+   same job could consume roughly $45 of allowance — about 400M cached and 100M uncached input
+   tokens plus 10M output — which leaves room for one rerun in the month, not for several. The
+   allowance is metered per model in three windows (5 hours at 20%, weekly at 50%, monthly at
+   100%) and publishes request estimates in the tens of thousands per window, far above the
+   roughly 2,600 requests a typical job issues, so the allowance binds and request rate does not.
+   Concurrency is Harbor's `-n`; the recorded job sets `-n 8` and records it, because the gateway
+   has no per-minute cap and the 5-hour window is the only time bound that matters.
 
 3. **What the job demonstrates, and what it does not.** It demonstrates that the agent works end to
    end on the full dataset and reports how well *this configuration* does. It does not establish how
@@ -74,12 +78,15 @@ The recorded job runs **`opencode`** — the OpenCode Go gateway — with **`dee
 6. **The provider is promoted, and that is the scope change.** `opencode` becomes the sixth
    `--provider` value; `OPENCODE_API_KEY` joins the fixed credential set in `@coding-agent/ai` and
    therefore the scrubbed child environment and the startup ancestor check; the adapter speaks the
-   Go gateway (`https://opencode.ai/inference/go` with the OpenAI Responses path) and sends the
-   stable `x-opencode-session` and a `coding-agent/<version>` user agent that the gateway asks
-   for; and `opencode` joins the shared conformance suite. No recorded job runs on it until the
-   conformance suite and the credential-isolation test of protocol §7 pass, because an
-   adapter-shaped failure would be scored against the agent. The map's destination and its
-   out-of-scope line say five providers, and after this record there are six.
+   Go gateway (`https://opencode.ai/inference/go`, Chat Completions path
+   `/openai/v1/chat/completions`, which is the call it already makes) and sends the stable
+   `x-opencode-session` and a `coding-agent/<version>` user agent that the gateway asks for; and
+   `opencode` joins the shared conformance suite. No recorded job runs on it until the conformance
+   suite and the credential-isolation test of protocol §7 pass, because an adapter-shaped failure
+   would be scored against the agent. The
+   [map](https://datn-fit-hcmus.atlassian.net/browse/CDA-13) fixes five providers in its
+   destination and excludes others in its Out of scope section, so its owners' agreement is what
+   turns this record from `proposed` into `accepted`.
 
 7. **Failure handling and settings.** A gateway returns an HTTP status on error like any other
    provider, and the adapter drops it today: `packages/ai/src/api/openai-responses.ts` catches the
@@ -117,9 +124,12 @@ The recorded job runs **`opencode`** — the OpenCode Go gateway — with **`dee
 - **The map changes.** Its destination says five model providers and its **Out of scope** section
   excludes providers beyond those five. Both need the owner group's agreement before this record
   moves from `proposed` to `accepted`; the record does not amend the map by itself.
-- **Four accepted records are amended with it:** ADR 0001 §8's credential scope, ADR 0005 §3's
+- **Three accepted records are amended with it:** ADR 0001 §8's credential scope, ADR 0005 §3's
   provider list and §8's secret-scan prefixes (`oc_sk_`), and ADR 0006 §3's exclusion and track E
   membership.
+- **A catalogue entry is owed.** Until `deepseek-v4.1-flash` is added to
+  `packages/ai/src/providers/opencode.models.json`, `--model` refuses it with exit 2. That one-line
+  entry belongs to the ticket that builds the recorded job.
 - **The credential-isolation test must cover the new key** on each backend the job uses, as protocol
   §7 and §9 already require for any credential-carrying job. Until it passes, the promotion is not
   operative and the OpenRouter fallback remains.
@@ -133,6 +143,5 @@ The recorded job runs **`opencode`** — the OpenCode Go gateway — with **`dee
 - **The allowance is a subscription**, so an incomplete or invalid job spends allowance rather than
   dollars; the smoke job still runs first, because a rerun inside the same month competes for the
   same window.
-- Results describe one cost-bounded configuration. A reader asking how capable the agent is on a
-  frontier model will not learn it from this job; a second job on such a model can be added later,
-  under the same protocol, with its own manifest and report.
+- The recorded job reports the profile it ran under and the date; a reader comparing two jobs
+  compares two manifests, not two narratives.

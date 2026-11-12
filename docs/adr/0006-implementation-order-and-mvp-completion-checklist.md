@@ -190,16 +190,20 @@ also needs `TuiModel` from C1, because `tui` owns that type. Owns the two later 
 | D4 | `projectSessionEvent` and the interactive path | The projection has unit tests and performs no I/O |
 
 **Track E, provider breadth.** Runs from Join 1, parallel to everything else: Anthropic, then
-OpenRouter, OpenAI, xAI, and OpenCode Go, each against one shared conformance suite of recorded fixtures. Exit
+OpenRouter, OpenAI, xAI, and OpenCode Go, each against one shared conformance suite of recorded
+fixtures. Exit
 criterion: every provider passes the same suite, and each declared deviation is a typed capability
 rather than a branch inside Agent Core.
 
-`opencode` is not one of the five MVP providers. Its adapter stayed in `packages/ai` and kept
-working, but it was excluded from the conformance suite, from the completion checklist, and from the
-`--provider` values of ADR 0005 §3. [ADR 0007](./0007-evaluation-provider-and-model.md)
-promotes it to a sixth `--provider` value for the recorded evaluation job, and it joins track E; the
-promotion is a scope change to [the map](https://datn-fit-hcmus.atlassian.net/browse/CDA-13), agreed
-as such rather than taken as an ordering choice.
+`opencode` was not among the `--provider` values ADR 0005 §3 accepted. Its adapter stayed in
+`packages/ai` and kept working, but it was excluded from the conformance suite, from the completion
+checklist, and from that command line. On 2026-11-12,
+[CDA-30](https://datn-fit-hcmus.atlassian.net/browse/CDA-30) **proposed** the promotion that
+[ADR 0007](./0007-evaluation-provider-and-model.md) records: `opencode` becomes a sixth
+`--provider` value and joins track E, and the checklist below grows to six providers once that
+decision is accepted. The promotion is a scope change to
+[the map](https://datn-fit-hcmus.atlassian.net/browse/CDA-13) rather than an ordering choice, so the
+map's owners' agreement is what accepts it.
 
 **Track F, evaluation.** Starts after D3, because the adapter depends on the command line and the
 files.
@@ -279,8 +283,7 @@ something works.
    checklist item that reads "the demo works" is not checkable, and the recording is what survives
    into the thesis and to a reviewer who was not present.
 7. All six providers pass the shared conformance suite: Google, Anthropic, OpenRouter, OpenAI, xAI,
-   and `opencode`, which [ADR 0007](./0007-evaluation-provider-and-model.md)
-   promotes to a `--provider` value.
+   and `opencode`, the sixth once [ADR 0007](./0007-evaluation-provider-and-model.md) is accepted.
 8. Boundary enforcement is in place and has been shown to fail: per-package manifests, the Biome
    overrides, and the CI bundle check, with `bun --filter '*' typecheck`, `bun test`, and
    `biome ci .` green.
@@ -320,9 +323,8 @@ TerminalBench evaluation, so the MVP reaches it only when both tiers are complet
    model, and this record does not either: a cheap weak model produces a valid job that says nothing,
    so the choice needs its own thinking and becomes its own decision ticket on the map.
    [ADR 0007](./0007-evaluation-provider-and-model.md) resolves it: `opencode` (OpenCode Go) with
-   `deepseek-v4.1-flash`, recorded as a configuration result rather than a capability ceiling, and
-   [ADR 0007](./0007-evaluation-provider-and-model.md) makes that provider
-   selectable.
+   `deepseek-v4.1-flash`, recorded as a configuration result rather than a capability ceiling, on
+   the provider promotion that same record proposes.
 
 Item 3 blocks nothing in tier 1, but it should be decided while tier 1 is still running rather than
 after it closes, for two reasons. It carries lead time that is not decision time: a paid key, a rate

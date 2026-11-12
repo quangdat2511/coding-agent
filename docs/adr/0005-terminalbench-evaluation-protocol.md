@@ -152,6 +152,11 @@ only for the smoke job (§7).
 
 Changing a pin is a new decision that amends this record. Results are never pooled across pins.
 
+On 2026-11-12, [CDA-30](https://datn-fit-hcmus.atlassian.net/browse/CDA-30) **proposed** three
+amendments to this record, which take effect when its decision is accepted: §3 accepts `opencode` as
+a sixth provider value, §7 chooses it for the recorded job ([ADR 0007](./0007-evaluation-provider-and-model.md)),
+and §8 adds the `oc_sk_` prefix to the secret scan.
+
 ### 2. Coding Agent artifact
 
 A recorded job evaluates a standalone executable, not a source checkout. It is built from a commit
@@ -504,8 +509,8 @@ step below is mandatory, and a failed step blocks the upload:
 2. Search the same files for `[REDACTED]`. Each occurrence is reviewed. One that Harbor wrote over a
    credential means the credential appeared in the logs, even though its value is gone.
 3. Search the same files for the provider key prefixes `sk-ant-`, `sk-or-`, `sk-proj-`, `xai-`,
-   `AIza`, and `oc_sk_`. Each match is reviewed, and the scan fails until every match is shown not to be a
-   credential or is removed from the archive.
+   `AIza`, and `oc_sk_`. Each match is reviewed, and the scan fails until every match is shown not
+   to be a credential or is removed from the archive.
 4. Revoke every credential that steps 1 to 3 show appeared in the logs, whether or not it would
    have been published, because the logs may already have been sent to the model provider and are
    already on the host.
@@ -553,7 +558,7 @@ them and decides neither.
   ADR 0002 §4 preserves a normalized provider reason in the failure details, but no decision says
   the HTTP status is part of that reason. Until the provider error contract includes it, a
   `MODEL_FAILURE` without a recorded status is not rerun-eligible and counts as an agent outcome.
-  [ADR 0007](./0007-evaluation-provider-and-model.md) fixes the provider as `opencode`, so
+  [ADR 0007](./0007-evaluation-provider-and-model.md) proposes `opencode`, so
   [CDA-83](https://datn-fit-hcmus.atlassian.net/browse/CDA-83) implements the status in that
   adapter.
 
