@@ -26,9 +26,7 @@ Five constraints shape the answer:
   effort inside the vendor's own harness; they rank models, and do not predict what this agent
   scores.
 - No paid frontier account exists, and model spend is capped at a student budget.
-- The candidate providers are the five MVP providers plus `opencode`, whose promotion to a sixth
-  `--provider` value is [ADR 0008](./0008-promote-opencode-go-to-a-cli-selectable-provider.md).
-  This record depends on that one and is `proposed` until both are accepted.
+- The job will be re-run, so the choice is judged per dollar of subscription, not per token.
 
 On [the Terminal-Bench leaderboard](https://www.tbench.ai/leaderboard) (66 tasks, five trials per
 row, read 2026-11-12): Claude Opus 5.5 65.8%, Claude Sonnet 5.5 63.9%, GPT-6.1 Sol 60.9%, Grok 4.7
@@ -39,28 +37,37 @@ exists for the model this record chooses.
 
 The recorded job runs **`opencode`** — the OpenCode Go gateway — with **`deepseek-v4.1-flash`**.
 
-1. The subscription, not the per-token price, is what makes repeated jobs affordable. Go costs $10
-   a month and includes $100 of DeepSeek V4.1 Flash usage at the allowance's list prices ($0.15 and
-   $0.60 per million input and output tokens off-peak, cache reads at $0.003), so one month covers
-   roughly 38 jobs of this shape. The same $10 spent pay-per-use buys roughly 7.7.
-2. One 66-task job consumes about $2.6 of that allowance off-peak (roughly 25M cached input, 6M
-   uncached input, and 2.6M output tokens), which is well inside the 5-hour window at 20% of the
-   monthly allowance. The gateway meters conversations, not requests, so its allowance — not a
-   requests-per-minute limit — is the binding constraint.
-3. **Claim.** The job measures this configuration under the `terminalbench` Evaluation Profile. It is
+1. **The subscription is the reason.** Go costs $10 a month and includes $100 of DeepSeek V4.1
+   Flash usage at the allowance's list prices ($0.15 and $0.60 per million input and output tokens
+   off-peak, cache reads at $0.003), so one month covers roughly 38 jobs of this shape. The same
+   $10 spent pay-per-use buys roughly 7.7.
+2. **One job costs about $2.6 of that allowance** off-peak — roughly 25M cached input, 6M uncached
+   input, and 2.6M output tokens — which is well inside the 5-hour window at 20% of the monthly
+   allowance. The gateway meters allowance, not requests, so the allowance is the binding
+   constraint, not a requests-per-minute limit.
+3. **The provider is promoted as part of this decision, and that is the scope change.** `opencode`
+   becomes the sixth `--provider` value; `OPENCODE_API_KEY` joins the fixed credential set in
+   `@coding-agent/ai` and therefore the scrubbed child environment and the startup ancestor check;
+   the adapter speaks the Go gateway (`https://opencode.ai/inference/go` with the OpenAI Responses
+   path) and sends the stable `x-opencode-session` and a `coding-agent/<version>` user agent that
+   the gateway asks for; and `opencode` joins the shared conformance suite. No recorded job runs on
+   it until the conformance suite and the credential-isolation test of protocol §7 pass, because an
+   adapter-shaped failure would be scored against the agent. This is why the map's destination and
+   its out-of-scope line change: they say five providers, and after this record there are six.
+4. **Claim.** The job measures this configuration under the `terminalbench` Evaluation Profile. It is
    a reproducible end-to-end result with a per-task diagnostic, not a capability ceiling for the
    agent, and the report does not compare it with the leaderboard. That is the narrowest claim a
    cost-bounded model supports, and it is recorded so the report cannot imply the stronger claim that
    protocol §7 and ADR 0006 §7 were careful not to make.
-4. Sampling is unchanged: `SAMPLING_BY_PROVIDER.opencode` is `{ maxOutputTokens: null, temperature:
+5. Sampling is unchanged: `SAMPLING_BY_PROVIDER.opencode` is `{ maxOutputTokens: null, temperature:
    null }`, so provider defaults apply and `run.json` records that fact.
-5. No reasoning effort is requested. Adding one changes the `@coding-agent/ai` provider contract
+6. No reasoning effort is requested. Adding one changes the `@coding-agent/ai` provider contract
    ([ADR 0004](./0004-package-apis-and-dependency-direction.md) §2) and is a separate decision; the
    recorded job does not wait for it.
-6. **Changeability.** The model is a flag, never baked into the artifact or the composition root.
+7. **Changeability.** The model is a flag, never baked into the artifact or the composition root.
    Each job declares exactly one provider and model in its manifest; a later job on another model is
    a separate job with its own manifest and report (protocol §7), never a pooled result.
-7. The provider's HTTP status reaches `MODEL_FAILURE` details through
+8. The provider's HTTP status reaches `MODEL_FAILURE` details through
    [Record the provider HTTP status in MODEL_FAILURE details](https://datn-fit-hcmus.atlassian.net/browse/CDA-83),
    so that ticket targets the `opencode` adapter.
 
@@ -92,7 +99,7 @@ The recorded job runs **`opencode`** — the OpenCode Go gateway — with **`dee
    this model are in the tens of thousands per 5-hour window, far above the roughly 2,600 requests one
    job issues. Concurrency stays Harbor's `-n` and changes wall-clock time only (protocol §7). The
    gateway asks for a stable session id and a real client user agent and monitors for abuse, which
-   ADR 0008 makes part of the adapter.
+   item 3 of the decision makes part of the adapter.
 
 ## Considered options
 
@@ -106,25 +113,37 @@ The recorded job runs **`opencode`** — the OpenCode Go gateway — with **`dee
   paid — about $16 a job. Rejected because it is several times the subscription's marginal cost for
   the same class of claim, and its only public TerminalBench row (18.2%) comes from a weaker harness,
   so it is not a like-for-like comparison either.
+- **A configurable OpenAI-compatible provider** (the `custom` factory, with `CUSTOM_BASE_URL` and a
+  caller-chosen `apiKeyEnv`). Rejected: it needs dynamic credential-name discovery, which ADR 0001
+  §8 states a static set cannot cover, and it records a vendor-neutral provider id in a manifest
+  whose purpose is to name what ran.
 - **The MiMo Token Plan.** Rejected on arithmetic: $6 buys 4.1 billion credits, about 1.2 billion
   credits per job on `mimo-v2.6-flash`, roughly 3.4 jobs a month against roughly 38 here. It would
   also need its own provider promotion.
 - **Pay-per-use on OpenRouter.** Kept as the fallback: admissible today, about $1.3 a job, and it
-  needs no amendment. It loses on cost per dollar once the job is re-run, which is why this record
-  takes the promotion instead.
+  needs no amendment. It loses on cost per dollar once the job is re-run.
 
 ## Consequences
 
+- **The map changes.** Its destination says five model providers and its **Out of scope** section
+  excludes providers beyond those five. Both need the owner group's agreement before this record
+  moves from `proposed` to `accepted`; the record does not amend the map by itself.
+- **Four accepted records are amended with it:** ADR 0001 §8's credential scope, ADR 0005 §3's
+  provider list and §8's secret-scan prefixes (`oc_sk_`), and ADR 0006 §3's exclusion and track E
+  membership.
+- **The credential-isolation test must cover the new key** on each backend the job uses, as protocol
+  §7 and §9 already require for any credential-carrying job. Until it passes, the promotion is not
+  operative and the OpenRouter fallback remains.
+- **A region setting is a prerequisite.** DeepSeek V4.1 Flash is blocked in the default Europe and
+  United States regions and needs the workspace's privacy setting set to Global.
+- **The free models are not usable here.** The console's free-tier models are served only inside the
+  OpenCode client; every other harness receives HTTP 403 "even with a Console API key". Only the paid
+  and Go models reach an external harness.
+- **Go's model ids are dateless**, so the manifest records the id and the job date, and a change to
+  what that id serves is a new job rather than a silent substitution.
+- **The allowance is a subscription**, so an incomplete or invalid job spends allowance rather than
+  dollars; the smoke job still runs first, because a rerun inside the same month competes for the
+  same window.
 - Results describe one cost-bounded configuration. A reader asking how capable the agent is on a
   frontier model will not learn it from this job; a second job on such a model can be added later,
   under the same protocol, with its own manifest and report.
-- The decision is not operative until ADR 0008 is accepted and implemented: `--provider opencode`,
-  the catalogue entry for `deepseek-v4.1-flash`, and the credential-isolation test for the new key
-  must all exist first. Until then the CLI refuses both, and the OpenRouter fallback remains.
-- Go's model ids are dateless, so the manifest records the id and the job date, and a change to what
-  that id serves is a new job rather than a silent substitution.
-- The gateway's allowance is a subscription, so an incomplete or invalid job spends allowance rather
-  than dollars; the smoke job is still run first, because a rerun inside the same month competes for
-  the same window.
-- The rerun rule of protocol §7 becomes unambiguous only once CDA-83 carries the HTTP status for this
-  adapter; until then a `MODEL_FAILURE` without a status counts as an agent outcome.

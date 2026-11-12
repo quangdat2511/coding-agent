@@ -196,7 +196,7 @@ rather than a branch inside Agent Core.
 
 `opencode` is not one of the five MVP providers. Its adapter stayed in `packages/ai` and kept
 working, but it was excluded from the conformance suite, from the completion checklist, and from the
-`--provider` values of ADR 0005 §3. [ADR 0008](./0008-promote-opencode-go-to-a-cli-selectable-provider.md)
+`--provider` values of ADR 0005 §3. [ADR 0007](./0007-evaluation-provider-and-model.md)
 promotes it to a sixth `--provider` value for the recorded evaluation job, and it joins track E; the
 promotion is a scope change to [the map](https://datn-fit-hcmus.atlassian.net/browse/CDA-13), agreed
 as such rather than taken as an ordering choice.
@@ -279,7 +279,7 @@ something works.
    checklist item that reads "the demo works" is not checkable, and the recording is what survives
    into the thesis and to a reviewer who was not present.
 7. All six providers pass the shared conformance suite: Google, Anthropic, OpenRouter, OpenAI, xAI,
-   and `opencode`, which [ADR 0008](./0008-promote-opencode-go-to-a-cli-selectable-provider.md)
+   and `opencode`, which [ADR 0007](./0007-evaluation-provider-and-model.md)
    promotes to a `--provider` value.
 8. Boundary enforcement is in place and has been shown to fail: per-package manifests, the Biome
    overrides, and the CI bundle check, with `bun --filter '*' typecheck`, `bun test`, and
@@ -321,7 +321,7 @@ TerminalBench evaluation, so the MVP reaches it only when both tiers are complet
    so the choice needs its own thinking and becomes its own decision ticket on the map.
    [ADR 0007](./0007-evaluation-provider-and-model.md) resolves it: `opencode` (OpenCode Go) with
    `deepseek-v4.1-flash`, recorded as a configuration result rather than a capability ceiling, and
-   [ADR 0008](./0008-promote-opencode-go-to-a-cli-selectable-provider.md) makes that provider
+   [ADR 0007](./0007-evaluation-provider-and-model.md) makes that provider
    selectable.
 
 Item 3 blocks nothing in tier 1, but it should be decided while tier 1 is still running rather than
