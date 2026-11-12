@@ -57,8 +57,10 @@ host, and CI runs the test suite on Linux, macOS and Windows. A test that cannot
 is skipped there with `skipIf` and a comment giving the reason, usually on its guard constant in
 the package's `platform.ts` (`packages/tools/tests/platform.ts`,
 `packages/coding-agent/tests/support/platform.ts`). The `coding-agent` bin
-entry does not start on Windows yet: Bun's Windows bin shim cannot run its `env -S` shebang, and
-Bun there accepts no empty device as `--config` (CDA-111).
+entry does not start on Windows: Bun's Windows bin shim cannot run its `env -S` shebang, and Bun
+there accepts no empty device as `--config`. On Windows, run the executable compiled with
+`--no-compile-autoload-dotenv --no-compile-autoload-bunfig` instead (see
+`packages/coding-agent/README.md`).
 
 ## Architecture
 
