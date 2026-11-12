@@ -392,7 +392,103 @@ describe("cancelling an Agent Session", () => {
     });
   });
 
-  describe("Cancellation grace period timeout", () => {
+  describe("Cancellation between model turns", () => {
+    it("quiesces cleanly and does not schedule a new model turn when cancellation is requested between turns", async () => {
+      let turn2Started = false;
+      let tool1Executed = false;
+
+      let sessionRef: AgentSession | undefined;
+      const tool: ExecutableTool = {
+        ...fakeTool({ name: "step_one" }),
+        async execute() {
+          tool1Executed = true;
+          void sessionRef?.dispatch({ type: "cancel", reason: "stop after step 1" });
+          return { isError: false, content: "step 1 complete" };
+        },
+      };
+
+      const { session } = openTestSession({
+        tools: [tool],
+        approvalPolicy: "auto-approve",
+        model: {
+          turns: [
+            toolCallTurn({ toolCallId: "call-1", name: "step_one", input: {} }),
+            () => {
+              turn2Started = true;
+              return streamOf(async function* () {
+                yield* textTurn("Step 2 response");
+              });
+            },
+          ],
+        },
+      });
+      sessionRef = session;
+
+      await session.dispatch({ type: "start", task });
+
+      const terminalResult = await session.result();
+      expect(terminalResult.outcome).toBe("cancelled");
+      expect(tool1Executed).toBe(true);
+      expect(turn2Started).toBe(false);
+
+      const events = await collect(session.events());
+      const modelTurnsStarted = events.filter((e) => e.type === "model_turn_started");
+      expect(modelTurnsStarted).toHaveLength(1);
+
+      const assistantStarted = events.filter((e) => e.type === "assistant_message_started");
+      expect(assistantStarted).toHaveLength(1);
+
+      const settled = events.find((e) => e.type === "session_settled");
+      expect(settled).toBeDefined();
+      expect(session.snapshot().phase).toBe("cancelled");
+    });
+
+    it("quiesces cleanly and does not schedule a new model turn when cancellation occurs after verification continues", async () => {
+      let turn2Started = false;
+      let sessionRef: AgentSession | undefined;
+
+      const { session } = openTestSession({
+        model: {
+          turns: [
+            textTurn("Candidate answer"),
+            () => {
+              turn2Started = true;
+              return streamOf(async function* () {
+                yield* textTurn("Next turn answer");
+              });
+            },
+          ],
+        },
+        verification: [
+          async () => {
+            void sessionRef?.dispatch({
+              type: "cancel",
+              reason: "stop after verification continue",
+            });
+            return {
+              outcome: "continue",
+              evidence: [],
+              feedback: { role: "user", content: "Needs more work" },
+            };
+          },
+        ],
+      });
+      sessionRef = session;
+
+      await session.dispatch({ type: "start", task });
+
+      const terminalResult = await session.result();
+      expect(terminalResult.outcome).toBe("cancelled");
+      expect(turn2Started).toBe(false);
+
+      const events = await collect(session.events());
+      const modelTurnsStarted = events.filter((e) => e.type === "model_turn_started");
+      expect(modelTurnsStarted).toHaveLength(1);
+      expect(session.snapshot().phase).toBe("cancelled");
+    });
+  });
+
+  describe("Cancellation grace period expiration", () => {
     it("settles as failed with CANCELLATION_TIMEOUT when an adapter ignores abort past cancellationGraceMs", async () => {
       const stubborn = abortIgnoringTool();
       const { session } = openTestSession({

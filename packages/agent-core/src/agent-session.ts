@@ -75,22 +75,24 @@ interface PendingApprovalResolver {
   resolve(decision: ApprovalDecision): void;
 }
 
+interface ActiveToolExecution {
+  readonly status: "pending" | "running";
+  readonly call: QueuedToolCall;
+}
+
 interface ActiveModelTurnContext {
   readonly modelTurn: ModelTurnRef;
   readonly messageId: string;
   draft: AssistantMessageDraft;
   messageCompleted: boolean;
   queuedToolCalls: readonly QueuedToolCall[];
-  currentToolCall?: QueuedToolCall;
-  currentToolExecutionStarted: boolean;
+  activeTool?: ActiveToolExecution;
   lastMessage?: AssistantMessage;
 }
 
 interface ActiveVerificationContext {
-  readonly verification: {
-    readonly verificationId: string;
-    readonly candidate: AssistantMessageRef;
-  };
+  readonly verificationId: string;
+  readonly candidate: AssistantMessageRef;
 }
 
 const rejectedResult = ({ id, name }: QueuedToolCall, error: ToolError): ToolResult => ({
@@ -278,6 +280,18 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
     }
 
     const outcome = mode.kind === "cancel" ? "cancelled" : "failed";
+    const skipReason: SkipReason = mode.kind === "cancel" ? "CANCELLED" : mode.failure.code;
+
+    const emitSkippedToolCall = (toolCallId: string) => {
+      commit(state, {
+        type: "tool_call_completed",
+        data: {
+          toolCallId,
+          outcome: "skipped",
+          reason: skipReason,
+        },
+      });
+    };
 
     // 1. Pending Approval
     if (pendingApproval !== undefined) {
@@ -306,47 +320,43 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
         messageId,
         draft,
         messageCompleted,
-        currentToolCall,
-        currentToolExecutionStarted,
+        activeTool,
         queuedToolCalls,
         lastMessage,
       } = activeModelTurn;
 
-      const skipReason: SkipReason = mode.kind === "cancel" ? "CANCELLED" : mode.failure.code;
-
-      if (currentToolCall !== undefined) {
-        if (currentToolExecutionStarted) {
+      if (activeTool !== undefined) {
+        if (activeTool.status === "running") {
           commit(state, {
             type: "tool_call_completed",
             data: {
-              toolCallId: currentToolCall.id,
+              toolCallId: activeTool.call.id,
               outcome,
             },
           });
         } else {
-          commit(state, {
-            type: "tool_call_completed",
-            data: {
-              toolCallId: currentToolCall.id,
-              outcome: "skipped",
-              reason: skipReason,
-            },
-          });
+          emitSkippedToolCall(activeTool.call.id);
         }
       }
 
       for (const call of queuedToolCalls) {
-        if (call.id !== currentToolCall?.id) {
-          commit(state, {
-            type: "tool_call_completed",
-            data: {
-              toolCallId: call.id,
-              outcome: "skipped",
-              reason: skipReason,
-            },
-          });
+        if (call.id !== activeTool?.call.id) {
+          emitSkippedToolCall(call.id);
         }
       }
+
+      const completeActiveModelTurn = (usage: UsageTotals, failure?: AgentFailure) => {
+        state = { ...state, usage: addUsage(state.usage, usage) };
+        commit(state, {
+          type: "model_turn_completed",
+          data: {
+            modelTurnId: modelTurn.modelTurnId,
+            outcome,
+            usage,
+            ...(failure !== undefined ? { failure } : {}),
+          },
+        });
+      };
 
       if (!messageCompleted) {
         const message =
@@ -364,28 +374,13 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
             ...(mode.kind === "failed" ? { failure: mode.failure } : {}),
           },
         });
-        state = { ...state, usage: addUsage(state.usage, usageOf(message)) };
-        commit(state, {
-          type: "model_turn_completed",
-          data: {
-            modelTurnId: modelTurn.modelTurnId,
-            outcome,
-            usage: usageOf(message),
-            ...(mode.kind === "failed" ? { failure: mode.failure } : {}),
-          },
-        });
+        completeActiveModelTurn(
+          usageOf(message),
+          mode.kind === "failed" ? mode.failure : undefined,
+        );
       } else {
         const usage = lastMessage ? usageOf(lastMessage) : { inputTokens: 0, outputTokens: 0 };
-        state = { ...state, usage: addUsage(state.usage, usage) };
-        commit(state, {
-          type: "model_turn_completed",
-          data: {
-            modelTurnId: modelTurn.modelTurnId,
-            outcome,
-            usage,
-            ...(mode.kind === "failed" ? { failure: mode.failure } : {}),
-          },
-        });
+        completeActiveModelTurn(usage, mode.kind === "failed" ? mode.failure : undefined);
       }
 
       activeModelTurn = undefined;
@@ -396,7 +391,7 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
       commit(state, {
         type: "verification_completed",
         data: {
-          verificationId: activeVerification.verification.verificationId,
+          verificationId: activeVerification.verificationId,
           outcome,
           evidence: [],
         },
@@ -533,8 +528,7 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
       }
 
       if (activeModelTurn !== undefined) {
-        activeModelTurn.currentToolCall = toolCall;
-        activeModelTurn.currentToolExecutionStarted = false;
+        activeModelTurn.activeTool = { status: "pending", call: toolCall };
         activeModelTurn.queuedToolCalls = queue.slice(index);
       }
 
@@ -598,8 +592,7 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
       }
 
       if (activeModelTurn !== undefined) {
-        activeModelTurn.currentToolCall = undefined;
-        activeModelTurn.currentToolExecutionStarted = false;
+        activeModelTurn.activeTool = undefined;
       }
 
       commit(
@@ -656,8 +649,7 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
         : undefined);
 
     if (activeModelTurn !== undefined) {
-      activeModelTurn.currentToolCall = toolCall;
-      activeModelTurn.currentToolExecutionStarted = true;
+      activeModelTurn.activeTool = { status: "running", call: toolCall };
     }
 
     commit(
@@ -709,6 +701,10 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
   }
 
   async function runModelTurn(): Promise<Candidate | "continue" | "settled"> {
+    if (quiesceIfCancelling()) {
+      return "settled";
+    }
+
     const modelTurn: ModelTurnRef = {
       modelTurnId: config.ids.next("model_turn"),
       index: state.counters.modelTurns,
@@ -723,7 +719,6 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
       draft,
       messageCompleted: false,
       queuedToolCalls: [],
-      currentToolExecutionStarted: false,
     };
     activeModelTurn = turnContext;
 
@@ -829,7 +824,7 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
       candidate: messageRef,
     };
     const { verificationId } = verification;
-    activeVerification = { verification };
+    activeVerification = { verificationId, candidate: messageRef };
     commit(
       { ...withoutPhase(state), phase: "verifying", verification },
       { type: "verification_started", data: verification },
@@ -893,6 +888,9 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
   async function run(): Promise<void> {
     for (;;) {
       if (isTerminal()) {
+        return;
+      }
+      if (quiesceIfCancelling()) {
         return;
       }
       const turn = await runModelTurn();
