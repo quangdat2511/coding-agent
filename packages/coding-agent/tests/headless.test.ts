@@ -85,11 +85,12 @@ interface LoggedEvent {
   readonly data: Record<string, unknown>;
 }
 
+// A line still being written has no newline yet, so only the lines before the last one count.
 async function loggedEvents(outputDir: string): Promise<LoggedEvent[]> {
   const text = await Bun.file(join(outputDir, "events.jsonl")).text();
   return text
     .split("\n")
-    .filter((line) => line !== "")
+    .slice(0, -1)
     .map((line) => JSON.parse(line));
 }
 
@@ -336,22 +337,28 @@ describe("a headless run of the named task on Google", () => {
   });
 
   it("appends events while the run goes on, so a killed run keeps what was written", async () => {
-    const typesAtSecondRequest: string[] = [];
+    const atSecondRequest: { types: string[]; readError?: string } = { types: [] };
     await runNamedTask(
       replayInOrder(readOnlyRun),
       () => {
-        expect(typesAtSecondRequest).toContain("tool_call_completed");
-        expect(typesAtSecondRequest).not.toContain("session_settled");
+        expect(atSecondRequest.readError).toBeUndefined();
+        expect(atSecondRequest.types).toContain("tool_call_completed");
+        expect(atSecondRequest.types).not.toContain("session_settled");
       },
       {
         onRequest: async (outputDir, sent) => {
           if (sent.length !== 2) return;
           // The log is written behind the Agent Session, so give it a moment to catch up.
           for (let attempt = 0; attempt < 200; attempt++) {
-            const types = (await loggedEvents(outputDir)).map(({ type }) => type);
-            if (types.includes("tool_call_completed")) {
-              typesAtSecondRequest.push(...types);
-              return;
+            try {
+              const types = (await loggedEvents(outputDir)).map(({ type }) => type);
+              if (types.includes("tool_call_completed")) {
+                atSecondRequest.types = types;
+                delete atSecondRequest.readError;
+                return;
+              }
+            } catch (error) {
+              atSecondRequest.readError = String(error);
             }
             await Bun.sleep(10);
           }

@@ -73,7 +73,10 @@ their `sequence`, so a gap in the numbers marks the events that were left out.
 
 The Agent Session never waits for the log. A killed process can therefore lose the last events. A
 log is complete only if its last line is a `session_settled` event. A reader must treat any other
-log as truncated, and must not take its last event as the outcome of the run.
+log as truncated, and must not take its last event as the outcome of the run. Each line is written
+when its event arrives, so a reader can also catch a line half written, during a run or after a
+kill. Only a line that ends in a newline is a whole event, and a reader ignores the text after the
+last newline.
 
 **`result.json`** is written after the Agent Session settles and the log is complete. It holds
 `exitCode`, `result` (the Agent Result) and `finishedAt` (the time the run received the Agent
