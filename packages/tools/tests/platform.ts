@@ -15,3 +15,6 @@ export const noNameTooLong = onWindows;
 // Windows refuses to inspect a Unix-domain socket file, so the resolver refuses it before read can
 // see its type.
 export const socketRefusal = onWindows ? "permission denied" : "not a regular file";
+// Windows has no process groups or POSIX signals: bash ends a command's tree with taskkill, and a
+// shell cannot kill itself with a signal the way these tests make it.
+export const noPosixSignals = onWindows;

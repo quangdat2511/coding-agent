@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { PathResolution, WorkspaceResolver } from "@coding-agent/agent-core";
 import { createDefaultTools, createWorkspaceResolver, readTool } from "@coding-agent/tools";
+import { createConfiguredChildLauncher } from "../src/child-launcher.ts";
 import {
   assembleSystemPrompt,
   buildSystemPrompt,
@@ -16,6 +17,12 @@ import {
   packageProjectInstructions,
   type SystemPromptEnvironment,
 } from "../src/system-prompt.ts";
+
+function defaultTools() {
+  const configured = createConfiguredChildLauncher();
+  if (!configured.ok) throw new Error(configured.message);
+  return createDefaultTools(configured.launcher);
+}
 
 const MAX = MAX_PROJECT_INSTRUCTIONS_BYTES;
 const MARKER = PROJECT_INSTRUCTIONS_TRUNCATION_MARKER;
@@ -695,7 +702,7 @@ describe("assembling the system prompt", () => {
 
     const assembled = await assembleSystemPrompt({
       workspace,
-      tools: createDefaultTools(),
+      tools: defaultTools(),
       platform: "win32",
     });
     if (!assembled.ok) throw new Error(`expected a prompt, got: ${assembled.message}`);
@@ -715,7 +722,7 @@ describe("assembling the system prompt", () => {
   it("builds a prompt for a repository with neither file", async () => {
     const assembled = await assembleSystemPrompt({
       workspace: await workspaceFor(repo),
-      tools: createDefaultTools(),
+      tools: defaultTools(),
       platform: "linux",
     });
     if (!assembled.ok) throw new Error(`expected a prompt, got: ${assembled.message}`);
@@ -729,7 +736,7 @@ describe("assembling the system prompt", () => {
 
     const assembled = await assembleSystemPrompt({
       workspace: await workspaceFor(repo),
-      tools: createDefaultTools(),
+      tools: defaultTools(),
       platform: "linux",
     });
 
