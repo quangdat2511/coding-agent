@@ -69,6 +69,14 @@ _Avoid_: Verification, testing
 The normalized outcome returned to the model and runtime after a Tool Call executes, is rejected, or fails.
 _Avoid_: Command output, execution response
 
+**Output Budget**:
+The 40 KiB of UTF-8 that bounds a Tool Result's content, keeping the start and the end of longer output around a truncation marker.
+_Avoid_: Output limit, truncation size, max output
+
+**Tool Progress**:
+The latest tail of a running Tool Call's output, delivered to observers at a bounded size and rate; each update replaces the previous one.
+_Avoid_: Progress message, partial result, streaming output
+
 **Verification**:
 Evidence gathered after a change to determine whether the Coding Task's result is valid.
 _Avoid_: Testing, validation

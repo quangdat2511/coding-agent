@@ -176,6 +176,7 @@ export interface ModelPort {
 export interface Clock {
   now(): string; // ISO-8601 wall-clock time for occurredAt
   monotonicMs(): number; // durations and maxDurationMs
+  setTimer(delayMs: number, callback: () => void): () => void; // returns a cancel function
 }
 
 export type IdKind =
@@ -386,13 +387,11 @@ export function writeTool(): ExecutableTool<typeof WriteParams>;
 export function editTool(): ExecutableTool<typeof EditParams>;
 ```
 
-`createDefaultTools()` currently registers only `read`, `write`, and `edit`, and keeps its
-zero-argument signature. The target API for CDA-71 is
-`createDefaultTools(launcher: ChildProcessLauncher): ToolRegistry` and
+CDA-71 implements `createDefaultTools(launcher: ChildProcessLauncher): ToolRegistry`, which
+registers `read`, `write`, `edit`, and `bash`, and
 `bashTool(launcher: ChildProcessLauncher): ExecutableTool<typeof BashParams>`. CDA-74 will add the
-Verification Runner with the same configured launcher dependency. These are planned signatures,
-not exports implemented by CDA-68. They replace the original zero-argument sketches when process
-execution is added; they do not add tool timeout options.
+Verification Runner with the same configured launcher dependency. These signatures replace the
+original zero-argument sketches; they do not add tool timeout options.
 
 The composition root reads the complete `PROVIDER_CREDENTIAL_ENV_VARS` export from `ai` and
 supplies it to the launcher's factory in `tools`. The set includes every credential variable name
@@ -689,6 +688,19 @@ amended this record:
 The standalone logic prototype and its accepted Q1–Q3 verdict are preserved on branch
 `CDA-68-prototype-child-environment`, commit `b8007bd`, under `packages/tools/prototype/`.
 
+On 2026-11-12, [Run commands through the bash tool](https://datn-fit-hcmus.atlassian.net/browse/CDA-71)
+amended this record:
+
+- **Tool Progress** (§3): `ToolProgress` is `{ output: string }`, the latest tail of the tool's
+  output, which replaces the previous update rather than adding to it. It was a free-text
+  `message`. `VerificationProgress` is unchanged. ADR 0002 §8 gives the bounds Agent Core applies.
+- **Clock timers** (§3): `Clock` gains `setTimer`, so Agent Core can deliver a held progress update
+  when its interval ends while staying free of wall-clock dependence; the test clock runs due
+  timers as it advances. ADR 0002's cancellation grace period can use the same port.
+- **Default tools** (§4): `createDefaultTools` and `bashTool` take the configured launcher. The
+  composition root registers `bash` with the Agent Session in CDA-80, which registers all four
+  tools.
+
 ## Consequences
 
 - `ai` tests against recorded provider fixtures with no other package present. Agent Core tests use
@@ -712,7 +724,7 @@ The standalone logic prototype and its accepted Q1–Q3 verdict are preserved on
 - Costs accepted: a fifth package; a rename pass across `packages/ai`; a two-phase tool port that is
   more work than a single `execute`; per-provider capability declarations; and an injected clock
   and ID source that lengthen construction at the composition root.
-- `ToolProgress` is shaped with the first tool that reports progress; Agent Core owns and bounds
-  it.
+- `ToolProgress` is shaped with the first tool that reports progress, `bash` in CDA-71; Agent
+  Core owns and bounds it.
 - Adding Pi's MIT notice to `packages/ai/src/utils/event-stream.ts`, or rewriting that file, remains
   separate follow-up work (§8).

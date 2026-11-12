@@ -179,6 +179,47 @@ On 2026-11-12, [CDA-30](https://datn-fit-hcmus.atlassian.net/browse/CDA-30) amen
   implementation. The sentence that placed the OpenCode adapter outside the guarantee is superseded;
   the Custom Provider residual is unchanged.
 
+On 2026-11-12, [CDA-71](https://datn-fit-hcmus.atlassian.net/browse/CDA-71) amended this record:
+
+- **Shell** (§3): `bash` runs the command as `<shell> -c`, without a login shell or rc files. On
+  Linux and macOS the shell is `bash` from `PATH`, or `/bin/sh` without it. On Windows it is Git
+  Bash, found in the Git for Windows install locations or as a `bash.exe` on `PATH`. WSL's
+  `bash.exe` is never used, because it runs the command in a Linux distribution. No shell is a
+  `TOOL_INTERNAL_ERROR`.
+- **Combined output** (§1, §3): the command runs after `exec 2>&1`, so its stderr shares stdout's
+  pipe and both keep the order they were written in. Joining two pipes by arrival misordered 580
+  of 600 alternating lines in the CDA-71 prototype. The cost is that bash reports a syntax error
+  one line later than the line in the command.
+- **Status line** (§1, §6): Agent Core sends the model only a Tool Result's `content` and
+  `isError`, so the content ends with a status line: `[exit code: 0]`, or, for a failure,
+  `[exit code: N; partial changes may remain]`, `[timed out after N ms; partial changes may
+  remain]` or `[terminated by SIG...; partial changes may remain]`. Its bytes are reserved from
+  the 40 KiB budget, so the whole content stays within it. A command that prints nothing shows
+  `(no output)`. The partial-changes note appears on every failure, as §5 requires for a failed
+  mutating call.
+- **Error classification** (§1): `TIMEOUT` is decided by bash's own timer, not by the signal the
+  shell died of, since a command can send itself the same signal. `SIGNAL` means the shell itself
+  was ended by a signal bash did not send; a killed child of a shell that goes on is a normal
+  exit. A cancelled call reports `SIGNAL` with `[cancelled; ...]`, and Agent Core records it as
+  cancelled (ADR 0002 §5).
+- **Process lifetime** (§3): a timeout or cancellation sends `SIGTERM` to the command's process
+  group and `SIGKILL` 1 s later, so what the command started stops too; on Windows `taskkill /T
+  /F`, started through the same launcher, ends the tree. A process the command leaves in the
+  background after a normal exit keeps running, so a server started with `&` survives. bash stops
+  reading 200 ms after the shell exits, because a background process can keep the pipes open.
+  Its later output is lost unless the command redirects it. A process that leaves the group with
+  `setsid` survives a timeout; Approval (§4) remains the control for it.
+- **Start directory** (§1, §2): `cwd` is relative to `repoRoot` and defaults to it. Every unusable
+  start directory is `PATH_OUTSIDE_REPO`, with a message that says why: outside the repository,
+  through a symbolic link, missing, or not a directory. It is checked in `prepare` and again before
+  the command starts. The start directory is not a jail: the command can change directory, and
+  Approval is the control for that.
+- **Approval summary** (§4): the summary shows the whole command, unshortened, with its start
+  directory when it is not `repoRoot` and its timeout when it is not the default.
+
+The prototypes behind these decisions are preserved on branch `CDA-71-prototype-bash-decisions`,
+commit `63ef192`, under `packages/tools/prototypes/` and `packages/agent-core/prototypes/`.
+
 ### 8. Credential Isolation for Tool and Verification Processes
 
 Coding Agent authenticates to Model Providers with credentials it reads from its own environment: the provider API-key variables that `@coding-agent/ai` defines. `bash` Tool Calls (§3) and the Verification Runner ([ADR 0003](./0003-mvp-context-planning-verification-and-session-memory.md) §3) start child processes on the model's behalf. Under the `"auto-approve"` policy (§4) with network access these children run unattended, so one that obtains a credential can send it anywhere; even under `"ask"`, a credential copied into a Tool Result enters the transcript, the Session Event log, and any exported trajectory. The credential reaches Coding Agent only because a launching process placed it in the environment Coding Agent inherits, so how the launcher holds it is part of the problem and cannot be fully solved inside Coding Agent. What this section can require therefore depends on the Approval Policy, and the guarantee is stated per policy below rather than as one absolute.
