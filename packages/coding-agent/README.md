@@ -221,6 +221,9 @@ Checks run in that order and the first problem wins. The output directory is cre
 other check has passed, and whatever it created is removed again if it then proves unusable, so a
 configuration error writes nothing.
 
+The [ancestor check](#ancestor-check) runs before all of these. When it finds a credential in an
+ancestor process, it also exits 2 and writes nothing.
+
 ## Process hardening
 
 On Linux, the Coding Agent process marks itself non-dumpable as soon as its arguments parse. This
@@ -258,8 +261,9 @@ The guarantee has these limits:
   `CAP_DAC_OVERRIDE` or `CAP_DAC_READ_SEARCH`, can still list the fd numbers in `/proc/<pid>/fd`.
   It cannot follow the links.
 - It protects only the Coding Agent process. An ancestor that still holds the credential stays
-  readable, for example the shell that exported it. Under `"auto-approve"`, the startup ancestor
-  check of CDA-72 will refuse that launch. Under `"ask"`, ADR 0001 §8 accepts this residual.
+  readable, for example the shell that exported it. The [ancestor check](#ancestor-check) refuses
+  that launch under `"auto-approve"`. It finds a credential in the environment or the arguments of
+  an ancestor. It cannot see a credential that an ancestor set after it started. Under `"ask"`, ADR 0001 §8 accepts this residual.
 - A child is dumpable again after its own `execve`, so this call does not protect it. The scrubbed
   environment of rule 1 protects the child instead.
 - Only Linux has this control. On macOS, a same-user process can read the startup environment of
@@ -278,3 +282,86 @@ also skipped. A reader with one of them can pass at least one of the checks.
 On every platform, the same file checks each failure of `markProcessNonDumpable` with a fake C
 library. It also preloads `tests/support/fail-hardening.ts` into the executable, which makes the
 hardening fail, and checks that the run exits 70 before it resolves the configuration.
+
+## Ancestor check
+
+This check applies under `"auto-approve"` on Linux. If a process above the Coding Agent still
+holds a provider credential, the Coding Agent refuses to run. This is the startup check of
+[ADR 0001 §8](../../docs/adr/0001-tool-contracts-and-safety-policy.md). A launcher that starts the
+Coding Agent as a child keeps the credential in its own `/proc/<pid>/environ`. A Tool Call child
+runs as the same user, so it can read that file. Coding Agent cannot scrub or mark a process that
+it did not start. The launcher must replace itself with the Coding Agent through `exec`, and this
+check makes that rule a checked precondition.
+
+`main` in `src/cli.ts` calls `checkAncestorCredentials` from `src/ancestor-credentials.ts` right
+after the hardening step and before it resolves the configuration. The check reads the parent from
+field 4 of `/proc/self/stat`. For each ancestor up to the end of the chain, it reads
+`/proc/<pid>/environ` and `/proc/<pid>/cmdline`. Then it reads the stat again and goes on to that
+ancestor's parent. The credential variables are all the names in `PROVIDER_CREDENTIAL_ENV_VARS`
+from `@coding-agent/ai`, not only those of the chosen provider. In the environment, a blank value
+counts as none, by the rule of `readEnvCredential`. In the arguments, an assignment such as
+`ANTHROPIC_API_KEY=sk-...` counts, because every process can read `/proc/<pid>/cmdline`.
+
+The check has these outcomes:
+
+- If an ancestor holds a credential, the run exits 2 and writes nothing. The message names the
+  process ID, the process name and the variable, but never the value. The name is shown as UTF-8,
+  and its control characters are escaped.
+- If the environment of an ancestor is denied with `EACCES` or `EPERM`, the check goes on to the
+  parent of that ancestor. A root-owned `init` and a non-dumpable process are examples. A Tool
+  Call child has the same user and capabilities as the Coding Agent, so the child is usually denied
+  the same file. Root is the exception, as the limits below say.
+- If an ancestor exits after its first stat read, the check goes on to the parent from that read.
+  The second stat read finds this case: the process is gone, or its start time (field 22) changed
+  because another process reused the pid. The files read in between then do not count.
+- If an ancestor exits before its stat is read, the kernel gives its child a new parent. The check
+  reads the parent field of the child again and goes on from the new parent.
+- If the stat of PID 1 cannot be read, the chain ends there. With `hidepid=invisible`, a user who
+  is not root cannot see the `init` of root. No process is above PID 1.
+- If the stat of another ancestor cannot be read, and the parent field of its child still names
+  it, the run exits 70. `hidepid` causes this case for a process of another user, for example the
+  `sshd` of root above an SSH session. The processes above it can still hold the credential, and
+  the walk cannot find them. Run the Coding Agent where `/proc` has no `hidepid`, or as a user who
+  can see that process.
+- If `/proc/self/stat` cannot be read, or another read fails, the run exits 70. The check fails
+  closed, because it cannot show that no ancestor holds a credential.
+
+The check has these limits:
+
+- It does not run under `"ask"`. ADR 0001 §8 accepts the residual there: the shell that exported
+  the key stays a readable ancestor. Two controls bound that residual. The `read` tool is jailed to
+  the Repository Root, so it cannot open a `/proc` path. Every mutating `bash` call waits for an
+  Approval, so a human allows each command that can read `/proc`.
+- It does not run on macOS or Windows. On those platforms `"auto-approve"` has no protection
+  against an ancestor that holds a credential. On macOS a same-user process can read the startup
+  environment of another process through `KERN_PROCARGS2` and `ps`. Run unattended evaluations
+  under `"auto-approve"` in a Linux container, as ADR 0005 does.
+- It walks only the ancestor chain. A sibling that holds the credential, such as another stage of
+  a pipeline, stays the launcher's responsibility.
+- It sees only the environment that `execve` gave each ancestor, and the arguments. An ancestor
+  that set the variable after it started keeps it only in its memory. Examples are a shell where
+  you typed `export ANTHROPIC_API_KEY=...`, and a Python launcher that sets `os.environ` and then
+  calls `subprocess.run`. The check passes such a launch. If Yama allows it, for example at
+  `ptrace_scope` 0, a same-uid Tool Call can still read that memory through `/proc/<pid>/mem`.
+  Start the Coding Agent with `exec`, or pass the key only in the environment of the Coding Agent.
+- For the same reason, Bun loads a `.env` file into `process.env`, but that does not change
+  `/proc/<pid>/environ`.
+- It does not protect a Coding Agent that runs as root with `CAP_SETUID` and `CAP_SETGID`, as in
+  `sudo -E coding-agent run ...` or as root in a default Docker container. The shell behind `sudo`
+  belongs to another user, so the check is denied its environment and passes over it. A Tool Call
+  can take the uid and gid of that user and then read the environment. ADR 0001 §8 leaves this case
+  out of scope. Run the Coding Agent as the user that holds the credential, or drop the two
+  capabilities, for example with `docker run --cap-drop=SETUID --cap-drop=SETGID`.
+
+`tests/ancestor-credentials.test.ts` checks every outcome with a fake `/proc` on every platform. It
+also preloads `tests/support/fail-ancestor-check.ts` into the executable, which makes the check
+fail, and checks that the run exits 70 and writes nothing. On Linux it also starts the executable
+from two `/bin/sh` launchers that hold a credential. The first launcher runs `exec`, and the run
+continues to the configuration. The second launcher stays as the parent, and the run exits 2. That
+part is skipped on other platforms, so it runs in CI on Ubuntu.
+
+The test runner is itself an ancestor of each run. If the shell that started `bun test` exported a
+provider key, the check rightly refuses every run. `runnerChainIsClean` in
+`tests/support/ancestor-chain.ts` finds this case, and the tests that need a run to get past the
+check are then skipped. In CI, a test asserts that the runner's chain is clean, so a check that
+wrongly refuses the runner fails instead of skipping.

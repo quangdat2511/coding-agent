@@ -18,8 +18,8 @@
 // - A caller with DAC override, such as root or a holder of CAP_DAC_OVERRIDE or
 //   CAP_DAC_READ_SEARCH, can still list the fd numbers in /proc/<pid>/fd. It cannot follow them.
 // - It protects only this process. An ancestor that still holds the credential, such as the shell
-//   that exported it, stays readable. Under "auto-approve" the startup ancestor check (CDA-72)
-//   will refuse such a launch. Under "ask" ADR 0001 §8 accepts that residual.
+//   that exported it, stays readable. Under "auto-approve" the startup ancestor check in
+//   ancestor-credentials.ts refuses such a launch. Under "ask" ADR 0001 §8 accepts that residual.
 // - A child is dumpable again after its own execve, so it is not protected by this call. Rule 1's
 //   scrubbed environment protects it instead.
 // - Only Linux has PR_SET_DUMPABLE. On macOS a same-user process can read another process's startup

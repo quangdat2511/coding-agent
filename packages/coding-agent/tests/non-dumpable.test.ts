@@ -3,6 +3,8 @@ import { readFileSync } from "node:fs";
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { type Libc, markProcessNonDumpable } from "../src/non-dumpable.ts";
+import { runnerChainIsClean } from "./support/ancestor-chain.ts";
+import { onLinux } from "./support/platform.ts";
 import {
   bunLikeShebang as bun,
   firstLine,
@@ -175,7 +177,10 @@ function memShowsDumpability(access: ProcAccess): boolean {
   return scope === undefined || scope === 0 || (scope === 1 && access.ptracerLifted);
 }
 
-const provable = process.platform === "linux" && !holdsBypassCapability();
+const provable = onLinux && !holdsBypassCapability();
+
+// The Coding Agent run below must get past the ancestor check to reach the probe's exit report.
+const cleanChain = await runnerChainIsClean();
 
 // Runs the target in a temporary directory with a credential in its environment. The probe in the
 // target starts a same-uid child against it as the target exits, and the child's report comes back.
@@ -215,20 +220,23 @@ describe.skipIf(!provable)("a same-uid child on Linux", () => {
     if (scope === undefined || scope <= 1) expect(access.mem).toBe("read");
   });
 
-  it("cannot read the environ, mem or fd links of the Coding Agent process", async () => {
-    const { exitCode, stderr, access } = await probeTarget([
-      ...bun,
-      "--preload",
-      probe,
-      cli,
-      ...parsedRun,
-    ]);
+  it.skipIf(!cleanChain)(
+    "cannot read the environ, mem or fd links of the Coding Agent process",
+    async () => {
+      const { exitCode, stderr, access } = await probeTarget([
+        ...bun,
+        "--preload",
+        probe,
+        cli,
+        ...parsedRun,
+      ]);
 
-    expect(firstLine(stderr)).toBe('coding-agent: --task-file "task.md" does not exist');
-    expect(exitCode).toBe(2);
-    expect(access.environ).toBe("EACCES");
-    expect(access.environNames).toEqual([]);
-    expect(access.fd).toBe("EACCES");
-    if (memShowsDumpability(access)) expect(access.mem).toBe("EACCES");
-  });
+      expect(firstLine(stderr)).toBe('coding-agent: --task-file "task.md" does not exist');
+      expect(exitCode).toBe(2);
+      expect(access.environ).toBe("EACCES");
+      expect(access.environNames).toEqual([]);
+      expect(access.fd).toBe("EACCES");
+      if (memShowsDumpability(access)) expect(access.mem).toBe("EACCES");
+    },
+  );
 });
