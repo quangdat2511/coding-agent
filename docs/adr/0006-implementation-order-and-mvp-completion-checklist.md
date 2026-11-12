@@ -316,6 +316,9 @@ TerminalBench evaluation, so the MVP reaches it only when both tiers are complet
 3. The evaluation provider and model are chosen. ADR 0005 §7 states that it does not choose the
    model, and this record does not either: a cheap weak model produces a valid job that says nothing,
    so the choice needs its own thinking and becomes its own decision ticket on the map.
+   [ADR 0007](./0007-evaluation-provider-and-model.md) resolves it: `openrouter` with
+   `deepseek/deepseek-v4.1-flash-1017`, recorded as a configuration result rather than a capability
+   ceiling.
 
 Item 3 blocks nothing in tier 1, but it should be decided while tier 1 is still running rather than
 after it closes, for two reasons. It carries lead time that is not decision time: a paid key, a rate

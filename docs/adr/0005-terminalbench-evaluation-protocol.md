@@ -431,7 +431,8 @@ The oracle job receives no credential and is not gated.
 Rules for the recorded job:
 
 - Exactly one provider and model per job, declared in the manifest. This decision does not choose
-  the model.
+  the model; [ADR 0007](./0007-evaluation-provider-and-model.md) chooses `openrouter` with
+  `deepseek/deepseek-v4.1-flash-1017` and bounds what that job may claim.
 - One attempt per task (`-k 1`). Additional attempts for measuring variance are separate jobs,
   reported separately.
 - No task filtering outside the rerun job, and no timeout override or timeout multiplier.
@@ -552,6 +553,9 @@ them and decides neither.
   ADR 0002 §4 preserves a normalized provider reason in the failure details, but no decision says
   the HTTP status is part of that reason. Until the provider error contract includes it, a
   `MODEL_FAILURE` without a recorded status is not rerun-eligible and counts as an agent outcome.
+  [ADR 0007](./0007-evaluation-provider-and-model.md) fixes the provider as `openrouter`, so
+  [CDA-83](https://datn-fit-hcmus.atlassian.net/browse/CDA-83) implements the status in that
+  adapter.
 
 ## Consequences
 
