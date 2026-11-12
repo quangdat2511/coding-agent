@@ -33,6 +33,33 @@ const failSessionFactory = join(import.meta.dir, "support", "fail-session-factor
 // Windows cannot start a file by its shebang or mode bits, so there the bin runs under this Bun.
 const command = onWindows ? [...bunLikeShebang, bin] : [bin];
 
+// The autoload flags of ADR 0005 §2, built for this host rather than the evaluation targets.
+async function compileExecutable(directory: string): Promise<string[]> {
+  const outfile = join(directory, onWindows ? "coding-agent.exe" : "coding-agent");
+  const build = await runProcess([
+    process.execPath,
+    "build",
+    bin,
+    "--compile",
+    "--no-compile-autoload-dotenv",
+    "--no-compile-autoload-bunfig",
+    "--outfile",
+    outfile,
+  ]);
+  if (build.exitCode !== 0) throw new Error(`bun build --compile failed:\n${build.stderr}`);
+  return [outfile];
+}
+
+async function writePreloadingBunfig(directory: string): Promise<void> {
+  await Bun.write(join(directory, "bunfig.toml"), 'preload = ["./preload.ts"]\n');
+  await Bun.write(join(directory, "preload.ts"), 'process.stderr.write("preloaded\\n");\n');
+}
+
+const launchPaths = [
+  ...(onWindows ? [] : [{ name: "the bin entry", launch: async () => [bin] }]),
+  { name: "the compiled executable", launch: compileExecutable },
+];
+
 const required = [
   "--task-file",
   "/tmp/task.md",
@@ -83,17 +110,35 @@ describe("the coding-agent executable", () => {
     expect(statSync(bin).mode & 0o111).not.toBe(0);
   });
 
-  // Bun on Windows accepts no empty device as --config, so a working-directory preload loads there.
-  it.skipIf(onWindows)("ignores a bunfig.toml preload in the working directory", async () => {
+  it("sees a bunfig.toml preload in the working directory when Bun autoloads it", async () => {
     await withTemporaryDirectory(async (directory) => {
-      await Bun.write(join(directory, "bunfig.toml"), 'preload = ["./preload.ts"]\n');
-      await Bun.write(join(directory, "preload.ts"), 'process.stderr.write("preloaded\\n");\n');
+      await writePreloadingBunfig(directory);
 
-      const { exitCode, stderr } = await run(["run", "--nope"], directory);
-      expect(exitCode).toBe(2);
-      expect(stderr).not.toContain("preloaded");
+      const { stderr } = await runProcess([process.execPath, bin, "run", "--nope"], {
+        cwd: directory,
+      });
+      expect(stderr).toContain("preloaded");
     });
   });
+
+  // Bun's Windows bin shim cannot start an `env -S` shebang and Bun there accepts no spelling of
+  // an empty device as --config, so on Windows the compiled executable is the only launch path.
+  it.each(launchPaths)(
+    "ignores a bunfig.toml preload in the working directory, launched as $name",
+    async ({ launch }) => {
+      await withTemporaryDirectory(async (directory) => {
+        await writePreloadingBunfig(directory);
+
+        const command = await launch(directory);
+        const { exitCode, stderr } = await runProcess([...command, "run", "--nope"], {
+          cwd: directory,
+        });
+        expect(stderr).not.toContain("preloaded");
+        expect(exitCode).toBe(2);
+      });
+    },
+    60_000,
+  );
 
   it.each([
     { name: "no arguments", args: [], expected: "a command is required" },

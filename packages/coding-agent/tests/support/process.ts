@@ -4,12 +4,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 // Bun with the flags of the executable's shebang, so no bunfig.toml or .env of the host takes part,
-// for a test that must add a flag such as --preload. Bun 1.3.14 on Windows crashes on
-// --config=/dev/null, so Windows runs without that flag.
+// for a test that must add a flag such as --preload. Bun 1.3.14 on Windows accepts no empty device
+// as --config, so there it reads an empty file instead.
 export const bunLikeShebang: readonly string[] = [
   process.execPath,
   "--no-env-file",
-  ...(process.platform === "win32" ? [] : ["--config=/dev/null"]),
+  `--config=${process.platform === "win32" ? join(import.meta.dir, "empty-bunfig.toml") : "/dev/null"}`,
 ];
 
 export const firstLine = (text: string): string => text.split("\n")[0] ?? "";
