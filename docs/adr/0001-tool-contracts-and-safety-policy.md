@@ -172,12 +172,11 @@ On 2026-11-12, [CDA-72](https://datn-fit-hcmus.atlassian.net/browse/CDA-72) amen
 - **Scope of the guarantee** (§8): a Coding Agent that runs as root with `CAP_SETUID` and
   `CAP_SETGID` is excluded, like a child with `CAP_SYS_PTRACE`.
 
-On 2026-11-12, [CDA-30](https://datn-fit-hcmus.atlassian.net/browse/CDA-30) **proposed** this
-amendment, which takes effect when its decision is accepted:
+On 2026-11-12, [CDA-30](https://datn-fit-hcmus.atlassian.net/browse/CDA-30) amended this record:
 
-- **Credential scope** (§8): [ADR 0007](./0007-evaluation-provider-and-model.md) proposes to
-  promote `opencode` to a sixth `--provider` value, with `OPENCODE_API_KEY` joining the fixed set.
-  The sentence that placed the OpenCode adapter outside the guarantee is superseded on acceptance;
+- **Credential scope** (§8): [ADR 0007](./0007-evaluation-provider-and-model.md) promotes
+  `opencode` to a sixth `--provider` value, with `OPENCODE_API_KEY` joining the fixed set in the
+  implementation. The sentence that placed the OpenCode adapter outside the guarantee is superseded;
   the Custom Provider residual is unchanged.
 
 ### 8. Credential Isolation for Tool and Verification Processes
@@ -188,10 +187,10 @@ This rule was grounded in Linux experiments (Docker, kernel 6.12, same-uid child
 
 Two rules hold on every entry point and under both policies:
 
-1. **Non-inheritance.** Every process started for a Tool Call or by the Verification Runner is launched with an environment from which Coding Agent's MVP provider-credential variables are removed. The removed set is exactly `PROVIDER_CREDENTIAL_ENV_VARS`, the six credential variable names `@coding-agent/ai` declares for the five CLI-selectable providers ([ADR 0006](./0006-implementation-order-and-mvp-completion-checklist.md) §3), including providers not selected for the current run. Once [ADR 0007](./0007-evaluation-provider-and-model.md) is accepted, seven names cover six providers. This export is the single source of truth, not an arbitrary denylist. Variables outside that set, such as a task's own `GH_TOKEN`, are not touched, so there is no separate opt-out to misconfigure.
+1. **Non-inheritance.** Every process started for a Tool Call or by the Verification Runner is launched with an environment from which Coding Agent's MVP provider-credential variables are removed. The removed set is exactly `PROVIDER_CREDENTIAL_ENV_VARS`, the six credential variable names `@coding-agent/ai` declares for the five CLI-selectable providers ([ADR 0006](./0006-implementation-order-and-mvp-completion-checklist.md) §3), including providers not selected for the current run. [ADR 0007](./0007-evaluation-provider-and-model.md) adds a seventh name, for a sixth provider, in the implementation. This export is the single source of truth, not an arbitrary denylist. Variables outside that set, such as a task's own `GH_TOKEN`, are not touched, so there is no separate opt-out to misconfigure.
 2. **Agent non-recovery.** Because a same-user child can read a launcher's `/proc/<pid>/environ`, `/proc/<pid>/mem`, and `/proc/<pid>/fd`, where the credential remains after an in-process delete, item 1 alone is insufficient. On Linux the Coding Agent process marks itself non-dumpable (`prctl(PR_SET_DUMPABLE, SUID_DUMP_DISABLE)`) before it starts the first Tool Call or Verification child, so a same-uid child without `CAP_SYS_PTRACE` cannot read those files of the Coding Agent process. This closes the Coding Agent process as a vector; it does not affect any other process.
 
-**MVP credential scope and residual (CDA-68, 2026-11-11).** In this section, the provider-credential guarantee covers the fixed MVP set above. OpenCode was outside this set for as long as the CLI could not select it; ADR 0007 proposes to promote the adapter and add `OPENCODE_API_KEY` to the fixed set, and that credential is covered on the same terms as the rest once the decision is accepted. Custom Provider's configurable `apiKeyEnv` is still outside the fixed set and still inherited, and is not covered by the isolation guarantee under either Approval Policy, including `"auto-approve"`. Adding CLI support for a Custom Provider requires extending credential-name discovery and passing the resulting names through the composition root before enabling it, because a fixed static set cannot cover arbitrary names. This clarification preserves CDA-68's accepted MVP scope rather than silently extending it to every AI-library adapter.
+**MVP credential scope and residual (CDA-68, 2026-11-11).** In this section, the provider-credential guarantee covers the fixed MVP set above. OpenCode was outside this set for as long as the CLI could not select it; ADR 0007 promotes the adapter and adds `OPENCODE_API_KEY` to the fixed set as part of the implementation, and that credential is covered on the same terms as the rest once that lands. Custom Provider's configurable `apiKeyEnv` is still outside the fixed set and still inherited, and is not covered by the isolation guarantee under either Approval Policy, including `"auto-approve"`. Adding CLI support for a Custom Provider requires extending credential-name discovery and passing the resulting names through the composition root before enabling it, because a fixed static set cannot cover arbitrary names. This clarification preserves CDA-68's accepted MVP scope rather than silently extending it to every AI-library adapter.
 
 **Verification parity.** Verification Runner commands follow every rule in this section identically to `bash`.
 
