@@ -25,20 +25,89 @@ export interface BoundedOutput {
 
 // Output over the budget keeps both ends: the beginning names what ran and the end holds the final
 // error. The budgets are measured in bytes, and each cut moves to the nearest code point boundary
-// so a decoded half never starts or ends inside a multi-byte character.
-export function boundToolOutput(content: string): BoundedOutput {
+// so a decoded half never starts or ends inside a multi-byte character. A caller that appends its
+// own text, such as bash's status line, passes a smaller budget so the total stays within 40 KiB.
+export function boundToolOutput(content: string, budget = MAX_TOOL_OUTPUT_BYTES): BoundedOutput {
   const bytes = Buffer.from(content, "utf8");
-  if (bytes.byteLength <= MAX_TOOL_OUTPUT_BYTES) return { content, truncated: false };
-  // ADR 0001 §3 splits what remains evenly: the 26-byte marker leaves 20,467 bytes for each end.
-  const half = Math.floor((MAX_TOOL_OUTPUT_BYTES - MARKER_BYTES) / 2);
-  const headEnd = codePointStartAtOrBefore(bytes, half);
-  const tailStart = codePointStartAtOrAfter(bytes, bytes.byteLength - half);
+  if (bytes.byteLength <= budget) return { content, truncated: false };
+  return joinEnds(bytes, bytes, budget);
+}
+
+// ADR 0001 §3 splits what remains evenly: the 26-byte marker leaves 20,467 bytes for each end of
+// the full budget.
+const endBudget = (budget: number): number => Math.floor((budget - MARKER_BYTES) / 2);
+
+// head starts where the output starts and tail ends where it ends; each holds at least one end's
+// budget.
+function joinEnds(head: Uint8Array, tail: Uint8Array, budget: number): BoundedOutput {
+  const half = endBudget(budget);
+  const headEnd = codePointStartAtOrBefore(head, half);
+  const tailStart = codePointStartAtOrAfter(tail, tail.byteLength - half);
   return {
     content:
-      decoder.decode(bytes.subarray(0, headEnd)) +
+      decoder.decode(head.subarray(0, headEnd)) +
       TOOL_OUTPUT_TRUNCATION_MARKER +
-      decoder.decode(bytes.subarray(tailStart)),
+      decoder.decode(tail.subarray(tailStart)),
     truncated: true,
+  };
+}
+
+export interface OutputCollector {
+  push(chunk: Uint8Array): void;
+  /** Bound everything pushed so far, leaving reservedBytes of the budget for the caller's text. */
+  finish(reservedBytes: number): BoundedOutput;
+}
+
+// Collects a child's output as it streams, holding at most the budget in memory: all of it while
+// it fits, then only the first and last end budget's bytes. Bytes that are not UTF-8 decode to
+// U+FFFD. finish gives the same content as boundToolOutput on the whole output.
+export function createOutputCollector(): OutputCollector {
+  const keep = endBudget(MAX_TOOL_OUTPUT_BYTES);
+  // Every chunk while the output fits the budget; undefined once it has been cut.
+  let whole: Uint8Array[] | undefined = [];
+  let total = 0;
+  // One byte past the head's budget shows whether the head cut falls inside a character.
+  const head = new Uint8Array(keep + 1);
+  // The last `keep` bytes, as a ring: `ringAt` is where the next byte goes.
+  const ring = new Uint8Array(keep);
+  let ringAt = 0;
+
+  const toRing = (chunk: Uint8Array) => {
+    const recent = chunk.byteLength > keep ? chunk.subarray(chunk.byteLength - keep) : chunk;
+    const first = Math.min(recent.byteLength, keep - ringAt);
+    ring.set(recent.subarray(0, first), ringAt);
+    ring.set(recent.subarray(first), 0);
+    ringAt = (ringAt + recent.byteLength) % keep;
+  };
+
+  return {
+    push(chunk) {
+      if (chunk.byteLength === 0) return;
+      if (whole) {
+        whole.push(chunk.slice());
+        if (total + chunk.byteLength <= MAX_TOOL_OUTPUT_BYTES) {
+          total += chunk.byteLength;
+          return;
+        }
+        // The output no longer fits, so it will be cut: keep only its ends from here on.
+        const all = Buffer.concat(whole);
+        whole = undefined;
+        head.set(all.subarray(0, keep + 1));
+        toRing(all);
+        return;
+      }
+      toRing(chunk);
+    },
+    finish(reservedBytes) {
+      const budget = MAX_TOOL_OUTPUT_BYTES - reservedBytes;
+      if (whole) {
+        const bytes = Buffer.concat(whole);
+        if (bytes.byteLength <= budget) return { content: decoder.decode(bytes), truncated: false };
+        return joinEnds(bytes, bytes, budget);
+      }
+      const tail = Buffer.concat([ring.subarray(ringAt), ring.subarray(0, ringAt)]);
+      return joinEnds(head, tail, budget);
+    },
   };
 }
 
