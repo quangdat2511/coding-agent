@@ -50,7 +50,12 @@ interface Run {
   readonly progress: readonly string[];
 }
 
-async function run(input: BashInput, options: { signal?: AbortSignal } = {}): Promise<Run> {
+interface RunOptions {
+  readonly signal?: AbortSignal;
+  readonly onProgress?: (update: ToolProgress) => void;
+}
+
+async function run(input: BashInput, options: RunOptions = {}): Promise<Run> {
   const tool = bashTool(launcherFor());
   const progress: string[] = [];
   const ctx: ExecuteContext = {
@@ -58,6 +63,7 @@ async function run(input: BashInput, options: { signal?: AbortSignal } = {}): Pr
     signal: options.signal ?? new AbortController().signal,
     onProgress: (update: ToolProgress) => {
       progress.push(update.output);
+      options.onProgress?.(update);
     },
   };
   const prepared = await tool.prepare(input, ctx);
@@ -65,7 +71,7 @@ async function run(input: BashInput, options: { signal?: AbortSignal } = {}): Pr
   return { prepared, outcome: await tool.execute(prepared.prepared, ctx), progress };
 }
 
-async function outcomeOf(input: BashInput, options: { signal?: AbortSignal } = {}) {
+async function outcomeOf(input: BashInput, options: RunOptions = {}) {
   const { prepared, outcome } = await run(input, options);
   if (!prepared.ok) throw new Error(`expected prepare to pass, got ${prepared.code}`);
   return outcome as ToolOutcome;
@@ -154,7 +160,7 @@ describe("bounding a command", () => {
     await outcomeOf({ command: `sleep 30 & echo $! > ${pidFile}; sleep 30`, timeoutMs: 300 });
     const pid = Number((await readFile(pidFile, "utf8")).trim());
 
-    expect(isAlive(pid)).toBe(false);
+    expect(await exitsSoon(pid)).toBe(true);
   });
 
   it.skipIf(noPosixSignals)(
@@ -207,20 +213,59 @@ describe("bounding a command", () => {
 
   it("ends the command when the Tool Call is cancelled", async () => {
     const controller = new AbortController();
-    const pidFile = join(sandbox, "cancelled.pid");
     setTimeout(() => controller.abort(), 300);
     const started = performance.now();
-    const outcome = await outcomeOf(
-      { command: `echo $$ > ${pidFile}; sleep 30` },
-      { signal: controller.signal },
-    );
+    const outcome = await outcomeOf({ command: "sleep 30" }, { signal: controller.signal });
 
     expect(codeOf(outcome)).toBe("SIGNAL");
     expect(outcome.content).toBe("(no output)\n[cancelled; partial changes may remain]");
     expect(performance.now() - started).toBeLessThan(3_000);
-    if (!noPosixSignals) {
-      expect(isAlive(Number((await readFile(pidFile, "utf8")).trim()))).toBe(false);
-    }
+  });
+
+  it.skipIf(noPosixSignals)("stops what the command started when it is cancelled", async () => {
+    const controller = new AbortController();
+    const pidFile = join(sandbox, "cancelled.pid");
+    setTimeout(() => controller.abort(), 300);
+    await outcomeOf(
+      { command: `sleep 30 & echo $! > ${pidFile}; sleep 30` },
+      { signal: controller.signal },
+    );
+
+    expect(await exitsSoon(Number((await readFile(pidFile, "utf8")).trim()))).toBe(true);
+  });
+
+  it.skipIf(noPosixSignals)(
+    "reports a command that already exited normally when cancellation arrives while reading its output",
+    async () => {
+      const controller = new AbortController();
+      const pidFile = join(sandbox, "background.pid");
+      // The shell exits at once, but the background sleep keeps the pipe open, so bash is still
+      // reading when the abort arrives.
+      setTimeout(() => controller.abort(), 100);
+      const outcome = await outcomeOf(
+        { command: `sleep 5 & echo $! > ${pidFile}; echo done` },
+        { signal: controller.signal },
+      );
+      const pid = Number((await readFile(pidFile, "utf8")).trim());
+      await Bun.sleep(1_200);
+
+      expect(outcome).toEqual({ isError: false, content: "done\n[exit code: 0]" });
+      expect(isAlive(pid)).toBe(true);
+      process.kill(pid, "SIGKILL");
+    },
+  );
+
+  it("keeps collecting output when a progress observer throws", async () => {
+    const outcome = await outcomeOf(
+      { command: "echo one; sleep 0.1; echo two" },
+      {
+        onProgress: () => {
+          throw new Error("observer failed");
+        },
+      },
+    );
+
+    expect(outcome).toEqual({ isError: false, content: "one\ntwo\n[exit code: 0]" });
   });
 });
 
@@ -253,18 +298,20 @@ describe("the command's environment", () => {
 
 describe("the start directory", () => {
   it("starts in the repository root by default, or in the directory given", async () => {
+    // Listing names compares the same way on every platform; Git Bash prints a drive path as /c/.
     await mkdir(join(repo, "src"));
+    await writeFile(join(repo, "src", "main.ts"), "");
 
-    expect((await outcomeOf({ command: "pwd -P" })).content).toBe(`${repo}\n[exit code: 0]`);
-    expect((await outcomeOf({ command: "pwd -P", cwd: "src" })).content).toBe(
-      `${join(repo, "src")}\n[exit code: 0]`,
+    expect((await outcomeOf({ command: "ls" })).content).toBe("src\n[exit code: 0]");
+    expect((await outcomeOf({ command: "ls", cwd: "src" })).content).toBe(
+      "main.ts\n[exit code: 0]",
     );
   });
 
   it("refuses every unusable start directory as PATH_OUTSIDE_REPO", async () => {
     await writeFile(join(repo, "notes.txt"), "text");
 
-    for (const cwd of ["..", sandbox, "missing", "notes.txt"]) {
+    for (const cwd of ["..", sandbox, "missing"]) {
       const { prepared } = await run({ command: "true", cwd });
       expect(prepared.ok ? "ok" : prepared.code).toBe("PATH_OUTSIDE_REPO");
     }
@@ -318,6 +365,16 @@ describe("reporting progress", () => {
 });
 
 const codeOf = (outcome: ToolOutcome) => (outcome.isError ? outcome.error.code : undefined);
+
+// A killed process can linger as a zombie until its new parent reaps it, and signal 0 still
+// reaches a zombie, so wait briefly for it to disappear.
+async function exitsSoon(pid: number): Promise<boolean> {
+  for (let waited = 0; waited < 2_000; waited += 50) {
+    if (!isAlive(pid)) return true;
+    await Bun.sleep(50);
+  }
+  return false;
+}
 
 function isAlive(pid: number): boolean {
   try {

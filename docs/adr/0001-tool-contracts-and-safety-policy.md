@@ -183,8 +183,9 @@ On 2026-11-12, [CDA-71](https://datn-fit-hcmus.atlassian.net/browse/CDA-71) amen
 
 - **Shell** (§3): `bash` runs the command as `<shell> -c`, without a login shell or rc files. On
   Linux and macOS the shell is `bash` from `PATH`, or `/bin/sh` without it. On Windows it is Git
-  Bash, found in the Git for Windows install locations or as a `bash.exe` on `PATH`. WSL's
-  `bash.exe` is never used, because it runs the command in a Linux distribution. No shell is a
+  Bash, found in the Git for Windows install locations or as the first `bash.exe` on `PATH` that is
+  not WSL's. WSL's `bash.exe` is never used, because it runs the command in a Linux distribution;
+  it usually comes first on `PATH`, so the search goes past it. No shell is a
   `TOOL_INTERNAL_ERROR`.
 - **Combined output** (§1, §3): the command runs after `exec 2>&1`, so its stderr shares stdout's
   pipe and both keep the order they were written in. Joining two pipes by arrival misordered 580

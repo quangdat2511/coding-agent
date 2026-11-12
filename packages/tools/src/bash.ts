@@ -12,8 +12,8 @@ import { type Static, Type } from "typebox";
 import type { ChildProcess, ChildProcessLauncher } from "./child-process.ts";
 import { displayPath, quote } from "./messages.ts";
 import { createOutputCollector } from "./output-budget.ts";
-import { findShell, hostShell, type ShellHost } from "./shell.ts";
-import { prepareFailure } from "./tool-outcome.ts";
+import { findShell, processShellHost } from "./shell.ts";
+import { prepareFailure, toolError } from "./tool-outcome.ts";
 
 // ADR 0001 §3: a command gets 30 s unless the model asks for more, and never more than 120 s.
 export const DEFAULT_BASH_TIMEOUT_MS = 30_000;
@@ -48,14 +48,7 @@ export const BashParams = Type.Object({
 
 type BashInput = Static<typeof BashParams>;
 
-export interface BashToolOptions {
-  readonly shellHost?: ShellHost;
-}
-
-export function bashTool(
-  launcher: ChildProcessLauncher,
-  { shellHost = hostShell }: BashToolOptions = {},
-): ExecutableTool<typeof BashParams> {
+export function bashTool(launcher: ChildProcessLauncher): ExecutableTool<typeof BashParams> {
   return {
     name: "bash",
     description:
@@ -88,16 +81,16 @@ export function bashTool(
     async execute(prepared, { workspace, signal, onProgress }): Promise<ToolOutcome> {
       const [preparedCwd] = prepared.paths;
       const cwd = await resolveDirectory(workspace, preparedCwd ?? workspace.repoRoot);
-      if (!cwd.ok) return failure(cwd.error.code, cwd.error.message);
+      if (!cwd.ok) return toolError(cwd.error);
       if (cwd.path !== preparedCwd) {
-        return failure(
-          "PATH_OUTSIDE_REPO",
-          `${quote(String(preparedCwd))} changed after it was prepared`,
-        );
+        return toolError({
+          code: "PATH_OUTSIDE_REPO",
+          message: `${quote(String(preparedCwd))} changed after it was prepared`,
+        });
       }
-      const shell = findShell(shellHost);
-      if (!shell.ok) return failure("TOOL_INTERNAL_ERROR", shell.message);
-      if (signal.aborted) return finish(createOutputCollector(), { kind: "cancelled" });
+      const shell = findShell(processShellHost());
+      if (!shell.ok) return toolError({ code: "TOOL_INTERNAL_ERROR", message: shell.message });
+      if (signal.aborted) return outcomeOf(createOutputCollector(), { kind: "cancelled" });
 
       const timeoutMs = prepared.input.timeoutMs ?? DEFAULT_BASH_TIMEOUT_MS;
       return runCommand(launcher, {
@@ -195,18 +188,20 @@ async function runCommand(launcher: ChildProcessLauncher, run: CommandRun): Prom
   });
 
   const collector = createOutputCollector();
-  const decoder = new TextDecoder();
   let recent = "";
   let lastByte: number | undefined;
-  const take = (chunk: Uint8Array) => {
-    if (chunk.byteLength === 0) return;
+  const take = (chunk: Uint8Array, text: string) => {
     collector.push(chunk);
     lastByte = chunk[chunk.byteLength - 1];
-    recent = (recent + decoder.decode(chunk, { stream: true })).slice(-PROGRESS_WINDOW_CHARS);
-    run.onProgress(recent);
+    recent = (recent + text).slice(-PROGRESS_WINDOW_CHARS);
+    try {
+      run.onProgress(recent);
+    } catch {
+      // Progress is advisory: an observer that fails must not stop the output being collected.
+    }
   };
   const readers = [child.stdout.getReader(), child.stderr.getReader()];
-  const reading = Promise.all(readers.map((reader) => drain(reader, take)));
+  const reading = Promise.all(readers.map((reader) => readAll(reader, take)));
 
   let stop: "timeout" | "cancelled" | undefined;
   let killTimer: ReturnType<typeof setTimeout> | undefined;
@@ -214,55 +209,80 @@ async function runCommand(launcher: ChildProcessLauncher, run: CommandRun): Prom
     if (stop !== undefined) return;
     stop = reason;
     signalTree(launcher, child, "SIGTERM");
-    killTimer = setTimeout(() => signalTree(launcher, child, "SIGKILL"), KILL_GRACE_MS);
+    killTimer = setTimeout(() => {
+      if (groupAlive(child)) signalTree(launcher, child, "SIGKILL");
+    }, KILL_GRACE_MS);
   };
-  const timer = setTimeout(() => terminate("timeout"), run.timeoutMs);
+  const timeoutTimer = setTimeout(() => terminate("timeout"), run.timeoutMs);
   const onAbort = () => terminate("cancelled");
   run.signal.addEventListener("abort", onAbort, { once: true });
 
   try {
     await child.exited;
-    clearTimeout(timer);
-    let drained: ReturnType<typeof setTimeout> | undefined;
-    await Promise.race([
-      reading,
-      new Promise((resolve) => {
-        drained = setTimeout(resolve, DRAIN_MS);
-      }),
-    ]);
-    clearTimeout(drained);
   } finally {
-    clearTimeout(timer);
+    // How the command ended is settled once the shell exits: a cancellation that arrives while
+    // the remaining output is read must not turn a finished command into a cancelled one, nor
+    // stop the background processes it left running.
+    clearTimeout(timeoutTimer);
     run.signal.removeEventListener("abort", onAbort);
-    for (const reader of readers) reader.cancel().catch(() => undefined);
   }
-  // A process group still alive after a timeout or cancellation gets SIGKILL on schedule; one
-  // whose shell exited on its own is left running, as a background server should be.
-  if (stop === undefined) clearTimeout(killTimer);
+  let drainTimer: ReturnType<typeof setTimeout> | undefined;
+  await Promise.race([
+    reading,
+    new Promise((resolve) => {
+      drainTimer = setTimeout(resolve, DRAIN_MS);
+    }),
+  ]);
+  clearTimeout(drainTimer);
+  for (const reader of readers) reader.cancel().catch(() => undefined);
+  // A group that has already exited needs no SIGKILL; skipping it also avoids signalling a group
+  // that later reuses the id.
+  if (!groupAlive(child)) clearTimeout(killTimer);
 
-  const ending: Ending =
-    stop === "timeout"
-      ? { kind: "timeout", timeoutMs: run.timeoutMs }
-      : stop === "cancelled"
-        ? { kind: "cancelled" }
-        : child.signalCode
-          ? { kind: "signal", signal: child.signalCode }
-          : { kind: "exit", code: child.exitCode ?? 0 };
-  return finish(collector, ending, lastByte);
+  return outcomeOf(collector, endingOf(stop, child, run.timeoutMs), lastByte);
 }
 
-async function drain(
+// bash's own timer and abort decide TIMEOUT and cancellation, since a command can send itself the
+// signal bash would. Otherwise a shell ended by a signal is SIGNAL, and an exit code is an exit.
+function endingOf(
+  stop: "timeout" | "cancelled" | undefined,
+  child: ChildProcess,
+  timeoutMs: number,
+): Ending {
+  if (stop === "timeout") return { kind: "timeout", timeoutMs };
+  if (stop === "cancelled") return { kind: "cancelled" };
+  if (child.signalCode) return { kind: "signal", signal: child.signalCode };
+  return { kind: "exit", code: child.exitCode ?? 0 };
+}
+
+// Reads one pipe until it closes or is cancelled, decoding with its own stream decoder so a
+// character split across chunks of one pipe is not mixed with the other's bytes.
+async function readAll(
   reader: { read(): Promise<{ done: boolean; value?: Uint8Array }> },
-  take: (chunk: Uint8Array) => void,
+  take: (chunk: Uint8Array, text: string) => void,
 ): Promise<void> {
-  try {
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done || value === undefined) return;
-      take(value);
+  const decoder = new TextDecoder();
+  for (;;) {
+    let next: { done: boolean; value?: Uint8Array };
+    try {
+      next = await reader.read();
+    } catch {
+      return; // Cancelled after the drain limit.
     }
+    if (next.done || next.value === undefined) return;
+    if (next.value.byteLength > 0) take(next.value, decoder.decode(next.value, { stream: true }));
+  }
+}
+
+// Whether any process is left in the command's group. Windows has no process groups, and
+// taskkill /T already ended the tree, so there is nothing left to kill.
+function groupAlive(child: ChildProcess): boolean {
+  if (process.platform === "win32") return false;
+  try {
+    process.kill(-child.pid, 0);
+    return true;
   } catch {
-    // Cancelled after the drain limit.
+    return false;
   }
 }
 
@@ -293,12 +313,12 @@ const NEWLINE = 0x0a;
 // The status line ends the content so the model always sees how the command ended: Agent Core
 // sends it only content and isError. Its bytes are reserved from the shared budget, so the whole
 // content stays within 40 KiB.
-function finish(
+function outcomeOf(
   collector: ReturnType<typeof createOutputCollector>,
   ending: Ending,
   lastByte?: number,
 ): ToolOutcome {
-  const { code, status } = describe(ending);
+  const { code, status } = statusOf(ending);
   const statusLine = code === undefined ? `[${status}]` : `[${status}; partial changes may remain]`;
   const empty = lastByte === undefined;
   const separator = !empty && lastByte === NEWLINE ? "" : "\n";
@@ -311,7 +331,7 @@ function finish(
     : { isError: true, content, error: { code, message: content }, ...truncated };
 }
 
-function describe(ending: Ending): { code?: ToolErrorCode; status: string } {
+function statusOf(ending: Ending): { code?: ToolErrorCode; status: string } {
   switch (ending.kind) {
     case "exit":
       return ending.code === 0
@@ -324,8 +344,4 @@ function describe(ending: Ending): { code?: ToolErrorCode; status: string } {
     case "cancelled":
       return { code: "SIGNAL", status: "cancelled" };
   }
-}
-
-function failure(code: ToolErrorCode, message: string): ToolOutcome {
-  return { isError: true, content: message, error: { code, message } };
 }
