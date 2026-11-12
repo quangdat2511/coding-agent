@@ -14,6 +14,8 @@ export interface ModelPort {
 export interface Clock {
   now(): string;
   monotonicMs(): number;
+  /** Run callback once after delayMs of monotonic time; the returned function cancels it. */
+  setTimer(delayMs: number, callback: () => void): () => void;
 }
 
 export type IdKind =

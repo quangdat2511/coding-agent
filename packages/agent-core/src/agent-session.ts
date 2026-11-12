@@ -6,7 +6,7 @@ import type {
 } from "@coding-agent/ai";
 import { createEventLog } from "./event-log.ts";
 import type { SessionEvent, SessionEventType } from "./events.ts";
-import { messageOf } from "./guards.ts";
+import { isRecord, messageOf } from "./guards.ts";
 import { readModelResponse } from "./model-response.ts";
 import type { AgentFailure, AgentResult, UsageTotals } from "./result.ts";
 import type { AgentSession, CommandResult, OpenSessionConfig, SessionCommand } from "./session.ts";
@@ -24,6 +24,7 @@ import type {
 import type { CodingTask } from "./task.ts";
 import { type PreflightOutcome, preflightToolCall } from "./tool-call-preflight.ts";
 import { executeTool } from "./tool-execution.ts";
+import { createProgressGate } from "./tool-progress.ts";
 import type { ApprovalDecider, ToolError, ToolResult } from "./tool-result.ts";
 import { addUsage, usageOf } from "./usage.ts";
 import type { VerificationDecision } from "./verification.ts";
@@ -379,11 +380,22 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
       { type: "tool_execution_started", data: { toolCallId: toolCall.id, mutation } },
     );
     const startedMs = config.clock.monotonicMs();
+    // ADR 0002 permits progress only between tool_execution_started and tool_call_completed, so
+    // the gate closes before the result is committed and later updates are ignored.
+    const progress = createProgressGate(config.clock, (output) => {
+      commit(state, {
+        type: "tool_execution_progress",
+        data: { toolCallId: toolCall.id, update: { output } },
+      });
+    });
     const outcome = await executeTool(tool, prepared, {
       workspace: config.workspace,
       signal: abortEffects.signal,
-      onProgress: () => {},
+      onProgress: (update) => {
+        if (isRecord(update) && typeof update.output === "string") progress.report(update.output);
+      },
     });
+    progress.close();
     const durationMs = config.clock.monotonicMs() - startedMs;
     return {
       toolCallId: toolCall.id,

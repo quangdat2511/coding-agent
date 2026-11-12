@@ -88,6 +88,8 @@ export function createTestKit(options: TestKitOptions = {}): TestKit {
       clock: {
         now: () => record("clock.now()", () => clock.now()),
         monotonicMs: () => record("clock.monotonicMs()", () => clock.monotonicMs()),
+        setTimer: (delayMs, callback) =>
+          record("clock.setTimer()", () => clock.setTimer(delayMs, callback)),
       },
       ids: { next: (kind) => record(`ids.next(${kind})`, () => ids.next(kind)) },
     },

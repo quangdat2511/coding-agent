@@ -38,6 +38,10 @@ export type SessionFactoryResult =
 const systemClock: Clock = {
   now: () => new Date().toISOString(),
   monotonicMs: () => Math.floor(performance.now()),
+  setTimer: (delayMs, callback) => {
+    const timer = setTimeout(callback, delayMs);
+    return () => clearTimeout(timer);
+  },
 };
 
 const randomIds: IdSource = { next: (kind) => `${kind}-${crypto.randomUUID()}` };
