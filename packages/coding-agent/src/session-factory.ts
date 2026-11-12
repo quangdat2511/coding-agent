@@ -28,6 +28,8 @@ export type SessionFactoryResult =
   | {
       readonly ok: true;
       readonly session: AgentSession;
+      readonly systemPrompt: string;
+      readonly toolNames: readonly string[];
       readonly skippedInstructions: readonly SkippedProjectInstructions[];
     }
   | Extract<OpenSessionResult, { ok: false }>
@@ -85,5 +87,11 @@ export async function openSession(config: SessionConfig): Promise<SessionFactory
     clock: systemClock,
     ids: randomIds,
   });
-  return opened.ok ? { ...opened, skippedInstructions: prompt.skipped } : opened;
+  if (!opened.ok) return opened;
+  return {
+    ...opened,
+    systemPrompt: prompt.systemPrompt,
+    toolNames: tools.list().map(({ name }) => name),
+    skippedInstructions: prompt.skipped,
+  };
 }

@@ -16,6 +16,10 @@ the task file, and waits for the Agent Result. `runHeadless` in `src/headless.ts
 | `failed` | 1 |
 | `cancelled` | 130 |
 
+A run that opens no Agent Session exits 2 on a usage or configuration error. An internal error
+outside the Agent Session exits 70. A run that exits 0, 1 or 130 has written the three files of
+[Files written](#files-written).
+
 The run prints the final assistant message on standard output. On standard error it prints one
 line with the outcome and whether the workspace changed, for example
 `coding-agent: succeeded; workspace changed: no`. A failed run adds a second line with the failure
@@ -29,7 +33,6 @@ This is the walking skeleton of
 [ADR 0006](../../docs/adr/0006-implementation-order-and-mvp-completion-checklist.md) (Join 2).
 These parts are still to come:
 
-- The run writes no files yet. CDA-75 (D3.1) adds `run.json`, `events.jsonl` and `result.json`.
 - `SIGINT` and `SIGTERM` do not cancel the Agent Session yet, so no run settles `cancelled`.
   CDA-78 (D3.2) adds this.
 - `read` is the only registered tool, and Verification is a stand-in. CDA-80 (D5) replaces both.
@@ -37,6 +40,65 @@ These parts are still to come:
   with `maxModelTurns`, `maxToolCalls` or `maxDurationMs`, so a live run whose model keeps calling
   tools runs until the process is killed, and spends tokens all the while. CDA-76 (A4.2) enforces
   the limits. Until CDA-78, `SIGINT` and `SIGTERM` stop such a run only by ending the process.
+
+### Files written
+
+A run writes three files into `--output-dir`
+([ADR 0005 §4](../../docs/adr/0005-terminalbench-evaluation-protocol.md)). An evaluator reads the
+outcome from `result.json`, rebuilds the trajectory from `events.jsonl`, and reproduces the run
+from `run.json`. It does not need standard output. `src/run-files.ts` writes all three, and each
+carries `"schemaVersion": 1`.
+
+**`run.json`** is written before the Coding Task starts. It is one JSON object with these fields:
+
+| Field | Content |
+| --- | --- |
+| `codingAgent` | `version` and `commit`. The commit is `null` in a run from source. The artifact build (CDA-81) sets it with `bun build --define CODING_AGENT_COMMIT='"<commit>"'` |
+| `provider`, `model` | the `--provider` and `--model` values |
+| `sampling` | `maxOutputTokens` and `temperature`. `null` means the provider's default |
+| `transportRetryBound` | how often `@coding-agent/ai` re-issues a request before its stream opens |
+| `repoRoot` | the canonical Repository Root |
+| `profile`, `limits` | the Evaluation Profile and its resolved Session Limits |
+| `approvalPolicy` | the Approval Policy |
+| `verification` | `command`, or `null` when no command is configured |
+| `tools` | the name of each registered tool |
+| `systemPrompt` | the assembled system prompt |
+
+**`events.jsonl`** holds one Session Event on each line, in the envelope of
+[ADR 0002](../../docs/adr/0002-agent-session-state-machine-and-event-protocol.md) with
+`schemaVersion` added. The run appends each line when the event arrives. It leaves out
+`assistant_content_delta`, `tool_execution_progress` and `verification_progress`, because the
+completion events carry the final message, the Tool Result and the evidence. The other events keep
+their `sequence`, so a gap in the numbers marks the events that were left out.
+
+The Agent Session never waits for the log. A killed process can therefore lose the last events. A
+log is complete only if its last line is a `session_settled` event. A reader must treat any other
+log as truncated, and must not take its last event as the outcome of the run. Each line is written
+when its event arrives, so a reader can also catch a line half written, during a run or after a
+kill. Only a line that ends in a newline is a whole event, and a reader ignores the text after the
+last newline.
+
+**`result.json`** is written after the Agent Session settles and the log has written its last
+event. It holds `exitCode`, `result` (the Agent Result) and `finishedAt` (the time the run received
+the Agent Result, in ISO 8601).
+
+These rules apply to all three files:
+
+- The credential value is never written. Each string and each property name goes through the same
+  replacement as the printed text, so the value appears as `[redacted]`.
+- When the output directory holds files of an earlier run, the run removes the old `result.json`
+  before it writes `run.json`, and it empties `events.jsonl`. It does this once the Agent Session
+  is open. A run that is refused before that point, with exit code 2 or 70, leaves the directory as
+  it was, so the files of the earlier run stay.
+- `run.json` and `result.json` are each written to `<name>.partial` and renamed into place, so a
+  reader finds the whole document or none. A killed run can leave a `.partial` file, which a reader
+  ignores.
+- When a file cannot be written, the run exits 70. A failure before the Coding Task starts ends
+  the run before its first Model Turn, and the run removes the `run.json` and `events.jsonl` it
+  wrote. A failure in the log during the task shows only after the session settles. The run then
+  still writes `result.json`, with `exitCode` 70, and the log has no `session_settled`, so a reader
+  treats it as truncated. A failure to write `result.json` leaves none. Either way the run still
+  prints the final message and the outcome.
 
 ### Session factory
 
@@ -69,6 +131,25 @@ GOOGLE_API_KEY=... packages/coding-agent/src/cli.ts run \
   --provider google --model gemini-3.5-flash-lite --approval-policy auto-approve \
   --output-dir /tmp/named-task-out --repo-root /tmp/named-task-repo
 ```
+
+### Recorded provider responses in tests
+
+The tests run the executable against recorded provider responses, and the command line of
+ADR 0005 §3 has no flag for that. The injection uses Bun, not Coding Agent:
+
+- A test starts the bin entry as `bun --preload tests/support/replay-provider.ts src/cli.ts run ...`,
+  with the two Bun flags of the shebang before `--preload`. The arguments after the bin entry are
+  exactly the ADR 0005 §3 command line.
+- The preloaded module replaces `globalThis.fetch`, which every provider adapter sends through. It
+  answers each request with the next file named in `CODING_AGENT_TEST_REPLAY_FIXTURES`, a
+  comma-separated list of paths below `tests/fixtures/`.
+- Nothing in `src/` knows about fixtures. The shipped executable has no test hook, no base URL
+  setting and no variable that can redirect a credential.
+
+A `BUN_OPTIONS` variable would remove even the Bun flag. It was rejected, because its quoting is
+fragile. Bun 1.3.14 silently skips a quoted preload path that contains a space, and only a
+backslash before the space loads it. A skipped preload would send the test's request to the real
+provider.
 
 ## Configuring a run
 

@@ -33,3 +33,8 @@ own, and record the provider responses again.
 file for each Model Turn. The run used `gemini-3.5-flash-lite` on 2026-11-10 with `read` as the only
 registered tool. The model reads `src/slugify.ts`, tries `src/slugify.test.ts`, which does not
 exist, and then answers. `tests/headless.test.ts` and `tests/cli.test.ts` replay them.
+
+`../google/finish-reason-max-tokens.txt` is not a recording of this task. It is a copy of the
+`packages/ai` fixture of the same name: one Google response that ends at the output token limit, so
+a run that replays it settles `failed`.
+`tests/cli.test.ts` uses it for the exit code 1 smoke test.

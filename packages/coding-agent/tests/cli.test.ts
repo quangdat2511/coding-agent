@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { existsSync, statSync } from "node:fs";
-import { cp, readdir } from "node:fs/promises";
+import { cp, mkdir, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { runnerChainIsClean } from "./support/ancestor-chain.ts";
 import { NAMED_TASK_FILE, NAMED_TASK_REPO, READ_ONLY_RUN } from "./support/named-task.ts";
@@ -91,6 +91,28 @@ const validRun = (overrides: Record<string, string> = {}): string[] => [
   "run",
   ...Object.entries({ ...validFlags, ...overrides }).flat(),
 ];
+
+const namedTaskRun = validRun({
+  "--task-file": NAMED_TASK_FILE,
+  "--provider": READ_ONLY_RUN.provider,
+  "--model": READ_ONLY_RUN.model,
+  "--repo-root": "repo",
+});
+
+// The preload injects the replayed responses, so the arguments after `bin` are the real command line.
+const replayedNamedTask = [...bunLikeShebang, "--preload", replayProvider, bin, ...namedTaskRun];
+
+const replayEnv = (fixtures: readonly string[]): Record<string, string> => ({
+  GOOGLE_API_KEY: secret,
+  [REPLAY_FIXTURES_ENV_VAR]: fixtures.join(","),
+});
+
+const runFiles = ["events.jsonl", "result.json", "run.json"];
+
+async function lastEventType(outputDir: string): Promise<unknown> {
+  const lines = (await Bun.file(join(outputDir, "events.jsonl")).text()).trimEnd().split("\n");
+  return JSON.parse(lines.at(-1) ?? "{}").type;
+}
 
 interface ConfigurationErrorCase {
   readonly name: string;
@@ -233,40 +255,100 @@ describe("the coding-agent executable", () => {
   );
 
   it.skipIf(!cleanChain)(
-    "exits 0 on the named task against recorded Google responses, with read as the only tool",
+    "exits 0 on the named task against recorded Google responses and writes the three files",
     async () => {
       await withTemporaryDirectory(async (directory) => {
         await cp(NAMED_TASK_REPO, join(directory, "repo"), { recursive: true });
-        const { exitCode, stdout, stderr } = await runProcess(
-          [
-            ...bunLikeShebang,
-            "--preload",
-            replayProvider,
-            bin,
-            ...validRun({
-              "--task-file": NAMED_TASK_FILE,
-              "--provider": READ_ONLY_RUN.provider,
-              "--model": READ_ONLY_RUN.model,
-              "--repo-root": "repo",
-            }),
-          ],
-          {
-            cwd: directory,
-            env: {
-              GOOGLE_API_KEY: secret,
-              [REPLAY_FIXTURES_ENV_VAR]: READ_ONLY_RUN.fixtures.join(","),
-            },
-          },
-        );
+        const { exitCode, stdout, stderr } = await runProcess(replayedNamedTask, {
+          cwd: directory,
+          env: replayEnv(READ_ONLY_RUN.fixtures),
+        });
 
         expect(stderr).toBe("coding-agent: succeeded; workspace changed: no\n");
         expect(exitCode).toBe(0);
         expect(stdout).toStartWith("I have read `src/slugify.ts`.");
         expect(stdout).not.toContain(secret);
         expect((await readdir(directory)).sort()).toEqual(["out", "repo"]);
+
+        const outputDir = join(directory, "out");
+        expect((await readdir(outputDir)).sort()).toEqual(runFiles);
+        expect(await Bun.file(join(outputDir, "run.json")).json()).toMatchObject({
+          schemaVersion: 1,
+          codingAgent: { commit: null },
+          tools: ["read"],
+        });
+        expect(await lastEventType(outputDir)).toBe("session_settled");
+        expect(await Bun.file(join(outputDir, "result.json")).json()).toMatchObject({
+          schemaVersion: 1,
+          exitCode: 0,
+          result: { outcome: "succeeded" },
+        });
       });
     },
   );
+
+  it.skipIf(!cleanChain)(
+    "exits 1 when a replayed response ends at the output token limit and writes the three files",
+    async () => {
+      await withTemporaryDirectory(async (directory) => {
+        await cp(NAMED_TASK_REPO, join(directory, "repo"), { recursive: true });
+        const { exitCode, stdout, stderr } = await runProcess(replayedNamedTask, {
+          cwd: directory,
+          env: replayEnv(["google/finish-reason-max-tokens.txt"]),
+        });
+
+        expect(firstLine(stderr)).toBe("coding-agent: failed; workspace changed: no");
+        expect(stderr).toContain("coding-agent: MODEL_FAILURE: ");
+        expect(exitCode).toBe(1);
+        expect(stdout + stderr).not.toContain(secret);
+
+        const outputDir = join(directory, "out");
+        expect((await readdir(outputDir)).sort()).toEqual(runFiles);
+        expect(await lastEventType(outputDir)).toBe("session_settled");
+        expect(await Bun.file(join(outputDir, "result.json")).json()).toMatchObject({
+          schemaVersion: 1,
+          exitCode: 1,
+          result: { outcome: "failed", failure: { code: "MODEL_FAILURE" } },
+        });
+      });
+    },
+  );
+
+  it.skipIf(!cleanChain)(
+    "exits 70 before the first Model Turn when the event log cannot be opened",
+    async () => {
+      await withTemporaryDirectory(async (directory) => {
+        await cp(NAMED_TASK_REPO, join(directory, "repo"), { recursive: true });
+        const outputDir = join(directory, "out");
+        await mkdir(join(outputDir, "events.jsonl"), { recursive: true });
+        const { exitCode, stdout, stderr } = await runProcess(replayedNamedTask, {
+          cwd: directory,
+          env: replayEnv(READ_ONLY_RUN.fixtures),
+        });
+
+        expect(firstLine(stderr)).toStartWith("coding-agent: internal error: ");
+        expect(exitCode).toBe(70);
+        expect(stdout).toBe("");
+        expect(stderr).not.toContain(secret);
+        expect(await readdir(outputDir)).toEqual(["events.jsonl"]);
+      });
+    },
+  );
+
+  it.skipIf(!cleanChain)("records the commit that the build defines in run.json", async () => {
+    await withTemporaryDirectory(async (directory) => {
+      await cp(NAMED_TASK_REPO, join(directory, "repo"), { recursive: true });
+      const [bun = "", ...flags] = replayedNamedTask;
+      const { exitCode } = await runProcess(
+        [bun, "--define", 'CODING_AGENT_COMMIT="0123abc"', ...flags],
+        { cwd: directory, env: replayEnv(READ_ONLY_RUN.fixtures) },
+      );
+
+      expect(exitCode).toBe(0);
+      const run = await Bun.file(join(directory, "out", "run.json")).json();
+      expect(run.codingAgent.commit).toBe("0123abc");
+    });
+  });
 
   // A shell pipeline is the simplest way to close the reading end before the run prints, and Windows
   // reports a closed pipe differently, so this is POSIX only. The shell stays alive as an ancestor,
@@ -278,24 +360,12 @@ describe("the coding-agent executable", () => {
     async () => {
       await withTemporaryDirectory(async (directory) => {
         await cp(NAMED_TASK_REPO, join(directory, "repo"), { recursive: true });
-        const agentCommand = [
-          ...bunLikeShebang,
-          "--preload",
-          replayProvider,
-          bin,
-          ...validRun({
-            "--task-file": NAMED_TASK_FILE,
-            "--provider": READ_ONLY_RUN.provider,
-            "--model": READ_ONLY_RUN.model,
-            "--repo-root": "repo",
-          }),
-        ];
         await Bun.write(join(directory, "key"), secret);
         await Bun.write(
           join(directory, "launch.sh"),
           'GOOGLE_API_KEY="$(cat key)"\nexport GOOGLE_API_KEY\n("$@"; echo "exit $?" >&2) | true\n',
         );
-        const { stderr } = await runProcess(["sh", "launch.sh", ...agentCommand], {
+        const { stderr } = await runProcess(["sh", "launch.sh", ...replayedNamedTask], {
           cwd: directory,
           env: { [REPLAY_FIXTURES_ENV_VAR]: READ_ONLY_RUN.fixtures.join(",") },
         });
@@ -311,18 +381,7 @@ describe("the coding-agent executable", () => {
       await withTemporaryDirectory(async (directory) => {
         await cp(NAMED_TASK_REPO, join(directory, "repo"), { recursive: true });
         const { exitCode, stdout, stderr } = await runProcess(
-          [
-            ...bunLikeShebang,
-            "--preload",
-            failSessionFactory,
-            bin,
-            ...validRun({
-              "--task-file": NAMED_TASK_FILE,
-              "--provider": READ_ONLY_RUN.provider,
-              "--model": READ_ONLY_RUN.model,
-              "--repo-root": "repo",
-            }),
-          ],
+          [...bunLikeShebang, "--preload", failSessionFactory, bin, ...namedTaskRun],
           { cwd: directory, env: { GOOGLE_API_KEY: secret } },
         );
 
