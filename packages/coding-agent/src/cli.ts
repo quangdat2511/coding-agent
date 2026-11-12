@@ -2,6 +2,7 @@
 // Exit 2 means no Agent Session was opened (ADR 0005 §3). Usage errors are decided before any file
 // or environment access, and configuration errors before any Agent Session opens; a run that opens
 // none removes the output directory it created.
+import { createConfiguredChildLauncher } from "./child-launcher.ts";
 import { runHeadless } from "./headless.ts";
 import { markProcessNonDumpable } from "./non-dumpable.ts";
 import { parseRunArgs, USAGE } from "./run-args.ts";
@@ -27,6 +28,13 @@ async function main(
     );
     return 70;
   }
+  const children = createConfiguredChildLauncher();
+  if (!children.ok) {
+    process.stderr.write(`coding-agent: ${children.message}\n`);
+    return 2;
+  }
+  // CDA-71 and CDA-74 will receive children.launcher when their adapters are registered.
+  // Creating it validates configuration without spawning a process.
   // Bun reports a write to a closed pipe as an "error" event, which would end the run with exit 1.
   process.stdout.on("error", () => undefined);
   process.stderr.on("error", () => undefined);

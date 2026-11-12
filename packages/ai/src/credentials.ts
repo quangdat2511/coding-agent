@@ -3,11 +3,13 @@
 //
 // This is the **single source of truth** for the set of environment variable
 // names that carry provider credentials. ADR 0001 §8 makes `@coding-agent/ai`
-// that source; both `@coding-agent/tools` (for the scrubbed child environment)
-// and the composition root read this set.
+// that source; the composition root reads this set and supplies it to
+// `@coding-agent/tools` for the scrubbed child environment.
 //
 // Only MVP providers are listed. `opencode` keeps its adapter but is not
 // among the MVP provider values (ADR 0006 §2), so its variables are excluded.
+// ADR 0001 §8 explicitly records inherited OpenCode and configurable Custom
+// Provider credentials as outside the MVP isolation guarantee under both policies.
 // ---------------------------------------------------------------------------
 
 /**

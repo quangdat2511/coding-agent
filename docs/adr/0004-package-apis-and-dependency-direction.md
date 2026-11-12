@@ -374,11 +374,72 @@ export function createWorkspaceResolver(
 
 export function normalizeWindowsShellPath(input: string): string;
 export function createDefaultTools(): ToolRegistry;
+export function createChildEnvironmentBuilder(
+  credentialEnvVars: readonly string[],
+  platform?: NodeJS.Platform,
+): CreateChildEnvironmentResult;
+export function createChildProcessLauncher(
+  credentialEnvVars: readonly string[],
+): CreateChildProcessLauncherResult;
 export function readTool(): ExecutableTool<typeof ReadParams>;
 export function writeTool(): ExecutableTool<typeof WriteParams>;
 export function editTool(): ExecutableTool<typeof EditParams>;
-export function bashTool(): ExecutableTool<typeof BashParams>;
 ```
+
+`createDefaultTools()` currently registers only `read`, `write`, and `edit`, and keeps its
+zero-argument signature. The target API for CDA-71 is
+`createDefaultTools(launcher: ChildProcessLauncher): ToolRegistry` and
+`bashTool(launcher: ChildProcessLauncher): ExecutableTool<typeof BashParams>`. CDA-74 will add the
+Verification Runner with the same configured launcher dependency. These are planned signatures,
+not exports implemented by CDA-68. They replace the original zero-argument sketches when process
+execution is added; they do not add tool timeout options.
+
+The composition root reads the complete `PROVIDER_CREDENTIAL_ENV_VARS` export from `ai` and
+supplies it to the launcher's factory in `tools`. The set includes all six credential variable
+names of the MVP providers, including providers not selected for the current run. OpenCode and
+Custom Provider credential names are outside that declared MVP set; extending the set belongs
+with adding CLI support for them. ADR 0001 §8 explicitly records the resulting inherited OpenCode
+and Custom Provider credentials as a residual under both Approval Policies. `tools` receives
+names, never imports `ai`, and never discovers
+additional names by prefix or by scanning for secret-looking values.
+
+Every child started by `bash` or the Verification Runner goes through this shared launcher. At
+each launch it copies Coding Agent's current environment and removes exactly the configured
+credential names. The name set stays fixed after construction; the environment is not a
+session-start snapshot. Filtering does not change Coding Agent's own environment. Other variables,
+including a task's `GH_TOKEN` and same-prefixed names outside the set, retain their current values
+through filtering. Execution-mode requirements such as `CI=1` and `TERM=dumb` remain governed by
+ADR 0001 §3; they are separate from the credential-filtering step.
+
+Callers cannot pass a per-launch environment map to replace or extend the launcher's environment.
+The launcher owns construction of the child environment, applies execution-mode settings before
+the final credential filtering, and supplies that environment explicitly when starting the child.
+No caller can merge variables into it after filtering. An absent or empty configured name set is
+an `INVALID_CONFIGURATION` failure during launcher construction, before any child is started.
+
+Credential names are matched case-insensitively on Windows and exactly on Linux and macOS,
+following each platform's environment-variable naming rules. On Windows every matching key is
+removed, including when an input object contains multiple case variants. Nonmatching names keep
+their original spelling and values; prefix matches such as `OPENAI_API_KEY_BACKUP` are preserved.
+The declared MVP names are ASCII, so this decision does not require broader Unicode case folding.
+
+`createChildEnvironmentBuilder` returns either the configuration error above or an `ok: true`
+result with a `build(parent)` function; each call returns an independent filtered environment.
+Its optional platform argument permits testing Windows name matching on every host. The actual
+launcher always uses the host platform. `createChildProcessLauncher` returns the same failure
+shape or an `ok: true` result with a `ChildProcessLauncher`. Its
+`launch(command, { cwd, detached }?)`
+accepts an executable and argument array and returns the Bun child handle with piped stdout and
+stderr, closed stdin, and an exit promise. Shell selection, tool timeouts, output budgeting, and
+Verification result mapping belong to the later adapters; this factory does not execute a shell
+or start any child during construction. `detached` defaults to false and forwards Bun's process
+creation option: on POSIX it creates a new session and process group, allowing a later adapter to
+signal the group rather than only the shell. On Windows it uses Bun's detached-process behavior;
+it does not promise POSIX group signaling. The option does not unref the child or terminate its
+descendants. CDA-71 and CDA-74 remain responsible for timeout, cancellation, descendant cleanup,
+and bounded output draining. This avoids requiring those adapters to bypass the launcher just to
+request process isolation. The credential filter and `CI`/`TERM` override share one internal
+`environmentKeyOf` helper; this helper is not re-exported from the package entry point.
 
 `createWorkspaceResolver` canonicalizes and validates `repoRoot` once, which satisfies ADR 0002's
 requirement that `repoRoot` be valid before the Agent Session reaches `ready`. Tools take no
@@ -532,7 +593,7 @@ re-exports:
 | Package | Names checked | Exact matches with a Pi public export |
 | --- | --- | --- |
 | `agent-core` | the ADR 0001 and ADR 0002 types it exports and the names in §3 (41 names) | `AgentSession` (`pi-coding-agent`), `AgentState` (`pi-agent-core`), `JsonValue` (`pi-agent-core`, `pi-ai`), `IdGenerator` (`pi-agent-core`) |
-| `tools` | `createWorkspaceResolver`, `createDefaultTools`, `readTool`, `writeTool`, `editTool`, `bashTool`, `ReadParams`, `WriteParams`, `EditParams`, `BashParams` | none |
+| `tools` | `createWorkspaceResolver`, `createDefaultTools`, `readTool`, `writeTool`, `editTool`, `bashTool`, `ReadParams`, `WriteParams`, `EditParams`, `BashParams`, `createChildEnvironmentBuilder`, `createChildProcessLauncher`, `ChildEnvironment`, `CreateChildEnvironmentResult`, `ChildLaunchOptions`, `ChildProcess`, `ChildProcessLauncher`, `CreateChildProcessLauncherResult` | none |
 | `tui` | `renderTui`, `TuiModel`, `TuiHandlers`, `TuiHandle` | none |
 | `coding-agent` | `runInteractive`, `runHeadless`, `projectSessionEvent`, `CliOptions`, `HeadlessOptions`, `HeadlessResult` | none |
 
@@ -542,6 +603,12 @@ re-exports:
 | `AgentState` | kept: Agent Core glossary term, fixed by ADR 0002 |
 | `JsonValue` | kept: generic name for ADR 0002's JSON value type; it encodes no design choice |
 | `IdGenerator` | renamed to `IdSource` (§3) |
+
+CDA-68's eight child-environment and launcher exports were checked again on 2026-11-11 against
+the same Pi commit, `9841914c71a74d81abe07f751aefd271fd924e63`, including its package subpaths.
+Seven names do not occur in the four packages' source. `ChildProcess` occurs as an imported Node
+type and in internal implementation code, but is not a Pi public export. The package therefore
+keeps these eight names; the shared internal helper above adds no package export.
 
 A later public export that matches a Pi export is renamed, or kept with its reason recorded in the
 decision that introduces it. The renamed symbols have no consumers outside `packages/ai`, so the
@@ -596,6 +663,26 @@ amended this record:
   Gemini 3 attaches its `thoughtSignature` to the `functionCall` part itself and rejects a replay
   without it, so the value lives on the Tool Call rather than in the research's separate opaque
   block.
+
+On 2026-11-10,
+[Build the credential-free child environment](https://datn-fit-hcmus.atlassian.net/browse/CDA-68)
+amended this record:
+
+- **Shared child launch dependency** (§4): the composition root configures one launch path for
+  `bash` and the Verification Runner with AI's complete declared MVP credential-name set. This
+  replaces relying on each caller to remember a standalone filtering helper, and replaces the
+  zero-argument sketches for factories that include process execution.
+- **Environment timing** (§4): children receive a newly filtered copy of the current parent
+  environment at each launch, rather than a session-start snapshot. The configured credential-name
+  set is fixed; other variables can change between launches.
+- **Environment ownership** (§4): process callers cannot supply a replacement or supplemental
+  environment map. The shared launcher constructs and explicitly supplies the filtered environment.
+- **Platform name matching** (§4): Windows uses case-insensitive credential-name matching,
+  removing all matching case variants; Linux and macOS use exact matching. Other names and values
+  are preserved.
+
+The standalone logic prototype and its accepted Q1–Q3 verdict are preserved on branch
+`CDA-68-prototype-child-environment`, commit `b8007bd`, under `packages/tools/prototype/`.
 
 ## Consequences
 

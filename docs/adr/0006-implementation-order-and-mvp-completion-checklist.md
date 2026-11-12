@@ -134,8 +134,8 @@ Slice 0 blocks every other slice and contains no agent behavior.
   transcript (ADR 0002) is unverified. The selector leaves room to add it later without a new
   provider.
 - Export the provider credential variable names from `ai`. ADR 0001 §8 makes `ai` the single source
-  of truth for that set, and both `tools` and the composition root read it, so it belongs in the
-  slice that fixes `ai`'s public surface rather than in whichever slice needs it first.
+  of truth for that set. The composition root reads it and supplies it to `tools`, so it belongs
+  in the slice that fixes `ai`'s public surface rather than in whichever slice needs it first.
 - Give all five packages a manifest following `packages/ai` (`private: true`,
   `exports: { ".": "./src/index.ts" }`) with the §1 allowed edges as `workspace:*` dependencies.
 - Add the ADR 0004 §9 enforcement: Biome `noRestrictedImports` overrides per package, `noEnum`, and
