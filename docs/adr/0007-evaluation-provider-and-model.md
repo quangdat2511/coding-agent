@@ -31,7 +31,8 @@ exists for the model this record chooses.
 
 ## Decision
 
-The recorded job runs **`opencode`** — the OpenCode Go gateway — with **`deepseek-v4.1-flash`**.
+The recorded job runs **`opencode`** — OpenCode's Go subscription gateway, not its pay-as-you-go
+Zen plan — with **`deepseek-v4.1-flash`**.
 
 1. **One provider and model, declared, and changeable between jobs.** The job declares
    `opencode`/`deepseek-v4.1-flash` in its manifest and in `run.json`. The model is a flag, never
@@ -39,19 +40,24 @@ The recorded job runs **`opencode`** — the OpenCode Go gateway — with **`dee
    job with its own manifest and report (protocol §7), never a pooled result.
 
 2. **A subscription, because the job is re-run.** Go costs $10 a month and includes $100 of
-   DeepSeek V4.1 Flash usage at the allowance's list prices ($0.15 and $0.60 per million input
-   and output tokens off-peak, cache reads at $0.003). A typical job consumes about $2.6 of that
-   allowance — roughly 25M cached input, 6M uncached input, and 2.6M output tokens — so one month
-   covers roughly 38 such jobs, against roughly 7.7 for the same $10 spent pay-per-use at $1.3 a
-   job. That comparison assumes the allowance is used; a single job costs $10 either way.
-   **The bound matters as much as the typical case.** At the 250-turn ceiling and peak rates the
-   same job could consume roughly $45 of allowance — about 400M cached and 100M uncached input
-   tokens plus 10M output — which leaves room for one rerun in the month, not for several. The
-   allowance is metered per model in three windows (5 hours at 20%, weekly at 50%, monthly at
-   100%) and publishes request estimates in the tens of thousands per window, far above the
-   roughly 2,600 requests a typical job issues, so the allowance binds and request rate does not.
-   Concurrency is Harbor's `-n`; the recorded job sets `-n 8` and records it, because the gateway
-   has no per-minute cap and the 5-hour window is the only time bound that matters.
+   DeepSeek V4.1 Flash usage at the allowance's list prices ($0.15 and $0.60 per million input and
+   output tokens off-peak, cache reads at $0.003, doubled at peak). A typical job consumes about
+   $2.6 of that allowance — roughly 25M cached input, 6M uncached input and 2.6M output tokens —
+   so one month covers roughly 38 such jobs, against roughly 7.7 for the same $10 spent pay-per-use
+   at $1.3 a job. The two figures differ because the list prices do: OpenRouter's cheapest endpoint
+   is several times cheaper on input than Go's list price. The comparison assumes the allowance is
+   used; a single job on the subscription still costs the $10 month.
+
+   **The bound matters as much as the typical case, and it does not fit one window.** At the
+   250-turn ceiling and peak rates the same job could consume roughly $45 of allowance — about 400M
+   cached and 100M uncached input tokens plus 10M output — while the 5-hour window allows only 20%
+   of the month, about $20, and the weekly window 50%, about $50. A run at the ceiling therefore
+   cannot finish inside one window: it would be throttled part-way and its trials would fail for a
+   reason that is not the agent's. That is why the smoke job runs first and why the recorded job is
+   paced to the typical case rather than to the ceiling. Go publishes request estimates in the tens
+   of thousands per window, far above the roughly 2,600 requests a typical job issues, and no
+   per-minute cap appears in its documentation, so the allowance binds, not the request rate.
+   Concurrency is Harbor's `-n`; the recorded job sets `-n 8` and records it.
 
 3. **What the job demonstrates, and what it does not.** It demonstrates that the agent works end to
    end on the full dataset and reports how well *this configuration* does. It does not establish how
@@ -72,21 +78,23 @@ The recorded job runs **`opencode`** — the OpenCode Go gateway — with **`dee
    documents thinking as the model's default mode, which the harness neither requests nor disables.
    A model that stops early is not hidden: the harness ends the session at the first Candidate
    Completion, so an early stop appears in the per-task table as a failure rather than as a limit
-   reached. The three-task smoke job measures it before the 66-task job spends the allowance, and if
-   early stopping dominates, the model is changed by a later decision, not by editing this one.
+   reached. The three-task smoke job bounds the cost of a bad run and shows whether the agent stops
+   early on three short CPU tasks; it cannot establish 250-turn persistence, and this record does
+   not claim it does. If early stopping dominates, the model is changed by a later decision, not by
+   editing this one.
 
 6. **The provider is promoted, and that is the scope change.** `opencode` becomes the sixth
    `--provider` value; `OPENCODE_API_KEY` joins the fixed credential set in `@coding-agent/ai` and
-   therefore the scrubbed child environment and the startup ancestor check; the adapter speaks the
-   Go gateway (`https://opencode.ai/inference/go`, Chat Completions path
-   `/openai/v1/chat/completions`, which is the call it already makes) and sends the stable
-   `x-opencode-session` and a `coding-agent/<version>` user agent that the gateway asks for; and
-   `opencode` joins the shared conformance suite. No recorded job runs on it until the conformance
+   therefore the scrubbed child environment and the startup ancestor check. The adapter must move
+   to the Go gateway — base URL `https://opencode.ai/inference/go` with the Chat Completions path,
+   the `x-opencode-session` header in place of today's `x-session-id`, and a
+   `coding-agent/<version>` user agent — none of which it does today; the session header is also
+   what lets Go reuse its prompt cache, which the cost model above assumes. `opencode` then joins
+   the shared conformance suite. No recorded job runs on it until the conformance
    suite and the credential-isolation test of protocol §7 pass, because an adapter-shaped failure
    would be scored against the agent. The
    [map](https://datn-fit-hcmus.atlassian.net/browse/CDA-13) fixes five providers in its
-   destination and excludes others in its Out of scope section, so its owners' agreement is what
-   turns this record from `proposed` into `accepted`.
+   destination and excludes others in its Out of scope section.
 
 7. **Failure handling and settings.** A gateway returns an HTTP status on error like any other
    provider, and the adapter drops it today: `packages/ai/src/api/openai-responses.ts` catches the
@@ -121,15 +129,18 @@ The recorded job runs **`opencode`** — the OpenCode Go gateway — with **`dee
 
 ## Consequences
 
-- **The map changes.** Its destination says five model providers and its **Out of scope** section
-  excludes providers beyond those five. Both need the owner group's agreement before this record
-  moves from `proposed` to `accepted`; the record does not amend the map by itself.
-- **Three accepted records are amended with it:** ADR 0001 §8's credential scope, ADR 0005 §3's
-  provider list and §8's secret-scan prefixes (`oc_sk_`), and ADR 0006 §3's exclusion and track E
-  membership.
-- **A catalogue entry is owed.** Until `deepseek-v4.1-flash` is added to
-  `packages/ai/src/providers/opencode.models.json`, `--model` refuses it with exit 2. That one-line
-  entry belongs to the ticket that builds the recorded job.
+- **The map changes.** The destination of the
+  [wayfinder map](https://datn-fit-hcmus.atlassian.net/browse/CDA-13) says five model providers and
+  its **Out of scope** section excludes providers beyond those five.
+  Both need the owner group's agreement before this record moves from `proposed` to `accepted`;
+  the record does not amend the map by itself.
+- **Three accepted records are amended with it:** ADR 0001 §8's credential scope; ADR 0005 §3's
+  provider list, §7's recorded-job rules and §8's secret-scan prefixes (`oc_sk_`); and ADR 0006
+  §3's exclusion and track E membership, §6 item 7, and §7 item 3.
+- **A catalogue entry and adapter changes are owed.** Until `deepseek-v4.1-flash` is added to
+  `packages/ai/src/providers/opencode.models.json`, `--model` refuses it with exit 2; and until the
+  adapter targets the Go gateway with the session header and user agent, the provider cannot serve
+  the job at all. Both belong to the ticket that builds the recorded job.
 - **The credential-isolation test must cover the new key** on each backend the job uses, as protocol
   §7 and §9 already require for any credential-carrying job. Until it passes, the promotion is not
   operative and the OpenRouter fallback remains.

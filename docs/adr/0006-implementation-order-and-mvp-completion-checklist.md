@@ -191,17 +191,16 @@ also needs `TuiModel` from C1, because `tui` owns that type. Owns the two later 
 
 **Track E, provider breadth.** Runs from Join 1, parallel to everything else: Anthropic, then
 OpenRouter, OpenAI, xAI, and OpenCode Go, each against one shared conformance suite of recorded
-fixtures. Exit
-criterion: every provider passes the same suite, and each declared deviation is a typed capability
-rather than a branch inside Agent Core.
+fixtures. Exit criterion: every provider passes the same suite, and each declared deviation is a
+typed capability rather than a branch inside Agent Core.
 
-`opencode` was not among the `--provider` values ADR 0005 §3 accepted. Its adapter stayed in
-`packages/ai` and kept working, but it was excluded from the conformance suite, from the completion
-checklist, and from that command line. On 2026-11-12,
-[CDA-30](https://datn-fit-hcmus.atlassian.net/browse/CDA-30) **proposed** the promotion that
+**Proposed amendment, 2026-11-12.**
+[CDA-30](https://datn-fit-hcmus.atlassian.net/browse/CDA-30) proposes the promotion that
 [ADR 0007](./0007-evaluation-provider-and-model.md) records: `opencode` becomes a sixth
-`--provider` value and joins track E, and the checklist below grows to six providers once that
-decision is accepted. The promotion is a scope change to
+`--provider` value and joins track E once that decision is accepted, which also grows the checklist
+below to six providers. It was not among the values ADR 0005 §3 accepted before this; its adapter
+stayed in `packages/ai` and kept working, but it was excluded from the conformance suite, from the
+completion checklist and from that command line. The promotion is a scope change to
 [the map](https://datn-fit-hcmus.atlassian.net/browse/CDA-13) rather than an ordering choice, so the
 map's owners' agreement is what accepts it.
 

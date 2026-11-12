@@ -154,8 +154,9 @@ Changing a pin is a new decision that amends this record. Results are never pool
 
 On 2026-11-12, [CDA-30](https://datn-fit-hcmus.atlassian.net/browse/CDA-30) **proposed** three
 amendments to this record, which take effect when its decision is accepted: §3 accepts `opencode` as
-a sixth provider value, §7 chooses it for the recorded job ([ADR 0007](./0007-evaluation-provider-and-model.md)),
-and §8 adds the `oc_sk_` prefix to the secret scan.
+a sixth provider value, §7 names the choice that
+[ADR 0007](./0007-evaluation-provider-and-model.md) makes, and §8 adds the `oc_sk_` prefix to the
+secret scan.
 
 ### 2. Coding Agent artifact
 
