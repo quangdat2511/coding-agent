@@ -309,14 +309,20 @@ The check has these outcomes:
   and its control characters are escaped.
 - If the environment of an ancestor is denied with `EACCES` or `EPERM`, the check goes on to the
   parent of that ancestor. A root-owned `init` and a non-dumpable process are examples. A Tool
-  Call child has the same user and capabilities as the Coding Agent, so the child is denied the
-  same file.
+  Call child has the same user and capabilities as the Coding Agent, so the child is usually denied
+  the same file. Root is the exception, as the limits below say.
 - If an ancestor exits after its first stat read, the check goes on to the parent from that read.
   The second stat read finds this case: the process is gone, or its start time (field 22) changed
   because another process reused the pid. The files read in between then do not count.
-- If the stat of an ancestor cannot be read, the run exits 70, also when the ancestor is gone or
-  `hidepid` hides it. The processes above it can still hold the credential, and the walk can no
-  longer find them.
+- If an ancestor exits before its stat is read, the kernel gives its child a new parent. The check
+  reads the parent field of the child again and goes on from the new parent.
+- If the stat of PID 1 cannot be read, the chain ends there. With `hidepid=invisible`, a user who
+  is not root cannot see the `init` of root. No process is above PID 1.
+- If the stat of another ancestor cannot be read, and the parent field of its child still names
+  it, the run exits 70. `hidepid` causes this case for a process of another user, for example the
+  `sshd` of root above an SSH session. The processes above it can still hold the credential, and
+  the walk cannot find them. Run the Coding Agent where `/proc` has no `hidepid`, or as a user who
+  can see that process.
 - If `/proc/self/stat` cannot be read, or another read fails, the run exits 70. The check fails
   closed, because it cannot show that no ancestor holds a credential.
 
@@ -340,6 +346,12 @@ The check has these limits:
   Start the Coding Agent with `exec`, or pass the key only in the environment of the Coding Agent.
 - For the same reason, Bun loads a `.env` file into `process.env`, but that does not change
   `/proc/<pid>/environ`.
+- It does not protect a Coding Agent that runs as root with `CAP_SETUID` and `CAP_SETGID`, as in
+  `sudo -E coding-agent run ...` or as root in a default Docker container. The shell behind `sudo`
+  belongs to another user, so the check is denied its environment and passes over it. A Tool Call
+  can take the uid and gid of that user and then read the environment. ADR 0001 §8 leaves this case
+  out of scope. Run the Coding Agent as the user that holds the credential, or drop the two
+  capabilities, for example with `docker run --cap-drop=SETUID --cap-drop=SETGID`.
 
 `tests/ancestor-credentials.test.ts` checks every outcome with a fake `/proc` on every platform. It
 also preloads `tests/support/fail-ancestor-check.ts` into the executable, which makes the check

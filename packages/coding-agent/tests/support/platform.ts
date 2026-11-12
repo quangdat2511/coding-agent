@@ -1,5 +1,7 @@
 // Why a test cannot run as written on this host. Each test that checks one says so with skipIf.
 export const onWindows = process.platform === "win32";
+// Only Linux has /proc/<pid>/environ and PR_SET_DUMPABLE.
+export const onLinux = process.platform === "linux";
 
 // Windows has no FIFOs; Git Bash's mkfifo makes an MSYS emulation that Bun sees as missing.
 export const noFifos = onWindows;

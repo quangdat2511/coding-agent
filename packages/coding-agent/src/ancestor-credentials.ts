@@ -18,7 +18,10 @@
 //   keeps it only in its memory, which this check cannot read.
 // - It reads each environment as this process can. A Tool Call child runs with the same user and
 //   capabilities, so an ancestor whose environment this process cannot read, such as a root-owned
-//   init or another non-dumpable process, is also out of the child's reach and is passed over.
+//   init or another non-dumpable process, is passed over. The child is denied it too, with one
+//   exception that ADR 0001 §8 leaves out of scope: when Coding Agent runs as root with CAP_SETUID
+//   and CAP_SETGID, a child can switch to the uid and gid of an ancestor that belongs to another
+//   user, such as the shell behind `sudo -E`, and then read its environment.
 import { readFile } from "node:fs/promises";
 import type { ApprovalPolicy } from "@coding-agent/agent-core";
 import { PROVIDER_CREDENTIAL_ENV_VARS, readEnvCredential } from "@coding-agent/ai";
@@ -133,7 +136,7 @@ const exited = (error: unknown) => errnoOf(error) === "ENOENT" || errnoOf(error)
 function readStat(proc: ProcFiles, pid: number | "self", whenGone: "fail"): Promise<Stat | Failure>;
 function readStat(
   proc: ProcFiles,
-  pid: number,
+  pid: number | "self",
   whenGone: "report",
 ): Promise<Stat | Failure | "gone">;
 async function readStat(
@@ -152,8 +155,8 @@ async function readStat(
 }
 
 // The text of an environ or cmdline file. It is empty when the process is gone, and when the file
-// is denied with EACCES or EPERM: a same-uid child is denied it too, so the credential, if any, is
-// out of the child's reach.
+// is denied with EACCES or EPERM: a child is denied it too, except in the root case that the header
+// describes, so the credential, if any, is out of the child's reach.
 async function readOrEmpty(read: () => Promise<string>, path: string): Promise<string | Failure> {
   try {
     return await read();
@@ -182,15 +185,40 @@ export async function checkAncestorCredentials(
   const names = new Set(variables);
   const assignment = credentialAssignment(variables);
 
-  // Parent 0 ends the chain: it is the parent of init and of every kernel thread.
+  // The process whose parent field named `pid`, so the walk can read that field again.
+  let child: { readonly pid: number | "self"; readonly start: string } = {
+    pid: "self",
+    start: self.start,
+  };
+  // Parent 0 ends the chain: it is the parent of init and of every kernel thread. A retry after a
+  // parent exited also counts as a step, so the walk cannot loop.
   for (let pid = self.parent, steps = 0; pid !== 0; steps++) {
     if (steps === MAX_ANCESTORS) {
       return failed(`the ancestor chain is longer than ${MAX_ANCESTORS} processes`);
     }
-    // An ancestor that is gone, or that hidepid hides, fails the walk: the processes above it can
-    // still hold the credential, and a walk from here can no longer find them.
-    const stat = await readStat(proc, pid, "fail");
-    if (isFailure(stat)) return stat;
+    let text: string;
+    try {
+      text = await proc.stat(pid);
+    } catch (error) {
+      // hidepid hides or denies PID 1, which belongs to root. No process is above PID 1, so the
+      // chain ends there.
+      if (pid === 1) break;
+      const unreadable = failed(`cannot read /proc/${pid}/stat: ${reason(error)}`);
+      if (!exited(error)) return unreadable;
+      // The ancestor exited before its stat was read, so the kernel gave the child a new parent.
+      // Read the child's parent field again and go on from there. If the field did not change, the
+      // ancestor is hidden, for example by hidepid, rather than gone, and the walk cannot see past
+      // it. The same holds when the child is gone too.
+      const moved = await readStat(proc, child.pid, "report");
+      if (isFailure(moved)) return moved;
+      if (moved === "gone" || moved.start !== child.start || moved.parent === pid) {
+        return unreadable;
+      }
+      pid = moved.parent;
+      continue;
+    }
+    const stat = parseStat(text);
+    if (stat === undefined) return failed(`cannot parse /proc/${pid}/stat`);
 
     const environ = await readOrEmpty(() => proc.environ(pid), `/proc/${pid}/environ`);
     if (isFailure(environ)) return environ;
@@ -214,6 +242,7 @@ export async function checkAncestorCredentials(
           "Coding Agent with exec so that no process above it keeps the credential",
       };
     }
+    child = { pid, start: stat.start };
     pid = same ? again.parent : stat.parent;
   }
   return { ok: true };

@@ -5,11 +5,12 @@
 import { readFileSync } from "node:fs";
 import { PROVIDER_CREDENTIAL_ENV_VARS } from "@coding-agent/ai";
 import { checkAncestorCredentials, heldCredential } from "../../src/ancestor-credentials.ts";
+import { onLinux } from "./platform.ts";
 
 // True when a run that the test runner starts gets past the ancestor check. The check does not run
 // on other platforms, so there it is always true.
 export async function runnerChainIsClean(): Promise<boolean> {
-  if (process.platform !== "linux") return true;
+  if (!onLinux) return true;
   const own = heldCredential(
     readFileSync("/proc/self/environ", "utf8"),
     new Set(PROVIDER_CREDENTIAL_ENV_VARS),

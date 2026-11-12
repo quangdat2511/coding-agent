@@ -2,7 +2,7 @@
 
 Status: accepted
 
-Date: 2026-09-11 (Refined: 2026-09-12; Amended: 2026-09-13, 2026-11-09, 2026-11-11)
+Date: 2026-09-11 (Refined: 2026-09-12; Amended: 2026-09-13, 2026-11-09, 2026-11-11, 2026-11-12)
 
 ## Context
 
@@ -158,6 +158,20 @@ On 2026-11-11, [CDA-110](https://datn-fit-hcmus.atlassian.net/browse/CDA-110) am
   only in case or as a Windows short name, is still rejected, and readability stays the opening
   tool's check.
 
+On 2026-11-12, [CDA-72](https://datn-fit-hcmus.atlassian.net/browse/CDA-72) amended this record:
+
+- **Startup ancestor check** (§8): besides each ancestor's `/proc/<pid>/environ`, the check reads
+  its `/proc/<pid>/cmdline` and refuses an assignment of a non-blank value to a credential
+  variable, because every process can read that file. The check passes over an `environ` or
+  `cmdline` that is denied with `EACCES` or `EPERM`, because a child is denied it too. The root
+  case that the scope of the guarantee excludes is the exception. A walk that cannot finish refuses
+  the run with exit 70 instead of 2. Examples are a stat that cannot be read or parsed, an ancestor
+  that is hidden rather than gone, and a chain longer than 4,096 processes. If an ancestor exits
+  before its stat is read, the walk reads its child's parent field again and goes on from the new
+  parent. A PID 1 whose stat cannot be read, as under `hidepid`, ends the chain.
+- **Scope of the guarantee** (§8): a Coding Agent that runs as root with `CAP_SETUID` and
+  `CAP_SETGID` is excluded, like a child with `CAP_SYS_PTRACE`.
+
 ### 8. Credential Isolation for Tool and Verification Processes
 
 Coding Agent authenticates to Model Providers with credentials it reads from its own environment: the provider API-key variables that `@coding-agent/ai` defines. `bash` Tool Calls (§3) and the Verification Runner ([ADR 0003](./0003-mvp-context-planning-verification-and-session-memory.md) §3) start child processes on the model's behalf. Under the `"auto-approve"` policy (§4) with network access these children run unattended, so one that obtains a credential can send it anywhere; even under `"ask"`, a credential copied into a Tool Result enters the transcript, the Session Event log, and any exported trajectory. The credential reaches Coding Agent only because a launching process placed it in the environment Coding Agent inherits, so how the launcher holds it is part of the problem and cannot be fully solved inside Coding Agent. What this section can require therefore depends on the Approval Policy, and the guarantee is stated per policy below rather than as one absolute.
@@ -180,7 +194,7 @@ Two rules hold on every entry point and under both policies:
 
 **Under `"ask"` (interactive TUI and any attended headless).** The cross-process guarantee above is not claimed, and this section does not require it. The process that launched Coding Agent — typically the user's shell, which exported the provider key — remains a live, dumpable, same-uid ancestor holding the credential, and Coding Agent can neither scrub nor re-mark it. This residual is accepted for the MVP and bounded by two controls already in this ADR: read-only tools (`read`) are jailed to `repoRoot` (§2) and cannot open a `/proc` path, so no auto-approved tool can reach an ancestor's environment; and every mutating `bash` is gated by Approval (§4), so the only tool that can read `/proc` runs only after a human allows that specific command. Requiring interactive users to launch from a credential-free shell, or adding an opt-in hardened launch that delivers the credential to Coding Agent without any ancestor holding it, is deferred; this section states the residual rather than closing it.
 
-**Scope of the guarantee.** Even under `"auto-approve"` the guarantee excludes a child granted `CAP_SYS_PTRACE`, and platforms without a non-dumpable equivalent: on macOS a same-user process can read another's startup environment through `KERN_PROCARGS2` and `ps`, and there is no `PR_SET_DUMPABLE` analogue, so item 2 and the startup ancestor read are Linux-only. Reproducible evaluation runs under `"auto-approve"` in Linux containers, where the contract and the check are enforceable.
+**Scope of the guarantee.** Even under `"auto-approve"` the guarantee excludes a child granted `CAP_SYS_PTRACE`, and platforms without a non-dumpable equivalent: on macOS a same-user process can read another's startup environment through `KERN_PROCARGS2` and `ps`, and there is no `PR_SET_DUMPABLE` analogue, so item 2 and the startup ancestor read are Linux-only. It also excludes a Coding Agent that runs as root with `CAP_SETUID` and `CAP_SETGID`. Its child can take the uid and gid of an ancestor of another user, such as the shell behind `sudo -E`. The child can then read the environment of that ancestor, which the startup check passed over because Coding Agent itself was denied it. Reproducible evaluation runs under `"auto-approve"` in Linux containers, where the contract and the check are enforceable.
 
 Enforcement follows the package boundaries in [ADR 0004](./0004-package-apis-and-dependency-direction.md). `@coding-agent/ai` exports the credential variable names as the single source of truth. `@coding-agent/tools`, which implements the `bash` tool and the Verification Runner adapter, builds the scrubbed child environment. `@coding-agent/coding-agent`, the composition root that reads the credentials, applies the non-dumpable hardening, performs the `"auto-approve"` startup ancestor check, and supplies the credential-name set to strip. The Harbor adapter obligations that satisfy the launch contract are fixed by ADR 0005.
 
@@ -193,4 +207,4 @@ An automated test enforces the `"auto-approve"` path: on each backend an evaluat
   - CDA-20 can define clean package boundaries knowing Agent Core owns execution, the path-validation step (§2), and approval states, while AI owns only schema types and raw streaming.
   - CDA-23 can model context budgeting based on the 40 KiB output cap measured in UTF-8 bytes and 300-line read defaults.
   - CDA-24 can implement the TerminalBench evaluation runner using `approvalPolicy: "auto-approve"`, once §8's credential isolation is enforced and tested per ADR 0005.
-- **Credential isolation cost** (§8): the composition root marks the process non-dumpable through a `prctl` call (via `bun:ffi`) before the first Tool Call or Verification child, `@coding-agent/tools` strips the AI-declared credential variables from every such child, and under `"auto-approve"` the composition root walks its ancestor chain at startup and refuses to run if an ancestor still holds a credential. The full cross-process guarantee is Linux-only and scoped to `"auto-approve"`; under `"ask"` the launching shell may still hold the credential, a residual bounded by the `read` path jail (§2) and by Approval gating of `bash` (§4); a child with `CAP_SYS_PTRACE` and non-Linux platforms are out of scope.
+- **Credential isolation cost** (§8): the composition root marks the process non-dumpable through a `prctl` call (via `bun:ffi`) before the first Tool Call or Verification child, `@coding-agent/tools` strips the AI-declared credential variables from every such child, and under `"auto-approve"` the composition root walks its ancestor chain at startup and refuses to run if an ancestor still holds a credential. The full cross-process guarantee is Linux-only and scoped to `"auto-approve"`; under `"ask"` the launching shell may still hold the credential, a residual bounded by the `read` path jail (§2) and by Approval gating of `bash` (§4); a child with `CAP_SYS_PTRACE`, a Coding Agent that runs as root with `CAP_SETUID` and `CAP_SETGID`, and non-Linux platforms are out of scope.

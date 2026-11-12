@@ -11,6 +11,7 @@ import {
   procFiles,
 } from "../src/ancestor-credentials.ts";
 import { runnerChainIsClean } from "./support/ancestor-chain.ts";
+import { onLinux } from "./support/platform.ts";
 import {
   bunLikeShebang as bun,
   firstLine,
@@ -32,6 +33,9 @@ interface FakeProcess {
   readonly statError?: string;
   // The start time of each stat read in turn, the last one repeating. A change models pid reuse.
   readonly starts?: readonly number[];
+  // The parent of each stat read in turn, the last one repeating, in place of `parent`. A change
+  // models a child that the kernel moved to a new parent.
+  readonly parents?: readonly number[];
   // Every stat read after the first throws ENOENT, as for a process that exits during the walk.
   readonly exitsAfterFirstStat?: boolean;
 }
@@ -52,12 +56,14 @@ function fakeProc(self: number, table: Record<number, FakeProcess>) {
     stat: async (pid) => {
       read.push(`${pid}/stat`);
       const id = pid === "self" ? self : pid;
-      const { parent, name = "sh", statError, starts = [100], exitsAfterFirstStat } = entry(id);
+      const { name = "sh", statError, starts = [100], exitsAfterFirstStat, ...found } = entry(id);
       if (statError !== undefined) throw errno(statError);
       const count = statReads.get(id) ?? 0;
       statReads.set(id, count + 1);
       if (exitsAfterFirstStat && count > 0) throw errno("ENOENT");
       const start = starts[Math.min(count, starts.length - 1)];
+      const parents = found.parents ?? [found.parent];
+      const parent = parents[Math.min(count, parents.length - 1)];
       return `${id} (${name}) S ${parent} ${id} ${id} 0 -1 4194560 100 0 0 0 0 0 0 0 20 0 1 0 ${start}`;
     },
     environ: async (pid) => {
@@ -235,6 +241,8 @@ describe("checkAncestorCredentials", () => {
     },
   );
 
+  // The parent field of the child still names 9, so 9 is hidden, for example by hidepid, and the
+  // walk cannot see 5 above it.
   it("fails closed at an ancestor that is gone before its stat is read", async () => {
     const { proc } = fakeProc(10, {
       10: { parent: 9 },
@@ -247,6 +255,44 @@ describe("checkAncestorCredentials", () => {
       message: `${checkFailed}cannot read /proc/9/stat: ENOENT`,
     });
   });
+
+  it("goes on from the new parent of a child whose parent exited during the walk", async () => {
+    const { proc, read } = fakeProc(10, {
+      10: { parent: 9, parents: [9, 1] },
+      1: { parent: 0, name: "init" },
+    });
+    expect(await checkAncestorCredentials("auto-approve", linux(proc))).toEqual({ ok: true });
+    expect(read).toEqual([
+      "self/stat",
+      "9/stat",
+      "self/stat",
+      ...["1/stat", "1/environ", "1/cmdline", "1/stat"],
+    ]);
+  });
+
+  it("fails closed when the child of a gone ancestor is gone too", async () => {
+    const { proc } = fakeProc(10, {
+      10: { parent: 9 },
+      9: { parent: 8, exitsAfterFirstStat: true },
+    });
+    expect(await checkAncestorCredentials("auto-approve", linux(proc))).toEqual({
+      ok: false,
+      code: "CHECK_FAILED",
+      message: `${checkFailed}cannot read /proc/8/stat: ENOENT`,
+    });
+  });
+
+  it.each(["ENOENT", "EACCES"])(
+    "ends the chain at a PID 1 whose stat fails with %s, as under hidepid",
+    async (statError) => {
+      const { proc } = fakeProc(10, {
+        10: { parent: 9 },
+        9: { parent: 1 },
+        1: { parent: 0, statError, environ: credential },
+      });
+      expect(await checkAncestorCredentials("auto-approve", linux(proc))).toEqual({ ok: true });
+    },
+  );
 
   it.each([
     ["its environment is read", { parent: 5, environ: { error: "ESRCH" } }],
@@ -363,10 +409,6 @@ describe("the coding-agent executable when the ancestor check cannot finish", ()
     });
   });
 });
-
-// The end-to-end part reads the real /proc, so it runs on Linux only: in CI on Ubuntu, and skipped
-// elsewhere.
-const onLinux = process.platform === "linux";
 
 const cleanChain = await runnerChainIsClean();
 

@@ -4,6 +4,7 @@ import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { type Libc, markProcessNonDumpable } from "../src/non-dumpable.ts";
 import { runnerChainIsClean } from "./support/ancestor-chain.ts";
+import { onLinux } from "./support/platform.ts";
 import {
   bunLikeShebang as bun,
   firstLine,
@@ -176,7 +177,7 @@ function memShowsDumpability(access: ProcAccess): boolean {
   return scope === undefined || scope === 0 || (scope === 1 && access.ptracerLifted);
 }
 
-const provable = process.platform === "linux" && !holdsBypassCapability();
+const provable = onLinux && !holdsBypassCapability();
 
 // The Coding Agent run below must get past the ancestor check to reach the probe's exit report.
 const cleanChain = await runnerChainIsClean();
