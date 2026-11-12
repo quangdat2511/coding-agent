@@ -78,9 +78,9 @@ when its event arrives, so a reader can also catch a line half written, during a
 kill. Only a line that ends in a newline is a whole event, and a reader ignores the text after the
 last newline.
 
-**`result.json`** is written after the Agent Session settles and the log is complete. It holds
-`exitCode`, `result` (the Agent Result) and `finishedAt` (the time the run received the Agent
-Result, in ISO 8601).
+**`result.json`** is written after the Agent Session settles and the log has written its last
+event. It holds `exitCode`, `result` (the Agent Result) and `finishedAt` (the time the run received
+the Agent Result, in ISO 8601).
 
 These rules apply to all three files:
 
@@ -90,9 +90,15 @@ These rules apply to all three files:
   before it writes `run.json`, and it empties `events.jsonl`. It does this once the Agent Session
   is open. A run that is refused before that point, with exit code 2 or 70, leaves the directory as
   it was, so the files of the earlier run stay.
-- When a file cannot be written, the run exits 70, and the files may be incomplete. A failure
-  before the Coding Task starts ends the run before its first Model Turn. A failure in the log
-  during the task shows only after the session settles, and the run then writes no `result.json`.
+- `run.json` and `result.json` are each written to `<name>.partial` and renamed into place, so a
+  reader finds the whole document or none. A killed run can leave a `.partial` file, which a reader
+  ignores.
+- When a file cannot be written, the run exits 70. A failure before the Coding Task starts ends
+  the run before its first Model Turn, and the run removes the `run.json` and `events.jsonl` it
+  wrote. A failure in the log during the task shows only after the session settles. The run then
+  still writes `result.json`, with `exitCode` 70, and the log has no `session_settled`, so a reader
+  treats it as truncated. A failure to write `result.json` leaves none. Either way the run still
+  prints the final message and the outcome.
 
 ### Session factory
 

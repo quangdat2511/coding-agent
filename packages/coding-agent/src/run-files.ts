@@ -1,4 +1,4 @@
-import { open, rm, writeFile } from "node:fs/promises";
+import { open, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type {
   AgentResult,
@@ -44,6 +44,7 @@ export interface RunFiles {
   logEvents(events: AsyncIterable<SessionEvent>): Promise<void>;
   writeResult(result: ResultRecord): Promise<void>;
   close(): Promise<void>;
+  discard(): Promise<void>;
 }
 
 type Redact = (text: string) => string;
@@ -67,13 +68,27 @@ export async function openRunFiles(
     const versioned = { schemaVersion: SCHEMA_VERSION, ...content };
     return `${JSON.stringify(redacted(versioned, redact), null, indent)}\n`;
   };
-  const writeDocument = (name: string, content: object) =>
-    writeFile(join(outputDir, name), serialize(content, 2));
+  const remove = (name: string) => rm(join(outputDir, name), { force: true });
+  // Renamed into place, so a reader never sees half a document, even after a kill.
+  const writeDocument = async (name: string, content: object) => {
+    const path = join(outputDir, name);
+    const partial = `${path}.partial`;
+    try {
+      await writeFile(partial, serialize(content, 2));
+      await rename(partial, path);
+    } catch (error) {
+      await rm(partial, { force: true }).catch(() => undefined);
+      throw error;
+    }
+  };
 
   // Otherwise an earlier run's result would stand in for a run killed before it settles.
-  await rm(join(outputDir, "result.json"), { force: true });
+  await remove("result.json");
   await writeDocument("run.json", run);
-  const log = await open(join(outputDir, "events.jsonl"), "w");
+  const log = await open(join(outputDir, "events.jsonl"), "w").catch(async (error: unknown) => {
+    await remove("run.json").catch(() => undefined);
+    throw error;
+  });
   return {
     async logEvents(events) {
       for await (const event of events) {
@@ -83,5 +98,9 @@ export async function openRunFiles(
     },
     writeResult: (result) => writeDocument("result.json", result),
     close: () => log.close(),
+    async discard() {
+      await log.close().catch(() => undefined);
+      for (const name of ["run.json", "events.jsonl"]) await remove(name).catch(() => undefined);
+    },
   };
 }

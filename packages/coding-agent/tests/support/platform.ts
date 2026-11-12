@@ -2,6 +2,8 @@
 export const onWindows = process.platform === "win32";
 // Only Linux has /proc/<pid>/environ and PR_SET_DUMPABLE.
 export const onLinux = process.platform === "linux";
+// Only Linux has /dev/full, which accepts an open for writing and then fails every write.
+export const noFullDevice = !onLinux;
 
 // Windows has no FIFOs; Git Bash's mkfifo makes an MSYS emulation that Bun sees as missing.
 export const noFifos = onWindows;

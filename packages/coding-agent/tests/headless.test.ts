@@ -1,9 +1,10 @@
 import { describe, expect, it } from "bun:test";
 import { existsSync } from "node:fs";
-import { chmod, cp, readdir, realpath } from "node:fs/promises";
+import { chmod, cp, mkdir, readdir, realpath, symlink } from "node:fs/promises";
 import { join } from "node:path";
 import { type HeadlessResult, runHeadless } from "../src/headless.ts";
 import { NAMED_TASK_FILE, NAMED_TASK_REPO, READ_ONLY_RUN } from "./support/named-task.ts";
+import { noFullDevice } from "./support/platform.ts";
 import { withTemporaryDirectory } from "./support/process.ts";
 import {
   type Respond,
@@ -16,6 +17,8 @@ const secret = "sk-test-credential-value";
 
 const readOnlyRun = READ_ONLY_RUN.fixtures;
 
+const deep = { recursive: true } as const;
+
 interface Run {
   readonly result: HeadlessResult;
   readonly stdout: string;
@@ -27,7 +30,7 @@ interface Run {
 
 interface Scenario {
   readonly env?: Record<string, string>;
-  readonly prepare?: (repoRoot: string, outputDir: string) => Promise<void>;
+  readonly prepare?: (repoRoot: string, outputDir: string) => Promise<unknown>;
   readonly stdout?: (text: string) => void;
   readonly onRequest?: (outputDir: string, sent: readonly SentRequest[]) => void | Promise<void>;
 }
@@ -446,6 +449,83 @@ describe("a headless run of the named task on Google", () => {
       expect(written).toContain("bad key [redacted]");
       expect(written).not.toContain(secret);
     });
+  });
+
+  it("exits 70 before the first Model Turn when run.json cannot be written", async () => {
+    await runNamedTask(
+      replayInOrder(readOnlyRun),
+      async ({ result, stdout, stderr, sent, outputDir }) => {
+        expect(result).toEqual({ exitCode: 70 });
+        expect(sent).toHaveLength(0);
+        expect(stdout).toBe("");
+        expect(stderr).toStartWith("coding-agent: internal error: ");
+        expect(await readdir(outputDir)).toEqual(["run.json"]);
+      },
+      { prepare: (_repoRoot, outputDir) => mkdir(join(outputDir, "run.json", "taken"), deep) },
+    );
+  });
+
+  it("exits 70 before the first Model Turn and keeps no run.json when the log cannot be opened", async () => {
+    await runNamedTask(
+      replayInOrder(readOnlyRun),
+      async ({ result, stdout, stderr, sent, outputDir }) => {
+        expect(result).toEqual({ exitCode: 70 });
+        expect(sent).toHaveLength(0);
+        expect(stdout).toBe("");
+        expect(stderr).toStartWith("coding-agent: internal error: ");
+        expect(await readdir(outputDir)).toEqual(["events.jsonl"]);
+      },
+      { prepare: (_repoRoot, outputDir) => mkdir(join(outputDir, "events.jsonl"), deep) },
+    );
+  });
+
+  it.skipIf(noFullDevice)(
+    "still writes result.json and prints the outcome when the log fails during the task",
+    async () => {
+      await runNamedTask(
+        replayInOrder(readOnlyRun),
+        async ({ result, stdout, stderr, outputDir }) => {
+          expect(result.exitCode).toBe(70);
+          expect(result.result?.outcome).toBe("succeeded");
+          expect(stdout).not.toBe("");
+          expect(stderr).toContain("coding-agent: succeeded; workspace changed: no\n");
+          expect(stderr).toContain("coding-agent: internal error: ");
+          const written = await Bun.file(join(outputDir, "result.json")).json();
+          expect(written).toMatchObject({ exitCode: 70, result: { outcome: "succeeded" } });
+        },
+        {
+          prepare: async (_repoRoot, outputDir) => {
+            await mkdir(outputDir, deep);
+            await symlink("/dev/full", join(outputDir, "events.jsonl"));
+          },
+        },
+      );
+    },
+  );
+
+  it("exits 70 and still prints the outcome when result.json cannot be written", async () => {
+    await runNamedTask(
+      replayInOrder(readOnlyRun),
+      async ({ result, stdout, stderr, outputDir }) => {
+        expect(result.exitCode).toBe(70);
+        expect(result.result?.outcome).toBe("succeeded");
+        expect(stdout).not.toBe("");
+        expect(stderr).toContain("coding-agent: succeeded; workspace changed: no\n");
+        expect(stderr).toContain("coding-agent: internal error: ");
+        expect((await loggedEvents(outputDir)).at(-1)?.type).toBe("session_settled");
+        expect((await readdir(outputDir)).sort()).toEqual([
+          "events.jsonl",
+          "result.json",
+          "run.json",
+        ]);
+        expect(await readdir(join(outputDir, "result.json"))).toEqual(["taken"]);
+      },
+      {
+        onRequest: async (outputDir, sent) => {
+          if (sent.length === 1) await mkdir(join(outputDir, "result.json", "taken"), deep);
+        },
+      },
+    );
   });
 
   it("leaves nothing of an earlier run in the output directory once the task starts", async () => {

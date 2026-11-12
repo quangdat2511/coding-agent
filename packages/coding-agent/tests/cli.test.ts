@@ -330,7 +330,7 @@ describe("the coding-agent executable", () => {
         expect(exitCode).toBe(70);
         expect(stdout).toBe("");
         expect(stderr).not.toContain(secret);
-        expect((await readdir(outputDir)).sort()).toEqual(["events.jsonl", "run.json"]);
+        expect(await readdir(outputDir)).toEqual(["events.jsonl"]);
       });
     },
   );

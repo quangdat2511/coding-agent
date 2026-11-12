@@ -39,6 +39,17 @@ interface Refusal {
 }
 
 const diagnostic = (message: string): string => `coding-agent: ${message}\n`;
+const internalError = (message: string): string => diagnostic(`internal error: ${message}`);
+
+const messageOf = (error: unknown): string =>
+  error instanceof Error ? error.message : String(error);
+
+async function failureOf(task: Promise<void>): Promise<string | undefined> {
+  return task.then(
+    () => undefined,
+    (error: unknown) => messageOf(error),
+  );
+}
 
 function refuse({ code, message }: Refusal, stderr: (text: string) => void): HeadlessResult {
   stderr(diagnostic(message));
@@ -115,8 +126,7 @@ export async function runHeadless(options: HeadlessOptions): Promise<HeadlessRes
 
     files = await openRunFiles(config.outputDir, runRecord(config, opened), redact);
     // Never awaited by the Agent Session, so a failed write surfaces only once it has settled.
-    const logged = files.logEvents(session.events());
-    logged.catch(() => undefined);
+    const logged = failureOf(files.logEvents(session.events()));
 
     const task = { objective: config.objective };
     const started = await session.dispatch({ type: "start", task });
@@ -125,17 +135,28 @@ export async function runHeadless(options: HeadlessOptions): Promise<HeadlessRes
 
     const result = await session.result();
     const finishedAt = new Date().toISOString();
-    const exitCode = EXIT_CODE_BY_OUTCOME[result.outcome];
-    await logged;
-    await files.writeResult({ exitCode, result, finishedAt });
+    const logFailure = await logged;
+    const exitCode: ExitCode = logFailure === undefined ? EXIT_CODE_BY_OUTCOME[result.outcome] : 70;
+    const resultFailure = await failureOf(files.writeResult({ exitCode, result, finishedAt }));
 
     const text = finalText(result);
     if (text !== "") stdout(text.endsWith("\n") ? text : `${text}\n`);
     stderr(describeOutcome(result));
+    if (logFailure !== undefined)
+      stderr(internalError(`events.jsonl is incomplete: ${logFailure}`));
+    if (resultFailure !== undefined) {
+      stderr(internalError(`result.json was not written: ${resultFailure}`));
+      return { exitCode: 70, result };
+    }
     return { exitCode, result };
   } catch (error) {
-    if (!running) await removeCreated(createdDirectories);
-    throw new Error(redact(error instanceof Error ? error.message : String(error)));
+    if (!running) {
+      await files?.discard();
+      files = undefined;
+      await removeCreated(createdDirectories);
+    }
+    stderr(internalError(messageOf(error)));
+    return { exitCode: 70 };
   } finally {
     await files?.close().catch(() => undefined);
   }
