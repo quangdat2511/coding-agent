@@ -14,19 +14,15 @@ it. [The implementation order](./0006-implementation-order-and-mvp-completion-ch
 makes the choice the third item of the "MVP evaluated" checklist and warns that a cheap weak model
 produces a valid job that says nothing about the agent.
 
-Five constraints shape the answer:
-
-- The recorded job runs 66 tasks, one attempt each, within 250 Model Turns and 1,000 Tool Calls per
-  task (protocol §5), so per-task cost is multiplied by 66 and by whatever the rerun job adds.
-- The model must resolve through `ProviderDirectory.getModel`, which reads
-  `packages/ai/src/providers/<provider>.models.json`. An unlisted id is refused with exit 2 before
-  a session opens.
-- `@coding-agent/ai` counts reasoning tokens but never requests a reasoning effort, so the job runs
-  at each provider's default. Published TerminalBench figures are produced at each vendor's maximum
-  effort inside the vendor's own harness; they rank models, and do not predict what this agent
-  scores.
-- No paid frontier account exists, and model spend is capped at a student budget.
-- The job will be re-run, so the choice is judged per dollar of subscription, not per token.
+Five facts bound the answer. The job runs 66 tasks, one attempt each, within 250 Model Turns and
+1,000 Tool Calls per task (protocol §5), so a per-task cost is multiplied by 66. The model must
+resolve through `ProviderDirectory.getModel`, which reads
+`packages/ai/src/providers/<provider>.models.json`, because an unlisted id is refused with exit 2
+before a session opens. `@coding-agent/ai` counts reasoning tokens but never requests a reasoning
+effort, so the job runs at each provider's default, while the published TerminalBench figures are
+produced at each vendor's maximum effort inside the vendor's own harness. No paid frontier account
+exists. And the job will be re-run, so the choice is judged per dollar of subscription rather than
+per token.
 
 On [the Terminal-Bench leaderboard](https://www.tbench.ai/leaderboard) (66 tasks, five trials per
 row, read 2026-11-12): Claude Opus 5.5 65.8%, Claude Sonnet 5.5 63.9%, GPT-6.1 Sol 60.9%, Grok 4.7
@@ -37,69 +33,62 @@ exists for the model this record chooses.
 
 The recorded job runs **`opencode`** — the OpenCode Go gateway — with **`deepseek-v4.1-flash`**.
 
-1. **The subscription is the reason.** Go costs $10 a month and includes $100 of DeepSeek V4.1
-   Flash usage at the allowance's list prices ($0.15 and $0.60 per million input and output tokens
-   off-peak, cache reads at $0.003), so one month covers roughly 38 jobs of this shape. The same
-   $10 spent pay-per-use buys roughly 7.7.
-2. **One job costs about $2.6 of that allowance** off-peak — roughly 25M cached input, 6M uncached
-   input, and 2.6M output tokens — which is well inside the 5-hour window at 20% of the monthly
-   allowance. The gateway meters allowance, not requests, so the allowance is the binding
-   constraint, not a requests-per-minute limit.
-3. **The provider is promoted as part of this decision, and that is the scope change.** `opencode`
-   becomes the sixth `--provider` value; `OPENCODE_API_KEY` joins the fixed credential set in
-   `@coding-agent/ai` and therefore the scrubbed child environment and the startup ancestor check;
-   the adapter speaks the Go gateway (`https://opencode.ai/inference/go` with the OpenAI Responses
-   path) and sends the stable `x-opencode-session` and a `coding-agent/<version>` user agent that
-   the gateway asks for; and `opencode` joins the shared conformance suite. No recorded job runs on
-   it until the conformance suite and the credential-isolation test of protocol §7 pass, because an
-   adapter-shaped failure would be scored against the agent. This is why the map's destination and
-   its out-of-scope line change: they say five providers, and after this record there are six.
-4. **Claim.** The job measures this configuration under the `terminalbench` Evaluation Profile. It is
-   a reproducible end-to-end result with a per-task diagnostic, not a capability ceiling for the
-   agent, and the report does not compare it with the leaderboard. That is the narrowest claim a
-   cost-bounded model supports, and it is recorded so the report cannot imply the stronger claim that
-   protocol §7 and ADR 0006 §7 were careful not to make.
-5. Sampling is unchanged: `SAMPLING_BY_PROVIDER.opencode` is `{ maxOutputTokens: null, temperature:
-   null }`, so provider defaults apply and `run.json` records that fact.
-6. No reasoning effort is requested. Adding one changes the `@coding-agent/ai` provider contract
-   ([ADR 0004](./0004-package-apis-and-dependency-direction.md) §2) and is a separate decision; the
-   recorded job does not wait for it.
-7. **Changeability.** The model is a flag, never baked into the artifact or the composition root.
-   Each job declares exactly one provider and model in its manifest; a later job on another model is
-   a separate job with its own manifest and report (protocol §7), never a pooled result.
-8. The provider's HTTP status reaches `MODEL_FAILURE` details through
-   [Record the provider HTTP status in MODEL_FAILURE details](https://datn-fit-hcmus.atlassian.net/browse/CDA-83),
-   so that ticket targets the `opencode` adapter.
+1. **One provider and model, declared, and changeable between jobs.** The job declares
+   `opencode`/`deepseek-v4.1-flash` in its manifest and in `run.json`. The model is a flag, never
+   baked into the artifact or the composition root, so a later job on another model is a separate
+   job with its own manifest and report (protocol §7), never a pooled result.
 
-## The five considerations the ticket asked to weigh
+2. **A subscription, because the job is re-run.** Go costs $10 a month and includes $100 of
+   DeepSeek V4.1 Flash usage at the allowance's list prices ($0.15 and $0.60 per million input
+   and output tokens off-peak, cache reads at $0.003), which covers roughly 38 jobs of this shape,
+   against roughly 7.7 jobs for the same $10 spent pay-per-use. One job consumes about $2.6 of
+   that allowance — roughly 25M cached input, 6M uncached input, and 2.6M output tokens — inside
+   the 5-hour window at 20% of the monthly allowance. The allowance is metered per model in three
+   windows (5 hours at 20%, weekly at 50%, monthly at 100%) and otherwise publishes request
+   estimates in the tens of thousands per window for this model, far above the roughly 2,600
+   requests one job issues, so the allowance binds and request rate does not. Concurrency stays
+   Harbor's `-n` and changes wall-clock time only (protocol §7).
 
-1. **What the job demonstrates.** It demonstrates that the agent works end to end on the full
-   dataset, and reports how well *this configuration* does. It does not establish how well the agent
-   would work with a frontier model, because nothing in this budget buys that comparison.
-2. **A second job on another model.** None for the MVP. Protocol §7 permits additional jobs and never
+3. **What the job demonstrates, and what it does not.** It demonstrates that the agent works end to
+   end on the full dataset and reports how well *this configuration* does. It does not establish how
+   well the agent would work with a frontier model, because nothing in this budget buys that
+   comparison. The report states the configuration result and does not compare it with the
+   leaderboard, so it cannot imply the stronger claim that protocol §7 and ADR 0006 §7 were careful
+   not to make.
+
+4. **No second job on another model, for the MVP.** Protocol §7 permits additional jobs and never
    pools their results, but a second job is a second 66-task run and a second set of task
-   environments, so it is an additive experiment, not part of this effort. The subscription's
-   allowance is what makes such an experiment affordable later.
-3. **Tool-calling reliability over long sessions.** No independent long-horizon result exists for
-   this model: it appears on no Terminal-Bench row, and a vendor benchmark would not be evidence of
-   250-turn persistence. What the choice does control is truncation pressure — 1M context and 384K
-   maximum output are far beyond a 250-turn session — and DeepSeek documents thinking as the model's
-   default mode, which the harness neither requests nor disables. The risk that a model stops early
-   is visible rather than hidden: the harness ends the session at the first Candidate Completion, so
-   an early stop lands in the per-task table as a failure. The three-task smoke job measures it
-   before the 66-task job spends the allowance, and if early stopping dominates, the model is changed
-   by a later decision, not by editing this one.
-4. **The provider's HTTP status in `MODEL_FAILURE` details.** A gateway returns an HTTP status on
-   error like any other provider. The adapter drops it today:
-   `packages/ai/src/api/openai-responses.ts` catches the SDK error and emits `{ message }` with no
-   `code`, so a failure carries a message and no status. CDA-83 carries it for this adapter; until
-   then a `MODEL_FAILURE` without a status is not rerun-eligible and counts as an agent outcome.
-5. **Rate limits and concurrency.** Go limits allowance per model in three windows — 5 hours at 20%
-   of the monthly allowance, weekly at 50%, monthly at 100% — and its published request estimates for
-   this model are in the tens of thousands per 5-hour window, far above the roughly 2,600 requests one
-   job issues. Concurrency stays Harbor's `-n` and changes wall-clock time only (protocol §7). The
-   gateway asks for a stable session id and a real client user agent and monitors for abuse, which
-   item 3 of the decision makes part of the adapter.
+   environments, so it is an additive experiment rather than part of this effort. The subscription's
+   allowance is what makes such an experiment affordable later, without amending this record.
+
+5. **Long-session reliability is accepted as unmeasured, and made visible.** No independent
+   long-horizon result exists for this model: it appears on no Terminal-Bench row, and a vendor
+   benchmark would not be evidence of 250-turn persistence. The choice does control truncation
+   pressure — 1M context and 384K maximum output are far beyond a 250-turn session — and DeepSeek
+   documents thinking as the model's default mode, which the harness neither requests nor disables.
+   A model that stops early is not hidden: the harness ends the session at the first Candidate
+   Completion, so an early stop appears in the per-task table as a failure rather than as a limit
+   reached. The three-task smoke job measures it before the 66-task job spends the allowance, and if
+   early stopping dominates, the model is changed by a later decision, not by editing this one.
+
+6. **The provider is promoted, and that is the scope change.** `opencode` becomes the sixth
+   `--provider` value; `OPENCODE_API_KEY` joins the fixed credential set in `@coding-agent/ai` and
+   therefore the scrubbed child environment and the startup ancestor check; the adapter speaks the
+   Go gateway (`https://opencode.ai/inference/go` with the OpenAI Responses path) and sends the
+   stable `x-opencode-session` and a `coding-agent/<version>` user agent that the gateway asks
+   for; and `opencode` joins the shared conformance suite. No recorded job runs on it until the
+   conformance suite and the credential-isolation test of protocol §7 pass, because an
+   adapter-shaped failure would be scored against the agent. The map's destination and its
+   out-of-scope line say five providers, and after this record there are six.
+
+7. **Failure handling and settings.** A gateway returns an HTTP status on error like any other
+   provider, and the adapter drops it today: `packages/ai/src/api/openai-responses.ts` catches the
+   SDK error and emits `{ message }` with no `code`. [CDA-83](https://datn-fit-hcmus.atlassian.net/browse/CDA-83)
+   carries it for this adapter; until then a `MODEL_FAILURE` without a status is not rerun-eligible
+   and counts as an agent outcome. Sampling is `{ maxOutputTokens: null, temperature: null }`, so
+   provider defaults apply and `run.json` records that fact, and no reasoning effort is requested:
+   adding one changes the `@coding-agent/ai` provider contract
+   ([ADR 0004](./0004-package-apis-and-dependency-direction.md) §2) and is a separate decision.
 
 ## Considered options
 
