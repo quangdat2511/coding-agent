@@ -152,8 +152,9 @@ only for the smoke job (§7).
 
 Changing a pin is a new decision that amends this record. Results are never pooled across pins.
 
-On 2026-11-12, [CDA-30](https://datn-fit-hcmus.atlassian.net/browse/CDA-30) amended this record in
-three places: §3 accepts `opencode` as a sixth provider value, §7 names the choice that
+On 2026-11-12, [CDA-30](https://datn-fit-hcmus.atlassian.net/browse/CDA-30) **proposed** three
+amendments to this record, which take effect when its decision is accepted: §3 accepts `opencode` as
+a sixth provider value, §7 names the choice that
 [ADR 0007](./0007-evaluation-provider-and-model.md) makes, and §8 adds the `oc_sk_` prefix to the
 secret scan.
 
@@ -558,7 +559,7 @@ them and decides neither.
   ADR 0002 §4 preserves a normalized provider reason in the failure details, but no decision says
   the HTTP status is part of that reason. Until the provider error contract includes it, a
   `MODEL_FAILURE` without a recorded status is not rerun-eligible and counts as an agent outcome.
-  [ADR 0007](./0007-evaluation-provider-and-model.md) names `opencode`, so
+  [ADR 0007](./0007-evaluation-provider-and-model.md) proposes `opencode`, so
   [CDA-83](https://datn-fit-hcmus.atlassian.net/browse/CDA-83) implements the status in that
   adapter.
 

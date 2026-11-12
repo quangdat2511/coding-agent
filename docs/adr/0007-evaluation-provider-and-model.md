@@ -1,6 +1,6 @@
 # Evaluation Provider and Model for the Recorded TerminalBench Job
 
-Status: accepted
+Status: proposed
 
 Date: 2026-11-12
 
@@ -88,9 +88,9 @@ Zen plan — with **`deepseek-v4.1-flash`**.
    measures, and the conformance suite and the smoke job make it visible rather than assumed. If
    early stopping dominates, the model is changed by a later decision, not by editing this one.
 
-6. **The provider is promoted, and that is the scope change.** This decision makes `opencode` the
-   sixth `--provider` value; `OPENCODE_API_KEY` joins the fixed credential set in `@coding-agent/ai`
-   as part of the implementation, and therefore the scrubbed child environment and the startup
+6. **The provider is promoted, and that is the scope change.** This decision would make `opencode`
+   the sixth `--provider` value; `OPENCODE_API_KEY` would join the fixed credential set in
+   `@coding-agent/ai` as part of the implementation, and therefore the scrubbed child environment and the startup
    ancestor check. The adapter must move to the Go gateway — SDK base URL
    `https://opencode.ai/inference/go/openai/v1`, since the OpenAI SDK appends `/chat/completions`
    itself; the `x-opencode-session` header in place of today's `x-session-id`; and a
@@ -139,8 +139,8 @@ Zen plan — with **`deepseek-v4.1-flash`**.
 
 - **The map is owed a change.** The destination of
   [the map](https://datn-fit-hcmus.atlassian.net/browse/CDA-13) says five model providers and its
-  **Out of scope** section excludes others. Updating it is a separate action, and until it happens
-  this record and the map disagree.
+  **Out of scope** section excludes others. Updating it is a separate action, and this record cannot
+  move from `proposed` to `accepted` before it happens.
 - **Three accepted records are amended with it:** ADR 0001 §8's credential scope; ADR 0005 §3's
   provider list, §7's recorded-job rules and §8's secret-scan prefixes (`oc_sk_`); and ADR 0006
   §3's exclusion and track E membership, §6 item 7, and §7 item 3.

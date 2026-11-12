@@ -194,10 +194,11 @@ OpenRouter, OpenAI, xAI, and OpenCode, each against one shared conformance suite
 fixtures. Exit criterion: every provider passes the same suite, and each declared deviation is a
 typed capability rather than a branch inside Agent Core.
 
-On 2026-11-12, [CDA-30](https://datn-fit-hcmus.atlassian.net/browse/CDA-30) amended this record:
-`opencode` becomes a sixth `--provider` value, which
-[ADR 0007](./0007-evaluation-provider-and-model.md) records; it joins track E, and the checklist
-below grows to six providers. It was not among the values ADR 0005 §3 accepted before this; its
+**Proposed amendment, 2026-11-12.**
+[CDA-30](https://datn-fit-hcmus.atlassian.net/browse/CDA-30) proposes the promotion that
+[ADR 0007](./0007-evaluation-provider-and-model.md) records: `opencode` becomes a sixth
+`--provider` value and joins track E once that decision is accepted, which also grows the checklist
+below to six providers. It was not among the values ADR 0005 §3 accepted before this; its
 adapter stayed in `packages/ai` and kept working, but it was excluded from the conformance suite,
 from the completion checklist and from that command line. The promotion is a scope change to
 [the map](https://datn-fit-hcmus.atlassian.net/browse/CDA-13) rather than an ordering choice, and
@@ -281,7 +282,7 @@ something works.
    checklist item that reads "the demo works" is not checkable, and the recording is what survives
    into the thesis and to a reviewer who was not present.
 7. All six providers pass the shared conformance suite: Google, Anthropic, OpenRouter, OpenAI, xAI,
-   and `opencode`, the sixth provider, per [ADR 0007](./0007-evaluation-provider-and-model.md).
+   and `opencode`, the sixth once [ADR 0007](./0007-evaluation-provider-and-model.md) is accepted.
 8. Boundary enforcement is in place and has been shown to fail: per-package manifests, the Biome
    overrides, and the CI bundle check, with `bun --filter '*' typecheck`, `bun test`, and
    `biome ci .` green.
@@ -301,8 +302,7 @@ involved, since tier 1's oracle job runs there too. It is drawn where a job carr
 credential and spends on a model. Every tier-2 job does both, so tier 2 is gated on the isolation
 test passing in a container on each backend a job will use, it spends model money on top of
 compute, it depends on provider rate limits the team does not control, and the provider and model
-it runs on was an open decision until [ADR 0007](./0007-evaluation-provider-and-model.md) (item 3).
-Tier 1 has no credential, no model spend, and no open
+it runs on is still an open decision (item 3). Tier 1 has no credential, no model spend, and no open
 decision: it is code and tests on a developer machine, plus one oracle job that needs a Modal account
 and compute (§6 item 11). A checklist whose final item cannot be scheduled cannot tell the team when
 to stop building, which is why the line is drawn here.
@@ -319,19 +319,19 @@ TerminalBench evaluation, so the MVP reaches it only when both tiers are complet
    the recorded job is valid under ADR 0005 §7; its manifest and report are committed; and its
    archive passed the secret scan and is published.
 3. The evaluation provider and model are chosen. ADR 0005 §7 states that it does not choose the
-   model, and this record did not either: a cheap weak model produces a valid job that says nothing,
-   so the choice needed its own thinking and became its own decision ticket on the map.
-   [ADR 0007](./0007-evaluation-provider-and-model.md) resolves it: `opencode` with
+   model, and this record does not either: a cheap weak model produces a valid job that says
+   nothing, so the choice needs its own thinking and becomes its own decision ticket on the map.
+   [ADR 0007](./0007-evaluation-provider-and-model.md) proposes to resolve it: `opencode` with
    `deepseek-v4.1-flash`, recorded as a configuration result rather than a capability ceiling.
 
 Item 3 blocks nothing in tier 1, but it should be decided while tier 1 is still running rather than
 after it closes, for two reasons. It carries lead time that is not decision time: a paid key, a rate
 limit checked at the concurrency the job will use, and possibly a quota increase. And it can reach
 back into tier 1, because ADR 0005 §7's second rerun condition reads the provider's HTTP status from
-`MODEL_FAILURE` details, which ADR 0005 lists as an open dependency; now that
-[ADR 0007](./0007-evaluation-provider-and-model.md) names the provider, that status belongs in its
-adapter, and adapters are track E, which is tier 1 work. Deciding late risked reopening a tier-1
-item that was already called complete. Any point after track E starts was soon
+`MODEL_FAILURE` details, which ADR 0005 lists as an open dependency; once
+[ADR 0007](./0007-evaluation-provider-and-model.md) is accepted and names the provider, that status
+belongs in its adapter, and adapters are track E, which is tier 1 work. Deciding late risks
+reopening a tier-1 item that was already called complete. Any point after track E starts is soon
 enough.
 
 No reward value is a criterion, in either tier.
