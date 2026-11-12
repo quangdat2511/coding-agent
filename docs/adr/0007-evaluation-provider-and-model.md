@@ -66,6 +66,42 @@ The recorded job runs **`openrouter`** with **`deepseek/deepseek-v4.1-flash-1017
    [Record the provider HTTP status in MODEL_FAILURE details](https://datn-fit-hcmus.atlassian.net/browse/CDA-83),
    so that ticket targets the `openrouter` adapter.
 
+## The five considerations the ticket asked to weigh
+
+1. **What the job demonstrates.** It demonstrates that the agent works end to end on the full
+   dataset, and reports how well *this configuration* does. It does not establish how well the agent
+   would work with a frontier model, because nothing in this budget buys that comparison. Of the two
+   readings in the ticket — that the agent works, or how well it works — the recorded job answers the
+   first outright and the second only for the configuration it declares.
+2. **A second job on another model.** None for the MVP. Protocol §7 permits additional jobs and never
+   pools their results, but a second job is a second 66-task run and a second set of task
+   environments, so it is an additive experiment, not part of this effort. A later job on a stronger
+   model is how the capability question would be answered, and it needs no change to this record.
+3. **Tool-calling reliability over long sessions.** No independent long-horizon result exists for
+   this model: it appears on no Terminal-Bench row, and a vendor benchmark would not be evidence of
+   250-turn persistence. What the choice does control is truncation pressure — 1M context and 384K
+   maximum output are far beyond a 250-turn session — and DeepSeek documents thinking as the model's
+   default mode, which the harness neither requests nor disables, so the routed upstream's default
+   applies and is recorded as "provider defaults" rather than as a chosen effort. The risk that a
+   model stops early is real, and it is visible: the harness ends the session at the first Candidate
+   Completion, so an early stop lands in the per-task table as a failure rather than as a limit
+   reached. The three-task smoke job measures it before the 66-task job spends the money, and if
+   early stopping turns out to dominate, the model is changed by a later decision, not by editing
+   this one.
+4. **The provider's HTTP status in `MODEL_FAILURE` details.** OpenRouter returns an HTTP status on
+   error, and its 429 body separates a platform limit from the upstream host's
+   (`error.metadata.provider_code`). The adapter drops the status today:
+   `packages/ai/src/api/openai-responses.ts` catches the SDK error and emits `{ message }` with no
+   `code`, so a failure carries a message and no status.
+   [CDA-83](https://datn-fit-hcmus.atlassian.net/browse/CDA-83) carries it for this adapter; until
+   it does, a `MODEL_FAILURE` without a status is not rerun-eligible and counts as an agent outcome.
+5. **Rate limits and concurrency.** OpenRouter imposes no platform-level request cap on paid
+   variants. The 20-per-minute and 50-or-1,000-per-day caps belong to `:free` variants, which this
+   job does not use. A 429 can still come from the upstream host that serves the request, and
+   OpenRouter retries other hosts for the same model before surfacing it, so a trial either lands on
+   another host or fails with the upstream's code attached. Concurrency is Harbor's `-n` and changes
+   wall-clock time only (protocol §7), so nothing in this choice lowers it.
+
 ## Considered options
 
 - **Claude Opus 5.5 or Sonnet 5.5 (65.8% and 63.9%).** The strongest measured models, and the only
