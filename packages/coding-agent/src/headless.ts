@@ -1,6 +1,8 @@
 import type { AgentResult } from "@coding-agent/agent-core";
+import { BUILD_INFO } from "./build-info.ts";
 import type { RunArgs } from "./run-args.ts";
-import { removeCreated, resolveRunConfig } from "./run-config.ts";
+import { type RunConfig, removeCreated, resolveRunConfig } from "./run-config.ts";
+import { openRunFiles, type RunFiles, type RunRecord } from "./run-files.ts";
 import { openSession } from "./session-factory.ts";
 
 export type ExitCode = 0 | 1 | 2 | 70 | 130;
@@ -65,6 +67,26 @@ function printer(write: (text: string) => void, redact: (text: string) => string
   };
 }
 
+function runRecord(
+  config: RunConfig,
+  { systemPrompt, toolNames }: { systemPrompt: string; toolNames: readonly string[] },
+): RunRecord {
+  return {
+    codingAgent: BUILD_INFO,
+    provider: config.model.provider,
+    model: config.model.id,
+    sampling: config.sampling,
+    transportRetryBound: config.transportRetryBound,
+    repoRoot: config.repoRoot,
+    profile: config.profile,
+    limits: config.limits,
+    approvalPolicy: config.approvalPolicy,
+    verification: config.verification,
+    tools: toolNames,
+    systemPrompt,
+  };
+}
+
 export async function runHeadless(options: HeadlessOptions): Promise<HeadlessResult> {
   const resolved = await resolveRunConfig(options.args, options);
   if (!resolved.ok)
@@ -79,6 +101,7 @@ export async function runHeadless(options: HeadlessOptions): Promise<HeadlessRes
   const stderr = printer(options.stderr, redact);
 
   let running = false;
+  let files: RunFiles | undefined;
   try {
     const opened = await openSession(config);
     if (!opened.ok) {
@@ -90,18 +113,30 @@ export async function runHeadless(options: HeadlessOptions): Promise<HeadlessRes
       stderr(diagnostic(`Project Instructions candidate ${path} skipped: ${reason}`));
     }
 
+    files = await openRunFiles(config.outputDir, runRecord(config, opened), redact);
+    // Never awaited by the Agent Session, so a failed write surfaces only once it has settled.
+    const logged = files.logEvents(session.events());
+    logged.catch(() => undefined);
+
     const task = { objective: config.objective };
     const started = await session.dispatch({ type: "start", task });
     if (!started.accepted) throw new Error(`the Agent Session did not start: ${started.message}`);
     running = true;
 
     const result = await session.result();
+    const finishedAt = new Date().toISOString();
+    const exitCode = EXIT_CODE_BY_OUTCOME[result.outcome];
+    await logged;
+    await files.writeResult({ exitCode, result, finishedAt });
+
     const text = finalText(result);
     if (text !== "") stdout(text.endsWith("\n") ? text : `${text}\n`);
     stderr(describeOutcome(result));
-    return { exitCode: EXIT_CODE_BY_OUTCOME[result.outcome], result };
+    return { exitCode, result };
   } catch (error) {
     if (!running) await removeCreated(createdDirectories);
     throw new Error(redact(error instanceof Error ? error.message : String(error)));
+  } finally {
+    await files?.close().catch(() => undefined);
   }
 }

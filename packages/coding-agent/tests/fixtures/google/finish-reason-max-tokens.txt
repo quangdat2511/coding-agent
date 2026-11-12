@@ -1,0 +1,2 @@
+data: {"candidates":[{"content":{"parts":[{"text":"This text exceeds the token limit"}],"role":"model"},"finishReason":"MAX_TOKENS","index":0}],"usageMetadata":{"promptTokenCount":20,"candidatesTokenCount":50,"totalTokenCount":70},"modelVersion":"gemini-2.0-flash-lite"}
+

@@ -47,7 +47,7 @@ async function main(
     process.stderr.write(`coding-agent: ${ancestors.message}\n`);
     return ancestors.code === "CREDENTIAL_IN_ANCESTOR" ? 2 : 70;
   }
-  // Temporary: CDA-75 (D3.1) writes the run's files, and CDA-78 (D3.2) cancels on a signal.
+  // Temporary: CDA-78 (D3.2) cancels on a signal.
   const { exitCode } = await runHeadless({
     args: parsed.args,
     cwd,
