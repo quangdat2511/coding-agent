@@ -185,7 +185,7 @@ the headless entry point implemented by `runHeadless`:
 ```text
 coding-agent run
   --task-file <path>              required  UTF-8 file whose entire content is the Coding Task objective
-  --provider <provider>           required  anthropic | openrouter | openai | google | xai
+  --provider <provider>           required  anthropic | openrouter | openai | google | xai | opencode
   --model <model-id>              required  model identifier within that provider
   --approval-policy auto-approve  required  omission or any other value is a usage error
   --output-dir <dir>              required  created when missing
@@ -431,8 +431,8 @@ The oracle job receives no credential and is not gated.
 Rules for the recorded job:
 
 - Exactly one provider and model per job, declared in the manifest. This decision does not choose
-  the model; [ADR 0007](./0007-evaluation-provider-and-model.md) chooses `openrouter` with
-  `deepseek/deepseek-v4.1-flash-1017` and bounds what that job may claim.
+  the model; [ADR 0007](./0007-evaluation-provider-and-model.md) chooses `opencode` with
+  `deepseek-v4.1-flash` and bounds what that job may claim.
 - One attempt per task (`-k 1`). Additional attempts for measuring variance are separate jobs,
   reported separately.
 - No task filtering outside the rerun job, and no timeout override or timeout multiplier.
@@ -504,7 +504,7 @@ step below is mandatory, and a failed step blocks the upload:
 2. Search the same files for `[REDACTED]`. Each occurrence is reviewed. One that Harbor wrote over a
    credential means the credential appeared in the logs, even though its value is gone.
 3. Search the same files for the provider key prefixes `sk-ant-`, `sk-or-`, `sk-proj-`, `xai-`,
-   and `AIza`. Each match is reviewed, and the scan fails until every match is shown not to be a
+   `AIza`, and `oc_sk_`. Each match is reviewed, and the scan fails until every match is shown not to be a
    credential or is removed from the archive.
 4. Revoke every credential that steps 1 to 3 show appeared in the logs, whether or not it would
    have been published, because the logs may already have been sent to the model provider and are
@@ -553,7 +553,7 @@ them and decides neither.
   ADR 0002 §4 preserves a normalized provider reason in the failure details, but no decision says
   the HTTP status is part of that reason. Until the provider error contract includes it, a
   `MODEL_FAILURE` without a recorded status is not rerun-eligible and counts as an agent outcome.
-  [ADR 0007](./0007-evaluation-provider-and-model.md) fixes the provider as `openrouter`, so
+  [ADR 0007](./0007-evaluation-provider-and-model.md) fixes the provider as `opencode`, so
   [CDA-83](https://datn-fit-hcmus.atlassian.net/browse/CDA-83) implements the status in that
   adapter.
 
