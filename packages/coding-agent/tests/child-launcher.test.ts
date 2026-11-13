@@ -1,4 +1,9 @@
 import { describe, expect, it } from "bun:test";
+import { mkdtemp, realpath, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { PROVIDER_CREDENTIAL_ENV_VARS } from "@coding-agent/ai";
+import { bashTool, createWorkspaceResolver } from "@coding-agent/tools";
 import { createConfiguredChildLauncher } from "../src/child-launcher.ts";
 
 describe("configuring the child launcher in the composition root", () => {
@@ -63,6 +68,52 @@ describe("configuring the child launcher in the composition root", () => {
         if (value === undefined) delete process.env[key];
         else process.env[key] = value;
       }
+    }
+  });
+});
+
+describe("running bash through the configured launcher", () => {
+  it("cannot read any provider credential, while a variable the task set stays visible", async () => {
+    const credentials = Object.fromEntries(
+      PROVIDER_CREDENTIAL_ENV_VARS.map((name) => [name, `fake-${name.toLowerCase()}`]),
+    );
+    const fixture = { ...credentials, CDA71_TASK_VAR: "visible-to-the-task" };
+    const saved = Object.fromEntries(Object.keys(fixture).map((key) => [key, process.env[key]]));
+    const repo = await realpath(await mkdtemp(join(tmpdir(), "bash-credentials-")));
+    try {
+      Object.assign(process.env, fixture);
+      const configured = createConfiguredChildLauncher();
+      if (!configured.ok) throw new Error(configured.message);
+      const created = await createWorkspaceResolver(repo);
+      if (!created.ok) throw new Error(created.message);
+      const ctx = {
+        workspace: created.workspace,
+        signal: new AbortController().signal,
+        onProgress: () => {},
+      };
+      const tool = bashTool(configured.launcher);
+      // printenv prints nothing and fails for a variable the child does not have.
+      const names = [...PROVIDER_CREDENTIAL_ENV_VARS, "CDA71_TASK_VAR"];
+      const command = names.map((name) => `echo "${name}=$(printenv ${name} || echo absent)"`);
+      const prepared = await tool.prepare({ command: command.join("\n") }, ctx);
+      if (!prepared.ok) throw new Error(prepared.message);
+
+      const outcome = await tool.execute(prepared.prepared, ctx);
+
+      expect(PROVIDER_CREDENTIAL_ENV_VARS.length).toBeGreaterThan(0);
+      expect(outcome.content).toBe(
+        [
+          ...PROVIDER_CREDENTIAL_ENV_VARS.map((name) => `${name}=absent`),
+          "CDA71_TASK_VAR=visible-to-the-task",
+          "[exit code: 0]",
+        ].join("\n"),
+      );
+    } finally {
+      for (const [key, value] of Object.entries(saved)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+      await rm(repo, { recursive: true, force: true });
     }
   });
 });

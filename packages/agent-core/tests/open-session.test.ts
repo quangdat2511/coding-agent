@@ -184,6 +184,13 @@ describe("refusing an invalid configuration", () => {
       change: (config) => ({ clock: { now: config.clock.now } }),
     },
     {
+      problem: "a clock that cannot set timers",
+      field: "clock.setTimer",
+      change: (config) => ({
+        clock: { now: config.clock.now, monotonicMs: config.clock.monotonicMs },
+      }),
+    },
+    {
       problem: "an id source that cannot issue ids",
       field: "ids.next",
       change: () => ({ ids: {} }),

@@ -466,6 +466,19 @@ The protocol has no per-event schema version. Package versioning and exhaustive 
 are the compatibility contract. A schema version becomes necessary only if Session Events later
 cross a process boundary or become persistent data.
 
+### 8. Amendments
+
+On 2026-11-12, [CDA-71](https://datn-fit-hcmus.atlassian.net/browse/CDA-71) amended this record:
+
+- **Tool Progress bounds** (§6): a `tool_execution_progress` update carries the latest tail of the
+  tool's output, at most 2,048 UTF-8 bytes cut at a character boundary, and replaces the previous
+  update. Agent Core delivers at most one per 250 ms per Tool Call. An update that arrives sooner
+  is held, a newer one replaces it, and the held update is delivered when the interval ends. An
+  update equal to the last one is dropped. An update still held when the Tool Call completes is
+  discarded, because `tool_call_completed` carries the full Tool Result, and an update after that
+  is ignored. A command that prints for the full 120 s adds about 1 MB to the in-memory event log.
+  ADR 0005 already leaves progress out of `events.jsonl`. Tool Progress is not part of Agent State.
+
 ## Consequences
 
 - TUI, headless evaluation, and tests consume the same ordered protocol without knowing provider

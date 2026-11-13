@@ -159,7 +159,7 @@ const checks = {
       : problem("approvalPolicy", `approvalPolicy must be one of ${oneOf(approvalPolicies)}`),
   verification: (value) => checkPort("verification", value, ["verify"]),
   limits: checkLimits,
-  clock: (value) => checkPort("clock", value, ["now", "monotonicMs"]),
+  clock: (value) => checkPort("clock", value, ["now", "monotonicMs", "setTimer"]),
   ids: (value) => checkPort("ids", value, ["next"]),
 } satisfies Record<keyof OpenSessionConfig, Check>;
 

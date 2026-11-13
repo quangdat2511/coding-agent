@@ -207,7 +207,11 @@ describe("injected ports", () => {
   });
 
   it("separates wall-clock time from monotonic time", () => {
-    const clock: Clock = { now: () => "2026-10-01T00:00:00.000Z", monotonicMs: () => 42 };
+    const clock: Clock = {
+      now: () => "2026-10-01T00:00:00.000Z",
+      monotonicMs: () => 42,
+      setTimer: () => () => {},
+    };
 
     expect(clock.now()).toBe("2026-10-01T00:00:00.000Z");
     expect(clock.monotonicMs()).toBe(42);
@@ -708,7 +712,7 @@ describe("session events", () => {
       decidedBy: "user",
     },
     tool_execution_started: { toolCallId: "tool-1", mutation: "mutating" },
-    tool_execution_progress: { toolCallId: "tool-1", update: { message: "writing" } },
+    tool_execution_progress: { toolCallId: "tool-1", update: { output: "writing\n" } },
     tool_call_completed: {
       toolCallId: "tool-1",
       outcome: "succeeded",

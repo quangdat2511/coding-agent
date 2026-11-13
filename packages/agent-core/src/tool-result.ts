@@ -39,6 +39,7 @@ export interface ToolResult {
   };
 }
 
+// The latest tail of a running tool's output. Each update replaces the previous one.
 export interface ToolProgress {
-  readonly message: string;
+  readonly output: string;
 }

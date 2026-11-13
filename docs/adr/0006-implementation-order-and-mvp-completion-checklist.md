@@ -296,6 +296,14 @@ something works.
 12. ADR 0004 and ADR 0005 are marked `accepted`. This record marks them so; implementing against a
     proposed record invites re-litigating a five-package boundary decision mid-build.
 
+On 2026-11-13, [CDA-71](https://datn-fit-hcmus.atlassian.net/browse/CDA-71) amended this record:
+`bash` reports its latest output while a command runs, and Agent Core emits it as
+`tool_execution_progress`, bounded as ADR 0002 §8 describes. Item 1's exception therefore covers
+only `verification_progress`, which stays without an emitter. Showing tool progress in the TUI
+belongs to the projection of D4 ([CDA-82](https://datn-fit-hcmus.atlassian.net/browse/CDA-82)), which
+gives an executing Tool Call the latest output tail. ADR 0005 §4 still leaves both progress events
+out of `events.jsonl`.
+
 ### 7. Tier 2: MVP evaluated
 
 Tier 2 is the recorded benchmark result. The line between the tiers is not whether Modal is
@@ -367,8 +375,8 @@ lookup rather than a search, each pull request that adapts code from Pi names th
 - Tier 1 can be reached, demonstrated, and written up without model spend or a credential-carrying
   job; its only paid step is one oracle job on Modal. Tier 2 cannot start until the credential rule is implemented and tested per
   backend.
-- The MVP ships without the split rail and without progress events for tools or Verification. Both
-  are declared deferrals, not omissions.
+- The MVP ships without the split rail and without progress events for Verification. Both are
+  declared deferrals, not omissions. Progress events for tools arrived with CDA-71 (§6).
 - Reaching Join 2 through the headless entry point means the first end-to-end proof is not the
   full-screen TUI the destination names. Track C running from Join 1 is what keeps that from becoming
   a late surprise; if track C stalls, Join 3 becomes the schedule risk of the whole plan.

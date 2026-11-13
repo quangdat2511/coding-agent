@@ -176,6 +176,7 @@ export interface ModelPort {
 export interface Clock {
   now(): string; // ISO-8601 wall-clock time for occurredAt
   monotonicMs(): number; // durations and maxDurationMs
+  setTimer(delayMs: number, callback: () => void): () => void; // returns a cancel function
 }
 
 export type IdKind =
@@ -342,6 +343,13 @@ never enters Agent State. After an accepted cancellation, Agent Core records an 
 as cancelled whether `execute` resolves or rejects, and waits for it to settle within the
 cancellation grace period (ADR 0002 §5).
 
+Agent Core also checks at run time what a tool hands back, because `ExecutableTool` binds only code
+type-checked against it, and a registry holds whatever was registered. An `execute` result that is
+not a `ToolOutcome` becomes the same `TOOL_INTERNAL_ERROR`. A progress update that is not a
+`ToolProgress` is dropped, because Tool Progress is advisory: the Tool Result still carries the
+call's output, so a bad update must not fail the call. Nothing records the drop, since ADR 0002
+defines no Session Event that could carry it.
+
 Not exported: the state machine implementation and the Tool Call scheduler. Agent Core performs no
 automatic retry or recovery (ADR 0002 §4) and no history compaction; ADR 0003 §4 limits in-session
 memory to the canonical transcript and defers compaction.
@@ -373,7 +381,7 @@ export function createWorkspaceResolver(
 >;
 
 export function normalizeWindowsShellPath(input: string): string;
-export function createDefaultTools(): ToolRegistry;
+export function createDefaultTools(launcher: ChildProcessLauncher): ToolRegistry;
 export function createChildEnvironmentBuilder(
   credentialEnvVars: readonly string[],
   platform?: NodeJS.Platform,
@@ -384,15 +392,12 @@ export function createChildProcessLauncher(
 export function readTool(): ExecutableTool<typeof ReadParams>;
 export function writeTool(): ExecutableTool<typeof WriteParams>;
 export function editTool(): ExecutableTool<typeof EditParams>;
+export function bashTool(launcher: ChildProcessLauncher): ExecutableTool<typeof BashParams>;
 ```
 
-`createDefaultTools()` currently registers only `read`, `write`, and `edit`, and keeps its
-zero-argument signature. The target API for CDA-71 is
-`createDefaultTools(launcher: ChildProcessLauncher): ToolRegistry` and
-`bashTool(launcher: ChildProcessLauncher): ExecutableTool<typeof BashParams>`. CDA-74 will add the
-Verification Runner with the same configured launcher dependency. These are planned signatures,
-not exports implemented by CDA-68. They replace the original zero-argument sketches when process
-execution is added; they do not add tool timeout options.
+`createDefaultTools` registers `read`, `write`, `edit`, and `bash`. CDA-74 will add the
+Verification Runner with the same configured launcher dependency. The launcher arguments, added in
+CDA-71, replace the original zero-argument sketches; they do not add tool timeout options.
 
 The composition root reads the complete `PROVIDER_CREDENTIAL_ENV_VARS` export from `ai` and
 supplies it to the launcher's factory in `tools`. The set includes every credential variable name
@@ -443,8 +448,11 @@ signal the group rather than only the shell. On Windows it uses Bun's detached-p
 it does not promise POSIX group signaling. The option does not unref the child or terminate its
 descendants. CDA-71 and CDA-74 remain responsible for timeout, cancellation, descendant cleanup,
 and bounded output draining. This avoids requiring those adapters to bypass the launcher just to
-request process isolation. The credential filter and `CI`/`TERM` override share one internal
-`environmentKeyOf` helper; this helper is not re-exported from the package entry point.
+request process isolation. CDA-71 keeps that supervision inside `bash.ts`, because `bash` is its
+only user so far. CDA-74 moves it into a module that `bash` and the Verification Runner share, as
+`createOutputCollector` already is, instead of copying it; the second user shows which parts both
+need. The credential filter and `CI`/`TERM` override share one internal `environmentKeyOf` helper;
+this helper is not re-exported from the package entry point.
 
 `createWorkspaceResolver` canonicalizes and validates `repoRoot` once, which satisfies ADR 0002's
 requirement that `repoRoot` be valid before the Agent Session reaches `ready`. Tools take no
@@ -689,6 +697,23 @@ amended this record:
 The standalone logic prototype and its accepted Q1–Q3 verdict are preserved on branch
 `CDA-68-prototype-child-environment`, commit `b8007bd`, under `packages/tools/prototype/`.
 
+On 2026-11-12, [Run commands through the bash tool](https://datn-fit-hcmus.atlassian.net/browse/CDA-71)
+amended this record:
+
+- **Tool Progress** (§3): `ToolProgress` is `{ output: string }`, the latest tail of the tool's
+  output, which replaces the previous update rather than adding to it. It was a free-text
+  `message`. `VerificationProgress` is unchanged. ADR 0002 §8 gives the bounds Agent Core applies.
+- **Clock timers** (§3): `Clock` gains `setTimer`, so Agent Core can deliver a held progress update
+  when its interval ends while staying free of wall-clock dependence; the test clock runs due
+  timers as it advances. ADR 0002's cancellation grace period can use the same port.
+- **Default tools** (§4): `createDefaultTools` and `bashTool` take the configured launcher. The
+  composition root registers `bash` with the Agent Session in CDA-80, which registers all four
+  tools.
+- **What a tool hands back** (§3): a progress update that is not a `ToolProgress` is dropped, just
+  as an `execute` result that is not a `ToolOutcome` already becomes `TOOL_INTERNAL_ERROR`.
+- **Process supervision** (§4): timeout, cancellation, descendant cleanup, and output draining stay
+  in `bash.ts` until CDA-74, which moves them into a module shared with the Verification Runner.
+
 ## Consequences
 
 - `ai` tests against recorded provider fixtures with no other package present. Agent Core tests use
@@ -712,7 +737,7 @@ The standalone logic prototype and its accepted Q1–Q3 verdict are preserved on
 - Costs accepted: a fifth package; a rename pass across `packages/ai`; a two-phase tool port that is
   more work than a single `execute`; per-provider capability declarations; and an injected clock
   and ID source that lengthen construction at the composition root.
-- `ToolProgress` is shaped with the first tool that reports progress; Agent Core owns and bounds
-  it.
+- `ToolProgress` is shaped with the first tool that reports progress, `bash` in CDA-71; Agent
+  Core owns and bounds it.
 - Adding Pi's MIT notice to `packages/ai/src/utils/event-stream.ts`, or rewriting that file, remains
   separate follow-up work (§8).

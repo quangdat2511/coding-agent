@@ -1,3 +1,4 @@
+export { BashParams, bashTool } from "./bash.ts";
 export type { ChildEnvironment, CreateChildEnvironmentResult } from "./child-environment.ts";
 export { createChildEnvironmentBuilder } from "./child-environment.ts";
 export type {

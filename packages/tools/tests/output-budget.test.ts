@@ -2,6 +2,7 @@ import { describe, expect, it } from "bun:test";
 import { Buffer } from "node:buffer";
 import {
   boundToolOutput,
+  createOutputCollector,
   MAX_TOOL_OUTPUT_BYTES,
   TOOL_OUTPUT_TRUNCATION_MARKER,
 } from "../src/output-budget.ts";
@@ -126,5 +127,76 @@ describe("bounding tool output", () => {
       truncated: true,
     });
     expect(bytesOf(bounded.content)).toBe(MAX_TOOL_OUTPUT_BYTES - 2 * droppedPerEnd);
+  });
+});
+
+describe("bounding tool output to a smaller budget", () => {
+  it("splits what remains of a smaller budget evenly around the marker", () => {
+    // A 100-byte budget leaves (100 - 26) / 2 = 37 bytes for each end.
+    const content = "a".repeat(37) + "OMITTED".repeat(10) + "z".repeat(37);
+
+    expect(boundToolOutput(content, 100)).toEqual({
+      content: `${"a".repeat(37)}${TOOL_OUTPUT_TRUNCATION_MARKER}${"z".repeat(37)}`,
+      truncated: true,
+    });
+    expect(boundToolOutput("a".repeat(100), 100)).toEqual({
+      content: "a".repeat(100),
+      truncated: false,
+    });
+  });
+});
+
+describe("collecting streamed output within the budget", () => {
+  const encoder = new TextEncoder();
+  const inputs: Record<string, string> = {
+    empty: "",
+    short: "Compiled 3 files\n",
+    "exactly the budget": "a".repeat(MAX_TOOL_OUTPUT_BYTES),
+    "one byte over": "a".repeat(MAX_TOOL_OUTPUT_BYTES + 1),
+    "two-byte characters": "é".repeat(30_001),
+    "four-byte characters": `x${"😀".repeat(12_345)}`,
+    "mixed log": Array.from({ length: 4_000 }, (_, i) => `line ${i}: ổn định ✓ 😀\n`).join(""),
+  };
+
+  // Splits text into byte chunks of the given size, so characters break across chunks.
+  const chunksOf = (text: string, size: number): Uint8Array[] => {
+    const bytes = encoder.encode(text);
+    const chunks: Uint8Array[] = [];
+    for (let at = 0; at < bytes.byteLength; at += size) chunks.push(bytes.slice(at, at + size));
+    return chunks;
+  };
+
+  for (const [name, text] of Object.entries(inputs)) {
+    for (const reserve of [0, 37]) {
+      it(`matches bounding the whole output: ${name}, ${reserve} bytes reserved`, () => {
+        const expected = boundToolOutput(text, MAX_TOOL_OUTPUT_BYTES - reserve);
+        for (const size of [1, 3, 4_096, 65_536]) {
+          if (size === 1 && text.length > 50_000) continue;
+          const collector = createOutputCollector();
+          for (const chunk of chunksOf(text, size)) collector.push(chunk);
+          expect(collector.finish(reserve)).toEqual(expected);
+        }
+      });
+    }
+  }
+
+  it("says whether the last byte pushed is a newline, once it has been cut too", () => {
+    const collector = createOutputCollector();
+    expect(collector.endsWithNewline()).toBe(false);
+
+    collector.push(encoder.encode("building\n"));
+    expect(collector.endsWithNewline()).toBe(true);
+    collector.push(encoder.encode("a".repeat(MAX_TOOL_OUTPUT_BYTES)));
+    expect(collector.endsWithNewline()).toBe(false);
+    collector.push(encoder.encode("done\n"));
+    collector.push(new Uint8Array(0));
+    expect(collector.endsWithNewline()).toBe(true);
+  });
+
+  it("decodes bytes that are not UTF-8 as replacement characters", () => {
+    const collector = createOutputCollector();
+    collector.push(new Uint8Array([0x6f, 0x6b, 0xff, 0x0a]));
+
+    expect(collector.finish(0)).toEqual({ content: "ok�\n", truncated: false });
   });
 });

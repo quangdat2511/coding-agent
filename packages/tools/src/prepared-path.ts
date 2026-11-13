@@ -10,7 +10,8 @@ export async function revalidatePreparedPath(
   resolve: (path: RepoPath) => Promise<PathResolution>,
 ): Promise<PathResolution> {
   const prepared = paths[0];
-  // The file tools prepare exactly one path; a tool that prepares several must validate each one.
+  // The file tools and bash prepare exactly one path; a tool that prepares several must validate
+  // each one.
   if (prepared === undefined) throw new Error("the prepared call has no path to re-validate");
   const resolved = await resolve(prepared);
   if (!resolved.ok) return resolved;
