@@ -190,16 +190,17 @@ also needs `TuiModel` from C1, because `tui` owns that type. Owns the two later 
 | D4 | `projectSessionEvent` and the interactive path | The projection has unit tests and performs no I/O |
 
 **Track E, provider breadth.** Runs from Join 1, parallel to everything else: Anthropic, then
-OpenRouter, OpenAI, xAI, and OpenCode, each against one shared conformance suite of recorded
-fixtures. Exit criterion: every provider passes the same suite, and each declared deviation is a
-typed capability rather than a branch inside Agent Core.
+OpenRouter, OpenAI, and xAI, each against one shared conformance suite of recorded fixtures. Exit
+criterion: every provider passes the same suite, and each declared deviation is a typed capability
+rather than a branch inside Agent Core.
 
 On 2026-11-12, [CDA-30](https://datn-fit-hcmus.atlassian.net/browse/CDA-30) amended this record:
-`opencode` becomes a sixth `--provider` value, which
-[ADR 0007](./0007-evaluation-provider-and-model.md) records; it joins track E, and the checklist
-below grows to six providers. It was not among the values ADR 0005 §3 accepted before this; its
-adapter stayed in `packages/ai` and kept working, but it was excluded from the conformance suite,
-from the completion checklist and from that command line. The promotion is a scope change to
+[ADR 0007](./0007-evaluation-provider-and-model.md) makes `opencode` a sixth `--provider` value for
+the recorded evaluation job. It does **not** join track E or the tier-1 checklist: that checklist
+keeps measuring the five MVP providers, and the Go adapter's conformance is a tier-2 prerequisite
+tracked by CDA-112. It was not among the values ADR 0005 §3 accepted before this; its adapter stayed
+in `packages/ai` and kept working, but it was excluded from the conformance suite, from the
+completion checklist and from that command line. The promotion is a scope change to
 [the map](https://datn-fit-hcmus.atlassian.net/browse/CDA-13) rather than an ordering choice, and
 the map still lists five providers until its owners update it.
 
@@ -280,8 +281,9 @@ something works.
    approval and one cancellation, with a committed demo script and a recorded terminal capture. A
    checklist item that reads "the demo works" is not checkable, and the recording is what survives
    into the thesis and to a reviewer who was not present.
-7. All six providers pass the shared conformance suite: Google, Anthropic, OpenRouter, OpenAI, xAI,
-   and `opencode`, the sixth provider, per [ADR 0007](./0007-evaluation-provider-and-model.md).
+7. All five MVP providers pass the shared conformance suite: Google, Anthropic, OpenRouter, OpenAI,
+   and xAI. `opencode` stays outside this item; its conformance is a tier-2 prerequisite
+   (§7 item 3).
 8. Boundary enforcement is in place and has been shown to fail: per-package manifests, the Biome
    overrides, and the CI bundle check, with `bun --filter '*' typecheck`, `bun test`, and
    `biome ci .` green.
@@ -322,16 +324,15 @@ TerminalBench evaluation, so the MVP reaches it only when both tiers are complet
    model, and this record did not either: a cheap weak model produces a valid job that says nothing,
    so the choice needed its own thinking and became its own decision ticket on the map.
    [ADR 0007](./0007-evaluation-provider-and-model.md) resolves it: `opencode` with
-   `deepseek-v4.1-flash`, recorded as a configuration result rather than a capability ceiling.
+   `deepseek-v4.1-flash`, recorded as a configuration result rather than a capability ceiling. Its
+   implementation (CDA-112) and that provider's HTTP status (CDA-83) are tier-2 prerequisites.
 
-Item 3 blocked nothing in tier 1 when this record was written, but its resolution does: ADR 0007
-promotes `opencode`, which puts the Go adapter's conformance (CDA-112) inside track E and therefore
-inside tier 1 item 7. It also carried lead time that is not decision time — a paid key, a rate limit
-checked at the concurrency the job will use — and it reached back into tier 1, because ADR 0005 §7's
-second rerun condition reads the provider's HTTP status from `MODEL_FAILURE` details; now that
-[ADR 0007](./0007-evaluation-provider-and-model.md) names the provider, that status belongs in its
-adapter (CDA-83), and adapters are track E, which is tier 1 work. Any point after track E started
-was soon enough.
+Item 3 blocks nothing in tier 1. Its resolution adds tier-2 work instead: the Go adapter's
+conformance is CDA-112, and ADR 0005 §7's rerun condition needs that provider's HTTP status from
+CDA-83, so both are prerequisites of the recorded job rather than of the five-provider checklist. It
+also carried lead time that is not decision time — a paid key, a rate limit checked at the
+concurrency the job will use — and deciding late risked reopening a tier-1 item that was already
+called complete, which is why it was asked for while tier 1 was still running.
 
 No reward value is a criterion, in either tier.
 

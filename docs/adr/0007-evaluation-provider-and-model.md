@@ -55,8 +55,11 @@ Zen plan — with **`deepseek-v4.1-flash`**.
    and 2.6M output tokens — so one month covers roughly 38 such jobs off-peak and 20 at peak,
    against roughly 7.7 for the same $10 spent pay-per-use at $1.3 a job. The gap is mostly the
    tenfold subsidy — $10 buys $100 of allowance — partly offset by Go's list prices, which are about
-   twice OpenRouter's cheapest endpoint. The comparison assumes the allowance is used; a single job
-   on the subscription still costs the $10 month.
+   twice OpenRouter's cheapest endpoint. The ground is the plan rather than this month: evaluation
+   repeats the job — smoke, recorded, rerun, and the re-runs any change to the agent forces — and
+   the subscription overtakes pay-per-use above about eight full jobs a month. The team expects to
+   cross that during evaluation; below it, pay-per-use is cheaper, and this record states the
+   condition rather than claiming the subscription is cheaper unconditionally.
 
    **The bound matters as much as the typical case, and it does not fit one window.** At the
    250-turn ceiling, and at about 1,000 output tokens a turn, the same job consumes roughly 400M
@@ -72,17 +75,18 @@ Zen plan — with **`deepseek-v4.1-flash`**.
    above the roughly 2,600 requests a typical job issues, and no per-minute cap appears in its
    documentation, so the allowance binds, not the request rate.
 
-   **Exhaustion is a protocol event, not an operational footnote.** With Extra Usage off, Go refuses
-   the request once a window is exhausted, and the adapter turns that refusal into a
-   `MODEL_FAILURE`. Until CDA-83 lands that failure carries no status and therefore scores as an
-   agent outcome; afterwards it is rerun-eligible only if the status is 401, 403, 429 or 5xx, which
-   protocol §7 fixes. A rerun job that starts inside the already-exhausted window fails the same
-   way, and "a rerun trial is never rerun", so the job would never become valid. Two rules follow:
-   Extra Usage stays **off** for the recorded job, so a run cannot silently continue at Console
-   rates; and
-   the rerun job starts only after the window the recorded job exhausted has reset. A status outside
-   protocol §7's list, such as 402, makes the trial an agent outcome, so CDA-83 records the status
-   Go actually returns rather than assuming 429.
+   **Exhaustion is a cost event, not a pass.** Extra Usage is **on**, with a monthly spend limit set
+   in the Console, because the evaluation's token burn is estimated rather than known and a run must
+   not stall mid-job for a reason that is not the agent's. When the allowance is exhausted, Go
+   continues at Console pay-as-you-go rates until that limit; past it, requests fail and the adapter
+   turns the refusal into a `MODEL_FAILURE`. Until CDA-83 lands that failure carries no status and
+   scores as an agent outcome; afterwards it is rerun-eligible only for 401, 403, 429 or 5xx, per
+   protocol §7, so CDA-83 records the status Go actually returns rather than assuming 429. Two
+   consequences follow: the recorded job's manifest must record the limit and the observed spend,
+   because the subscription no longer bounds the bill by itself; and the rerun job starts only after
+   the window that the recorded job exhausted has reset, because "a rerun trial is never rerun". The
+   limit's value is set by a later ticket, once the smoke job has measured the real rate: this
+   record fixes the mechanism, not the number.
 
 3. **What the job demonstrates, and what it does not.** It demonstrates that the agent works end to
    end on the full dataset and reports how well *this configuration* does. It does not establish how
@@ -119,7 +123,8 @@ Zen plan — with **`deepseek-v4.1-flash`**.
    what lets Go reuse its prompt cache, which the cost model above assumes, so its value must stay
    stable for the whole Agent Session and differ between sessions: a per-turn UUID would defeat the
    cache and price the typical job's input as uncached, about $6.2 instead of $2.6 off-peak.
-   `opencode` then joins the shared conformance suite. No recorded job runs on it until the
+   `opencode` then joins the shared conformance suite as the gate for the recorded job, not as a
+   sixth member of the tier-1 provider checklist (ADR 0006 §3). No recorded job runs on it until the
    conformance suite and the credential-isolation test of protocol §7 pass, because an
    adapter-shaped failure would be scored against the agent. The
    [map](https://datn-fit-hcmus.atlassian.net/browse/CDA-13) fixes five providers in its
@@ -168,8 +173,8 @@ Zen plan — with **`deepseek-v4.1-flash`**.
   this record and the map disagree.
 - **Four accepted records are amended with it:** ADR 0001 §8's credential scope; ADR 0004's
   statement that OpenCode credentials sit outside the declared set; ADR 0005 §3's provider list,
-  §7's recorded-job rules and §8's secret-scan prefixes (`oc_sk_`); and ADR 0006 §3's exclusion and
-  track E membership, §6 item 7, and §7 item 3. The comment at the head of `credentials.ts` and the
+  §7's recorded-job rules and §8's secret-scan prefixes (`oc_sk_`); and ADR 0006 §3's exclusion
+  note and §7 item 3. The comment at the head of `credentials.ts` and the
   `Model Provider` entry in `packages/ai/CONTEXT.md` describe the old scope too; CDA-112 fixes
   both.
 - **Implementation work is owed, and it is more than a catalogue entry.** `deepseek-v4.1-flash`
