@@ -190,14 +190,20 @@ also needs `TuiModel` from C1, because `tui` owns that type. Owns the two later 
 | D4 | `projectSessionEvent` and the interactive path | The projection has unit tests and performs no I/O |
 
 **Track E, provider breadth.** Runs from Join 1, parallel to everything else: Anthropic, then
-OpenRouter, OpenAI, and xAI, each against one shared conformance suite of recorded fixtures. Exit
+OpenRouter, OpenAI, xAI, and OpenCode, each against one shared conformance suite of recorded
+fixtures. Exit
 criterion: every provider passes the same suite, and each declared deviation is a typed capability
 rather than a branch inside Agent Core.
 
-`opencode` is not one of the five MVP providers. Its adapter stays in `packages/ai` and keeps working,
-but it is excluded from the conformance suite, from the completion checklist, and from the
-`--provider` values of ADR 0005 §3. Promoting it would be a scope change to
-[the map](https://datn-fit-hcmus.atlassian.net/browse/CDA-13), not an ordering choice.
+On 2026-11-12, [CDA-30](https://datn-fit-hcmus.atlassian.net/browse/CDA-30) amended this record:
+[ADR 0007](./0007-evaluation-provider-and-model.md) makes `opencode` a sixth `--provider` value for
+the recorded evaluation job. It joins track E, so the checklist below grows to six providers and
+tier 1 completes only when the Go adapter's conformance (CDA-112) passes the shared suite. It was
+not among the values ADR 0005 §3 accepted before this; its adapter stayed
+in `packages/ai` and kept working, but it was excluded from the conformance suite, from the
+completion checklist and from that command line. The promotion is a scope change to
+[the map](https://datn-fit-hcmus.atlassian.net/browse/CDA-13) rather than an ordering choice, and
+the map still lists five providers until its owners update it.
 
 **Track F, evaluation.** Starts after D3, because the adapter depends on the command line and the
 files.
@@ -276,8 +282,8 @@ something works.
    approval and one cancellation, with a committed demo script and a recorded terminal capture. A
    checklist item that reads "the demo works" is not checkable, and the recording is what survives
    into the thesis and to a reviewer who was not present.
-7. All five MVP providers pass the shared conformance suite: Google, Anthropic, OpenRouter, OpenAI,
-   and xAI. `opencode` is excluded by §3.
+7. All six providers pass the shared conformance suite: Google, Anthropic, OpenRouter, OpenAI, xAI,
+   and `opencode`, the sixth provider, per [ADR 0007](./0007-evaluation-provider-and-model.md).
 8. Boundary enforcement is in place and has been shown to fail: per-package manifests, the Biome
    overrides, and the CI bundle check, with `bun --filter '*' typecheck`, `bun test`, and
    `biome ci .` green.
@@ -297,7 +303,8 @@ involved, since tier 1's oracle job runs there too. It is drawn where a job carr
 credential and spends on a model. Every tier-2 job does both, so tier 2 is gated on the isolation
 test passing in a container on each backend a job will use, it spends model money on top of
 compute, it depends on provider rate limits the team does not control, and the provider and model
-it runs on is still an open decision (item 3). Tier 1 has no credential, no model spend, and no open
+it runs on was an open decision until [ADR 0007](./0007-evaluation-provider-and-model.md) (item 3).
+Tier 1 has no credential, no model spend, and no open
 decision: it is code and tests on a developer machine, plus one oracle job that needs a Modal account
 and compute (§6 item 11). A checklist whose final item cannot be scheduled cannot tell the team when
 to stop building, which is why the line is drawn here.
@@ -314,17 +321,20 @@ TerminalBench evaluation, so the MVP reaches it only when both tiers are complet
    the recorded job is valid under ADR 0005 §7; its manifest and report are committed; and its
    archive passed the secret scan and is published.
 3. The evaluation provider and model are chosen. ADR 0005 §7 states that it does not choose the
-   model, and this record does not either: a cheap weak model produces a valid job that says nothing,
-   so the choice needs its own thinking and becomes its own decision ticket on the map.
+   model, and this record did not either: a cheap weak model produces a valid job that says nothing,
+   so the choice needed its own thinking and became its own decision ticket on the map.
+   [ADR 0007](./0007-evaluation-provider-and-model.md) resolves it: `opencode` with
+   `deepseek-v4.1-flash`, recorded as a configuration result rather than a capability ceiling. Its
+   implementation (CDA-112) and that provider's HTTP status (CDA-83) are tier-1 work, because the
+   provider joins track E.
 
-Item 3 blocks nothing in tier 1, but it should be decided while tier 1 is still running rather than
-after it closes, for two reasons. It carries lead time that is not decision time: a paid key, a rate
-limit checked at the concurrency the job will use, and possibly a quota increase. And it can reach
-back into tier 1, because ADR 0005 §7's second rerun condition reads the provider's HTTP status from
-`MODEL_FAILURE` details, which ADR 0005 lists as an open dependency; once the provider is known, that
-status belongs in its adapter, and adapters are track E, which is tier 1 work. Deciding late risks
-reopening a tier-1 item that was already called complete. Any point after track E starts is soon
-enough.
+Item 3 blocked nothing in tier 1 when this record was written, but its resolution does: ADR 0007
+promotes `opencode`, which puts the Go adapter's conformance (CDA-112) inside track E and therefore
+inside tier 1 item 7, so tier 1 completes only when that adapter passes the suite. It also carried
+lead time that is not decision time — a paid key, a rate limit checked at the concurrency the job
+will use — and it reached back into tier 1, because ADR 0005 §7's rerun condition needs that
+provider's HTTP status from CDA-83. Deciding late risked reopening a tier-1 item that was already
+called complete, which is why it was asked for while tier 1 was still running.
 
 No reward value is a criterion, in either tier.
 
