@@ -198,7 +198,8 @@ On 2026-11-12, [CDA-30](https://datn-fit-hcmus.atlassian.net/browse/CDA-30) amen
 [ADR 0007](./0007-evaluation-provider-and-model.md) makes `opencode` a sixth `--provider` value for
 the recorded evaluation job. It does **not** join track E or the tier-1 checklist: that checklist
 keeps measuring the five MVP providers, and the Go adapter's conformance is a tier-2 prerequisite
-tracked by CDA-112. It was not among the values ADR 0005 §3 accepted before this; its adapter stayed
+tracked by CDA-112. Its adapter must still pass the shared suite, because that is the gate for the
+recorded job; passing it does not add a line to the tier-1 checklist. It was not among the values ADR 0005 §3 accepted before this; its adapter stayed
 in `packages/ai` and kept working, but it was excluded from the conformance suite, from the
 completion checklist and from that command line. The promotion is a scope change to
 [the map](https://datn-fit-hcmus.atlassian.net/browse/CDA-13) rather than an ordering choice, and
