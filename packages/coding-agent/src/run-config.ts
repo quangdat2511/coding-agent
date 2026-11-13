@@ -15,12 +15,26 @@ import type { Profile, ProviderId, RunArgs } from "./run-args.ts";
 // The ADR 0003 §4 defaults. CDA-59 chose cancellationGraceMs: long enough for a tool or
 // Verification child to go from SIGTERM to SIGKILL, and short enough that a cancelled run still
 // writes its files inside the 10 s `docker stop` allows before it kills the container.
-export const DEFAULT_SESSION_LIMITS: SessionLimits = Object.freeze({
+const DEFAULT_SESSION_LIMITS: SessionLimits = Object.freeze({
   maxModelTurns: 30,
   maxToolCalls: 100,
   maxDurationMs: 600_000,
   maxConsecutiveRecoverableFailures: 3,
   cancellationGraceMs: 5_000,
+});
+
+// The Evaluation Profiles of ADR 0005 §5. A profile selects only SessionLimits: every other part of
+// the configuration is the same under each, so the evaluated agent is the MVP with a larger budget.
+// The values live here, not in a flag or an environment variable, so a build fixes them.
+export const SESSION_LIMITS_BY_PROFILE: Readonly<Record<Profile, SessionLimits>> = Object.freeze({
+  default: DEFAULT_SESSION_LIMITS,
+  terminalbench: Object.freeze({
+    maxModelTurns: 250,
+    maxToolCalls: 1_000,
+    maxDurationMs: 3_600_000,
+    maxConsecutiveRecoverableFailures: 10,
+    cancellationGraceMs: DEFAULT_SESSION_LIMITS.cancellationGraceMs,
+  }),
 });
 
 // null leaves a setting to the provider's own default.
@@ -96,13 +110,6 @@ export type ResolveRunConfigResult =
       readonly code: "INVALID_CONFIGURATION";
       readonly message: string;
       readonly field: string;
-    }
-  // Temporary: CDA-79 (D3.3) resolves terminalbench to the ADR 0005 §5 limits and removes this.
-  | {
-      readonly ok: false;
-      readonly code: "NOT_IMPLEMENTED";
-      readonly message: string;
-      readonly field: "--profile";
     };
 
 export interface ResolveRunConfigContext {
@@ -356,18 +363,6 @@ export async function resolveRunConfig(
   const outputDir = await prepareOutputDir(cwd, args.outputDir);
   if (!outputDir.ok) return outputDir;
 
-  // Checked last so that a terminalbench run still reports every configuration error as one. No
-  // session runs, so the output directory it created is removed again.
-  if (args.profile === "terminalbench") {
-    await removeCreated(outputDir.value.created);
-    return {
-      ok: false,
-      code: "NOT_IMPLEMENTED",
-      field: "--profile",
-      message: "--profile terminalbench is not implemented yet; CDA-79 (D3.3) adds its limits",
-    };
-  }
-
   const { variable, value } = credential;
   return {
     ok: true,
@@ -384,7 +379,7 @@ export async function resolveRunConfig(
       givenRepoRoot: repoRoot.value.given,
       outputDir: outputDir.value.path,
       profile: args.profile,
-      limits: DEFAULT_SESSION_LIMITS,
+      limits: SESSION_LIMITS_BY_PROFILE[args.profile],
       verification: { command: command ?? null },
     },
   };

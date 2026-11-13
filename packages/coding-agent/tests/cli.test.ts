@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { existsSync, statSync } from "node:fs";
-import { cp, mkdir, readdir } from "node:fs/promises";
+import { cp, mkdir, readdir, rename } from "node:fs/promises";
 import { join } from "node:path";
 import { runnerChainIsClean } from "./support/ancestor-chain.ts";
 import { NAMED_TASK_FILE, NAMED_TASK_REPO, READ_ONLY_RUN } from "./support/named-task.ts";
@@ -11,6 +11,7 @@ import {
   runProcess,
   withTemporaryDirectory,
 } from "./support/process.ts";
+import { withoutProfile } from "./support/profile.ts";
 import { REPLAY_FIXTURES_ENV_VAR } from "./support/recorded-provider.ts";
 
 // A run that gets past argument parsing meets the ancestor check first.
@@ -275,6 +276,7 @@ describe("the coding-agent executable", () => {
         expect(await Bun.file(join(outputDir, "run.json")).json()).toMatchObject({
           schemaVersion: 1,
           codingAgent: { commit: null },
+          profile: "default",
           tools: ["read"],
         });
         expect(await lastEventType(outputDir)).toBe("session_settled");
@@ -393,25 +395,39 @@ describe("the coding-agent executable", () => {
     },
   );
 
-  // Temporary: CDA-79 (D3.3) gives terminalbench its limits. Until then it is not a configuration
-  // error, so it must not exit 2, which Harbor reads as an invalid invocation.
+  // Both runs use the same directory, so repoRoot and every other recorded value can match.
   it.skipIf(!cleanChain)(
-    "exits 70 on --profile terminalbench without leaving an output directory behind",
+    "exits 0 under --profile terminalbench and records a run.json that differs only in its limits",
     async () => {
       await withTemporaryDirectory(async (directory) => {
-        await Bun.write(join(directory, "task.md"), "Add a failing test, then make it pass.\n");
-        const { exitCode, stdout, stderr } = await run(
-          validRun({ "--profile": "terminalbench" }),
-          directory,
-          { ANTHROPIC_API_KEY: secret },
-        );
+        await cp(NAMED_TASK_REPO, join(directory, "repo"), { recursive: true });
+        const runUnder = async (profile: string) => {
+          const { exitCode, stderr } = await runProcess(
+            [...replayedNamedTask, "--profile", profile],
+            { cwd: directory, env: replayEnv(READ_ONLY_RUN.fixtures) },
+          );
+          expect(stderr).toBe("coding-agent: succeeded; workspace changed: no\n");
+          expect(exitCode).toBe(0);
+          const outputDir = join(directory, `out-${profile}`);
+          await rename(join(directory, "out"), outputDir);
+          expect((await readdir(outputDir)).sort()).toEqual(runFiles);
+          return Bun.file(join(outputDir, "run.json")).json();
+        };
+        const standard = await runUnder("default");
+        const terminalbench = await runUnder("terminalbench");
 
-        expect(exitCode).toBe(70);
-        expect(firstLine(stderr)).toBe(
-          "coding-agent: --profile terminalbench is not implemented yet; CDA-79 (D3.3) adds its limits",
-        );
-        expect(stdout).toBe("");
-        expect(await readdir(directory)).toEqual(["task.md"]);
+        expect(standard).toMatchObject({ profile: "default", limits: { maxModelTurns: 30 } });
+        expect(terminalbench).toMatchObject({
+          profile: "terminalbench",
+          limits: {
+            maxModelTurns: 250,
+            maxToolCalls: 1_000,
+            maxDurationMs: 3_600_000,
+            maxConsecutiveRecoverableFailures: 10,
+            cancellationGraceMs: standard.limits.cancellationGraceMs,
+          },
+        });
+        expect(withoutProfile(terminalbench)).toStrictEqual(withoutProfile(standard));
       });
     },
   );

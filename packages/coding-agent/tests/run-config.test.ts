@@ -13,8 +13,15 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { RunArgs } from "../src/run-args.ts";
-import { MAX_TASK_FILE_BYTES, parentIsFile, resolveRunConfig } from "../src/run-config.ts";
+import {
+  MAX_TASK_FILE_BYTES,
+  parentIsFile,
+  type RunConfig,
+  resolveRunConfig,
+  SESSION_LIMITS_BY_PROFILE,
+} from "../src/run-config.ts";
 import { noFifos, permissionsIgnored } from "./support/platform.ts";
+import { withoutProfile } from "./support/profile.ts";
 
 const secret = "sk-test-credential-value";
 
@@ -457,34 +464,47 @@ describe("classifying a missing output parent", () => {
   });
 });
 
-// Temporary: CDA-79 (D3.3) resolves terminalbench to the ADR 0005 §5 limits.
-describe("selecting the terminalbench profile before its limits exist", () => {
-  const notImplemented = {
-    ok: false,
-    code: "NOT_IMPLEMENTED",
-    field: "--profile",
-    message: "--profile terminalbench is not implemented yet; CDA-79 (D3.3) adds its limits",
-  } as const;
+describe("resolving an Evaluation Profile", () => {
+  async function resolveProfile(profile: RunArgs["profile"]): Promise<RunConfig> {
+    const resolved = await resolveWith({ profile });
+    if (!resolved.ok) throw new Error(`expected a configuration, got: ${resolved.message}`);
+    return resolved.config;
+  }
 
-  it("reports the profile as not implemented once every configuration check has passed", async () => {
-    expect(await resolveWith({ profile: "terminalbench", outputDir: "logs/out" })).toStrictEqual(
-      notImplemented,
-    );
-    // Nothing runs, so the output directory it created is removed again.
-    expect((await readdir(directory)).sort()).toEqual(["repo", "task.md"]);
+  // The credential is a closure, so it is compared by what it reveals.
+  const comparable = (config: RunConfig) => {
+    const { credential, ...rest } = withoutProfile(config);
+    return { ...rest, credential: { variable: credential.variable, value: credential.reveal() } };
+  };
+
+  // The same object, not an equal one: nothing computes a limit at run time, so neither a flag nor
+  // an environment variable can change it.
+  it("resolves terminalbench to the source-controlled ADR 0005 §5 limits", async () => {
+    const config = await resolveProfile("terminalbench");
+
+    expect(config.profile).toBe("terminalbench");
+    expect(config.limits).toBe(SESSION_LIMITS_BY_PROFILE.terminalbench);
+    expect(config.limits).toEqual({
+      maxModelTurns: 250,
+      maxToolCalls: 1_000,
+      maxDurationMs: 3_600_000,
+      maxConsecutiveRecoverableFailures: 10,
+      cancellationGraceMs: SESSION_LIMITS_BY_PROFILE.default.cancellationGraceMs,
+    });
   });
 
-  it("leaves an output directory that already existed in place", async () => {
-    await mkdir(join(directory, "out"));
-    expect(await resolveWith({ profile: "terminalbench" })).toStrictEqual(notImplemented);
-    expect(await readdir(join(directory, "out"))).toEqual([]);
+  it("changes nothing other than SessionLimits", async () => {
+    const standard = await resolveProfile("default");
+    const terminalbench = await resolveProfile("terminalbench");
+
+    expect(standard.limits).toBe(SESSION_LIMITS_BY_PROFILE.default);
+    expect(terminalbench.limits).not.toEqual(standard.limits);
+    expect(comparable(terminalbench)).toStrictEqual(comparable(standard));
   });
 
-  it("still refuses a configuration error first", async () => {
-    await expectRefused(
-      await resolveWith({ profile: "terminalbench", model: "no-such-model" }),
-      "--model",
-      '--model "no-such-model" is not a known anthropic model',
-    );
+  it("freezes the source-controlled limits", () => {
+    expect(Object.isFrozen(SESSION_LIMITS_BY_PROFILE)).toBe(true);
+    expect(Object.isFrozen(SESSION_LIMITS_BY_PROFILE.default)).toBe(true);
+    expect(Object.isFrozen(SESSION_LIMITS_BY_PROFILE.terminalbench)).toBe(true);
   });
 });
