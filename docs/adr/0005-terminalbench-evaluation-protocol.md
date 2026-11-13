@@ -153,9 +153,9 @@ only for the smoke job (§7).
 Changing a pin is a new decision that amends this record. Results are never pooled across pins.
 
 On 2026-11-12, [CDA-30](https://datn-fit-hcmus.atlassian.net/browse/CDA-30) amended this record in
-three places: §3 accepts `opencode` as a sixth provider value, §7 names the choice that
-[ADR 0007](./0007-evaluation-provider-and-model.md) makes, and §8 adds the `oc_sk_` prefix to the
-secret scan.
+four places: §3 accepts `opencode` as a sixth provider value, §7 names the choice that
+[ADR 0007](./0007-evaluation-provider-and-model.md) makes, §8 adds the `oc_sk_` prefix to the secret
+scan, and the note under Dependencies records that CDA-83 carries the status for this adapter.
 
 ### 2. Coding Agent artifact
 
@@ -509,8 +509,11 @@ step below is mandatory, and a failed step blocks the upload:
 2. Search the same files for `[REDACTED]`. Each occurrence is reviewed. One that Harbor wrote over a
    credential means the credential appeared in the logs, even though its value is gone.
 3. Search the same files for the provider key prefixes `sk-ant-`, `sk-or-`, `sk-proj-`, `xai-`,
-   `AIza`, and `oc_sk_`. Each match is reviewed, and the scan fails until every match is shown not
-   to be a credential or is removed from the archive.
+   `AIza`, and `oc_sk_` ([OpenCode's harness page](https://opencode.ai/docs/console/harnesses) shows
+   the prefix in its key example, read 2026-11-12; confirm it against a live key before relying on
+   this step, because a different prefix would leave a truncated key unmatched). Each match is
+   reviewed, and the scan fails until every match is shown not to be a credential or is removed from
+   the archive.
 4. Revoke every credential that steps 1 to 3 show appeared in the logs, whether or not it would
    have been published, because the logs may already have been sent to the model provider and are
    already on the host.

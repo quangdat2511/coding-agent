@@ -324,15 +324,14 @@ TerminalBench evaluation, so the MVP reaches it only when both tiers are complet
    [ADR 0007](./0007-evaluation-provider-and-model.md) resolves it: `opencode` with
    `deepseek-v4.1-flash`, recorded as a configuration result rather than a capability ceiling.
 
-Item 3 blocks nothing in tier 1, but it should be decided while tier 1 is still running rather than
-after it closes, for two reasons. It carries lead time that is not decision time: a paid key, a rate
-limit checked at the concurrency the job will use, and possibly a quota increase. And it can reach
-back into tier 1, because ADR 0005 §7's second rerun condition reads the provider's HTTP status from
-`MODEL_FAILURE` details, which ADR 0005 lists as an open dependency; now that
+Item 3 blocked nothing in tier 1 when this record was written, but its resolution does: ADR 0007
+promotes `opencode`, which puts the Go adapter's conformance (CDA-112) inside track E and therefore
+inside tier 1 item 7. It also carried lead time that is not decision time — a paid key, a rate limit
+checked at the concurrency the job will use — and it reached back into tier 1, because ADR 0005 §7's
+second rerun condition reads the provider's HTTP status from `MODEL_FAILURE` details; now that
 [ADR 0007](./0007-evaluation-provider-and-model.md) names the provider, that status belongs in its
-adapter, and adapters are track E, which is tier 1 work. Deciding late risked reopening a tier-1
-item that was already called complete. Any point after track E starts was soon
-enough.
+adapter (CDA-83), and adapters are track E, which is tier 1 work. Any point after track E started
+was soon enough.
 
 No reward value is a criterion, in either tier.
 

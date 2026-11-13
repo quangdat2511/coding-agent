@@ -29,6 +29,15 @@ row, read 2026-11-12): Claude Opus 5.5 65.8%, Claude Sonnet 5.5 63.9%, GPT-6.1 S
 38.8%, GPT-5.6 Sol 38.5%, and Gemini 3.8 Flash 18.2% under mini-SWE-agent. No leaderboard row
 exists for the model this record chooses.
 
+Go's terms are quoted from [the Console Go documentation](https://opencode.ai/docs/console/go) and
+[the harnesses page](https://opencode.ai/docs/console/harnesses), both read 2026-11-12: $10 a month
+with $100 of DeepSeek V4.1 Flash allowance; list prices $0.15 and $0.60 per million input and
+output tokens off-peak, doubled at peak, cache reads at $0.003; per-model windows of 5 hours at 20%
+of the month, weekly at 50% and monthly at 100%; Extra Usage billed at Console pay-as-you-go rates;
+base URL `https://opencode.ai/inference/go`; and free-tier models refused to every client except
+OpenCode with HTTP 403. What the documentation does not say is which status Go returns when a window
+is exhausted, which is why item 2 turns that into a rule rather than an assumption.
+
 ## Decision
 
 The recorded job runs **`opencode`** — OpenCode's Go subscription gateway, not its pay-as-you-go
@@ -63,6 +72,18 @@ Zen plan — with **`deepseek-v4.1-flash`**.
    above the roughly 2,600 requests a typical job issues, and no per-minute cap appears in its
    documentation, so the allowance binds, not the request rate.
 
+   **Exhaustion is a protocol event, not an operational footnote.** With Extra Usage off, Go refuses
+   the request once a window is exhausted, and the adapter turns that refusal into a
+   `MODEL_FAILURE`. Until CDA-83 lands that failure carries no status and therefore scores as an
+   agent outcome; afterwards it is rerun-eligible only if the status is 401, 403, 429 or 5xx, which
+   protocol §7 fixes. A rerun job that starts inside the already-exhausted window fails the same
+   way, and "a rerun trial is never rerun", so the job would never become valid. Two rules follow:
+   Extra Usage stays **off** for the recorded job, so a run cannot silently continue at Console
+   rates; and
+   the rerun job starts only after the window the recorded job exhausted has reset. A status outside
+   protocol §7's list, such as 402, makes the trial an agent outcome, so CDA-83 records the status
+   Go actually returns rather than assuming 429.
+
 3. **What the job demonstrates, and what it does not.** It demonstrates that the agent works end to
    end on the full dataset and reports how well *this configuration* does. It does not establish how
    well the agent would work with a frontier model, because nothing in this budget buys that
@@ -94,8 +115,10 @@ Zen plan — with **`deepseek-v4.1-flash`**.
    ancestor check. The adapter must move to the Go gateway — SDK base URL
    `https://opencode.ai/inference/go/openai/v1`, since the OpenAI SDK appends `/chat/completions`
    itself; the `x-opencode-session` header in place of today's `x-session-id`; and a
-   `coding-agent/<version>` user agent — none of which it does today. The
-   session header is also what lets Go reuse its prompt cache, which the cost model above assumes.
+   `coding-agent/<version>` user agent — none of which it does today. The session header is also
+   what lets Go reuse its prompt cache, which the cost model above assumes, so its value must stay
+   stable for the whole Agent Session and differ between sessions: a per-turn UUID would defeat the
+   cache and price the typical job's input as uncached, about $6.2 instead of $2.6 off-peak.
    `opencode` then joins the shared conformance suite. No recorded job runs on it until the
    conformance suite and the credential-isolation test of protocol §7 pass, because an
    adapter-shaped failure would be scored against the agent. The
@@ -121,10 +144,11 @@ Zen plan — with **`deepseek-v4.1-flash`**.
   cap, and this harness cannot reproduce the maximum effort those scores used.
 - **GPT-6.1 Sol (60.9%).** The same objection: a capability claim would need a paid account, and the
   ranking gap to the leaders is within noise at one attempt per task.
-- **Gemini 3.8 Flash.** Admissible without any amendment, free for a smoke job, and $0.75/$3.75
-  paid — about $16 a job. Rejected because it is several times the subscription's marginal cost for
-  the same class of claim, and its only public TerminalBench row (18.2%) comes from a weaker harness,
-  so it is not a like-for-like comparison either.
+- **Gemini 3.8 Flash.** Admissible without amending any record, free for a smoke job, and
+  $0.75/$3.75 paid — about $16 a job — though it too needs a catalogue entry, since
+  `google.models.json` stops at `gemini-3.6-flash`. Rejected because it is several times the
+  subscription's marginal cost for the same class of claim, and its only public TerminalBench row
+  (18.2%) comes from a weaker harness, so it is not a like-for-like comparison either.
 - **A configurable OpenAI-compatible provider** (the `custom` factory, with `CUSTOM_BASE_URL` and a
   caller-chosen `apiKeyEnv`). Rejected: it needs dynamic credential-name discovery, which
   [ADR 0001](./0001-tool-contracts-and-safety-policy.md) §8 states a static set cannot cover, and it
@@ -132,8 +156,9 @@ Zen plan — with **`deepseek-v4.1-flash`**.
 - **The MiMo Token Plan.** Rejected on arithmetic: $6 buys 4.1 billion credits, about 1.2 billion
   credits per job on `mimo-v2.6-flash`, roughly 3.4 jobs a month against roughly 38 here. It would
   also need its own provider promotion.
-- **Pay-per-use on OpenRouter.** Kept as the fallback: admissible today, about $1.3 a job, and it
-  needs no amendment. It loses on cost per dollar once the job is re-run.
+- **Pay-per-use on OpenRouter.** Kept as the fallback: about $1.3 a job and no amendment, though it
+  needs the `deepseek/deepseek-v4.1-flash-1017` catalogue entry like any other provider. It loses on
+  cost per dollar once the job is re-run.
 
 ## Consequences
 
@@ -141,9 +166,12 @@ Zen plan — with **`deepseek-v4.1-flash`**.
   [the map](https://datn-fit-hcmus.atlassian.net/browse/CDA-13) says five model providers and its
   **Out of scope** section excludes others. Updating it is a separate action, and until it happens
   this record and the map disagree.
-- **Three accepted records are amended with it:** ADR 0001 §8's credential scope; ADR 0005 §3's
-  provider list, §7's recorded-job rules and §8's secret-scan prefixes (`oc_sk_`); and ADR 0006
-  §3's exclusion and track E membership, §6 item 7, and §7 item 3.
+- **Four accepted records are amended with it:** ADR 0001 §8's credential scope; ADR 0004's
+  statement that OpenCode credentials sit outside the declared set; ADR 0005 §3's provider list,
+  §7's recorded-job rules and §8's secret-scan prefixes (`oc_sk_`); and ADR 0006 §3's exclusion and
+  track E membership, §6 item 7, and §7 item 3. The comment at the head of `credentials.ts` and the
+  `Model Provider` entry in `packages/ai/CONTEXT.md` describe the old scope too; CDA-112 fixes
+  both.
 - **Implementation work is owed, and it is more than a catalogue entry.** `deepseek-v4.1-flash`
   must be added to `packages/ai/src/providers/opencode.models.json`, or `--model` refuses it with
   exit 2; the adapter must target the Go gateway with the session header and user agent; and
@@ -156,8 +184,8 @@ Zen plan — with **`deepseek-v4.1-flash`**.
 - **A region setting is a prerequisite.** DeepSeek V4.1 Flash is blocked in the default Europe and
   United States regions and needs the workspace's privacy setting set to Global.
 - **The free models are not usable here.** The console's free-tier models are served only inside the
-  OpenCode client; every other harness receives HTTP 403 "even with a Console API key". Only the paid
-  and Go models reach an external harness.
+  OpenCode client; every other harness receives HTTP 403 "even with a Console API key". Only the
+  paid and Go models reach an external harness.
 - **Go's model ids are dateless**, so the manifest records the id and the job date, and a change to
   what that id serves is a new job rather than a silent substitution.
 - **The allowance is a subscription**, so an incomplete or invalid job spends allowance rather than
