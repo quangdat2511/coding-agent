@@ -10,7 +10,7 @@ on:
 
 permissions: {}
 
-# Each single comment and each reply in a review thread is a review of its own. A comment waits five
+# Each single comment and each reply in a review thread is a review of its own. A comment waits two
 # minutes before it is relayed, and the next comment from the same reviewer on the same pull request
 # cancels that wait, so a burst of comments becomes one Discord note. A cancelled run does not start
 # the Discord PR Post workflow's job. Approvals and change requests get a group of their own, so
@@ -23,12 +23,12 @@ jobs:
   relay:
     name: Relay the review
     runs-on: ubuntu-24.04
-    timeout-minutes: 8
+    timeout-minutes: 5
 
     steps:
       - name: Wait for more comments
         if: github.event.review.state == 'commented'
-        run: sleep 300
+        run: sleep 120
 
       - name: Keep the pull request number and review ID
         run: >-

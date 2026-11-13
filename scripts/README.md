@@ -133,10 +133,10 @@ verdict (approved, changes requested, or commented) and mentions the pull reques
 by the author, such as replies to review threads, and reviews by bots get no note.
 
 GitHub makes a separate review with the commented verdict for each single comment and for each
-reply in a review thread. The relay workflow waits five minutes before it relays such a review. If
+reply in a review thread. The relay workflow waits two minutes before it relays such a review. If
 the same reviewer comments again on the same pull request during that wait, the new review cancels
 the wait and starts a new one. When the reviewer stops, one note reports the burst, such as
-`đã comment review (11 lần)`. Comments less than six minutes apart count as one burst. An approval
+`đã comment review (11 lần)`. Comments less than three minutes apart count as one burst. An approval
 or a change request is relayed at once. Its note also counts the comments that the reviewer made
 just before it, such as `đã approve, kèm 3 lần comment`. The relay runs from the code of the pull
 request, so a branch gets this wait only after you rebase it onto a `main` that has it.

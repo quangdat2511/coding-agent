@@ -27,11 +27,11 @@ const CREATION_WINDOW_MS = 2 * 60 * 1000;
 const RECORD_WAIT_MS = 60 * 1000;
 const RECORD_POLL_MS = 5 * 1000;
 // Each single comment and each reply in a review thread is a COMMENTED review of its own. The relay
-// workflow waits five minutes after a comment, and a newer review from the same reviewer cancels
+// workflow waits two minutes after a comment, and a newer review from the same reviewer cancels
 // that wait, so a burst of comments reaches Discord as one note. Reviews closer together than this
 // belong to one burst. It is a minute longer than the relay's wait, so a slow runner does not split
 // a burst and lose its first comments.
-export const REVIEW_BURST_MS = 6 * 60 * 1000;
+export const REVIEW_BURST_MS = 3 * 60 * 1000;
 const PAGE_SIZE = 100;
 
 type User = { login: string };

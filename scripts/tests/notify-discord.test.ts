@@ -261,22 +261,22 @@ function noteFor(subject: Review, history: Review[] = [subject]): string {
 }
 
 describe("reviewBurst", () => {
-  it("counts the comments that came less than six minutes apart", () => {
+  it("counts the comments that came less than three minutes apart", () => {
     const history = [
       review(1, "COMMENTED", "bob", 0),
-      review(2, "COMMENTED", "bob", 7),
-      review(3, "COMMENTED", "Bob", 12),
-      review(4, "COMMENTED", "carol", 13),
-      review(5, "COMMENTED", "bob", 17),
+      review(2, "COMMENTED", "bob", 4),
+      review(3, "COMMENTED", "Bob", 6),
+      review(4, "COMMENTED", "carol", 7),
+      review(5, "COMMENTED", "bob", 8),
     ];
-    expect(reviewBurst(review(5, "COMMENTED", "bob", 17), history)).toBe(3);
+    expect(reviewBurst(review(5, "COMMENTED", "bob", 8), history)).toBe(3);
     expect(reviewBurst(review(1, "COMMENTED", "bob", 0), history)).toBe(1);
   });
 
   it("leaves a comment to the newer review from the same reviewer", () => {
-    const history = [review(1, "COMMENTED", "bob", 0), review(2, "APPROVED", "bob", 3)];
+    const history = [review(1, "COMMENTED", "bob", 0), review(2, "APPROVED", "bob", 2)];
     expect(reviewBurst(review(1, "COMMENTED", "bob", 0), history)).toBeUndefined();
-    expect(reviewBurst(review(2, "APPROVED", "bob", 3), history)).toBe(1);
+    expect(reviewBurst(review(2, "APPROVED", "bob", 2), history)).toBe(1);
   });
 
   it("stops at an earlier verdict, which was already reported", () => {
