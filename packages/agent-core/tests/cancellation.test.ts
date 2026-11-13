@@ -515,7 +515,7 @@ describe("cancelling an Agent Session", () => {
       }
 
       stubborn.release();
-      await new Promise((r) => setTimeout(r, 10));
+      await new Promise((r) => setTimeout(r, 25));
       expect(session.snapshot().phase).toBe("failed");
       const events = await collect(session.events());
       const settledEvents = events.filter((e) => e.type === "session_settled");

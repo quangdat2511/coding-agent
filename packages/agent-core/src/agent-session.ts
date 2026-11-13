@@ -231,7 +231,6 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
         });
       }
     }, config.limits.cancellationGraceMs);
-    graceTimer?.unref?.();
   }
 
   function clearGraceTimer(): void {
