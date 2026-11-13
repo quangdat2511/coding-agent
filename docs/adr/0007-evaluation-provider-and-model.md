@@ -123,10 +123,10 @@ Zen plan — with **`deepseek-v4.1-flash`**.
    what lets Go reuse its prompt cache, which the cost model above assumes, so its value must stay
    stable for the whole Agent Session and differ between sessions: a per-turn UUID would defeat the
    cache and price the typical job's input as uncached, about $6.2 instead of $2.6 off-peak.
-   `opencode` then joins the shared conformance suite as the gate for the recorded job, not as a
-   sixth member of the tier-1 provider checklist (ADR 0006 §3). No recorded job runs on it until the
-   conformance suite and the credential-isolation test of protocol §7 pass, because an
-   adapter-shaped failure would be scored against the agent. The
+   `opencode` then joins the shared conformance suite as a sixth member of the tier-1 provider
+   checklist (ADR 0006 §3), so tier 1 completes only once that adapter passes. No recorded job runs
+   on it until the conformance suite and the credential-isolation test of protocol §7 pass, because
+   an adapter-shaped failure would be scored against the agent. The
    [map](https://datn-fit-hcmus.atlassian.net/browse/CDA-13) fixes five providers in its
    destination and excludes others in its Out of scope section.
 
@@ -173,8 +173,8 @@ Zen plan — with **`deepseek-v4.1-flash`**.
   this record and the map disagree.
 - **Four accepted records are amended with it:** ADR 0001 §8's credential scope; ADR 0004's
   statement that OpenCode credentials sit outside the declared set; ADR 0005 §3's provider list,
-  §7's recorded-job rules and §8's secret-scan prefixes (`oc_sk_`); and ADR 0006 §3's exclusion
-  note and §7 item 3. The comment at the head of `credentials.ts` and the
+  §7's recorded-job rules and §8's secret-scan prefixes (`oc_sk_`); and ADR 0006 §3's exclusion and
+  track E membership, §6 item 7, and §7 item 3. The comment at the head of `credentials.ts` and the
   `Model Provider` entry in `packages/ai/CONTEXT.md` describe the old scope too; CDA-112 fixes
   both.
 - **Implementation work is owed, and it is more than a catalogue entry.** `deepseek-v4.1-flash`
