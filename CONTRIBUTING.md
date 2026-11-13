@@ -226,7 +226,7 @@ Trong lúc chưa tự review xong, để PR ở trạng thái **Draft** để tr
 
 **Chỉ chủ PR** mới được chuyển qua lại giữa **Draft** và **Ready for review**. Người khác (kể cả reviewer) không tự ý chuyển trạng thái PR của người khác theo cả hai chiều, vì chỉ chủ PR mới biết PR đã thực sự sẵn sàng hay chưa.
 
-Khi PR được mở ở trạng thái **Ready for review**, hoặc chuyển từ **Draft** sang **Ready for review**, GitHub Actions tự tạo một post trong kênh `#ticket-forum` trên Discord, tag chủ PR và các reviewer đã được request. Reviewer được request sau, review mới (tag chủ PR), commit mới khi PR đang Ready (tag reviewer), PR chuyển về Draft, mở lại, merge hoặc đóng đều được báo vào cùng post đó. **Không tạo post cho PR bằng tay**, để tránh mỗi PR có hai post. Cấu hình xem [scripts/README.md](scripts/README.md#discord-pr-posts).
+Khi PR được mở ở trạng thái **Ready for review**, hoặc chuyển từ **Draft** sang **Ready for review**, GitHub Actions tự tạo một post trong kênh `#ticket-forum` trên Discord, tag chủ PR và các reviewer đã được request. Reviewer được request sau, review mới (tag chủ PR; comment liên tiếp của cùng một reviewer được gộp thành một tin, gửi sau khi reviewer ngừng comment 5 phút), commit mới khi PR đang Ready (tag reviewer), PR chuyển về Draft, mở lại, merge hoặc đóng đều được báo vào cùng post đó. **Không tạo post cho PR bằng tay**, để tránh mỗi PR có hai post. Cấu hình xem [scripts/README.md](scripts/README.md#discord-pr-posts).
 
 Ngay khi PR được mở (kể cả Draft), ticket tự chuyển sang `In Review` ([Bước 1](#bước-1-nhận-ticket-trên-jira)).
 

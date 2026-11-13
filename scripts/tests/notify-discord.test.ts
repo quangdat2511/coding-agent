@@ -12,7 +12,9 @@ import {
   planEvent,
   planPush,
   planReview,
+  type Review,
   readZipEntry,
+  reviewBurst,
   run,
   type ThreadRecord,
 } from "../notify-discord.ts";
@@ -247,40 +249,83 @@ describe("planPush", () => {
   });
 });
 
+// A review submitted `minutes` after NOW.
+function review(id: number, state: string, login: string, minutes = 0): Review {
+  return { id, state, login, submittedAt: new Date(NOW + minutes * 60 * 1000).toISOString() };
+}
+
+function noteFor(subject: Review, history: Review[] = [subject]): string {
+  const plan = planReview("Alice", subject, history, record(), config);
+  if (plan.kind !== "note") throw new Error(`expected note, got ${plan.kind}`);
+  return plan.message.content;
+}
+
+describe("reviewBurst", () => {
+  it("counts the comments that came less than six minutes apart", () => {
+    const history = [
+      review(1, "COMMENTED", "bob", 0),
+      review(2, "COMMENTED", "bob", 7),
+      review(3, "COMMENTED", "Bob", 12),
+      review(4, "COMMENTED", "carol", 13),
+      review(5, "COMMENTED", "bob", 17),
+    ];
+    expect(reviewBurst(review(5, "COMMENTED", "bob", 17), history)).toBe(3);
+    expect(reviewBurst(review(1, "COMMENTED", "bob", 0), history)).toBe(1);
+  });
+
+  it("leaves a comment to the newer review from the same reviewer", () => {
+    const history = [review(1, "COMMENTED", "bob", 0), review(2, "APPROVED", "bob", 3)];
+    expect(reviewBurst(review(1, "COMMENTED", "bob", 0), history)).toBeUndefined();
+    expect(reviewBurst(review(2, "APPROVED", "bob", 3), history)).toBe(1);
+  });
+
+  it("stops at an earlier verdict, which was already reported", () => {
+    const history = [
+      review(1, "COMMENTED", "bob", 0),
+      review(2, "CHANGES_REQUESTED", "bob", 1),
+      review(3, "COMMENTED", "bob", 2),
+    ];
+    expect(reviewBurst(review(3, "COMMENTED", "bob", 2), history)).toBe(1);
+  });
+
+  it("reports a review it cannot find on its own", () => {
+    expect(reviewBurst(review(9, "COMMENTED", "bob"), [])).toBe(1);
+    expect(reviewBurst(review(9, "APPROVED", "bob"), [])).toBe(0);
+  });
+});
+
 describe("planReview", () => {
   it("names the verdict and pings only the author", () => {
-    const approved = planReview("Alice", { state: "APPROVED", login: "bob" }, record(), config);
+    const approved = planReview("Alice", review(1, "APPROVED", "bob"), [], record(), config);
     if (approved.kind !== "note") throw new Error(`expected note, got ${approved.kind}`);
     expect(approved.message.content).toBe("<@222> đã approve. <@111>");
     expect(approved.message.allowed_mentions.users).toEqual(["111"]);
 
-    const changes = planReview(
-      "Alice",
-      { state: "CHANGES_REQUESTED", login: "carol" },
-      record(),
-      config,
-    );
-    if (changes.kind !== "note") throw new Error(`expected note, got ${changes.kind}`);
-    expect(changes.message.content).toBe("@carol yêu cầu sửa. <@111>");
-
-    const comment = planReview("Alice", { state: "COMMENTED", login: "bob" }, record(), config);
-    if (comment.kind !== "note") throw new Error(`expected note, got ${comment.kind}`);
-    expect(comment.message.content).toBe("<@222> đã comment review. <@111>");
+    expect(noteFor(review(2, "CHANGES_REQUESTED", "carol"))).toBe("@carol yêu cầu sửa. <@111>");
+    expect(noteFor(review(3, "COMMENTED", "bob"))).toBe("<@222> đã comment review. <@111>");
   });
 
-  it("skips the author's own replies, bots, dismissed reviews, and missing posts", () => {
-    expect(planReview("Alice", { state: "COMMENTED", login: "alice" }, record(), config).kind).toBe(
-      "skip",
+  it("counts a burst of comments in one note", () => {
+    const history = [1, 2, 3].map((minute) => review(minute, "COMMENTED", "bob", minute));
+    expect(noteFor(review(3, "COMMENTED", "bob", 3), history)).toBe(
+      "<@222> đã comment review (3 lần). <@111>",
     );
-    expect(
-      planReview("Alice", { state: "COMMENTED", login: "copilot[bot]" }, record(), config).kind,
-    ).toBe("skip");
-    expect(planReview("Alice", { state: "DISMISSED", login: "bob" }, record(), config).kind).toBe(
-      "skip",
+    const approved = review(4, "APPROVED", "bob", 4);
+    expect(noteFor(approved, [...history, approved])).toBe(
+      "<@222> đã approve, kèm 3 lần comment. <@111>",
     );
-    expect(planReview("Alice", { state: "APPROVED", login: "bob" }, undefined, config).kind).toBe(
-      "skip",
-    );
+  });
+
+  it("skips the author's own replies, bots, dismissed reviews, missing posts, and older comments", () => {
+    const skipped = (subject: Review, found = record(), history = [subject]) =>
+      planReview("Alice", subject, history, found, config).kind;
+    expect(skipped(review(1, "COMMENTED", "alice"))).toBe("skip");
+    expect(skipped(review(2, "COMMENTED", "copilot[bot]"))).toBe("skip");
+    expect(skipped(review(3, "DISMISSED", "bob"))).toBe("skip");
+    const approved = review(4, "APPROVED", "bob");
+    expect(planReview("Alice", approved, [approved], undefined, config).kind).toBe("skip");
+    const older = review(5, "COMMENTED", "bob", 0);
+    expect(skipped(older, record(), [older, review(6, "COMMENTED", "bob", 1)])).toBe("skip");
   });
 });
 
@@ -540,21 +585,67 @@ describe("run", () => {
   });
 
   function relay(review: unknown) {
+    const responses: Record<string, unknown> = {
+      [`${API}/actions/runs/123/artifacts`]: {
+        artifacts: [
+          { id: 50, name: "discord-review-event", expired: false, created_at: "2026-11-02" },
+        ],
+      },
+      [`${API}/pulls/7`]: { base: { ref: "main" }, user: { login: "Alice" } },
+      [`${API}/pulls/7/reviews?per_page=100&page=1`]: [
+        { id: 55, state: "APPROVED", user: { login: "bob" }, submitted_at: "2026-11-02T10:00:00Z" },
+      ],
+    };
     return {
       eventName: "workflow_run",
       artifacts: [[artifact(7, "2026-11-02T00:00:00Z")]],
       blobs: { 7: zip(JSON.stringify(record()), 0), 50: zip(JSON.stringify(review), 0) },
-      responses: {
-        [`${API}/actions/runs/123/artifacts`]: {
-          artifacts: [
-            { id: 50, name: "discord-review-event", expired: false, created_at: "2026-11-02" },
-          ],
-        },
-        [`${API}/pulls/7`]: { base: { ref: "main" }, user: { login: "Alice" } },
-        [`${API}/pulls/7/reviews/55`]: { state: "APPROVED", user: { login: "bob" } },
-      },
+      responses,
     };
   }
+
+  // GitHub review objects, `minutes` after NOW.
+  function reviews(count: number, state: string, login: string, from: number) {
+    return Array.from({ length: count }, (_, index) => ({
+      id: from + index,
+      state,
+      user: { login },
+      submitted_at: new Date(NOW + (from + index) * 60 * 1000).toISOString(),
+    }));
+  }
+
+  it("reads every page of reviews and counts the burst", async () => {
+    const fixture = relay({ pull_request: { number: 7 }, review: { id: 101 } });
+    fixture.responses[`${API}/pulls/7/reviews?per_page=100&page=1`] = [
+      ...reviews(98, "COMMENTED", "carol", 0),
+      ...reviews(2, "COMMENTED", "bob", 98),
+    ];
+    fixture.responses[`${API}/pulls/7/reviews?per_page=100&page=2`] = [
+      ...reviews(2, "COMMENTED", "bob", 100),
+    ];
+    const { calls, dependencies, env } = await setup({ workflow_run: { id: 123 } }, fixture);
+
+    expect(await run(env, dependencies)).toBe("Posted to thread 999.");
+    expect(calls.at(-1)?.body).toMatchObject({
+      content: "<@222> đã comment review (4 lần). <@111>",
+    });
+  });
+
+  it("does not post a relayed comment that a newer review reports", async () => {
+    const fixture = relay({ pull_request: { number: 7 }, review: { id: 1 } });
+    fixture.responses[`${API}/pulls/7/reviews?per_page=100&page=1`] = reviews(
+      2,
+      "COMMENTED",
+      "bob",
+      1,
+    );
+    const { calls, dependencies, env } = await setup({ workflow_run: { id: 123 } }, fixture);
+
+    expect(await run(env, dependencies)).toBe(
+      "A newer review from the same reviewer reports this one.",
+    );
+    expect(calls.some((call) => call.url.startsWith("https://discord.test/"))).toBe(false);
+  });
 
   it("posts a relayed review after reading it back from GitHub", async () => {
     const fixture = relay({ pull_request: { number: 7 }, review: { id: 55 } });

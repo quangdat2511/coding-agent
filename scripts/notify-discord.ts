@@ -26,6 +26,13 @@ const CREATION_WINDOW_MS = 2 * 60 * 1000;
 // review_requested can arrive before the run that creates the post has uploaded its artifact.
 const RECORD_WAIT_MS = 60 * 1000;
 const RECORD_POLL_MS = 5 * 1000;
+// Each single comment and each reply in a review thread is a COMMENTED review of its own. The relay
+// workflow waits five minutes after a comment, and a newer review from the same reviewer cancels
+// that wait, so a burst of comments reaches Discord as one note. Reviews closer together than this
+// belong to one burst. It is a minute longer than the relay's wait, so a slow runner does not split
+// a burst and lose its first comments.
+export const REVIEW_BURST_MS = 6 * 60 * 1000;
+const PAGE_SIZE = 100;
 
 type User = { login: string };
 
@@ -63,7 +70,7 @@ export type Config = { userIds: Record<string, string>; tagId?: string };
 
 export type Push = { sha: string; title: string; reviewers: string[] };
 
-export type Review = { state: string; login: string };
+export type Review = { id: number; state: string; login: string; submittedAt: string };
 
 export function parseUserIds(raw: string | undefined): Record<string, string> {
   if (!raw?.trim()) return {};
@@ -248,9 +255,39 @@ export function planPush(
   return { kind: "note", message: message(content, push.reviewers, config) };
 }
 
+function closeTogether(earlier: Review, later: Review): boolean {
+  return Date.parse(later.submittedAt) - Date.parse(earlier.submittedAt) < REVIEW_BURST_MS;
+}
+
+// Counts the COMMENTED reviews in the burst that ends at `review`: `review` itself when it is a
+// comment, and the comments from the same reviewer just before it. Returns undefined when `review`
+// is a comment and the same reviewer submitted another review soon after it, because the run for
+// that newer review reports this one too.
+export function reviewBurst(review: Review, history: Review[]): number | undefined {
+  const login = review.login.toLowerCase();
+  const own = history
+    .filter((other) => other.login.toLowerCase() === login)
+    .sort((a, b) => Date.parse(a.submittedAt) - Date.parse(b.submittedAt));
+  const index = own.findIndex((other) => other.id === review.id);
+  const commented = review.state === "COMMENTED";
+  if (index === -1) return commented ? 1 : 0;
+  const next = own[index + 1];
+  if (commented && next !== undefined && closeTogether(review, next)) return undefined;
+
+  let comments = commented ? 1 : 0;
+  let later = review;
+  for (const earlier of own.slice(0, index).reverse()) {
+    if (earlier.state !== "COMMENTED" || !closeTogether(earlier, later)) break;
+    comments++;
+    later = earlier;
+  }
+  return comments;
+}
+
 export function planReview(
   author: string,
   review: Review,
+  history: Review[],
   record: ThreadRecord | undefined,
   config: Config,
 ): Plan {
@@ -264,7 +301,14 @@ export function planReview(
   }
   if (review.login.endsWith("[bot]")) return { kind: "skip", reason: "A bot reviewed." };
   if (!record) return { kind: "skip", reason: "No post for this pull request." };
-  const content = `${mention(review.login, config.userIds)} ${verdict}. ${mention(author, config.userIds)}`;
+  const comments = reviewBurst(review, history);
+  if (comments === undefined) {
+    return { kind: "skip", reason: "A newer review from the same reviewer reports this one." };
+  }
+  let count = "";
+  if (review.state === "COMMENTED" && comments > 1) count = ` (${comments} lần)`;
+  if (review.state !== "COMMENTED" && comments > 0) count = `, kèm ${comments} lần comment`;
+  const content = `${mention(review.login, config.userIds)} ${verdict}${count}. ${mention(author, config.userIds)}`;
   return { kind: "note", message: message(content, [author], config) };
 }
 
@@ -376,6 +420,24 @@ async function pushDetails(context: GitHubContext, event: PullRequestEvent): Pro
   return { sha, title: short, reviewers };
 }
 
+// Every submitted review on the pull request, oldest first.
+async function listReviews(context: GitHubContext): Promise<Review[]> {
+  const reviews: Review[] = [];
+  for (let page = 1; ; page++) {
+    const batch = (await github(
+      context,
+      `/pulls/${context.number}/reviews?per_page=${PAGE_SIZE}&page=${page}`,
+    )) as Array<{ id?: unknown; state?: unknown; user?: User | null; submitted_at?: unknown }>;
+    for (const item of batch) {
+      const { id, state, submitted_at: submittedAt } = item;
+      if (typeof id !== "number" || typeof state !== "string") continue;
+      if (typeof submittedAt !== "string") continue;
+      reviews.push({ id, state, login: item.user?.login ?? "", submittedAt });
+    }
+    if (batch.length < PAGE_SIZE) return reviews;
+  }
+}
+
 type WorkflowRunEvent = { workflow_run: { id: number } };
 
 // The relay workflow ran with the pull request's code, so only the pull request number and the
@@ -407,17 +469,11 @@ async function postReview(
   const context: GitHubContext = { ...repository, number: number as number };
   const pr = (await github(context, `/pulls/${number}`)) as { base: { ref: string }; user: User };
   if (pr.base.ref !== "main") return "The pull request does not target main.";
-  const review = (await github(context, `/pulls/${number}/reviews/${reviewId}`)) as {
-    state: string;
-    user?: User | null;
-  };
+  const history = await listReviews(context);
+  const review = history.find((candidate) => candidate.id === reviewId);
+  if (review === undefined) return "The review is not on the pull request.";
   const record = await findRecord(context);
-  const plan = planReview(
-    pr.user.login,
-    { state: review.state, login: review.user?.login ?? "" },
-    record,
-    config,
-  );
+  const plan = planReview(pr.user.login, review, history, record, config);
   if (plan.kind === "skip") return plan.reason;
   if (plan.kind !== "note" || !record) return "Nothing to post.";
   await postToDiscord(dependencies.fetch, webhook, { thread_id: record.id }, plan.message);
