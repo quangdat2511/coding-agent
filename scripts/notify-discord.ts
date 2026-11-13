@@ -70,7 +70,17 @@ export type Config = { userIds: Record<string, string>; tagId?: string };
 
 export type Push = { sha: string; title: string; reviewers: string[] };
 
-export type Review = { id: number; state: string; login: string; submittedAt: string };
+export type Review = {
+  id: number;
+  state: string;
+  login: string;
+  submittedAt: string;
+  body?: string;
+};
+
+// For each review that only replies in existing threads, the IDs of the comments it answered.
+// A reply in the GitHub UI answers the first comment of its thread, so each ID is one thread.
+export type Replies = Record<number, number[]>;
 
 export function parseUserIds(raw: string | undefined): Record<string, string> {
   if (!raw?.trim()) return {};
@@ -259,29 +269,49 @@ function closeTogether(earlier: Review, later: Review): boolean {
   return Date.parse(later.submittedAt) - Date.parse(earlier.submittedAt) < REVIEW_BURST_MS;
 }
 
-// Counts the COMMENTED reviews in the burst that ends at `review`: `review` itself when it is a
-// comment, and the comments from the same reviewer just before it. Returns undefined when `review`
-// is a comment and the same reviewer submitted another review soon after it, because the run for
-// that newer review reports this one too.
-export function reviewBurst(review: Review, history: Review[]): number | undefined {
+// The COMMENTED reviews in the burst that ends at `review`: `review` itself when it is a comment,
+// and the comments from the same reviewer just before it, oldest first. Returns undefined when
+// `review` is a comment and the same reviewer submitted another review soon after it, because the
+// run for that newer review reports this one too.
+export function reviewBurst(review: Review, history: Review[]): Review[] | undefined {
   const login = review.login.toLowerCase();
   const own = history
     .filter((other) => other.login.toLowerCase() === login)
     .sort((a, b) => Date.parse(a.submittedAt) - Date.parse(b.submittedAt));
   const index = own.findIndex((other) => other.id === review.id);
   const commented = review.state === "COMMENTED";
-  if (index === -1) return commented ? 1 : 0;
+  if (index === -1) return commented ? [review] : [];
   const next = own[index + 1];
   if (commented && next !== undefined && closeTogether(review, next)) return undefined;
 
-  let comments = commented ? 1 : 0;
+  const burst = commented ? [review] : [];
   let later = review;
   for (const earlier of own.slice(0, index).reverse()) {
     if (earlier.state !== "COMMENTED" || !closeTogether(earlier, later)) break;
-    comments++;
+    burst.unshift(earlier);
     later = earlier;
   }
-  return comments;
+  return burst;
+}
+
+// What a burst of comments says: "đã comment review (2 lần), trả lời 10 thread" for a comment, or
+// "đã approve, kèm 2 lần comment, trả lời 10 thread" for a verdict that follows comments.
+function burstText(review: Review, verdict: string, burst: Review[], replies: Replies): string {
+  let fresh = 0;
+  const threads = new Set<number>();
+  for (const item of burst) {
+    const answered = item.body ? [] : (replies[item.id] ?? []);
+    if (answered.length === 0) fresh++;
+    for (const thread of answered) threads.add(thread);
+  }
+  const replied = threads.size > 0 ? `trả lời ${threads.size} thread` : "";
+  if (review.state === "COMMENTED") {
+    if (fresh === 0) return `đã ${replied}`;
+    const count = fresh > 1 ? ` (${fresh} lần)` : "";
+    return `${verdict}${count}${replied ? `, ${replied}` : ""}`;
+  }
+  const extra = [fresh > 0 ? `${fresh} lần comment` : "", replied].filter(Boolean);
+  return extra.length > 0 ? `${verdict}, kèm ${extra.join(", ")}` : verdict;
 }
 
 export function planReview(
@@ -290,6 +320,7 @@ export function planReview(
   history: Review[],
   record: ThreadRecord | undefined,
   config: Config,
+  replies: Replies = {},
 ): Plan {
   const verdict = REVIEW_VERDICTS[review.state];
   if (verdict === undefined) {
@@ -301,14 +332,12 @@ export function planReview(
   }
   if (review.login.endsWith("[bot]")) return { kind: "skip", reason: "A bot reviewed." };
   if (!record) return { kind: "skip", reason: "No post for this pull request." };
-  const comments = reviewBurst(review, history);
-  if (comments === undefined) {
+  const burst = reviewBurst(review, history);
+  if (burst === undefined) {
     return { kind: "skip", reason: "A newer review from the same reviewer reports this one." };
   }
-  let count = "";
-  if (review.state === "COMMENTED" && comments > 1) count = ` (${comments} lần)`;
-  if (review.state !== "COMMENTED" && comments > 0) count = `, kèm ${comments} lần comment`;
-  const content = `${mention(review.login, config.userIds)} ${verdict}${count}. ${mention(author, config.userIds)}`;
+  const text = burstText(review, verdict, burst, replies);
+  const content = `${mention(review.login, config.userIds)} ${text}. ${mention(author, config.userIds)}`;
   return { kind: "note", message: message(content, [author], config) };
 }
 
@@ -427,15 +456,37 @@ async function listReviews(context: GitHubContext): Promise<Review[]> {
     const batch = (await github(
       context,
       `/pulls/${context.number}/reviews?per_page=${PAGE_SIZE}&page=${page}`,
-    )) as Array<{ id?: unknown; state?: unknown; user?: User | null; submitted_at?: unknown }>;
+    )) as Array<{
+      id?: unknown;
+      state?: unknown;
+      user?: User | null;
+      submitted_at?: unknown;
+      body?: unknown;
+    }>;
     for (const item of batch) {
       const { id, state, submitted_at: submittedAt } = item;
       if (typeof id !== "number" || typeof state !== "string") continue;
       if (typeof submittedAt !== "string") continue;
-      reviews.push({ id, state, login: item.user?.login ?? "", submittedAt });
+      const body = typeof item.body === "string" ? item.body : "";
+      reviews.push({ id, state, login: item.user?.login ?? "", submittedAt, body });
     }
     if (batch.length < PAGE_SIZE) return reviews;
   }
+}
+
+// The comments a review answered, when every comment in it is a reply in an existing thread.
+// Empty when the review starts at least one new thread.
+async function threadReplies(context: GitHubContext, reviewId: number): Promise<number[]> {
+  const comments = (await github(
+    context,
+    `/pulls/${context.number}/reviews/${reviewId}/comments?per_page=${PAGE_SIZE}`,
+  )) as Array<{ in_reply_to_id?: unknown }>;
+  const answered: number[] = [];
+  for (const comment of comments) {
+    if (typeof comment.in_reply_to_id !== "number") return [];
+    answered.push(comment.in_reply_to_id);
+  }
+  return answered;
 }
 
 type WorkflowRunEvent = { workflow_run: { id: number } };
@@ -473,8 +524,14 @@ async function postReview(
   const review = history.find((candidate) => candidate.id === reviewId);
   if (review === undefined) return "The review is not on the pull request.";
   const record = await findRecord(context);
-  const plan = planReview(pr.user.login, review, history, record, config);
-  if (plan.kind === "skip") return plan.reason;
+  const first = planReview(pr.user.login, review, history, record, config);
+  if (first.kind === "skip") return first.reason;
+  // Only a review that gets a note pays for reading the comments of its burst.
+  const replies: Replies = {};
+  for (const item of reviewBurst(review, history) ?? []) {
+    if (!item.body) replies[item.id] = await threadReplies(context, item.id);
+  }
+  const plan = planReview(pr.user.login, review, history, record, config, replies);
   if (plan.kind !== "note" || !record) return "Nothing to post.";
   await postToDiscord(dependencies.fetch, webhook, { thread_id: record.id }, plan.message);
   return `Posted to thread ${record.id}.`;

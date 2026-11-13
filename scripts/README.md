@@ -136,10 +136,17 @@ GitHub makes a separate review with the commented verdict for each single commen
 reply in a review thread. The relay workflow waits two minutes before it relays such a review. If
 the same reviewer comments again on the same pull request during that wait, the new review cancels
 the wait and starts a new one. When the reviewer stops, one note reports the burst, such as
-`đã comment review (11 lần)`. Comments less than three minutes apart count as one burst. An approval
-or a change request is relayed at once. Its note also counts the comments that the reviewer made
-just before it, such as `đã approve, kèm 3 lần comment`. The relay runs from the code of the pull
-request, so a branch gets this wait only after you rebase it onto a `main` that has it.
+`đã comment review (2 lần)`. Comments less than three minutes apart count as one burst.
+
+A review that only replies in existing threads, for example "fixed" before a resolve, counts as a
+thread reply and not as a new comment. The note then reads `đã comment review, trả lời 10 thread`,
+or `đã trả lời 10 thread` when there is no new comment. To tell the two apart, the script reads
+the comments of each review in the burst that has no body.
+
+An approval or a change request is relayed at once. Its note also counts the comments that the
+reviewer made just before it, such as `đã approve, kèm 3 lần comment`. The relay runs from the
+code of the pull request, so a branch gets this wait only after you rebase it onto a `main` that
+has it.
 
 When the author
 pushes to a pull request that is ready for review, the note shows the new head commit. It mentions

@@ -12,6 +12,7 @@ import {
   planEvent,
   planPush,
   planReview,
+  type Replies,
   type Review,
   readZipEntry,
   reviewBurst,
@@ -254,14 +255,19 @@ function review(id: number, state: string, login: string, minutes = 0): Review {
   return { id, state, login, submittedAt: new Date(NOW + minutes * 60 * 1000).toISOString() };
 }
 
-function noteFor(subject: Review, history: Review[] = [subject]): string {
-  const plan = planReview("Alice", subject, history, record(), config);
+function noteFor(subject: Review, history: Review[] = [subject], replies: Replies = {}): string {
+  const plan = planReview("Alice", subject, history, record(), config, replies);
   if (plan.kind !== "note") throw new Error(`expected note, got ${plan.kind}`);
   return plan.message.content;
 }
 
+// The IDs of the reviews in a burst.
+function burstIds(subject: Review, history: Review[]): number[] | undefined {
+  return reviewBurst(subject, history)?.map((item) => item.id);
+}
+
 describe("reviewBurst", () => {
-  it("counts the comments that came less than three minutes apart", () => {
+  it("collects the comments that came less than three minutes apart", () => {
     const history = [
       review(1, "COMMENTED", "bob", 0),
       review(2, "COMMENTED", "bob", 4),
@@ -269,14 +275,14 @@ describe("reviewBurst", () => {
       review(4, "COMMENTED", "carol", 7),
       review(5, "COMMENTED", "bob", 8),
     ];
-    expect(reviewBurst(review(5, "COMMENTED", "bob", 8), history)).toBe(3);
-    expect(reviewBurst(review(1, "COMMENTED", "bob", 0), history)).toBe(1);
+    expect(burstIds(review(5, "COMMENTED", "bob", 8), history)).toEqual([2, 3, 5]);
+    expect(burstIds(review(1, "COMMENTED", "bob", 0), history)).toEqual([1]);
   });
 
   it("leaves a comment to the newer review from the same reviewer", () => {
     const history = [review(1, "COMMENTED", "bob", 0), review(2, "APPROVED", "bob", 2)];
-    expect(reviewBurst(review(1, "COMMENTED", "bob", 0), history)).toBeUndefined();
-    expect(reviewBurst(review(2, "APPROVED", "bob", 2), history)).toBe(1);
+    expect(burstIds(review(1, "COMMENTED", "bob", 0), history)).toBeUndefined();
+    expect(burstIds(review(2, "APPROVED", "bob", 2), history)).toEqual([1]);
   });
 
   it("stops at an earlier verdict, which was already reported", () => {
@@ -285,12 +291,12 @@ describe("reviewBurst", () => {
       review(2, "CHANGES_REQUESTED", "bob", 1),
       review(3, "COMMENTED", "bob", 2),
     ];
-    expect(reviewBurst(review(3, "COMMENTED", "bob", 2), history)).toBe(1);
+    expect(burstIds(review(3, "COMMENTED", "bob", 2), history)).toEqual([3]);
   });
 
   it("reports a review it cannot find on its own", () => {
-    expect(reviewBurst(review(9, "COMMENTED", "bob"), [])).toBe(1);
-    expect(reviewBurst(review(9, "APPROVED", "bob"), [])).toBe(0);
+    expect(burstIds(review(9, "COMMENTED", "bob"), [])).toEqual([9]);
+    expect(burstIds(review(9, "APPROVED", "bob"), [])).toEqual([]);
   });
 });
 
@@ -314,6 +320,28 @@ describe("planReview", () => {
     expect(noteFor(approved, [...history, approved])).toBe(
       "<@222> đã approve, kèm 3 lần comment. <@111>",
     );
+  });
+
+  it("counts replies in existing threads apart from new comments", () => {
+    // Reviews 1 to 3 answer old threads, as when the reviewer replies "fixed" and resolves them.
+    const history = [1, 2, 3, 4].map((minute) => review(minute, "COMMENTED", "bob", minute));
+    const replies: Replies = { 1: [101], 2: [102], 3: [102, 103], 4: [] };
+    const last = review(4, "COMMENTED", "bob", 4);
+    expect(noteFor(last, history, replies)).toBe(
+      "<@222> đã comment review, trả lời 3 thread. <@111>",
+    );
+    expect(noteFor(review(3, "COMMENTED", "bob", 3), history.slice(0, 3), replies)).toBe(
+      "<@222> đã trả lời 3 thread. <@111>",
+    );
+    const approved = review(5, "APPROVED", "bob", 5);
+    expect(noteFor(approved, [...history, approved], replies)).toBe(
+      "<@222> đã approve, kèm 1 lần comment, trả lời 3 thread. <@111>",
+    );
+  });
+
+  it("counts a review with a body as a new comment even when it also replies", () => {
+    const withBody = { ...review(1, "COMMENTED", "bob"), body: "Nhìn chung ổn." };
+    expect(noteFor(withBody, [withBody], { 1: [101] })).toBe("<@222> đã comment review. <@111>");
   });
 
   it("skips the author's own replies, bots, dismissed reviews, missing posts, and older comments", () => {
@@ -614,7 +642,7 @@ describe("run", () => {
     }));
   }
 
-  it("reads every page of reviews and counts the burst", async () => {
+  it("reads every page of reviews and splits thread replies from new comments", async () => {
     const fixture = relay({ pull_request: { number: 7 }, review: { id: 101 } });
     fixture.responses[`${API}/pulls/7/reviews?per_page=100&page=1`] = [
       ...reviews(98, "COMMENTED", "carol", 0),
@@ -623,12 +651,20 @@ describe("run", () => {
     fixture.responses[`${API}/pulls/7/reviews?per_page=100&page=2`] = [
       ...reviews(2, "COMMENTED", "bob", 100),
     ];
+    const comments = (id: number) => `${API}/pulls/7/reviews/${id}/comments?per_page=100`;
+    // Reviews 98 and 99 reply in old threads. Review 100 replies and also opens a new thread.
+    fixture.responses[comments(98)] = [{ in_reply_to_id: 7001 }];
+    fixture.responses[comments(99)] = [{ in_reply_to_id: 7002 }];
+    fixture.responses[comments(100)] = [{ in_reply_to_id: 7003 }, { in_reply_to_id: null }];
+    fixture.responses[comments(101)] = [{}];
     const { calls, dependencies, env } = await setup({ workflow_run: { id: 123 } }, fixture);
 
     expect(await run(env, dependencies)).toBe("Posted to thread 999.");
     expect(calls.at(-1)?.body).toMatchObject({
-      content: "<@222> đã comment review (4 lần). <@111>",
+      content: "<@222> đã comment review (2 lần), trả lời 2 thread. <@111>",
     });
+    const read = calls.filter((call) => call.url.endsWith("/comments?per_page=100"));
+    expect(read.map((call) => call.url)).toEqual([98, 99, 100, 101].map(comments));
   });
 
   it("does not post a relayed comment that a newer review reports", async () => {
