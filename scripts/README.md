@@ -130,7 +130,25 @@ open longer than 90 days, it loses its artifact, and later events no longer reac
 
 Two more events add a note to the post. When a reviewer submits a review, the note names the
 verdict (approved, changes requested, or commented) and mentions the pull request author. Reviews
-by the author, such as replies to review threads, and reviews by bots get no note. When the author
+by the author, such as replies to review threads, and reviews by bots get no note.
+
+GitHub makes a separate review with the commented verdict for each single comment and for each
+reply in a review thread. The relay workflow waits two minutes before it relays such a review. If
+the same reviewer comments again on the same pull request during that wait, the new review cancels
+the wait and starts a new one. When the reviewer stops, one note reports the burst, such as
+`đã comment review (2 lần)`. Comments less than three minutes apart count as one burst.
+
+A review that only replies in existing threads, for example "fixed" before a resolve, counts as a
+thread reply and not as a new comment. The note then reads `đã comment review, trả lời 10 thread`,
+or `đã trả lời 10 thread` when there is no new comment. To tell the two apart, the script reads
+the comments of each review in the burst that has no body.
+
+An approval or a change request is relayed at once. Its note also counts the comments that the
+reviewer made just before it, such as `đã approve, kèm 3 lần comment`. The relay runs from the
+code of the pull request, so a branch gets this wait only after you rebase it onto a `main` that
+has it.
+
+When the author
 pushes to a pull request that is ready for review, the note shows the new head commit. It mentions
 the requested reviewers and everyone who already reviewed. A push to a draft gets no note. If the
 pull request title changes, the post keeps its first title, because a webhook cannot rename a
