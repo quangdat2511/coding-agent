@@ -25,8 +25,9 @@ export interface BoundedOutput {
 
 // Output over the budget keeps both ends: the beginning names what ran and the end holds the final
 // error. The budgets are measured in bytes, and each cut moves to the nearest code point boundary
-// so a decoded half never starts or ends inside a multi-byte character. A caller that appends its
-// own text, such as bash's status line, passes a smaller budget so the total stays within 40 KiB.
+// so a decoded half never starts or ends inside a multi-byte character. Every tool uses the full
+// 40 KiB. A smaller budget is what OutputCollector.finish(reservedBytes) cuts to, and passing it
+// here gives the reference that the collector's tests compare with.
 export function boundToolOutput(content: string, budget = MAX_TOOL_OUTPUT_BYTES): BoundedOutput {
   const bytes = Buffer.from(content, "utf8");
   if (bytes.byteLength <= budget) return { content, truncated: false };
@@ -54,9 +55,16 @@ function joinEnds(head: Uint8Array, tail: Uint8Array, budget: number): BoundedOu
 
 export interface OutputCollector {
   push(chunk: Uint8Array): void;
+  /**
+   * Whether the last byte pushed is a newline; false when nothing has been pushed. A caller that
+   * appends a line of its own asks this before finish, to know whether it must reserve a newline.
+   */
+  endsWithNewline(): boolean;
   /** Bound everything pushed so far, leaving reservedBytes of the budget for the caller's text. */
   finish(reservedBytes: number): BoundedOutput;
 }
+
+const NEWLINE = 0x0a;
 
 // Collects a child's output as it streams, holding at most the budget in memory: all of it while
 // it fits, then only the first and last end budget's bytes. Bytes that are not UTF-8 decode to
@@ -71,6 +79,7 @@ export function createOutputCollector(): OutputCollector {
   // The last `keep` bytes, as a ring: `ringAt` is where the next byte goes.
   const ring = new Uint8Array(keep);
   let ringAt = 0;
+  let lastByte: number | undefined;
 
   const toRing = (chunk: Uint8Array) => {
     const recent = chunk.byteLength > keep ? chunk.subarray(chunk.byteLength - keep) : chunk;
@@ -83,6 +92,7 @@ export function createOutputCollector(): OutputCollector {
   return {
     push(chunk) {
       if (chunk.byteLength === 0) return;
+      lastByte = chunk[chunk.byteLength - 1];
       if (whole) {
         whole.push(chunk.slice());
         if (total + chunk.byteLength <= MAX_TOOL_OUTPUT_BYTES) {
@@ -98,6 +108,7 @@ export function createOutputCollector(): OutputCollector {
       }
       toRing(chunk);
     },
+    endsWithNewline: () => lastByte === NEWLINE,
     finish(reservedBytes) {
       const budget = MAX_TOOL_OUTPUT_BYTES - reservedBytes;
       if (whole) {

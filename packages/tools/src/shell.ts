@@ -15,9 +15,15 @@ export type ShellLookup =
   | { readonly ok: false; readonly message: string };
 
 // bash runs commands through a POSIX shell on every platform, as Pi does. On Windows that is Git
-// Bash: the standard install locations first, then the first bash.exe on PATH that is not WSL's.
-// WSL's bash.exe runs commands in a Linux distribution rather than against this Windows checkout,
-// and it usually comes first on PATH because System32 does.
+// Bash, in this order: the standard install locations; the install that holds a git.exe on PATH;
+// the first bash.exe on PATH that is not WSL's. WSL's bash.exe runs commands in a Linux
+// distribution rather than against this Windows checkout, and it usually comes first on PATH
+// because System32 does.
+//
+// The second step covers Git for Windows installed elsewhere with its recommended PATH option,
+// which adds only <install>\cmd to PATH; that holds git.exe but no bash.exe, which the installer
+// puts in <install>\bin. This is read from the installer's source (ADR 0001 §7), not run on
+// Windows.
 export function findShell(host: ShellHost): ShellLookup {
   if (host.platform !== "win32") {
     const shell = onPath(host, "bash")[0] ?? (host.isExecutable("/bin/sh") ? "/bin/sh" : null);
@@ -33,8 +39,11 @@ export function findShell(host: ShellHost): ShellLookup {
   if (host.env.LOCALAPPDATA) {
     installs.push(win32.join(host.env.LOCALAPPDATA, "Programs", "Git", "bin", "bash.exe"));
   }
+  const besideGit = onPath(host, "git.exe").map((git) =>
+    win32.join(win32.dirname(git), "..", "bin", "bash.exe"),
+  );
   const shell =
-    installs.find((path) => host.isExecutable(path)) ??
+    [...installs, ...besideGit].find((path) => host.isExecutable(path)) ??
     onPath(host, "bash.exe").find((path) => !isWslLauncher(path));
   return shell === undefined
     ? {

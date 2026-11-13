@@ -392,6 +392,8 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
       workspace: config.workspace,
       signal: abortEffects.signal,
       onProgress: (update) => {
+        // Checked at run time like the outcome; an update that is not Tool Progress is dropped,
+        // because progress is advisory and must not fail the call (ADR 0004 §3).
         if (isRecord(update) && typeof update.output === "string") progress.report(update.output);
       },
     });

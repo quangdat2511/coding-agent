@@ -2,6 +2,7 @@ import { Buffer } from "node:buffer";
 import { stat } from "node:fs/promises";
 import type {
   ExecutableTool,
+  PathResolution,
   PrepareOutcome,
   RepoPath,
   ToolErrorCode,
@@ -11,7 +12,8 @@ import type {
 import { type Static, Type } from "typebox";
 import type { ChildProcess, ChildProcessLauncher } from "./child-process.ts";
 import { displayPath, quote } from "./messages.ts";
-import { createOutputCollector } from "./output-budget.ts";
+import { createOutputCollector, type OutputCollector } from "./output-budget.ts";
+import { revalidatePreparedPath } from "./prepared-path.ts";
 import { findShell, processShellHost } from "./shell.ts";
 import { prepareFailure, toolError } from "./tool-outcome.ts";
 
@@ -19,7 +21,8 @@ import { prepareFailure, toolError } from "./tool-outcome.ts";
 export const DEFAULT_BASH_TIMEOUT_MS = 30_000;
 export const MAX_BASH_TIMEOUT_MS = 120_000;
 
-// After SIGTERM, a command gets this long to exit before its process group is killed.
+// After SIGTERM, a command gets this long to exit before its process group is killed. Windows has
+// no such grace: taskkill /F ends the tree at once.
 const KILL_GRACE_MS = 1_000;
 // How long to keep reading after the shell exits. A background process that inherited the pipes
 // keeps them open; past this limit its output is not waited for.
@@ -70,7 +73,9 @@ export function bashTool(launcher: ChildProcessLauncher): ExecutableTool<typeof 
         return prepareFailure<typeof BashParams>({ code: "SCHEMA_VIOLATION", message: invalid });
       }
       const cwd = await resolveDirectory(workspace, input.cwd ?? workspace.repoRoot);
-      if (!cwd.ok) return prepareFailure<typeof BashParams>(cwd.error);
+      if (!cwd.ok) {
+        return prepareFailure<typeof BashParams>({ code: cwd.code, message: cwd.message });
+      }
       return {
         ok: true,
         prepared: { input, paths: [cwd.path], summary: summarize(workspace, input, cwd.path) },
@@ -79,18 +84,13 @@ export function bashTool(launcher: ChildProcessLauncher): ExecutableTool<typeof 
 
     // Re-validates the start directory, since the filesystem may have changed since prepare.
     async execute(prepared, { workspace, signal, onProgress }): Promise<ToolOutcome> {
-      const [preparedCwd] = prepared.paths;
-      const cwd = await resolveDirectory(workspace, preparedCwd ?? workspace.repoRoot);
-      if (!cwd.ok) return toolError(cwd.error);
-      if (cwd.path !== preparedCwd) {
-        return toolError({
-          code: "PATH_OUTSIDE_REPO",
-          message: `${quote(String(preparedCwd))} changed after it was prepared`,
-        });
-      }
+      const cwd = await revalidatePreparedPath(prepared.paths, (path) =>
+        resolveDirectory(workspace, path),
+      );
+      if (!cwd.ok) return toolError({ code: cwd.code, message: cwd.message });
       const shell = findShell(processShellHost());
       if (!shell.ok) return toolError({ code: "TOOL_INTERNAL_ERROR", message: shell.message });
-      if (signal.aborted) return outcomeOf(createOutputCollector(), { kind: "cancelled" });
+      if (signal.aborted) return outcomeOf(createOutputCollector(), CANCELLED);
 
       const timeoutMs = prepared.input.timeoutMs ?? DEFAULT_BASH_TIMEOUT_MS;
       return runCommand(launcher, {
@@ -106,7 +106,8 @@ export function bashTool(launcher: ChildProcessLauncher): ExecutableTool<typeof 
 }
 
 // Schema Validation belongs to Agent Core (ADR 0001 §1); this repeats the schema's rules so a
-// caller that skips it cannot start a command the declaration forbids.
+// caller that skips it cannot start a command the declaration forbids, as read, write and edit do.
+// A test checks that it refuses exactly the inputs BashParams refuses.
 function checkInput({ command, timeoutMs, cwd }: BashInput): string | undefined {
   if (typeof command !== "string" || command.length === 0) return "command must be non-empty text";
   if (
@@ -121,23 +122,20 @@ function checkInput({ command, timeoutMs, cwd }: BashInput): string | undefined 
   return undefined;
 }
 
-type DirectoryResolution =
-  | { readonly ok: true; readonly path: RepoPath }
-  | { readonly ok: false; readonly error: { code: ToolErrorCode; message: string } };
-
 // ADR 0001 §1 reports every unusable start directory as PATH_OUTSIDE_REPO: outside the
 // repository, through a symbolic link, missing, or not a directory. The message says which.
 async function resolveDirectory(
   workspace: WorkspaceResolver,
   input: string,
-): Promise<DirectoryResolution> {
+): Promise<PathResolution> {
   const resolved = await workspace.resolveExisting(input);
-  const invalid = (reason: string): DirectoryResolution => ({
+  const invalid = (reason: string): PathResolution => ({
     ok: false,
-    error: { code: "PATH_OUTSIDE_REPO", message: `cwd ${quote(input)} ${reason}` },
+    code: "PATH_OUTSIDE_REPO",
+    message: `cwd ${quote(input)} ${reason}`,
   });
   if (!resolved.ok) {
-    if (resolved.code === "PATH_OUTSIDE_REPO") return { ok: false, error: resolved };
+    if (resolved.code === "PATH_OUTSIDE_REPO") return resolved;
     return invalid(resolved.code === "NOT_FOUND" ? "does not exist" : "cannot be opened");
   }
   try {
@@ -160,11 +158,17 @@ function summarize(workspace: WorkspaceResolver, input: BashInput, cwd: RepoPath
   return `run ${quote(input.command)}${where}${timeout}`;
 }
 
-type Ending =
-  | { readonly kind: "exit"; readonly code: number }
-  | { readonly kind: "signal"; readonly signal: string }
-  | { readonly kind: "timeout"; readonly timeoutMs: number }
-  | { readonly kind: "cancelled" };
+// Why bash itself stopped the command, when it did.
+type StopReason = "timeout" | "cancelled";
+
+// What the status line (ADR 0001 §7) reports: the error code of a failure, and how the command
+// ended.
+interface Status {
+  readonly code?: ToolErrorCode;
+  readonly text: string;
+}
+
+const CANCELLED: Status = { code: "SIGNAL", text: "cancelled" };
 
 interface CommandRun {
   readonly shell: string;
@@ -175,6 +179,8 @@ interface CommandRun {
   onProgress(output: string): void;
 }
 
+// The process supervision here (timeout, cancellation, descendant cleanup, draining) moves into a
+// module shared with the Verification Runner in CDA-74 (ADR 0004 §4), rather than being copied.
 async function runCommand(launcher: ChildProcessLauncher, run: CommandRun): Promise<ToolOutcome> {
   const posix = process.platform !== "win32";
   // `exec 2>&1` sends the command's stderr into its stdout pipe, so the two keep the order they
@@ -189,10 +195,8 @@ async function runCommand(launcher: ChildProcessLauncher, run: CommandRun): Prom
 
   const collector = createOutputCollector();
   let recent = "";
-  let lastByte: number | undefined;
   const take = (chunk: Uint8Array, text: string) => {
     collector.push(chunk);
-    lastByte = chunk[chunk.byteLength - 1];
     recent = (recent + text).slice(-PROGRESS_WINDOW_CHARS);
     try {
       run.onProgress(recent);
@@ -203,11 +207,11 @@ async function runCommand(launcher: ChildProcessLauncher, run: CommandRun): Prom
   const readers = [child.stdout.getReader(), child.stderr.getReader()];
   const reading = Promise.all(readers.map((reader) => readAll(reader, take)));
 
-  let stop: "timeout" | "cancelled" | undefined;
+  let stopReason: StopReason | undefined;
   let killTimer: ReturnType<typeof setTimeout> | undefined;
-  const terminate = (reason: "timeout" | "cancelled") => {
-    if (stop !== undefined) return;
-    stop = reason;
+  const terminate = (reason: StopReason) => {
+    if (stopReason !== undefined) return;
+    stopReason = reason;
     signalTree(launcher, child, "SIGTERM");
     killTimer = setTimeout(() => {
       if (groupAlive(child)) signalTree(launcher, child, "SIGKILL");
@@ -239,20 +243,26 @@ async function runCommand(launcher: ChildProcessLauncher, run: CommandRun): Prom
   // that later reuses the id.
   if (!groupAlive(child)) clearTimeout(killTimer);
 
-  return outcomeOf(collector, endingOf(stop, child, run.timeoutMs), lastByte);
+  return outcomeOf(collector, statusOf(stopReason, child, run.timeoutMs));
 }
 
 // bash's own timer and abort decide TIMEOUT and cancellation, since a command can send itself the
-// signal bash would. Otherwise a shell ended by a signal is SIGNAL, and an exit code is an exit.
-function endingOf(
-  stop: "timeout" | "cancelled" | undefined,
+// signal bash would. Otherwise a shell ended by a signal is SIGNAL, and an exit code other than 0
+// is NON_ZERO_EXIT.
+function statusOf(
+  stopReason: StopReason | undefined,
   child: ChildProcess,
   timeoutMs: number,
-): Ending {
-  if (stop === "timeout") return { kind: "timeout", timeoutMs };
-  if (stop === "cancelled") return { kind: "cancelled" };
-  if (child.signalCode) return { kind: "signal", signal: child.signalCode };
-  return { kind: "exit", code: child.exitCode ?? 0 };
+): Status {
+  if (stopReason === "timeout") {
+    return { code: "TIMEOUT", text: `timed out after ${timeoutMs} ms` };
+  }
+  if (stopReason === "cancelled") return CANCELLED;
+  if (child.signalCode) return { code: "SIGNAL", text: `terminated by ${child.signalCode}` };
+  const exitCode = child.exitCode ?? 0;
+  return exitCode === 0
+    ? { text: "exit code: 0" }
+    : { code: "NON_ZERO_EXIT", text: `exit code: ${exitCode}` };
 }
 
 // Reads one pipe until it closes or is cancelled, decoding with its own stream decoder so a
@@ -308,40 +318,19 @@ function signalTree(
   }
 }
 
-const NEWLINE = 0x0a;
-
 // The status line ends the content so the model always sees how the command ended: Agent Core
 // sends it only content and isError. Its bytes are reserved from the shared budget, so the whole
 // content stays within 40 KiB.
-function outcomeOf(
-  collector: ReturnType<typeof createOutputCollector>,
-  ending: Ending,
-  lastByte?: number,
-): ToolOutcome {
-  const { code, status } = statusOf(ending);
-  const statusLine = code === undefined ? `[${status}]` : `[${status}; partial changes may remain]`;
-  const empty = lastByte === undefined;
-  const separator = !empty && lastByte === NEWLINE ? "" : "\n";
+function outcomeOf(collector: OutputCollector, { code, text }: Status): ToolOutcome {
+  const statusLine = code === undefined ? `[${text}]` : `[${text}; partial changes may remain]`;
+  // Asked before finish, because the separator's byte is part of what finish must leave free.
+  const separator = collector.endsWithNewline() ? "" : "\n";
   const reserved = Buffer.byteLength(separator + statusLine, "utf8");
   const bounded = collector.finish(reserved);
-  const content = `${empty ? "(no output)" : bounded.content}${separator}${statusLine}`;
+  const output = bounded.content === "" ? "(no output)" : bounded.content;
+  const content = `${output}${separator}${statusLine}`;
   const truncated = bounded.truncated ? { truncated: true } : {};
   return code === undefined
     ? { isError: false, content, ...truncated }
     : { isError: true, content, error: { code, message: content }, ...truncated };
-}
-
-function statusOf(ending: Ending): { code?: ToolErrorCode; status: string } {
-  switch (ending.kind) {
-    case "exit":
-      return ending.code === 0
-        ? { status: "exit code: 0" }
-        : { code: "NON_ZERO_EXIT", status: `exit code: ${ending.code}` };
-    case "timeout":
-      return { code: "TIMEOUT", status: `timed out after ${ending.timeoutMs} ms` };
-    case "signal":
-      return { code: "SIGNAL", status: `terminated by ${ending.signal}` };
-    case "cancelled":
-      return { code: "SIGNAL", status: "cancelled" };
-  }
 }

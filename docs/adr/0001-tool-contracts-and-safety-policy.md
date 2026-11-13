@@ -183,10 +183,13 @@ On 2026-11-12, [CDA-71](https://datn-fit-hcmus.atlassian.net/browse/CDA-71) amen
 
 - **Shell** (§3): `bash` runs the command as `<shell> -c`, without a login shell or rc files. On
   Linux and macOS the shell is `bash` from `PATH`, or `/bin/sh` without it. On Windows it is Git
-  Bash, found in the Git for Windows install locations or as the first `bash.exe` on `PATH` that is
-  not WSL's. WSL's `bash.exe` is never used, because it runs the command in a Linux distribution;
-  it usually comes first on `PATH`, so the search goes past it. No shell is a
-  `TOOL_INTERNAL_ERROR`.
+  Bash, searched in this order: the Git for Windows install locations under `ProgramFiles`,
+  `ProgramFiles(x86)` and `LOCALAPPDATA\Programs`, before anything on `PATH`; then `bin\bash.exe`
+  in the install that holds a `git.exe` on `PATH`; then the first `bash.exe` on `PATH` that is not
+  WSL's. The `git.exe` step finds Git installed elsewhere with the installer's recommended `PATH`
+  option, which adds only `<install>\cmd`: that directory holds `git.exe` but no `bash.exe`. WSL's
+  `bash.exe` is never used, because it runs the command in a Linux distribution; it usually comes
+  first on `PATH`, so the search goes past it. No shell is a `TOOL_INTERNAL_ERROR`.
 - **Combined output** (§1, §3): the command runs after `exec 2>&1`, so its stderr shares stdout's
   pipe and both keep the order they were written in. Joining two pipes by arrival misordered 580
   of 600 alternating lines in the CDA-71 prototype. The cost is that bash reports a syntax error
@@ -201,15 +204,20 @@ On 2026-11-12, [CDA-71](https://datn-fit-hcmus.atlassian.net/browse/CDA-71) amen
 - **Error classification** (§1): `TIMEOUT` is decided by bash's own timer, not by the signal the
   shell died of, since a command can send itself the same signal. `SIGNAL` means the shell itself
   was ended by a signal bash did not send; a killed child of a shell that goes on is a normal
-  exit. A cancelled call reports `SIGNAL` with `[cancelled; ...]`, and Agent Core records it as
-  cancelled (ADR 0002 §5).
+  exit. A cancelled call reports `SIGNAL` with `[cancelled; ...]`. Agent Core will record it as
+  cancelled (ADR 0002 §5) once session cancellation lands in
+  [CDA-73](https://datn-fit-hcmus.atlassian.net/browse/CDA-73); until then Agent Core refuses
+  `cancel` and never aborts a running Tool Call, so only a caller that aborts the signal itself
+  reaches this path.
 - **Process lifetime** (§3): a timeout or cancellation sends `SIGTERM` to the command's process
   group and `SIGKILL` 1 s later, so what the command started stops too; on Windows `taskkill /T
-  /F`, started through the same launcher, ends the tree. A process the command leaves in the
-  background after a normal exit keeps running, so a server started with `&` survives. bash stops
-  reading 200 ms after the shell exits, because a background process can keep the pipes open.
-  Its later output is lost unless the command redirects it. A process that leaves the group with
-  `setsid` survives a timeout; Approval (§4) remains the control for it.
+  /F`, started through the same launcher, ends the tree at once. Windows therefore has no grace
+  period: the command gets no chance to run its own cleanup, and no second step follows, because
+  there is no process group left to check. A process the command leaves in the background after
+  a normal exit keeps running, so a server started with `&` survives. bash stops reading 200 ms
+  after the shell exits, because a background process can keep the pipes open. Its later output
+  is lost unless the command redirects it. A process that leaves the group with `setsid` survives
+  a timeout; Approval (§4) remains the control for it.
 - **Start directory** (§1, §2): `cwd` is relative to `repoRoot` and defaults to it. Every unusable
   start directory is `PATH_OUTSIDE_REPO`, with a message that says why: outside the repository,
   through a symbolic link, missing, or not a directory. It is checked in `prepare` and again before
@@ -220,6 +228,16 @@ On 2026-11-12, [CDA-71](https://datn-fit-hcmus.atlassian.net/browse/CDA-71) amen
 
 The prototypes behind these decisions are preserved on branch `CDA-71-prototype-bash-decisions`,
 commit `63ef192`, under `packages/tools/prototypes/` and `packages/agent-core/prototypes/`.
+
+The Windows `git.exe` step is read from the Git for Windows installer's source at commit
+`44b6119`, not run on Windows. The `PATH` option the installer marks recommended
+([`installer/install.iss` line 2227](https://github.com/git-for-windows/build-extra/blob/44b61193488193e4302afbabf6c7c5caf56c2903/installer/install.iss#L2227))
+adds only `<install>\cmd`
+([lines 3412–3425](https://github.com/git-for-windows/build-extra/blob/44b61193488193e4302afbabf6c7c5caf56c2903/installer/install.iss#L3412-L3425)),
+and the installer puts `bash.exe` in `<install>\bin`
+([`installer/release.sh` line 197](https://github.com/git-for-windows/build-extra/blob/44b61193488193e4302afbabf6c7c5caf56c2903/installer/release.sh#L197)).
+Unit tests cover the search with a stand-in host, on CI's Windows job too; no test runs it against
+a real install made with that option.
 
 ### 8. Credential Isolation for Tool and Verification Processes
 

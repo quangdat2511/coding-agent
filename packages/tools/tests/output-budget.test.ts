@@ -180,6 +180,19 @@ describe("collecting streamed output within the budget", () => {
     }
   }
 
+  it("says whether the last byte pushed is a newline, once it has been cut too", () => {
+    const collector = createOutputCollector();
+    expect(collector.endsWithNewline()).toBe(false);
+
+    collector.push(encoder.encode("building\n"));
+    expect(collector.endsWithNewline()).toBe(true);
+    collector.push(encoder.encode("a".repeat(MAX_TOOL_OUTPUT_BYTES)));
+    expect(collector.endsWithNewline()).toBe(false);
+    collector.push(encoder.encode("done\n"));
+    collector.push(new Uint8Array(0));
+    expect(collector.endsWithNewline()).toBe(true);
+  });
+
   it("decodes bytes that are not UTF-8 as replacement characters", () => {
     const collector = createOutputCollector();
     collector.push(new Uint8Array([0x6f, 0x6b, 0xff, 0x0a]));

@@ -343,6 +343,13 @@ never enters Agent State. After an accepted cancellation, Agent Core records an 
 as cancelled whether `execute` resolves or rejects, and waits for it to settle within the
 cancellation grace period (ADR 0002 §5).
 
+Agent Core also checks at run time what a tool hands back, because `ExecutableTool` binds only code
+type-checked against it, and a registry holds whatever was registered. An `execute` result that is
+not a `ToolOutcome` becomes the same `TOOL_INTERNAL_ERROR`. A progress update that is not a
+`ToolProgress` is dropped, because Tool Progress is advisory: the Tool Result still carries the
+call's output, so a bad update must not fail the call. Nothing records the drop, since ADR 0002
+defines no Session Event that could carry it.
+
 Not exported: the state machine implementation and the Tool Call scheduler. Agent Core performs no
 automatic retry or recovery (ADR 0002 §4) and no history compaction; ADR 0003 §4 limits in-session
 memory to the canonical transcript and defers compaction.
@@ -374,7 +381,7 @@ export function createWorkspaceResolver(
 >;
 
 export function normalizeWindowsShellPath(input: string): string;
-export function createDefaultTools(): ToolRegistry;
+export function createDefaultTools(launcher: ChildProcessLauncher): ToolRegistry;
 export function createChildEnvironmentBuilder(
   credentialEnvVars: readonly string[],
   platform?: NodeJS.Platform,
@@ -385,13 +392,12 @@ export function createChildProcessLauncher(
 export function readTool(): ExecutableTool<typeof ReadParams>;
 export function writeTool(): ExecutableTool<typeof WriteParams>;
 export function editTool(): ExecutableTool<typeof EditParams>;
+export function bashTool(launcher: ChildProcessLauncher): ExecutableTool<typeof BashParams>;
 ```
 
-CDA-71 implements `createDefaultTools(launcher: ChildProcessLauncher): ToolRegistry`, which
-registers `read`, `write`, `edit`, and `bash`, and
-`bashTool(launcher: ChildProcessLauncher): ExecutableTool<typeof BashParams>`. CDA-74 will add the
-Verification Runner with the same configured launcher dependency. These signatures replace the
-original zero-argument sketches; they do not add tool timeout options.
+`createDefaultTools` registers `read`, `write`, `edit`, and `bash`. CDA-74 will add the
+Verification Runner with the same configured launcher dependency. The launcher arguments, added in
+CDA-71, replace the original zero-argument sketches; they do not add tool timeout options.
 
 The composition root reads the complete `PROVIDER_CREDENTIAL_ENV_VARS` export from `ai` and
 supplies it to the launcher's factory in `tools`. The set includes every credential variable name
@@ -442,8 +448,11 @@ signal the group rather than only the shell. On Windows it uses Bun's detached-p
 it does not promise POSIX group signaling. The option does not unref the child or terminate its
 descendants. CDA-71 and CDA-74 remain responsible for timeout, cancellation, descendant cleanup,
 and bounded output draining. This avoids requiring those adapters to bypass the launcher just to
-request process isolation. The credential filter and `CI`/`TERM` override share one internal
-`environmentKeyOf` helper; this helper is not re-exported from the package entry point.
+request process isolation. CDA-71 keeps that supervision inside `bash.ts`, because `bash` is its
+only user so far. CDA-74 moves it into a module that `bash` and the Verification Runner share, as
+`createOutputCollector` already is, instead of copying it; the second user shows which parts both
+need. The credential filter and `CI`/`TERM` override share one internal `environmentKeyOf` helper;
+this helper is not re-exported from the package entry point.
 
 `createWorkspaceResolver` canonicalizes and validates `repoRoot` once, which satisfies ADR 0002's
 requirement that `repoRoot` be valid before the Agent Session reaches `ready`. Tools take no
@@ -700,6 +709,10 @@ amended this record:
 - **Default tools** (§4): `createDefaultTools` and `bashTool` take the configured launcher. The
   composition root registers `bash` with the Agent Session in CDA-80, which registers all four
   tools.
+- **What a tool hands back** (§3): a progress update that is not a `ToolProgress` is dropped, just
+  as an `execute` result that is not a `ToolOutcome` already becomes `TOOL_INTERNAL_ERROR`.
+- **Process supervision** (§4): timeout, cancellation, descendant cleanup, and output draining stay
+  in `bash.ts` until CDA-74, which moves them into a module shared with the Verification Runner.
 
 ## Consequences
 

@@ -10,6 +10,7 @@ import type {
   WorkspaceResolver,
 } from "@coding-agent/agent-core";
 import { Value } from "typebox/value";
+import { DEFAULT_BASH_TIMEOUT_MS } from "../src/bash.ts";
 import {
   BashParams,
   bashTool,
@@ -137,6 +138,46 @@ describe("bounding a command", () => {
       ok: false,
       code: "SCHEMA_VIOLATION",
       message: "timeoutMs must be a whole number of milliseconds from 1 to 120000",
+    });
+  });
+
+  it("refuses in prepare exactly the inputs the schema refuses", async () => {
+    // bash repeats the schema's rules for a caller that skips Schema Validation; the two must not
+    // drift apart when BashParams changes.
+    const inputs: readonly Record<string, unknown>[] = [
+      { command: "true" },
+      {},
+      { command: "" },
+      { command: 1 },
+      { command: "true", timeoutMs: 1 },
+      { command: "true", timeoutMs: 0 },
+      { command: "true", timeoutMs: 120_000 },
+      { command: "true", timeoutMs: 120_001 },
+      { command: "true", timeoutMs: 1.5 },
+      { command: "true", timeoutMs: Number.NaN },
+      { command: "true", timeoutMs: "300" },
+      { command: "true", cwd: "." },
+      { command: "true", cwd: "" },
+      { command: "true", cwd: 1 },
+      { command: "true", unknown: 1 },
+    ];
+    const tool = bashTool(launcherFor());
+    const ctx = { workspace, signal: new AbortController().signal };
+
+    for (const input of inputs) {
+      const prepared = await tool.prepare(input as BashInput, ctx);
+      const refused = !prepared.ok && prepared.code === "SCHEMA_VIOLATION";
+      expect({ input, refused }).toEqual({ input, refused: !Value.Check(BashParams, input) });
+    }
+  });
+
+  it("gives a command 30,000 ms when it asks for no timeout", async () => {
+    expect(DEFAULT_BASH_TIMEOUT_MS).toBe(30_000);
+    // The same command that outlives a 300 ms timeout finishes under the default.
+    expect(codeOf(await outcomeOf({ command: "sleep 1", timeoutMs: 300 }))).toBe("TIMEOUT");
+    expect(await outcomeOf({ command: "sleep 1" })).toEqual({
+      isError: false,
+      content: "(no output)\n[exit code: 0]",
     });
   });
 
