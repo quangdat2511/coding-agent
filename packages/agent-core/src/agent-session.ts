@@ -381,8 +381,11 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
     );
     const startedMs = config.clock.monotonicMs();
     // ADR 0002 permits progress only between tool_execution_started and tool_call_completed, so
-    // the gate closes before the result is committed and later updates are ignored.
+    // the gate closes before the result is committed and later updates are ignored. The phase
+    // check covers a Tool Call completed while execute still runs, as when cancellation's grace
+    // period expires: no update may follow its tool_call_completed or session_settled.
     const progress = createProgressGate(config.clock, (output) => {
+      if (state.phase !== "executing_tool" || state.toolCall.id !== toolCall.id) return;
       commit(state, {
         type: "tool_execution_progress",
         data: { toolCallId: toolCall.id, update: { output } },
