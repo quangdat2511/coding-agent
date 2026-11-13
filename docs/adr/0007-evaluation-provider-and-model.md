@@ -34,8 +34,9 @@ Go's terms are quoted from [the Console Go documentation](https://opencode.ai/do
 with $100 of DeepSeek V4.1 Flash allowance; list prices $0.15 and $0.60 per million input and
 output tokens off-peak, doubled at peak, cache reads at $0.003; per-model windows of 5 hours at 20%
 of the month, weekly at 50% and monthly at 100%; Extra Usage billed at Console pay-as-you-go rates;
-base URL `https://opencode.ai/inference/go`; and free-tier models refused to every client except
-OpenCode with HTTP 403. What the documentation does not say is which status Go returns when a window
+a base URL root of `https://opencode.ai/inference/go`, to which the adapter's SDK base URL adds
+the OpenAI path, `/openai/v1`; and free-tier models refused to every client except OpenCode with
+HTTP 403. What the documentation does not say is which status Go returns when a window
 is exhausted, which is why item 2 turns that into a rule rather than an assumption.
 
 ## Decision
@@ -67,26 +68,28 @@ Zen plan — with **`deepseek-v4.1-flash`**.
    at peak. The 5-hour window allows 20% of the month, about $20, and the weekly window 50%, about
    $50, so even the off-peak ceiling needs more than one 5-hour window and the peak ceiling exceeds
    the weekly allowance too. Go blocks a request once a window is exhausted, unless Extra Usage is
-   enabled, in which case it proceeds and is billed at pay-as-you-go Console rates; either way the
-   subscription's cost model stops applying mid-job. Nothing in the harness paces token burn — the
-   turn ceiling comes from the profile and concurrency from Harbor's `-n` — so the smoke job's
-   measured rate, not a pacing rule, decides whether the recorded job fits one window or has to
-   spread across several. Go publishes request estimates in the tens of thousands per window, far
-   above the roughly 2,600 requests a typical job issues, and no per-minute cap appears in its
-   documentation, so the allowance binds, not the request rate.
+   enabled, in which case it proceeds and is billed at Console pay-as-you-go rates until the monthly
+   spend limit; from that point the subscription's cost model no longer applies. Nothing in the
+   harness paces token burn — the turn ceiling comes from the profile and concurrency from Harbor's
+   `-n` — so the smoke job's measured rate is what sets that limit, not a pacing rule. Go publishes
+   request estimates in the tens of thousands per window, far above the roughly 2,600 requests a
+   typical job issues, and no per-minute cap appears in its documentation, so the allowance binds,
+   not the request rate.
 
    **Exhaustion is a cost event, not a pass.** Extra Usage is **on**, with a monthly spend limit set
-   in the Console, because the evaluation's token burn is estimated rather than known and a run must
-   not stall mid-job for a reason that is not the agent's. When the allowance is exhausted, Go
-   continues at Console pay-as-you-go rates until that limit; past it, requests fail and the adapter
-   turns the refusal into a `MODEL_FAILURE`. Until CDA-83 lands that failure carries no status and
-   scores as an agent outcome; afterwards it is rerun-eligible only for 401, 403, 429 or 5xx, per
-   protocol §7, so CDA-83 records the status Go actually returns rather than assuming 429. Two
-   consequences follow: the recorded job's manifest must record the limit and the observed spend,
-   because the subscription no longer bounds the bill by itself; and the rerun job starts only after
-   the window that the recorded job exhausted has reset, because "a rerun trial is never rerun". The
-   limit's value is set by a later ticket, once the smoke job has measured the real rate: this
-   record fixes the mechanism, not the number.
+   in the Console, because the evaluation's token burn is estimated rather than known and a run
+   must not stall mid-job for a reason that is not the agent's. The recorded job does not start
+   until that limit is set and recorded in the manifest: a job that runs before the limit exists
+   has no ceiling at all. When the allowance is exhausted, Go continues at Console rates until the
+   limit; past it, requests fail and the adapter turns the refusal into a `MODEL_FAILURE`. Until
+   CDA-83 lands that failure carries no status and scores as an agent outcome; afterwards it is
+   rerun-eligible only for 401, 403, 429 or 5xx, per protocol §7, so CDA-83 records the status Go
+   actually returns rather than assuming 429. Two consequences follow: the manifest must record the
+   limit and the observed spend, because the subscription no longer bounds the bill by itself; and
+   the rerun job starts only when the window has reset **and** the limit has headroom — a raised
+   limit or a new month — because "a rerun trial is never rerun", and a rerun inside a capped month
+   fails the same way. The value itself is set by a later ticket, after the smoke job measures the
+   real rate.
 
 3. **What the job demonstrates, and what it does not.** It demonstrates that the agent works end to
    end on the full dataset and reports how well *this configuration* does. It does not establish how
@@ -117,12 +120,13 @@ Zen plan — with **`deepseek-v4.1-flash`**.
    sixth `--provider` value; `OPENCODE_API_KEY` joins the fixed credential set in `@coding-agent/ai`
    as part of the implementation, and therefore the scrubbed child environment and the startup
    ancestor check. The adapter must move to the Go gateway — SDK base URL
-   `https://opencode.ai/inference/go/openai/v1`, since the OpenAI SDK appends `/chat/completions`
-   itself; the `x-opencode-session` header in place of today's `x-session-id`; and a
-   `coding-agent/<version>` user agent — none of which it does today. The session header is also
-   what lets Go reuse its prompt cache, which the cost model above assumes, so its value must stay
-   stable for the whole Agent Session and differ between sessions: a per-turn UUID would defeat the
-   cache and price the typical job's input as uncached, about $6.2 instead of $2.6 off-peak.
+   `https://opencode.ai/inference/go/openai/v1`, the documented root plus its OpenAI path, since the
+   OpenAI SDK appends `/chat/completions` itself; the `x-opencode-session` header in place of
+   today's `x-session-id`; and a `coding-agent/<version>` user agent — none of which it does
+   today. The session header is also what lets Go reuse its prompt cache, which the cost model above
+   assumes, so its value must stay stable for the whole Agent Session and differ between sessions: a
+   per-turn UUID would defeat the cache and price the typical job's input as uncached, about $6.2
+   instead of $2.6 off-peak.
    `opencode` then joins the shared conformance suite as a sixth member of the tier-1 provider
    checklist (ADR 0006 §3), so tier 1 completes only once that adapter passes. No recorded job runs
    on it until the conformance suite and the credential-isolation test of protocol §7 pass, because

@@ -399,14 +399,14 @@ supplies it to the launcher's factory in `tools`. The set includes every credent
 the CLI-selectable providers of ADR 0005 §3 declare, including providers not selected for the
 current run. Custom Provider credential names are outside that declared set; extending the set
 belongs with adding CLI support for them, and ADR 0001 §8 records the resulting inherited Custom
-Provider credentials as a residual under both Approval Policies.
+Provider credentials as a residual under both Approval Policies. `tools` receives names, never
+imports `ai`, and never discovers additional names by prefix or by scanning for secret-looking
+values.
 
 On 2026-11-12, [CDA-30](https://datn-fit-hcmus.atlassian.net/browse/CDA-30) amended this record:
 [ADR 0007](./0007-evaluation-provider-and-model.md) promotes `opencode` to a sixth `--provider`
 value, so `OPENCODE_API_KEY` joins the declared set with it, and the sentence that placed OpenCode
-credentials outside the set is superseded. The Custom Provider sentence stands. `tools` receives
-names, never imports `ai`, and never discovers
-additional names by prefix or by scanning for secret-looking values.
+credentials outside the set is superseded. The Custom Provider sentence stands.
 
 Every child started by `bash` or the Verification Runner goes through this shared launcher. At
 each launch it copies Coding Agent's current environment and removes exactly the configured
