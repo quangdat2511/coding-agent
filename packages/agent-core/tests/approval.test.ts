@@ -849,4 +849,62 @@ describe("waiting for Approval under the ask policy", () => {
     // After call 3 succeeded, the consecutive counter reset to 0
     expect(session.snapshot().counters.consecutiveRecoverableFailures).toBe(0);
   });
+
+  it("resolves pending Approval with status cancelled and decidedBy policy when session fails", async () => {
+    let throwClock = false;
+    const original = fakeWriteTool();
+    const tool: typeof original = {
+      ...original,
+      async prepare(input, ctx) {
+        throwClock = true;
+        return original.prepare(input, ctx);
+      },
+    };
+
+    const { session, clock } = openTestSession({
+      tools: [tool],
+      model: {
+        turns: [
+          toolCallTurn({ toolCallId: "call-1", name: "write", input: { path: "src/a.ts" } }),
+          textTurn("done"),
+        ],
+      },
+    });
+
+    const originalNow = clock.now;
+    clock.now = () => {
+      if (throwClock) {
+        throw new Error("clock failed during approval request");
+      }
+      return originalNow();
+    };
+
+    await session.dispatch({ type: "start", task });
+
+    const result = await session.result();
+    expect(result).toMatchObject({
+      outcome: "failed",
+      failure: {
+        code: "INTERNAL_ERROR",
+        message: "clock failed during approval request",
+      },
+    });
+
+    const events = await collect(session.events());
+    const approvalResolved = events.find((event) => event.type === "approval_resolved");
+    expect(approvalResolved?.data).toMatchObject({
+      approvalId: "approval-1",
+      toolCallId: "tool_call-1",
+      status: "cancelled",
+      decidedBy: "policy",
+      reason: "clock failed during approval request",
+    });
+
+    const toolCompleted = events.find((event) => event.type === "tool_call_completed");
+    expect(toolCompleted?.data).toEqual({
+      toolCallId: "tool_call-1",
+      outcome: "skipped",
+      reason: "INTERNAL_ERROR",
+    });
+  });
 });
