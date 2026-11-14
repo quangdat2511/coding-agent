@@ -176,7 +176,7 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
   let activeModelTurn: ActiveModelTurnContext | undefined;
   let activeVerification: ActiveVerificationContext | undefined;
   let cancellationReason: string | undefined;
-  let graceTimer: ReturnType<typeof setTimeout> | undefined;
+  let cancelGraceTimer: (() => void) | undefined;
 
   const SAFE_FALLBACK_TIMESTAMP = "1970-01-01T00:00:00.000Z";
   let lastOccurredAt: string | undefined;
@@ -218,9 +218,9 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
   }
 
   function startGraceTimer(): void {
-    if (graceTimer !== undefined) return;
-    graceTimer = setTimeout(() => {
-      graceTimer = undefined;
+    if (cancelGraceTimer !== undefined) return;
+    cancelGraceTimer = config.clock.setTimer(config.limits.cancellationGraceMs, () => {
+      cancelGraceTimer = undefined;
       if (!isTerminal()) {
         closeActiveWork({
           kind: "failed",
@@ -230,13 +230,13 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
           },
         });
       }
-    }, config.limits.cancellationGraceMs);
+    });
   }
 
   function clearGraceTimer(): void {
-    if (graceTimer !== undefined) {
-      clearTimeout(graceTimer);
-      graceTimer = undefined;
+    if (cancelGraceTimer !== undefined) {
+      cancelGraceTimer();
+      cancelGraceTimer = undefined;
     }
   }
 

@@ -491,7 +491,7 @@ describe("cancelling an Agent Session", () => {
   describe("Cancellation grace period expiration", () => {
     it("settles as failed with CANCELLATION_TIMEOUT when an adapter ignores abort past cancellationGraceMs", async () => {
       const stubborn = abortIgnoringTool();
-      const { session } = openTestSession({
+      const { session, clock } = openTestSession({
         tools: [stubborn],
         approvalPolicy: "auto-approve",
         limits: {
@@ -506,6 +506,7 @@ describe("cancelling an Agent Session", () => {
       await waitForEvent(session, "tool_execution_started");
 
       await session.dispatch({ type: "cancel", reason: "timed out cancellation" });
+      clock.advance(25);
 
       const terminalResult = await session.result();
       expect(terminalResult.outcome).toBe("failed");
@@ -515,7 +516,6 @@ describe("cancelling an Agent Session", () => {
       }
 
       stubborn.release();
-      await new Promise((r) => setTimeout(r, 25));
       expect(session.snapshot().phase).toBe("failed");
       const events = await collect(session.events());
       const settledEvents = events.filter((e) => e.type === "session_settled");

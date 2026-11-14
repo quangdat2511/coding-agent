@@ -7,6 +7,7 @@ import {
   openTestSession,
   textTurn,
   toolCallTurn,
+  waitForEvent,
 } from "./kit/index.ts";
 
 const task = { objective: "Run the build" };
@@ -168,5 +169,48 @@ describe("reporting Tool Progress", () => {
       { type: "tool_execution_started" },
       { type: "tool_call_completed" },
     ]);
+  });
+
+  it("delivers no update after cancellation's grace period completes the Tool Call", async () => {
+    // The tool ignores the abort, so the grace period expires while execute still runs and the
+    // session completes the call and settles without it. The tool then keeps reporting.
+    let report: ExecuteContext["onProgress"] = () => {};
+    const finished = Promise.withResolvers<ToolOutcome>();
+    const stubborn: ExecutableTool = {
+      ...fakeTool({ name: "build" }),
+      execute(_prepared, ctx) {
+        report = ctx.onProgress;
+        ctx.onProgress({ output: "line 1\n" });
+        return finished.promise;
+      },
+    };
+    const { session, clock } = openTestSession({
+      approvalPolicy: "auto-approve",
+      tools: [stubborn],
+      limits: { cancellationGraceMs: 20 },
+      model: { turns: [toolCallTurn({ toolCallId: "call-1", name: "build", input: {} })] },
+    });
+
+    await session.dispatch({ type: "start", task });
+    await waitForEvent(session, "tool_execution_started");
+    await session.dispatch({ type: "cancel" });
+    clock.advance(300);
+    report({ output: "line 1\nline 2\n" });
+    const result = await session.result();
+    clock.advance(300);
+    report({ output: "line 1\nline 2\nline 3\n" });
+    finished.resolve({ isError: false, content: "built" });
+    const events = await collect(session.events());
+
+    expect(result.outcome).toBe("failed");
+    expect(result.outcome === "failed" && result.failure.code).toBe("CANCELLATION_TIMEOUT");
+    const watched = ["tool_execution_started", "tool_execution_progress", "tool_call_completed"];
+    expect(shape(events.filter((event) => watched.includes(event.type)))).toEqual([
+      { type: "tool_execution_started" },
+      { type: "tool_execution_progress", output: "line 1\n" },
+      { type: "tool_call_completed" },
+    ]);
+    expect(events.at(-1)?.type).toBe("session_settled");
+    expect(session.snapshot().lastSequence).toBe(result.lastSequence);
   });
 });
