@@ -33,6 +33,9 @@ const RECORD_POLL_MS = 5 * 1000;
 // a burst and lose its first comments.
 export const REVIEW_BURST_MS = 3 * 60 * 1000;
 const PAGE_SIZE = 100;
+const DISCORD_API = "https://discord.com/api/v10";
+// Discord asks bot clients to name themselves in this form.
+const DISCORD_USER_AGENT = "DiscordBot (https://github.com, 1.0)";
 
 type User = { login: string };
 
@@ -64,7 +67,8 @@ export type DiscordMessage = {
 export type Plan =
   | { kind: "skip"; reason: string }
   | { kind: "create"; message: DiscordMessage; mentioned: string[] }
-  | { kind: "note"; message: DiscordMessage };
+  // `archive` closes the post after the note, when the pull request is merged or closed.
+  | { kind: "note"; message: DiscordMessage; archive?: boolean };
 
 export type Config = { userIds: Record<string, string>; tagId?: string };
 
@@ -243,6 +247,7 @@ export function planEvent(
           [],
           config,
         ),
+        archive: true,
       };
     default:
       return { kind: "skip", reason: `Nothing to post for ${event.action}.` };
@@ -578,6 +583,30 @@ async function postToDiscord(
   return response.status === 204 ? undefined : response.json();
 }
 
+// A webhook cannot archive a thread, so this step needs a bot with the Manage Threads permission.
+// The post is archived but not locked: Discord unarchives it when a later note arrives through the
+// webhook, for example after a reopen. A failure leaves the post open and only warns, because the
+// note itself already reached the post.
+async function archivePost(
+  fetchImpl: Fetch,
+  token: string | undefined,
+  id: string,
+): Promise<string> {
+  if (!token?.trim()) return "DISCORD_BOT_TOKEN is not set, so the post stays open.";
+  const response = await fetchImpl(`${DISCORD_API}/channels/${id}`, {
+    method: "PATCH",
+    headers: {
+      Authorization: `Bot ${token.trim()}`,
+      "Content-Type": "application/json",
+      "User-Agent": DISCORD_USER_AGENT,
+    },
+    body: JSON.stringify({ archived: true }),
+  });
+  // The token is never part of the message.
+  if (!response.ok) return `::warning::Discord did not close post ${id}: ${response.status}.`;
+  return `Closed post ${id}.`;
+}
+
 async function createPost(
   fetchImpl: Fetch,
   webhook: string,
@@ -640,7 +669,10 @@ export async function run(
   if (plan.kind === "skip") return plan.reason;
   if (plan.kind === "note" && record) {
     await postToDiscord(dependencies.fetch, webhook, { thread_id: record.id }, plan.message);
-    return `Posted to thread ${record.id}.`;
+    const posted = `Posted to thread ${record.id}.`;
+    if (!plan.archive) return posted;
+    // A ::warning:: line must start its own line to become an annotation.
+    return `${posted}\n${await archivePost(dependencies.fetch, env.DISCORD_BOT_TOKEN, record.id)}`;
   }
   if (plan.kind === "create") {
     // Without these the thread ID could not be saved, and a later event would post a second time.

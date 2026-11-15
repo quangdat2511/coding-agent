@@ -154,11 +154,22 @@ the requested reviewers and everyone who already reviewed. A push to a draft get
 pull request title changes, the post keeps its first title, because a webhook cannot rename a
 thread.
 
+After the note for a merge or a close, the script closes the post. Discord calls this "archive":
+the post leaves the list of open posts in the forum. A webhook cannot archive a thread, so this
+step uses a Discord bot through `DISCORD_BOT_TOKEN`. The post is not locked. If a note comes later,
+for example after a reopen, Discord opens the post again. If the secret is not set, the post stays
+open. If Discord refuses the request, the post stays open and the run shows a warning.
+
+To get the token, create an application on the Discord Developer Portal and add a bot to it.
+Invite the bot to the server with the View Channels and Manage Threads permissions on
+`#ticket-forum`. Then copy the bot token into the `DISCORD_BOT_TOKEN` secret.
+
 Store these values on the Settings → Secrets and variables → Actions page of the repository:
 
 | Name | Kind | Value |
 |------|------|-------|
 | `DISCORD_WEBHOOK_URL` | Secret | Webhook of `#ticket-forum`. If it is not set, the workflow skips. |
+| `DISCORD_BOT_TOKEN` | Secret | Optional token of a Discord bot with the Manage Threads permission. The script uses it to close the post after a merge or a close. If it is not set, the post stays open. |
 | `DISCORD_USER_IDS` | Variable | JSON object from GitHub login to Discord user ID, such as `{"quangdat2511": "123456789012345678"}`. An unmapped login appears as plain `@login` text. |
 | `DISCORD_FORUM_TAG_ID` | Variable | Optional ID of the forum tag for new posts. If Discord rejects the tag, for example after the tag was deleted, the post has no tag and the run shows a warning. |
 
