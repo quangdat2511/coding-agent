@@ -5,6 +5,7 @@ export interface EventLog {
   append(event: SessionEvent): void;
   close(): void;
   follow(afterSequence: number): AsyncIterable<SessionEvent>;
+  events(afterSequence?: number): readonly SessionEvent[];
 }
 
 export function createEventLog(): EventLog {
@@ -41,6 +42,9 @@ export function createEventLog(): EventLog {
           await changed.promise;
         }
       }
+    },
+    events(afterSequence = 0) {
+      return events.slice(afterSequence);
     },
   };
 }

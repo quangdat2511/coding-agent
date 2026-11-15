@@ -1,6 +1,13 @@
 import { describe, expect, it } from "bun:test";
 import type { AgentState, VerificationDecision } from "../src/index.ts";
-import { collect, openTestSession, textMessage, textTurn } from "./kit/index.ts";
+import {
+  collect,
+  fakeWriteTool,
+  openTestSession,
+  textMessage,
+  textTurn,
+  toolCallTurn,
+} from "./kit/index.ts";
 
 const task = { objective: "Fix the failing test" };
 
@@ -195,5 +202,44 @@ describe("verifying a Candidate Completion", () => {
       outcome: "failed",
       failure: { code: "INTERNAL_ERROR", message: expect.stringContaining("runner crashed") },
     });
+  });
+
+  it("marks partialChangesPossible when verification fails after workspace was changed by a mutating tool", async () => {
+    const { session } = openTestSession({
+      tools: [fakeWriteTool()],
+      approvalPolicy: "auto-approve",
+      model: {
+        turns: [
+          toolCallTurn({ toolCallId: "call-1", name: "write", input: { path: "src/a.ts" } }),
+          textTurn("Fixed it."),
+        ],
+      },
+      verification: [
+        {
+          outcome: "failed",
+          evidence: [
+            {
+              type: "command_execution",
+              command: "bun test",
+              exitCode: 1,
+              stdout: "1 fail",
+              stderr: "",
+              durationMs: 40,
+            },
+          ],
+          message: "Tests failed",
+        },
+      ],
+    });
+
+    await session.dispatch({ type: "start", task });
+    const result = await session.result();
+
+    expect(result.outcome).toBe("failed");
+    expect(result.workspaceChanged).toBe(true);
+    expect(result.partialChangesPossible).toBe(true);
+    expect(
+      (session.snapshot() as Extract<AgentState, { phase: "failed" }>).partialChangesPossible,
+    ).toBe(true);
   });
 });

@@ -850,7 +850,7 @@ describe("waiting for Approval under the ask policy", () => {
     expect(session.snapshot().counters.consecutiveRecoverableFailures).toBe(0);
   });
 
-  it("resolves pending Approval with status cancelled and decidedBy policy when session fails", async () => {
+  it("emits no approval events and skips the call when commit throws during approval request", async () => {
     let throwClock = false;
     const original = fakeWriteTool();
     const tool: typeof original = {
@@ -891,14 +891,9 @@ describe("waiting for Approval under the ask policy", () => {
     });
 
     const events = await collect(session.events());
-    const approvalResolved = events.find((event) => event.type === "approval_resolved");
-    expect(approvalResolved?.data).toMatchObject({
-      approvalId: "approval-1",
-      toolCallId: "tool_call-1",
-      status: "cancelled",
-      decidedBy: "policy",
-      reason: "clock failed during approval request",
-    });
+    const eventTypes = events.map((event) => event.type);
+    expect(eventTypes).not.toContain("approval_requested");
+    expect(eventTypes).not.toContain("approval_resolved");
 
     const toolCompleted = events.find((event) => event.type === "tool_call_completed");
     expect(toolCompleted?.data).toEqual({

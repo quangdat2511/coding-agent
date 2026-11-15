@@ -7,6 +7,7 @@ import {
   fakeWriteTool,
   openTestSession,
   streamOf,
+  textMessage,
   textTurn,
   toolCallTurn,
   waitForEvent,
@@ -132,6 +133,132 @@ describe("cancelling an Agent Session", () => {
       expect(turnCompleted?.data).toMatchObject({
         outcome: "cancelled",
       });
+    });
+
+    it("drops content delta arriving after cancellation and settles as cancelled", async () => {
+      const { session } = openTestSession({
+        model: {
+          turns: [
+            () =>
+              streamOf(async function* () {
+                yield { type: "stream_start" };
+                yield {
+                  type: "content_block_start",
+                  index: 0,
+                  block: { type: "text", text: "" },
+                };
+                yield {
+                  type: "content_block_delta",
+                  index: 0,
+                  delta: { type: "text_delta", text: "Part 1" },
+                };
+                await waitForPhase(session, "cancelling");
+                yield {
+                  type: "content_block_delta",
+                  index: 0,
+                  delta: { type: "text_delta", text: " - Part 2 after cancel" },
+                };
+                yield { type: "content_block_stop", index: 0 };
+                yield { type: "turn_end", message: textMessage("Part 1") };
+              }),
+          ],
+        },
+      });
+
+      await session.dispatch({ type: "start", task });
+      await waitForEvent(session, "assistant_content_delta");
+      const cancelResult = await session.dispatch({ type: "cancel" });
+      expect(cancelResult.accepted).toBe(true);
+
+      const result = await session.result();
+      expect(result.outcome).toBe("cancelled");
+      expect(session.snapshot().phase).toBe("cancelled");
+
+      const events = await collect(session.events());
+      const deltas = events.filter((e) => e.type === "assistant_content_delta");
+      expect(deltas).toHaveLength(1);
+      expect(deltas[0]?.data.delta).toBe("Part 1");
+
+      const messageCompleted = events.find((e) => e.type === "assistant_message_completed");
+      expect(messageCompleted?.data.outcome).toBe("cancelled");
+      const textBlock = messageCompleted?.data.message.content.find((b) => b.type === "text");
+      expect(textBlock?.text).toBe("Part 1");
+    });
+
+    it("drops content delta arriving after cancellation grace period expires and does not emit after session_settled", async () => {
+      const finished = Promise.withResolvers<void>();
+      let pushDelta: ((text: string) => void) | undefined;
+      const { session, clock } = openTestSession({
+        limits: { cancellationGraceMs: 20 },
+        model: {
+          turns: [
+            () =>
+              streamOf(async function* () {
+                yield { type: "stream_start" };
+                yield {
+                  type: "content_block_start",
+                  index: 0,
+                  block: { type: "text", text: "" },
+                };
+                yield {
+                  type: "content_block_delta",
+                  index: 0,
+                  delta: { type: "text_delta", text: "Initial stream" },
+                };
+                const queue: string[] = [];
+                let notify: (() => void) | undefined;
+                pushDelta = (t) => {
+                  queue.push(t);
+                  notify?.();
+                };
+                while (true) {
+                  const text = queue.shift();
+                  if (text !== undefined) {
+                    yield {
+                      type: "content_block_delta",
+                      index: 0,
+                      delta: { type: "text_delta", text },
+                    };
+                  } else {
+                    await Promise.race([
+                      new Promise<void>((r) => {
+                        notify = r;
+                      }),
+                      finished.promise,
+                    ]);
+                    if (queue.length === 0) break;
+                  }
+                }
+                yield { type: "content_block_stop", index: 0 };
+                yield { type: "turn_end", message: textMessage("Initial stream") };
+              }),
+          ],
+        },
+      });
+
+      await session.dispatch({ type: "start", task });
+      await waitForEvent(session, "assistant_content_delta");
+      await session.dispatch({ type: "cancel" });
+
+      clock.advance(300);
+      const result = await session.result();
+      expect(result.outcome).toBe("failed");
+      expect(result.outcome === "failed" && result.failure.code).toBe("CANCELLATION_TIMEOUT");
+      expect(session.snapshot().phase).toBe("failed");
+
+      pushDelta?.("Late delta after grace expired");
+      clock.advance(100);
+      finished.resolve();
+
+      const events = await collect(session.events());
+      const settledIndex = events.findIndex((e) => e.type === "session_settled");
+      expect(settledIndex).toBe(events.length - 1);
+      const settledCount = events.filter((e) => e.type === "session_settled").length;
+      expect(settledCount).toBe(1);
+
+      const deltas = events.filter((e) => e.type === "assistant_content_delta");
+      expect(deltas).toHaveLength(1);
+      expect(deltas[0]?.data.delta).toBe("Initial stream");
     });
   });
 
@@ -521,36 +648,142 @@ describe("cancelling an Agent Session", () => {
       const settledEvents = events.filter((e) => e.type === "session_settled");
       expect(settledEvents).toHaveLength(1);
     });
+
+    it("settles as failed with CANCELLATION_TIMEOUT when verification ignores abort past cancellationGraceMs", async () => {
+      const release = Promise.withResolvers<void>();
+      const { session, clock } = openTestSession({
+        limits: { cancellationGraceMs: 25 },
+        model: { turns: [textTurn("Candidate message")] },
+        verification: [
+          () =>
+            new Promise((resolve) => {
+              release.promise.then(() => {
+                resolve({
+                  outcome: "succeeded",
+                  evidence: [
+                    {
+                      type: "command_execution",
+                      command: "test",
+                      exitCode: 0,
+                      stdout: "ok",
+                      stderr: "",
+                      durationMs: 1,
+                    },
+                  ],
+                });
+              });
+            }),
+        ],
+      });
+
+      await session.dispatch({ type: "start", task });
+      await waitForEvent(session, "verification_started");
+
+      await session.dispatch({ type: "cancel" });
+      expect(session.snapshot().phase).toBe("cancelling");
+
+      clock.advance(50);
+      const result = await session.result();
+      expect(result.outcome).toBe("failed");
+      if (result.outcome === "failed") {
+        expect(result.failure.code).toBe("CANCELLATION_TIMEOUT");
+        expect(result.failure.message).toContain("cancellation grace period");
+      }
+      expect(session.snapshot().phase).toBe("failed");
+
+      release.resolve();
+      const events = await collect(session.events());
+      const settledEvents = events.filter((e) => e.type === "session_settled");
+      expect(settledEvents).toHaveLength(1);
+      expect(events.at(-1)?.type).toBe("session_settled");
+    });
   });
 
   describe("Repeated cancellation and terminal state rules", () => {
     it("returns accepted: true with current sequence when cancelling an already cancelling or cancelled session", async () => {
-      const { session } = openTestSession();
+      // 1. Cancelled from ready (synchronous -> cancelled phase)
+      const { session: syncSession } = openTestSession();
 
-      const firstCancel = await session.dispatch({ type: "cancel", reason: "first" });
+      const firstCancel = await syncSession.dispatch({ type: "cancel", reason: "first" });
       expect(firstCancel.accepted).toBe(true);
+      expect(syncSession.snapshot().phase).toBe("cancelled");
 
-      const secondCancel = await session.dispatch({ type: "cancel", reason: "second" });
+      const secondCancel = await syncSession.dispatch({ type: "cancel", reason: "second" });
       expect(secondCancel.accepted).toBe(true);
       if (secondCancel.accepted) {
-        expect(secondCancel.sequence).toBe(session.snapshot().lastSequence);
+        expect(secondCancel.sequence).toBe(syncSession.snapshot().lastSequence);
       }
+
+      // 2. Cancel while in cancelling phase (async work in flight)
+      const stubborn = abortIgnoringTool();
+      const { session: asyncSession } = openTestSession({
+        tools: [stubborn],
+        approvalPolicy: "auto-approve",
+        model: { turns: [toolCallTurn({ toolCallId: "call-1", name: "stubborn", input: {} })] },
+      });
+
+      await asyncSession.dispatch({ type: "start", task });
+      await waitForEvent(asyncSession, "tool_execution_started");
+
+      const firstAsyncCancel = await asyncSession.dispatch({
+        type: "cancel",
+        reason: "cancelling first",
+      });
+      expect(firstAsyncCancel.accepted).toBe(true);
+      expect(asyncSession.snapshot().phase).toBe("cancelling");
+
+      const secondAsyncCancel = await asyncSession.dispatch({
+        type: "cancel",
+        reason: "cancelling second",
+      });
+      expect(secondAsyncCancel.accepted).toBe(true);
+      if (secondAsyncCancel.accepted) {
+        expect(secondAsyncCancel.sequence).toBe(asyncSession.snapshot().lastSequence);
+      }
+
+      stubborn.release();
+      const asyncResult = await asyncSession.result();
+      expect(asyncResult.outcome).toBe("cancelled");
+      expect(asyncSession.snapshot().phase).toBe("cancelled");
     });
 
     it("returns ALREADY_SETTLED when cancelling after succeeded or failed", async () => {
-      const { session } = openTestSession({
+      // 1. After succeeded
+      const { session: succeededSession } = openTestSession({
         model: { turns: [textTurn("All done")] },
       });
 
-      await session.dispatch({ type: "start", task });
-      const result = await session.result();
-      expect(result.outcome).toBe("succeeded");
+      await succeededSession.dispatch({ type: "start", task });
+      const succeededResult = await succeededSession.result();
+      expect(succeededResult.outcome).toBe("succeeded");
 
-      const cancelResult = await session.dispatch({ type: "cancel" });
-      expect(cancelResult).toEqual({
+      const cancelSucceeded = await succeededSession.dispatch({ type: "cancel" });
+      expect(cancelSucceeded).toEqual({
         accepted: false,
         code: "ALREADY_SETTLED",
         message: "the session has already succeeded",
+      });
+
+      // 2. After failed
+      const { session: failedSession } = openTestSession({
+        model: {
+          turns: [
+            () => {
+              throw new Error("fatal model error");
+            },
+          ],
+        },
+      });
+
+      await failedSession.dispatch({ type: "start", task });
+      const failedResult = await failedSession.result();
+      expect(failedResult.outcome).toBe("failed");
+
+      const cancelFailed = await failedSession.dispatch({ type: "cancel" });
+      expect(cancelFailed).toEqual({
+        accepted: false,
+        code: "ALREADY_SETTLED",
+        message: "the session has already failed",
       });
     });
   });

@@ -641,4 +641,124 @@ describe("executing auto-approved Tool Calls", () => {
     const settled = events.find((e) => e.type === "session_settled");
     expect(settled).toBeDefined();
   });
+
+  it("skips unstarted call when commit of tool_execution_started throws", async () => {
+    let throwClock = false;
+    const original = fakeTool({ name: "lookup" });
+    const tool: typeof original = {
+      ...original,
+      async prepare(input, ctx) {
+        throwClock = true;
+        return original.prepare(input, ctx);
+      },
+    };
+    const { session, clock } = openTestSession({
+      tools: [tool],
+      approvalPolicy: "auto-approve",
+      model: {
+        turns: [toolCallTurn({ toolCallId: "call-1", name: "lookup", input: {} })],
+      },
+    });
+
+    const originalNow = clock.now;
+    clock.now = () => {
+      if (throwClock) {
+        throw new Error("clock failed during tool_execution_started");
+      }
+      return originalNow();
+    };
+
+    await session.dispatch({ type: "start", task });
+    const result = await session.result();
+    expect(result.outcome).toBe("failed");
+    if (result.outcome === "failed") {
+      expect(result.failure.code).toBe("INTERNAL_ERROR");
+    }
+
+    const events = await collect(session.events());
+    const started = events.find((e) => e.type === "tool_execution_started");
+    expect(started).toBeUndefined();
+
+    const completion = events.find((e) => e.type === "tool_call_completed");
+    expect(completion?.data).toEqual({
+      toolCallId: "tool_call-1",
+      outcome: "skipped",
+      reason: "INTERNAL_ERROR",
+    });
+  });
+
+  it("skips already queued call when ids throws on a subsequent call in queueToolCalls", async () => {
+    let idCallCount = 0;
+    const { session, config } = openTestSession({
+      tools: [fakeTool({ name: "first" }), fakeTool({ name: "second" })],
+      approvalPolicy: "auto-approve",
+      model: {
+        turns: [
+          toolCallTurn(
+            { toolCallId: "call-1", name: "first", input: {} },
+            { toolCallId: "call-2", name: "second", input: {} },
+          ),
+        ],
+      },
+    });
+
+    const originalNext = config.ids.next;
+    config.ids.next = (prefix) => {
+      if (prefix === "tool_call") {
+        idCallCount++;
+        if (idCallCount === 2) {
+          throw new Error("ids exhausted on second tool call");
+        }
+      }
+      return originalNext(prefix);
+    };
+
+    await session.dispatch({ type: "start", task });
+    const result = await session.result();
+    expect(result.outcome).toBe("failed");
+    if (result.outcome === "failed") {
+      expect(result.failure.code).toBe("INTERNAL_ERROR");
+    }
+
+    const events = await collect(session.events());
+    const queuedEvents = events.filter((e) => e.type === "tool_call_queued");
+    expect(queuedEvents).toHaveLength(1);
+    expect(queuedEvents[0]?.data.toolCall.id).toBe("tool_call-1");
+
+    const completed = events.filter((e) => e.type === "tool_call_completed");
+    expect(completed).toHaveLength(1);
+    expect(completed[0]?.data).toEqual({
+      toolCallId: "tool_call-1",
+      outcome: "skipped",
+      reason: "INTERNAL_ERROR",
+    });
+
+    const turnCompleted = events.find((e) => e.type === "model_turn_completed");
+    expect(turnCompleted?.data.outcome).toBe("failed");
+  });
+
+  it("does not double-count usage if commit of model_turn_completed throws", async () => {
+    let callCount = 0;
+    const { session, clock } = openTestSession({
+      model: { turns: [textTurn("Done")] },
+    });
+
+    const originalNow = clock.now;
+    clock.now = () => {
+      callCount++;
+      if (callCount === 6) {
+        throw new Error("clock failed during model_turn_completed");
+      }
+      return originalNow();
+    };
+
+    await session.dispatch({ type: "start", task });
+
+    const result = await session.result();
+    expect(result.outcome).toBe("failed");
+    if (result.outcome === "failed") {
+      expect(result.failure.code).toBe("INTERNAL_ERROR");
+    }
+    expect(result.usage).toEqual({ inputTokens: 10, outputTokens: 5 });
+  });
 });
