@@ -1,8 +1,20 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { mkdir, mkdtemp, readFile, realpath, rm, stat } from "node:fs/promises";
+import {
+  chmod,
+  mkdir,
+  mkdtemp,
+  readFile,
+  realpath,
+  rename,
+  rm,
+  stat,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { WorkspaceResolver } from "@coding-agent/agent-core";
+import type { ChildProcessLauncher } from "../src/child-process.ts";
 import {
   createChildProcessLauncher,
   createVerificationRunner,
@@ -12,7 +24,7 @@ import {
 } from "../src/index.ts";
 import { MAX_TOOL_OUTPUT_BYTES, TOOL_OUTPUT_TRUNCATION_MARKER } from "../src/output-budget.ts";
 import { createVerificationRunnerOn } from "../src/verification-runner.ts";
-import { noPosixSignals } from "./platform.ts";
+import { noModeBits, noPosixSignals } from "./platform.ts";
 
 let sandbox: string;
 let repo: string;
@@ -244,6 +256,158 @@ describe("a host with no shell", () => {
       error: "no shell found: neither bash on PATH nor /bin/sh exists",
     });
     expect(await stat(join(repo, "ran")).catch(() => "missing")).toBe("missing");
+  });
+});
+
+const missing = (path: string) =>
+  stat(path).then(
+    () => "present",
+    () => "missing",
+  );
+
+describe("a command that cannot run", () => {
+  it("reports a missing binary as launch_failed with exit code 127", async () => {
+    const result = await verify("nonexistent_cda74_binary");
+    if (result.status !== "launch_failed") throw new Error(`got ${result.status}`);
+
+    expect(result.exitCode).toBe(127);
+    expect(result.error).toStartWith("exit code 127 (command not found or not executable):\n");
+    expect(result.error).toContain("nonexistent_cda74_binary");
+  });
+
+  // Windows has no mode bits: Git Bash runs a file with a shebang whatever its permissions. Root
+  // ignores read and write bits but not a missing execute bit, so this also holds as root.
+  it.skipIf(noModeBits)(
+    "reports a file that is not executable as launch_failed with 126",
+    async () => {
+      await writeFile(join(repo, "check.sh"), "#!/bin/sh\necho ran\n");
+      await chmod(join(repo, "check.sh"), 0o644);
+      const result = await verify("./check.sh");
+      if (result.status !== "launch_failed") throw new Error(`got ${result.status}`);
+
+      expect(result.exitCode).toBe(126);
+      expect(result.error).not.toContain("ran\n");
+    },
+  );
+
+  it("reports a command that exits 2 as completed, since a failing make exits 2 as well", async () => {
+    expect(withoutDuration(await verify("echo failing; exit 2"))).toEqual({
+      status: "completed",
+      exitCode: 2,
+      stdout: "failing\n",
+      stderr: "",
+    });
+  });
+
+  it("reports a shell syntax error as launch_failed without running any of the command", async () => {
+    const result = await verify("touch ran\nif then");
+    if (result.status !== "launch_failed") throw new Error(`got ${result.status}`);
+
+    expect(result.exitCode).toBe(2);
+    expect(result.error).toStartWith("shell syntax error:\n");
+    expect(result.error).toContain("syntax error");
+    expect(await missing(join(repo, "ran"))).toBe("missing");
+  });
+
+  it("refuses a repository root replaced by a symbolic link, running nothing outside it", async () => {
+    const outside = join(sandbox, "outside");
+    await mkdir(outside);
+    await rename(repo, join(sandbox, "moved"));
+    await symlink(outside, repo);
+    const result = await verify("touch marker");
+
+    expect(withoutDuration(result)).toEqual({
+      status: "launch_failed",
+      error: expect.stringContaining(
+        `repository root ${JSON.stringify(workspace.repoRoot)} cannot be used: `,
+      ),
+    });
+    expect(await missing(join(outside, "marker"))).toBe("missing");
+  });
+
+  it("refuses a repository root that was removed", async () => {
+    await rm(repo, { recursive: true });
+    const result = await verify("echo hi");
+
+    expect(result.status).toBe("launch_failed");
+    expect(result.status === "launch_failed" && result.error).toStartWith(
+      `repository root ${JSON.stringify(workspace.repoRoot)} cannot be used: `,
+    );
+  });
+
+  it("reports a shell that cannot be started as launch_failed instead of rejecting", async () => {
+    const throwing: ChildProcessLauncher = {
+      launch: () => {
+        throw new Error("ENOENT: no such file or directory, posix_spawn '/bin/bash'");
+      },
+    };
+    const result = await runnerWith({ launcher: throwing }).run("echo hi", {
+      signal: new AbortController().signal,
+    });
+
+    expect(withoutDuration(result)).toEqual({
+      status: "launch_failed",
+      error: expect.stringMatching(
+        /^could not start ".+": ENOENT: no such file or directory, posix_spawn '\/bin\/bash'$/,
+      ),
+    });
+  });
+
+  it("bounds the output in a launch failure to 40 KiB, reason included", async () => {
+    const result = await verify(
+      'i=0; while [ $i -lt 3000 ]; do echo "line $i of a long log"; i=$((i+1)); done; nonexistent_cda74_binary',
+    );
+    if (result.status !== "launch_failed") throw new Error(`got ${result.status}`);
+
+    expect(Buffer.byteLength(result.error, "utf8")).toBeLessThanOrEqual(MAX_TOOL_OUTPUT_BYTES);
+    expect(result.error).toStartWith(
+      "exit code 127 (command not found or not executable):\nline 0 ",
+    );
+    expect(result.error).toContain(TOOL_OUTPUT_TRUNCATION_MARKER);
+    expect(result.error).toContain("nonexistent_cda74_binary");
+  });
+});
+
+// A launcher whose syntax check (`<shell> -n -c ...`) runs `stand-in` instead, so a test can make
+// the check slow without a command that is slow to parse.
+function slowSyntaxCheck(standIn: string): ChildProcessLauncher {
+  return {
+    launch: (argv, options) =>
+      argv[1] === "-n"
+        ? launcher.launch([argv[0] ?? "", "-c", standIn], options)
+        : launcher.launch(argv, options),
+  };
+}
+
+describe("the syntax check", () => {
+  it("shares the timeout with the command, so the whole run stays within it", async () => {
+    const result = await runnerWith({ launcher: slowSyntaxCheck("sleep 0.4"), timeoutMs: 700 }).run(
+      "sleep 5",
+      { signal: new AbortController().signal },
+    );
+
+    expect(result.status).toBe("timed_out");
+    expect(result.status === "timed_out" && result.timeoutMs).toBe(700);
+    // Each with the full 700 ms, the two would take about 1,100 ms.
+    expect(result.durationMs).toBeLessThan(1_000);
+  });
+
+  it("is stopped by the timeout and by cancellation too", async () => {
+    const timedOut = await runnerWith({ launcher: slowSyntaxCheck("sleep 5"), timeoutMs: 300 }).run(
+      "touch ran",
+      { signal: new AbortController().signal },
+    );
+    const controller = new AbortController();
+    setTimeout(() => controller.abort(), 300);
+    const cancelled = await runnerWith({ launcher: slowSyntaxCheck("sleep 5") }).run("touch ran", {
+      signal: controller.signal,
+    });
+
+    expect(timedOut.status).toBe("timed_out");
+    expect(cancelled.status).toBe("cancelled");
+    expect(timedOut.durationMs).toBeLessThan(3_000);
+    expect(cancelled.durationMs).toBeLessThan(3_000);
+    expect(await missing(join(repo, "ran"))).toBe("missing");
   });
 });
 
