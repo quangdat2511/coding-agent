@@ -210,6 +210,7 @@ describe("planEvent", () => {
     if (plan.kind !== "note") throw new Error(`expected note, got ${plan.kind}`);
     expect(plan.message.content).toBe("PR đã chuyển về Draft, tạm dừng review.");
     expect(plan.message.allowed_mentions.users).toEqual([]);
+    expect(plan.archive).toBeUndefined();
     expect(planEvent(draft, undefined, config, NOW).kind).toBe("skip");
   });
 
@@ -220,9 +221,12 @@ describe("planEvent", () => {
     if (plan.kind !== "note") throw new Error(`expected note, got ${plan.kind}`);
     expect(plan.message.content).toBe("PR đã được merge vào `main`.");
 
+    expect(plan.archive).toBe(true);
+
     const closed = planEvent(event({ action: "closed" }), record(), config, NOW);
     if (closed.kind !== "note") throw new Error(`expected note, got ${closed.kind}`);
     expect(closed.message.content).toBe("PR đã đóng, không merge.");
+    expect(closed.archive).toBe(true);
     expect(planEvent(event({ action: "closed" }), undefined, config, NOW).kind).toBe("skip");
   });
 });
@@ -373,10 +377,13 @@ describe("run", () => {
     // Other GitHub API responses, by full URL.
     responses?: Record<string, unknown>;
     eventName?: string;
+    // The status the Discord bot API answers with when the script closes a post.
+    archiveStatus?: number;
   };
 
   const API = "https://api.github.test/repos/acme/repo";
   const WEBHOOK = "https://discord.test/api/webhooks/1/token";
+  const CHANNELS = "https://discord.com/api/v10/channels";
 
   function artifact(id: number, createdAt: string, expired = false): Artifact {
     return { id, name: "discord-thread-pr-7", expired, created_at: createdAt };
@@ -399,6 +406,9 @@ describe("run", () => {
         calls.push({ method, url, body, headers: init.headers });
         if (url.startsWith("https://discord.test/")) {
           return new Response(JSON.stringify({ id: "1", channel_id: "4242" }), { status: 200 });
+        }
+        if (url.startsWith(`${CHANNELS}/`)) {
+          return new Response("{}", { status: fixture.archiveStatus ?? 200 });
         }
         if (url === `${API}/actions/artifacts?name=discord-thread-pr-7&per_page=100`) {
           return Response.json({ artifacts: artifactListings.shift() ?? [] });
@@ -490,7 +500,9 @@ describe("run", () => {
       blobs: { 7: zip(JSON.stringify(record()), 0) },
     });
 
-    expect(await run(env, dependencies)).toBe("Posted to thread 999.");
+    expect(await run(env, dependencies)).toBe(
+      "Posted to thread 999.\nDISCORD_BOT_TOKEN is not set, so the post stays open.",
+    );
     const download = calls.find((call) => call.url === "https://blob.test/7");
     expect(download?.headers).toBeUndefined();
     expect(calls.at(-1)?.url).toBe(`${WEBHOOK}?thread_id=999`);
@@ -502,8 +514,47 @@ describe("run", () => {
     const { calls, dependencies, env } = await setup(event({ action: "closed" }), {
       comments: [[legacy]],
     });
-    expect(await run(env, dependencies)).toBe("Posted to thread 999.");
+    expect(await run(env, dependencies)).toStartWith("Posted to thread 999.\n");
     expect(calls.at(-1)?.url).toBe(`${WEBHOOK}?thread_id=999`);
+  });
+
+  it("closes the post with the bot token after noting a merge", async () => {
+    const merged = event({ action: "closed" });
+    merged.pull_request.merged = true;
+    const { calls, dependencies, env } = await setup(merged, {
+      comments: [[{ user: { login: "github-actions[bot]" }, body: marker(record()) }]],
+    });
+
+    const result = await run({ ...env, DISCORD_BOT_TOKEN: " bot-token " }, dependencies);
+    expect(result).toBe("Posted to thread 999.\nClosed post 999.");
+    expect(calls.slice(-2).map((call) => `${call.method} ${call.url}`)).toEqual([
+      `POST ${WEBHOOK}?thread_id=999`,
+      `PATCH ${CHANNELS}/999`,
+    ]);
+    expect(calls.at(-1)?.body).toEqual({ archived: true });
+    expect(calls.at(-1)?.headers).toMatchObject({ Authorization: "Bot bot-token" });
+  });
+
+  it("only warns when Discord refuses to close the post", async () => {
+    const { calls, dependencies, env } = await setup(event({ action: "closed" }), {
+      comments: [[{ user: { login: "github-actions[bot]" }, body: marker(record()) }]],
+      archiveStatus: 403,
+    });
+
+    const result = await run({ ...env, DISCORD_BOT_TOKEN: "bot-token" }, dependencies);
+    expect(result).toBe("Posted to thread 999.\n::warning::Discord did not close post 999: 403.");
+    expect(result).not.toContain("bot-token");
+    expect(calls.some((call) => call.url === `${WEBHOOK}?thread_id=999`)).toBe(true);
+  });
+
+  it("does not close the post for a note that is not a merge or a close", async () => {
+    const { calls, dependencies, env } = await setup(event({ action: "converted_to_draft" }), {
+      comments: [[{ user: { login: "github-actions[bot]" }, body: marker(record()) }]],
+    });
+    expect(await run({ ...env, DISCORD_BOT_TOKEN: "bot-token" }, dependencies)).toBe(
+      "Posted to thread 999.",
+    );
+    expect(calls.some((call) => call.url.startsWith(CHANNELS))).toBe(false);
   });
 
   it("ignores comment markers that github-actions did not write", async () => {
