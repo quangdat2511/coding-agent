@@ -393,10 +393,16 @@ export function readTool(): ExecutableTool<typeof ReadParams>;
 export function writeTool(): ExecutableTool<typeof WriteParams>;
 export function editTool(): ExecutableTool<typeof EditParams>;
 export function bashTool(launcher: ChildProcessLauncher): ExecutableTool<typeof BashParams>;
+export function createVerificationRunner(options: {
+  launcher: ChildProcessLauncher;
+  workspace: WorkspaceResolver;
+  timeoutMs?: number;
+}): CreateVerificationRunnerResult;
 ```
 
-`createDefaultTools` registers `read`, `write`, `edit`, and `bash`. CDA-74 will add the
-Verification Runner with the same configured launcher dependency. The launcher arguments, added in
+`createDefaultTools` registers `read`, `write`, `edit`, and `bash`. `createVerificationRunner`
+(CDA-74) takes the same configured launcher, so a Verification command gets the same filtered
+environment; it is not a tool and is not registered. The launcher arguments, added in
 CDA-71, replace the original zero-argument sketches; they do not add tool timeout options.
 
 The composition root reads the complete `PROVIDER_CREDENTIAL_ENV_VARS` export from `ai` and
@@ -606,7 +612,7 @@ re-exports:
 | Package | Names checked | Exact matches with a Pi public export |
 | --- | --- | --- |
 | `agent-core` | the ADR 0001 and ADR 0002 types it exports and the names in §3 (41 names) | `AgentSession` (`pi-coding-agent`), `AgentState` (`pi-agent-core`), `JsonValue` (`pi-agent-core`, `pi-ai`), `IdGenerator` (`pi-agent-core`) |
-| `tools` | `createWorkspaceResolver`, `createDefaultTools`, `readTool`, `writeTool`, `editTool`, `bashTool`, `ReadParams`, `WriteParams`, `EditParams`, `BashParams`, `createChildEnvironmentBuilder`, `createChildProcessLauncher`, `ChildEnvironment`, `CreateChildEnvironmentResult`, `ChildLaunchOptions`, `ChildProcess`, `ChildProcessLauncher`, `CreateChildProcessLauncherResult` | none |
+| `tools` | `createWorkspaceResolver`, `createDefaultTools`, `readTool`, `writeTool`, `editTool`, `bashTool`, `ReadParams`, `WriteParams`, `EditParams`, `BashParams`, `createChildEnvironmentBuilder`, `createChildProcessLauncher`, `ChildEnvironment`, `CreateChildEnvironmentResult`, `ChildLaunchOptions`, `ChildProcess`, `ChildProcessLauncher`, `CreateChildProcessLauncherResult`, `createVerificationRunner`, `VerificationRunner`, `VerificationRunnerOptions`, `VerificationRunnerResult`, `CreateVerificationRunnerResult` | none |
 | `tui` | `renderTui`, `TuiModel`, `TuiHandlers`, `TuiHandle` | none |
 | `coding-agent` | `runInteractive`, `runHeadless`, `projectSessionEvent`, `CliOptions`, `HeadlessOptions`, `HeadlessResult` | none |
 
@@ -713,6 +719,21 @@ amended this record:
   as an `execute` result that is not a `ToolOutcome` already becomes `TOOL_INTERNAL_ERROR`.
 - **Process supervision** (§4): timeout, cancellation, descendant cleanup, and output draining stay
   in `bash.ts` until CDA-74, which moves them into a module shared with the Verification Runner.
+
+On 2026-11-15, [Run the Verification command](https://datn-fit-hcmus.atlassian.net/browse/CDA-74)
+amended this record:
+
+- **Process supervision** (§4): timeout, cancellation, descendant cleanup, and output draining
+  live in `packages/tools/src/process-run.ts`, which `bash` and the Verification Runner share. It
+  is not exported. Each caller decides what the exit means: `bash` writes its status line, and the
+  runner returns its result.
+- **Verification Runner** (§4): `createVerificationRunner({ launcher, workspace, timeoutMs? })`
+  returns `INVALID_CONFIGURATION` with `field: "timeoutMs"` for a timeout outside the `bash`
+  bounds, or a runner whose `run(command, { signal })` never rejects and resolves to the result
+  ADR 0003 §5 records. The composition root binds the workspace, because the Verification
+  Policy's `verify` context carries none.
+- **Pi names** (§8): the five new exports were checked on 2026-11-14 against Pi commit
+  `9841914c71a74d81abe07f751aefd271fd924e63`; none occurs in its packages' source.
 
 ## Consequences
 

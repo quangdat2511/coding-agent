@@ -2,7 +2,7 @@
 
 Status: accepted
 
-Date: 2026-09-13
+Date: 2026-09-13 (Amended: 2026-09-16, 2026-11-05, 2026-11-15)
 
 ## Context
 
@@ -145,6 +145,56 @@ On 2026-11-05, [CDA-53](https://datn-fit-hcmus.atlassian.net/browse/CDA-53) amen
 - **Discovery stop condition** (§1): discovery stops at the first candidate that yields instructions: a regular file with non-whitespace content, or a link whose target is one and passes the Path Jail. A directory, an empty or whitespace-only file, or an unusable link is passed over and reported in `skipped`.
 - **Planning requirement** (§2): the sentence names the registered mutating tools instead of a fixed list. With `write`, `edit` and `bash` registered, it is the quoted sentence verbatim.
 - **Tool snippets** (§1): the prompt lists the name of each registered tool. Each tool's description and parameters reach the model through its tool definition on every request, so the prompt does not repeat them.
+
+On 2026-11-15, [CDA-74](https://datn-fit-hcmus.atlassian.net/browse/CDA-74) amended this record:
+
+- **Combined output** (§3): the command runs after `exec 2>&1`, as `bash` does (ADR 0001 §7), so
+  all of its output is in `stdout`, in the order it was written, and `stderr` is always empty. The
+  40 KiB budget applies to that combined output. Two pipes joined by arrival lose the order, and
+  splitting the budget between them is not an algorithm ADR 0001 defines.
+- **Cancelled runs** (§3): the runner result gains a fourth member,
+  `{ status: "cancelled"; stdout; stderr; durationMs }`, for a run the abort signal ended or one
+  whose signal had already aborted, in which case nothing starts. A cancelled run is neither a
+  finished command nor one that could not start, so neither existing member describes it. Agent
+  Core records the Verification as cancelled (ADR 0002 §5,
+  [CDA-73](https://datn-fit-hcmus.atlassian.net/browse/CDA-73)); the Verification Policy
+  ([CDA-77](https://datn-fit-hcmus.atlassian.net/browse/CDA-77)) reports cancellation rather than a
+  decision.
+- **Shell syntax errors** (§3): the runner first runs `<shell> -n -c <command>`, which parses the
+  command without running any of it, and reports a non-zero result as `launch_failed` with that
+  exit code. The command's own exit code cannot show a syntax error, because a failing `make`
+  exits 2 as well, and without the check bash runs the lines before the error. A syntax error that
+  only appears at run time, inside `eval` or a sourced file, is `completed` with its exit code.
+- **Exit codes 126 and 127** (§3): always `launch_failed`, with the exit code, even when a command
+  inside a script exits with one. The cost accepted is that a test suite whose last step is a
+  missing command ends the Agent Session rather than continuing.
+- **A shell ended by a signal the runner did not send** (§3), such as an out-of-memory kill or a
+  crash: `completed`, with 128 plus the signal's number as the exit code, as a shell reports such a
+  child. The crash is a failure the model may fix, not an environment that cannot run.
+- **Other launch failures** (§3): no shell, a repository root that no longer resolves to itself as
+  a directory (checked again before each run, as `bash` checks its start directory in `execute`),
+  and a shell that cannot be started are `launch_failed` without an exit code. The runner never
+  rejects. `launch_failed.error` holds a reason followed by the shell's output, within 40 KiB.
+- **Timeout** (§3): each runner is created with a `timeoutMs` within the `bash` bounds of ADR 0001
+  §3, 30,000 ms by default and at most 120,000 ms; any other value is `INVALID_CONFIGURATION` when
+  the runner is created. The syntax check and the command share that one deadline.
+
+Evidence behind this amendment:
+
+- *Read in source:* the `bash` supervision the runner shares (`packages/tools/src/process-run.ts`),
+  and Agent Core's handling of a Verification Policy that throws: the session fails with
+  `INTERNAL_ERROR` (`packages/agent-core/src/agent-session.ts`), which is why the runner never
+  rejects.
+- *Tried locally* (macOS, bash 3.2.57, uid 501): a missing command exits 127, a file with mode 644
+  exits 126, `if then` exits 2, `make -f /dev/null nothing` exits 2, and `kill -TERM $$` exits 143.
+  `bash -n -c "touch x"` exits 0 and creates nothing; `bash -n -c "if then"` exits 2. `Bun.spawn`
+  throws at once with `ENOENT` for a missing shell or start directory and `ENOTDIR` for a file
+  used as one. In `oven/bun:1.3.14` as root (bash 5.2.37), a file with mode 644 still exits 126,
+  and every runner test passes.
+- *Not yet run:* Git Bash on Windows, including `-n`, which CI's Windows job runs first; and a host
+  without bash, such as a minimal Alpine container, where `/bin/sh` is used, including its `-n`.
+- *Prescriptions:* the four result members, the combined output, the syntax check, the meaning of
+  126, 127 and a foreign signal, and the shared deadline are decisions, not observations.
 
 ## Consequences
 
