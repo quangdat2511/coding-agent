@@ -40,6 +40,11 @@ async function main(
   // Bun reports a write to a closed pipe as an "error" event, which would end the run with exit 1.
   process.stdout.on("error", () => undefined);
   process.stderr.on("error", () => undefined);
+  // The listeners are never removed, so a later signal cannot end the run while it writes its files.
+  const cancellation = new AbortController();
+  for (const signal of ["SIGINT", "SIGTERM"] as const) {
+    process.on(signal, () => cancellation.abort(signal));
+  }
   // ADR 0001 §8, startup verification. Before configuration, so that a refused launch writes
   // nothing, and before any Agent Session opens. It does nothing unless the policy is
   // "auto-approve" and the platform is Linux.
@@ -48,14 +53,28 @@ async function main(
     process.stderr.write(`coding-agent: ${ancestors.message}\n`);
     return ancestors.code === "CREDENTIAL_IN_ANCESTOR" ? 2 : 70;
   }
-  // Temporary: CDA-78 (D3.2) cancels on a signal.
-  const { exitCode } = await runHeadless({
+  const written: Promise<void>[] = [];
+  const writeTo = (stream: NodeJS.WriteStream) => (text: string) => {
+    written.push(
+      new Promise((resolve) => {
+        stream.write(text, () => resolve());
+      }),
+    );
+  };
+  const { exitCode, result } = await runHeadless({
     args: parsed.args,
     cwd,
     env,
-    stdout: (text) => process.stdout.write(text),
-    stderr: (text) => process.stderr.write(text),
+    stdout: writeTo(process.stdout),
+    stderr: writeTo(process.stderr),
+    signal: cancellation.signal,
   });
+  // The effect that ignored the cancellation may still run, and would hold the process open.
+  if (result?.outcome === "failed" && result.failure.code === "CANCELLATION_TIMEOUT") {
+    // `process.exit()` drops piped output whose write has not called back yet.
+    await Promise.all(written);
+    process.exit(exitCode);
+  }
   return exitCode;
 }
 

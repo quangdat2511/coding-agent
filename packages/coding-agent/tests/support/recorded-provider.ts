@@ -29,12 +29,24 @@ export function replayInOrder(fixtures: readonly string[]): Respond {
   };
 }
 
-export const hang: Respond = ({ signal }) =>
-  new Promise((_, reject) => {
-    const abort = () => reject(signal?.reason ?? new DOMException("aborted", "AbortError"));
-    if (signal?.aborted) abort();
-    signal?.addEventListener("abort", abort, { once: true });
-  });
+// A timer clamps Infinity to 1 ms, so a request that never quiesces sets none.
+export const hangQuiescingAfter =
+  (delayMs: number): Respond =>
+  ({ signal }) =>
+    new Promise((_, reject) => {
+      const abort = () => {
+        const settle = () => reject(signal?.reason ?? new DOMException("aborted", "AbortError"));
+        if (delayMs === 0) settle();
+        else if (Number.isFinite(delayMs)) setTimeout(settle, delayMs);
+      };
+      if (signal?.aborted) abort();
+      signal?.addEventListener("abort", abort, { once: true });
+    });
+
+export const hang: Respond = hangQuiescingAfter(0);
+
+// Read by hang-provider.ts: the milliseconds a request takes to quiesce, or "Infinity".
+export const HANG_QUIESCE_MS_ENV_VAR = "CODING_AGENT_TEST_HANG_QUIESCE_MS";
 
 export function providerFetch(respond: Respond, sent: SentRequest[] = []): typeof fetch {
   return Object.assign(

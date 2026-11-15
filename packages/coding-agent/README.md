@@ -33,13 +33,40 @@ This is the walking skeleton of
 [ADR 0006](../../docs/adr/0006-implementation-order-and-mvp-completion-checklist.md) (Join 2).
 These parts are still to come:
 
-- `SIGINT` and `SIGTERM` do not cancel the Agent Session yet, so no run settles `cancelled`.
-  CDA-78 (D3.2) adds this.
 - `read` is the only registered tool, and Verification is a stand-in. CDA-80 (D5) replaces both.
 - The session limits are resolved but not enforced. Agent Core does not yet compare its counters
   with `maxModelTurns`, `maxToolCalls` or `maxDurationMs`, so a live run whose model keeps calling
   tools runs until the process is killed, and spends tokens all the while. CDA-76 (A4.2) enforces
-  the limits. Until CDA-78, `SIGINT` and `SIGTERM` stop such a run only by ending the process.
+  the limits. Until then, `SIGINT` or `SIGTERM` cancels such a run (see
+  [Cancelling a run](#cancelling-a-run)).
+
+### Cancelling a run
+
+Once `src/cli.ts` listens for them, `SIGINT` and `SIGTERM` cancel the run and do not end the
+process. `src/cli.ts` turns either one into an abort of the `signal` it gives `runHeadless`, and
+`runHeadless` dispatches the `cancel` command, the only cancellation path of
+[ADR 0004 §3](../../docs/adr/0004-package-apis-and-dependency-direction.md). The signal's name
+becomes the cancellation reason in the Agent Result.
+
+- A run whose active work quiesces within the Cancellation Grace Period settles `cancelled` and
+  exits 130, with the three files written. The Agent Result reports `workspaceChanged` and
+  `partialChangesPossible`.
+- A signal that arrives before the Coding Task starts cancels the Agent Session in place of
+  starting it. The run makes no Model Turn and still exits 130 with the three files.
+- A run whose active work ignores the cancellation past the grace period settles `failed` with
+  `CANCELLATION_TIMEOUT` and exits 1, with the three files written. That work may still be running
+  and would hold the process open, so in this case alone the run waits for what it printed to be
+  written and then calls `process.exit`.
+- Only the first signal cancels. A later one changes nothing, while the run is cancelling or after
+  it has settled, so it cannot interrupt the writing of `result.json`.
+- `src/cli.ts` listens for the signals from just before the ancestor check. A signal during the
+  check cancels the Agent Session as soon as it opens. An earlier one, during argument parsing or
+  hardening, ends the process in the default way, and nothing has been written at that point.
+
+On Windows, sending a signal to another process ends it at once and runs no handler. The tests
+that send a signal to the executable are therefore skipped there, and Ctrl+C in a Windows console
+is untested. The in-process tests of `runHeadless` cover the exit 130 path and
+`CANCELLATION_TIMEOUT` on every platform.
 
 ### Files written
 

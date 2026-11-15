@@ -4,15 +4,16 @@ import { cp, mkdir, readdir, rename } from "node:fs/promises";
 import { join } from "node:path";
 import { runnerChainIsClean } from "./support/ancestor-chain.ts";
 import { NAMED_TASK_FILE, NAMED_TASK_REPO, READ_ONLY_RUN } from "./support/named-task.ts";
-import { noModeBits, onWindows } from "./support/platform.ts";
+import { noModeBits, noSignalHandlers, onWindows } from "./support/platform.ts";
 import {
   bunLikeShebang,
   firstLine,
   runProcess,
+  startProcess,
   withTemporaryDirectory,
 } from "./support/process.ts";
 import { withoutProfile } from "./support/profile.ts";
-import { REPLAY_FIXTURES_ENV_VAR } from "./support/recorded-provider.ts";
+import { HANG_QUIESCE_MS_ENV_VAR, REPLAY_FIXTURES_ENV_VAR } from "./support/recorded-provider.ts";
 
 // A run that gets past argument parsing meets the ancestor check first.
 const cleanChain = await runnerChainIsClean();
@@ -29,6 +30,7 @@ if (declared === undefined) throw new Error("package.json declares no coding-age
 const bin = join(packageRoot, declared);
 
 const replayProvider = join(import.meta.dir, "support", "replay-provider.ts");
+const hangProvider = join(import.meta.dir, "support", "hang-provider.ts");
 const failSessionFactory = join(import.meta.dir, "support", "fail-session-factory.ts");
 
 // Windows cannot start a file by its shebang or mode bits, so there the bin runs under this Bun.
@@ -103,6 +105,8 @@ const namedTaskRun = validRun({
 // The preload injects the replayed responses, so the arguments after `bin` are the real command line.
 const replayedNamedTask = [...bunLikeShebang, "--preload", replayProvider, bin, ...namedTaskRun];
 
+const hangingNamedTask = [...bunLikeShebang, "--preload", hangProvider, bin, ...namedTaskRun];
+
 const replayEnv = (fixtures: readonly string[]): Record<string, string> => ({
   GOOGLE_API_KEY: secret,
   [REPLAY_FIXTURES_ENV_VAR]: fixtures.join(","),
@@ -110,9 +114,21 @@ const replayEnv = (fixtures: readonly string[]): Record<string, string> => ({
 
 const runFiles = ["events.jsonl", "result.json", "run.json"];
 
-async function lastEventType(outputDir: string): Promise<unknown> {
-  const lines = (await Bun.file(join(outputDir, "events.jsonl")).text()).trimEnd().split("\n");
-  return JSON.parse(lines.at(-1) ?? "{}").type;
+// Only a line that ends in a newline is a whole event.
+async function eventTypes(outputDir: string): Promise<unknown[]> {
+  const log = Bun.file(join(outputDir, "events.jsonl"));
+  const lines = (await log.exists()) ? (await log.text()).split("\n").slice(0, -1) : [];
+  return lines.map((line) => JSON.parse(line).type);
+}
+
+const lastEventType = async (outputDir: string) => (await eventTypes(outputDir)).at(-1);
+
+async function untilLogged(outputDir: string, type: string): Promise<void> {
+  for (let attempt = 0; attempt < 300; attempt++) {
+    if ((await eventTypes(outputDir)).includes(type)) return;
+    await Bun.sleep(10);
+  }
+  throw new Error(`no ${type} event was logged`);
 }
 
 interface ConfigurationErrorCase {
@@ -120,6 +136,29 @@ interface ConfigurationErrorCase {
   readonly flags?: Record<string, string>;
   readonly env?: Record<string, string>;
   readonly expected: string;
+}
+
+type HangingRun = { run: ReturnType<typeof startProcess>; outputDir: string };
+
+// The child outlives a failed expectation unless it is killed: its Model Turn never ends by itself.
+async function withHangingModelTurn(
+  quiesceMs: string,
+  body: (hanging: HangingRun) => Promise<void>,
+): Promise<void> {
+  await withTemporaryDirectory(async (directory) => {
+    await cp(NAMED_TASK_REPO, join(directory, "repo"), { recursive: true });
+    const outputDir = join(directory, "out");
+    const run = startProcess(hangingNamedTask, {
+      cwd: directory,
+      env: { GOOGLE_API_KEY: secret, [HANG_QUIESCE_MS_ENV_VAR]: quiesceMs },
+    });
+    try {
+      await untilLogged(outputDir, "model_turn_started");
+      await body({ run, outputDir });
+    } finally {
+      run.signal("SIGKILL");
+    }
+  });
 }
 
 describe("the coding-agent executable", () => {
@@ -430,6 +469,87 @@ describe("the coding-agent executable", () => {
         expect(withoutProfile(terminalbench)).toStrictEqual(withoutProfile(standard));
       });
     },
+  );
+
+  it.skipIf(noSignalHandlers || !cleanChain).each(["SIGINT", "SIGTERM"] as const)(
+    "exits 130 on %s during a Model Turn and writes the three files",
+    async (signal) => {
+      await withHangingModelTurn("0", async ({ run, outputDir }) => {
+        run.signal(signal);
+        const { exitCode, killedBy, stdout, stderr } = await run.finished;
+
+        expect(stderr).toBe("coding-agent: cancelled; workspace changed: no\n");
+        expect(killedBy).toBeNull();
+        expect(exitCode).toBe(130);
+        expect(stdout).toBe("");
+        expect((await readdir(outputDir)).sort()).toEqual(runFiles);
+        expect(await lastEventType(outputDir)).toBe("session_settled");
+        expect(await Bun.file(join(outputDir, "result.json")).json()).toMatchObject({
+          schemaVersion: 1,
+          exitCode: 130,
+          result: {
+            outcome: "cancelled",
+            cancellation: { reason: signal },
+            workspaceChanged: false,
+            partialChangesPossible: false,
+          },
+        });
+      });
+    },
+  );
+
+  it.skipIf(noSignalHandlers || !cleanChain)(
+    "settles cancelled once and exits 130 when a second signal arrives while cancelling",
+    async () => {
+      await withHangingModelTurn("2000", async ({ run, outputDir }) => {
+        run.signal("SIGINT");
+        await untilLogged(outputDir, "cancellation_requested");
+        expect(await eventTypes(outputDir)).not.toContain("session_settled");
+        run.signal("SIGTERM");
+        const { exitCode, killedBy, stderr } = await run.finished;
+
+        expect(stderr).toBe("coding-agent: cancelled; workspace changed: no\n");
+        expect(killedBy).toBeNull();
+        expect(exitCode).toBe(130);
+        expect((await readdir(outputDir)).sort()).toEqual(runFiles);
+        const types = await eventTypes(outputDir);
+        expect(types.filter((type) => type === "cancellation_requested")).toHaveLength(1);
+        expect(types.at(-1)).toBe("session_settled");
+        expect(await Bun.file(join(outputDir, "result.json")).json()).toMatchObject({
+          exitCode: 130,
+          result: { outcome: "cancelled", cancellation: { reason: "SIGINT" } },
+        });
+      });
+    },
+  );
+
+  // The default profile's Cancellation Grace Period is 5,000 ms.
+  it.skipIf(noSignalHandlers || !cleanChain)(
+    "exits 1 with CANCELLATION_TIMEOUT and the three files when the Model Turn ignores the cancellation",
+    async () => {
+      await withHangingModelTurn("Infinity", async ({ run, outputDir }) => {
+        run.signal("SIGTERM");
+        const { exitCode, killedBy, stderr } = await run.finished;
+
+        expect(firstLine(stderr)).toBe("coding-agent: failed; workspace changed: no");
+        expect(stderr).toContain("coding-agent: CANCELLATION_TIMEOUT: ");
+        expect(killedBy).toBeNull();
+        expect(exitCode).toBe(1);
+        expect((await readdir(outputDir)).sort()).toEqual(runFiles);
+        expect(await lastEventType(outputDir)).toBe("session_settled");
+        expect(await Bun.file(join(outputDir, "result.json")).json()).toMatchObject({
+          schemaVersion: 1,
+          exitCode: 1,
+          result: {
+            outcome: "failed",
+            failure: { code: "CANCELLATION_TIMEOUT" },
+            workspaceChanged: false,
+            partialChangesPossible: false,
+          },
+        });
+      });
+    },
+    20_000,
   );
 
   it("writes nothing before it refuses a usage error", async () => {

@@ -11,3 +11,5 @@ export const noFifos = onWindows;
 export const noModeBits = onWindows;
 // Root ignores file permissions and Windows has no POSIX mode bits or umask, so those tests skip.
 export const permissionsIgnored = process.getuid?.() === 0 || onWindows;
+// Windows ends a process that is sent a signal at once, so no handler of it runs.
+export const noSignalHandlers = onWindows;
