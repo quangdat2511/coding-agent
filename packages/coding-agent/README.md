@@ -210,9 +210,14 @@ path leaves it unset ([ADR 0005 §5](../../docs/adr/0005-terminalbench-evaluatio
 The `default` profile uses the ADR 0003 §4 limits: 30 Model Turns, 100 Tool Calls, 600,000 ms and 3
 consecutive recoverable failures, with a 5,000 ms cancellation grace. The grace is long enough for a
 tool or Verification child to go from `SIGTERM` to `SIGKILL`, and short enough that a cancelled run
-still writes its files inside the 10 s `docker stop` allows. The `terminalbench` profile arrives
-with CDA-79 (D3.3). Until then it exits 70 once every configuration check has passed, and removes
-any output directory it created.
+still writes its files inside the 10 s `docker stop` allows.
+
+The `terminalbench` profile uses the ADR 0005 §5 limits: 250 Model Turns, 1,000 Tool Calls,
+3,600,000 ms and 10 consecutive recoverable failures. Its cancellation grace is the same as in
+`default`. A profile changes only these limits. The system prompt, Project Instructions discovery, the
+Scratchpad convention, the tools and the model settings are the same under both profiles. The values
+live in `SESSION_LIMITS_BY_PROFILE` in `src/run-config.ts`, so a build fixes them, and no flag or
+environment variable changes them. `run.json` records the profile name and its resolved limits.
 
 ### Model settings
 
