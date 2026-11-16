@@ -208,6 +208,63 @@ describe("bounding the verification command", () => {
   });
 });
 
+// A launcher that records every command it starts, so a test can tell that nothing started rather
+// than relying on whether a file had time to appear.
+function countingLauncher(inner: ChildProcessLauncher = launcher) {
+  const started: (readonly string[])[] = [];
+  const counting: ChildProcessLauncher = {
+    launch: (argv, options) => {
+      started.push(argv);
+      return inner.launch(argv, options);
+    },
+  };
+  return { launcher: counting, started };
+}
+
+describe("a signal that aborts before the command starts", () => {
+  it("starts nothing when the signal aborts while the repository root is checked", async () => {
+    const controller = new AbortController();
+    const aborting: WorkspaceResolver = {
+      ...workspace,
+      resolveExisting: async (input) => {
+        controller.abort();
+        return workspace.resolveExisting(input);
+      },
+    };
+    const { launcher: counting, started } = countingLauncher();
+    const created = createVerificationRunner({ launcher: counting, workspace: aborting });
+    if (!created.ok) throw new Error(created.message);
+    const result = await created.runner.run("touch ran", { signal: controller.signal });
+
+    expect(withoutDuration(result)).toEqual({ status: "cancelled", stdout: "", stderr: "" });
+    expect(started).toEqual([]);
+    expect(await missing(join(repo, "ran"))).toBe("missing");
+  });
+
+  // The stand-in's background sleep holds the pipes open, so the abort arrives while the check's
+  // output is still read after its shell has exited. Its pid is an MSYS pid on Windows, which
+  // process.kill cannot reach to clean up.
+  it.skipIf(noPosixSignals)(
+    "does not start the command when the signal aborts after the syntax check",
+    async () => {
+      const pidFile = join(sandbox, "check.pid");
+      const { launcher: counting, started } = countingLauncher(
+        slowSyntaxCheck(`sleep 5 & echo $! > ${JSON.stringify(pidFile)}; exit 0`),
+      );
+      const controller = new AbortController();
+      setTimeout(() => controller.abort(), 100);
+      const result = await runnerWith({ launcher: counting }).run("touch ran", {
+        signal: controller.signal,
+      });
+      process.kill(Number((await readFile(pidFile, "utf8")).trim()), "SIGKILL");
+
+      expect(result.status).toBe("cancelled");
+      expect(started).toHaveLength(1);
+      expect(await missing(join(repo, "ran"))).toBe("missing");
+    },
+  );
+});
+
 describe("the verification command's environment", () => {
   const keys = ["CDA74_PROVIDER_KEY", "CDA74_TASK_VAR"] as const;
   let saved: Record<string, string | undefined>;

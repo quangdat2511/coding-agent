@@ -66,6 +66,9 @@ export async function runSupervised(
   const timeoutTimer = setTimeout(() => terminate("timeout"), run.timeoutMs);
   const onAbort = () => terminate("cancelled");
   run.signal.addEventListener("abort", onAbort, { once: true });
+  // A listener added to a signal that has already aborted never runs, so a caller that awaited
+  // something between its own check and this call would otherwise start a command nobody stops.
+  if (run.signal.aborted) terminate("cancelled");
 
   try {
     await child.exited;

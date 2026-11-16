@@ -91,6 +91,15 @@ describe("supervising a command", () => {
     expect(elapsedMs).toBeLessThan(3_000);
   });
 
+  it("stops a command at once when the signal had already aborted", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const { exit, elapsedMs } = await supervise("sleep 10", { signal: controller.signal });
+
+    expect(exit.stopReason).toBe("cancelled");
+    expect(elapsedMs).toBeLessThan(3_000);
+  });
+
   it.skipIf(noPosixSignals)(
     "reports a signal the supervisor did not send without a stop reason",
     async () => {

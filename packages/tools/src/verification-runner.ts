@@ -105,11 +105,20 @@ export function createVerificationRunnerOn(
           ...(exitCode === undefined ? {} : { exitCode }),
           durationMs: elapsed(),
         });
-        if (signal.aborted) return { status: "cancelled", ...noOutput, durationMs: elapsed() };
+        // A signal can abort while the run awaits, as it does while the root is checked, and a
+        // listener the supervisor adds after that would never run. So the signal is asked again
+        // right before each launch, as bash asks it right before its own.
+        const cancelledBeforeStart = (): VerificationRunnerResult => ({
+          status: "cancelled",
+          ...noOutput,
+          durationMs: elapsed(),
+        });
+        if (signal.aborted) return cancelledBeforeStart();
         const shell = findShell(host);
         if (!shell.ok) return launchFailed(shell.message);
         const unusableRoot = await checkRepoRoot(workspace);
         if (unusableRoot !== undefined) return launchFailed(unusableRoot);
+        if (signal.aborted) return cancelledBeforeStart();
 
         const run = (argv: readonly string[], limitMs: number) =>
           supervise(launcher, { argv, cwd: workspace.repoRoot, timeoutMs: limitMs, signal });
@@ -139,6 +148,9 @@ export function createVerificationRunnerOn(
         // The check and the command share one deadline, so the whole run stays within the same
         // bound as a bash Tool Call.
         const remainingMs = Math.max(1, Math.floor(timeoutMs - (performance.now() - started)));
+        // The check's output is still read after its shell exits, and an abort then reaches no
+        // listener.
+        if (signal.aborted) return cancelledBeforeStart();
         const main = await run(combinedOutputArgv(shell.shell, command), remainingMs);
         if (!main.ok) return launchFailed(couldNotStart(shell.shell, main.error));
         const mainStopped = stopped(main.exit, main.collector);
