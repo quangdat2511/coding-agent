@@ -14,13 +14,20 @@ import type { ChildProcessLauncher } from "./child-process.ts";
 import { displayPath, quote } from "./messages.ts";
 import { createOutputCollector, type OutputCollector } from "./output-budget.ts";
 import { revalidatePreparedPath } from "./prepared-path.ts";
-import { combinedOutputArgv, runSupervised, type SupervisedExit } from "./process-run.ts";
+import {
+  combinedOutputArgv,
+  DEFAULT_TIMEOUT_MS,
+  MAX_TIMEOUT_MS,
+  runSupervised,
+  type SupervisedExit,
+  timeoutProblem,
+} from "./process-run.ts";
 import { findShell, processShellHost } from "./shell.ts";
 import { prepareFailure, toolError } from "./tool-outcome.ts";
 
-// ADR 0001 §3: a command gets 30 s unless the model asks for more, and never more than 120 s.
-export const DEFAULT_BASH_TIMEOUT_MS = 30_000;
-export const MAX_BASH_TIMEOUT_MS = 120_000;
+// ADR 0001 §3's bounds, shared with the Verification Runner.
+export const DEFAULT_BASH_TIMEOUT_MS = DEFAULT_TIMEOUT_MS;
+export const MAX_BASH_TIMEOUT_MS = MAX_TIMEOUT_MS;
 
 // The most recent output kept for Tool Progress. Agent Core bounds each update further.
 const PROGRESS_WINDOW_CHARS = 8_192;
@@ -105,12 +112,8 @@ export function bashTool(launcher: ChildProcessLauncher): ExecutableTool<typeof 
 // A test checks that it refuses exactly the inputs BashParams refuses.
 function checkInput({ command, timeoutMs, cwd }: BashInput): string | undefined {
   if (typeof command !== "string" || command.length === 0) return "command must be non-empty text";
-  if (
-    timeoutMs !== undefined &&
-    (!Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > MAX_BASH_TIMEOUT_MS)
-  ) {
-    return `timeoutMs must be a whole number of milliseconds from 1 to ${MAX_BASH_TIMEOUT_MS}`;
-  }
+  const timeout = timeoutMs === undefined ? undefined : timeoutProblem(timeoutMs);
+  if (timeout !== undefined) return timeout;
   if (cwd !== undefined && (typeof cwd !== "string" || cwd.length === 0)) {
     return "cwd must be a non-empty path";
   }

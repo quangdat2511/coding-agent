@@ -25,6 +25,7 @@ import {
 import { MAX_TOOL_OUTPUT_BYTES, TOOL_OUTPUT_TRUNCATION_MARKER } from "../src/output-budget.ts";
 import { createVerificationRunnerOn } from "../src/verification-runner.ts";
 import { noModeBits, noPosixSignals } from "./platform.ts";
+import { exitsSoon } from "./support/processes.ts";
 
 let sandbox: string;
 let repo: string;
@@ -483,20 +484,3 @@ describe("the syntax check", () => {
     expect(await missing(join(repo, "ran"))).toBe("missing");
   });
 });
-
-async function exitsSoon(pid: number): Promise<boolean> {
-  for (let waited = 0; waited < 2_000; waited += 50) {
-    if (!isAlive(pid)) return true;
-    await Bun.sleep(50);
-  }
-  return false;
-}
-
-function isAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-}

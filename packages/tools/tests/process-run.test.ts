@@ -4,7 +4,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { RepoPath } from "@coding-agent/agent-core";
 import { createChildProcessLauncher, createWorkspaceResolver } from "../src/index.ts";
-import { combinedOutputArgv, runSupervised, type SupervisedExit } from "../src/process-run.ts";
+import {
+  combinedOutputArgv,
+  runSupervised,
+  type SupervisedExit,
+  timeoutProblem,
+} from "../src/process-run.ts";
 import { findShell, processShellHost } from "../src/shell.ts";
 import { noPosixSignals } from "./platform.ts";
 
@@ -108,4 +113,16 @@ describe("supervising a command", () => {
       expect(exit).toEqual({ exitCode: null, signalCode: "SIGKILL" });
     },
   );
+});
+
+describe("the shared timeout bounds", () => {
+  it("accepts a whole number of milliseconds from 1 to 120,000 and explains anything else", () => {
+    expect(timeoutProblem(1)).toBeUndefined();
+    expect(timeoutProblem(120_000)).toBeUndefined();
+    for (const timeoutMs of [0, 1.5, 120_001, Number.NaN]) {
+      expect(timeoutProblem(timeoutMs)).toBe(
+        "timeoutMs must be a whole number of milliseconds from 1 to 120000",
+      );
+    }
+  });
 });

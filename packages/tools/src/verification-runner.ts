@@ -2,15 +2,16 @@ import { Buffer } from "node:buffer";
 import { stat } from "node:fs/promises";
 import { constants } from "node:os";
 import type { WorkspaceResolver } from "@coding-agent/agent-core";
-import { DEFAULT_BASH_TIMEOUT_MS, MAX_BASH_TIMEOUT_MS } from "./bash.ts";
 import type { ChildProcessLauncher } from "./child-process.ts";
 import { quote } from "./messages.ts";
 import { createOutputCollector, type OutputCollector } from "./output-budget.ts";
 import {
   combinedOutputArgv,
+  DEFAULT_TIMEOUT_MS,
   runSupervised,
   type SupervisedExit,
   type SupervisedRun,
+  timeoutProblem,
 } from "./process-run.ts";
 import { findShell, processShellHost, type ShellHost } from "./shell.ts";
 
@@ -77,18 +78,19 @@ export function createVerificationRunner(
   return createVerificationRunnerOn(processShellHost(), options);
 }
 
+const noOutput = { stdout: "", stderr: "" } as const;
+
 // The shell host is a test seam, as for findShell: tests pass a host with no shell.
 export function createVerificationRunnerOn(
   host: ShellHost,
-  { launcher, workspace, timeoutMs = DEFAULT_BASH_TIMEOUT_MS }: VerificationRunnerOptions,
+  { launcher, workspace, timeoutMs = DEFAULT_TIMEOUT_MS }: VerificationRunnerOptions,
 ): CreateVerificationRunnerResult {
-  if (!Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > MAX_BASH_TIMEOUT_MS) {
+  const problem = timeoutProblem(timeoutMs);
+  if (problem !== undefined) {
     return {
       ok: false,
       code: "INVALID_CONFIGURATION",
-      message:
-        `timeoutMs must be a whole number of milliseconds from 1 to ${MAX_BASH_TIMEOUT_MS}, ` +
-        `got ${quote(String(timeoutMs))}`,
+      message: `${problem}, got ${quote(String(timeoutMs))}`,
       field: "timeoutMs",
     };
   }
@@ -120,25 +122,26 @@ export function createVerificationRunnerOn(
         if (unusableRoot !== undefined) return launchFailed(unusableRoot);
         if (signal.aborted) return cancelledBeforeStart();
 
-        const run = (argv: readonly string[], limitMs: number) =>
+        const launch = (argv: readonly string[], limitMs: number) =>
           supervise(launcher, { argv, cwd: workspace.repoRoot, timeoutMs: limitMs, signal });
-        const stopped = (exit: SupervisedExit, collector: OutputCollector) => {
+        // The result for a run the supervisor stopped, or undefined when the shell exited by itself.
+        const stopResultOf = (
+          exit: SupervisedExit,
+          collector: OutputCollector,
+        ): VerificationRunnerResult | undefined => {
+          if (exit.stopReason === undefined) return undefined;
           const output = { stdout: collector.finish(0).content, stderr: "" };
-          if (exit.stopReason === "timeout") {
-            return { status: "timed_out", timeoutMs, ...output, durationMs: elapsed() } as const;
-          }
-          if (exit.stopReason === "cancelled") {
-            return { status: "cancelled", ...output, durationMs: elapsed() } as const;
-          }
-          return undefined;
+          return exit.stopReason === "timeout"
+            ? { status: "timed_out", timeoutMs, ...output, durationMs: elapsed() }
+            : { status: "cancelled", ...output, durationMs: elapsed() };
         };
 
         // bash -n parses the command without running any of it. A syntax error cannot be told
         // from the command's own exit code, because a failing make or test runner also exits 2,
         // and without this check bash would run the lines before the error.
-        const check = await run([shell.shell, "-n", "-c", command], timeoutMs);
+        const check = await launch([shell.shell, "-n", "-c", command], timeoutMs);
         if (!check.ok) return launchFailed(couldNotStart(shell.shell, check.error));
-        const checkStopped = stopped(check.exit, check.collector);
+        const checkStopped = stopResultOf(check.exit, check.collector);
         if (checkStopped !== undefined) return checkStopped;
         // A check ended by a signal the runner did not send, such as an out-of-memory kill, says
         // nothing about the command's syntax, so the error names the signal instead. There is no
@@ -162,9 +165,9 @@ export function createVerificationRunnerOn(
         // The check's output is still read after its shell exits, and an abort then reaches no
         // listener.
         if (signal.aborted) return cancelledBeforeStart();
-        const main = await run(combinedOutputArgv(shell.shell, command), remainingMs);
+        const main = await launch(combinedOutputArgv(shell.shell, command), remainingMs);
         if (!main.ok) return launchFailed(couldNotStart(shell.shell, main.error));
-        const mainStopped = stopped(main.exit, main.collector);
+        const mainStopped = stopResultOf(main.exit, main.collector);
         if (mainStopped !== undefined) return mainStopped;
         const exitCode = exitCodeOf(main.exit);
         // ADR 0003 §3: the shell reports 127 for a command it cannot find and 126 for one it
@@ -233,8 +236,6 @@ async function checkRepoRoot(workspace: WorkspaceResolver): Promise<string | und
   }
   return undefined;
 }
-
-const noOutput = { stdout: "", stderr: "" } as const;
 
 // A shell ended by a signal the runner did not send, such as an out-of-memory kill or a crash,
 // reports 128 plus the signal's number, as a shell reports a child that died that way. The test

@@ -12,6 +12,18 @@ const KILL_GRACE_MS = 1_000;
 // keeps them open; past this limit its output is not waited for.
 const DRAIN_MS = 200;
 
+// ADR 0001 §3: a command gets 30 s unless it asks for more, and never more than 120 s. bash and
+// the Verification Runner share these bounds.
+export const DEFAULT_TIMEOUT_MS = 30_000;
+export const MAX_TIMEOUT_MS = 120_000;
+
+/** Why timeoutMs is not a whole number of milliseconds within the bounds, or undefined if it is. */
+export function timeoutProblem(timeoutMs: number): string | undefined {
+  return Number.isInteger(timeoutMs) && timeoutMs >= 1 && timeoutMs <= MAX_TIMEOUT_MS
+    ? undefined
+    : `timeoutMs must be a whole number of milliseconds from 1 to ${MAX_TIMEOUT_MS}`;
+}
+
 // Why the supervisor itself stopped the command, when it did.
 export type StopReason = "timeout" | "cancelled";
 
