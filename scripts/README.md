@@ -110,6 +110,88 @@ export const bunChild = () => Bun.spawn(["echo", "probe"]);
 `noRestrictedGlobals` errors. The same rules run in the existing CI lint step and staged-file
 pre-commit check. Remove the probe afterwards; `child-process.ts` itself passes the lint check.
 
+## Evaluation artifact build
+
+A recorded TerminalBench job runs a standalone executable, not a source checkout
+([ADR 0005 §2](../docs/adr/0005-terminalbench-evaluation-protocol.md)).
+`scripts/build-artifact.ts` builds that executable for both Linux targets and writes the manifest
+that identifies the build.
+
+To build the artifact for a recorded job:
+
+1. Check out the commit on `main` that the job evaluates.
+2. Make sure that `git status` shows no changes and no untracked files.
+3. Make sure that Bun is the version in `.bun-version`.
+4. Run the build from the repository root on Linux or macOS:
+
+   ```sh
+   bun run build:artifact
+   ```
+
+5. Give the Harbor adapter the directory `dist/artifact`.
+
+The build writes three files into `dist/artifact`, or into the directory that `--out-dir <dir>`
+names. A relative `--out-dir` resolves against the working directory.
+
+| File | Content |
+| --- | --- |
+| `coding-agent-linux-x64` | the executable for the `bun-linux-x64-baseline` target, which needs no AVX2 |
+| `coding-agent-linux-arm64` | the executable for the `bun-linux-arm64` target |
+| `artifact-manifest.json` | the manifest that the adapter checks before each trial |
+
+Each executable needs glibc 2.17 or newer and no other runtime. Both builds use
+`--no-compile-autoload-dotenv` and `--no-compile-autoload-bunfig`. A `.env` or `bunfig.toml` file
+in the working directory of a task therefore cannot configure the agent. The build sets the commit
+with `--define CODING_AGENT_COMMIT`, so `run.json` and `--version` both name it.
+
+`artifact-manifest.json` has this shape:
+
+```json
+{
+  "schemaVersion": 1,
+  "codingAgent": { "version": "0.0.1", "commit": "<40-character commit>" },
+  "dirty": false,
+  "bunVersion": "1.3.14",
+  "executables": [
+    { "file": "coding-agent-linux-x64", "target": "bun-linux-x64-baseline", "sha256": "<hex>" },
+    { "file": "coding-agent-linux-arm64", "target": "bun-linux-arm64", "sha256": "<hex>" }
+  ]
+}
+```
+
+`coding-agent --version` prints one line, `coding-agent <version> <commit>`, with the values of
+`codingAgent` in the manifest. A run from source has no commit and prints
+`coding-agent <version> (no commit)`.
+
+The build stops with exit code 1 in these cases:
+
+- The working tree has changes or untracked files. The message lists them.
+- The running Bun is not the version in `.bun-version`.
+- `bun build` fails for a target.
+- The executable that this host can run fails a check.
+
+Linux on x86-64 or on arm64 can run one of the executables. On such a host, the build runs that
+executable in a temporary directory and does two checks:
+
+- `--version` must print exactly the manifest line, next to a `bunfig.toml` with a preload that
+  writes to standard error. The output must not contain that line.
+- `run` must stop with the missing-credential error, next to a `.env` that sets
+  `ANTHROPIC_API_KEY`.
+
+On macOS, the build cannot run either executable, so it prints that `--version` was not checked.
+The CI job `Evaluation artifact` runs the build on `ubuntu-24.04`, so CI checks the x64 executable
+on every pull request. CI has no arm64 Linux runner. Run the build on an arm64 Linux host, or in an
+arm64 container, to check the arm64 executable.
+
+For a local test of uncommitted work, pass `--allow-dirty`. The build then records
+`"dirty": true`, and the commit in the manifest and in `--version` ends in `-dirty`. Do not give a
+dirty artifact to a recorded job.
+
+Bun 1.3.14 on Windows cannot cross-compile these targets. It stops with
+`Failed to extract executable for 'bun-linux-x64-baseline-v1.3.14'`. On Windows, run the build in
+WSL or in a Linux container. Run `bun test scripts/tests/build-artifact.test.ts` for the unit
+tests.
+
 ## Discord PR posts
 
 The `Discord PR Post` workflow runs `scripts/notify-discord.ts` on pull requests into `main`. When a

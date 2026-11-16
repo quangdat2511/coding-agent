@@ -17,6 +17,7 @@
     "ci:check": "biome ci .",
     "check:import-boundaries": "bun run scripts/check-import-boundaries.ts",
     "check:runtime-imports": "bun run scripts/check-runtime-imports.ts",
+    "build:artifact": "bun run scripts/build-artifact.ts",
     "check:fix": "biome check --write .",
     "format": "biome format --write ."
   },

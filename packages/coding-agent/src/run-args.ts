@@ -63,6 +63,7 @@ const oneOf = (options: object): string => {
 export const USAGE = `usage: coding-agent ${command} ${flagOf.taskFile} <path> ${flagOf.provider} <provider>
                     ${flagOf.model} <model-id> ${flagOf.approvalPolicy} auto-approve
                     ${flagOf.outputDir} <dir> [${flagOf.profile} <name>] [${flagOf.repoRoot} <dir>]
+       coding-agent --version
 
   ${flagOf.taskFile} <path>              required  file whose entire content is the Coding Task objective
   ${flagOf.provider} <provider>           required  ${Object.keys(providers).join(" | ")}

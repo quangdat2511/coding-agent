@@ -29,6 +29,18 @@ for example because the reader of a pipe has gone, does not change the exit code
 file that the model read can carry the credential, so the run replaces the credential value with
 `[redacted]` in everything it prints.
 
+## Version
+
+`coding-agent --version` prints `coding-agent <version> <commit>` on standard output and exits 0.
+The version comes from `package.json`. The commit is the one that the artifact build defines. A
+run from source has no commit and prints `coding-agent <version> (no commit)`. The Harbor adapter
+compares this line with `artifact-manifest.json` before each trial
+([ADR 0005 §6](../../docs/adr/0005-terminalbench-evaluation-protocol.md)). `--version` must be the
+only argument. After `run`, it is an unknown flag.
+
+`bun run build:artifact` builds the evaluation executables and their manifest. The procedure is in
+[Evaluation artifact build](../../scripts/README.md#evaluation-artifact-build).
+
 This is the walking skeleton of
 [ADR 0006](../../docs/adr/0006-implementation-order-and-mvp-completion-checklist.md) (Join 2).
 These parts are still to come:
@@ -83,7 +95,7 @@ carries `"schemaVersion": 1`.
 
 | Field | Content |
 | --- | --- |
-| `codingAgent` | `version` and `commit`. The commit is `null` in a run from source. The artifact build (CDA-81) sets it with `bun build --define CODING_AGENT_COMMIT='"<commit>"'` |
+| `codingAgent` | `version` and `commit`. The commit is `null` in a run from source. The artifact build (`bun run build:artifact`) sets it with `bun build --define CODING_AGENT_COMMIT='"<commit>"'` |
 | `provider`, `model` | the `--provider` and `--model` values |
 | `sampling` | `maxOutputTokens` and `temperature`. `null` means the provider's default |
 | `transportRetryBound` | how often `@coding-agent/ai` re-issues a request before its stream opens |
