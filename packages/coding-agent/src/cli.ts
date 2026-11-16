@@ -13,11 +13,12 @@ function trackedWriter(stream: NodeJS.WriteStream) {
   let last = Promise.resolve();
   return {
     write: (text: string): void => {
+      const previous = last;
       last = new Promise((resolve) => {
         try {
           stream.write(text, () => resolve());
         } catch {
-          resolve();
+          resolve(previous);
         }
       });
     },

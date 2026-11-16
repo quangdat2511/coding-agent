@@ -532,9 +532,12 @@ describe("the coding-agent executable", () => {
     },
   );
 
-  it.skipIf(noSignalHandlers || !cleanChain)(
-    "ignores the first signal and is ended by the second when no Agent Session has opened",
-    async () => {
+  it.skipIf(noSignalHandlers || !cleanChain).each([
+    ["SIGINT", "SIGTERM"],
+    ["SIGTERM", "SIGINT"],
+  ] as const)(
+    "ignores %s and is ended by %s when no Agent Session has opened",
+    async (first, second) => {
       await withTemporaryDirectory(async (directory) => {
         await cp(NAMED_TASK_REPO, join(directory, "repo"), { recursive: true });
         const run = startProcess(
@@ -544,13 +547,13 @@ describe("the coding-agent executable", () => {
         try {
           // The output directory exists once the configuration resolves, just before openSession.
           await untilExists(join(directory, "out"));
-          run.signal("SIGINT");
+          run.signal(first);
           const outcome = await Promise.race([run.finished, Bun.sleep(300).then(() => "running")]);
           expect(outcome).toBe("running");
-          run.signal("SIGTERM");
+          run.signal(second);
           const { killedBy, stdout, stderr } = await run.finished;
 
-          expect(killedBy).toBe("SIGTERM");
+          expect(killedBy).toBe(second);
           expect(stdout).toBe("");
           expect(stderr).toBe("");
         } finally {
