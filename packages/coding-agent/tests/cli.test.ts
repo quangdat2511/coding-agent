@@ -32,6 +32,7 @@ const bin = join(packageRoot, declared);
 const replayProvider = join(import.meta.dir, "support", "replay-provider.ts");
 const hangProvider = join(import.meta.dir, "support", "hang-provider.ts");
 const failSessionFactory = join(import.meta.dir, "support", "fail-session-factory.ts");
+const hangSessionFactory = join(import.meta.dir, "support", "hang-session-factory.ts");
 
 // Windows cannot start a file by its shebang or mode bits, so there the bin runs under this Bun.
 const command = onWindows ? [...bunLikeShebang, bin] : [bin];
@@ -129,6 +130,14 @@ async function untilLogged(outputDir: string, type: string): Promise<void> {
     await Bun.sleep(10);
   }
   throw new Error(`no ${type} event was logged`);
+}
+
+async function untilExists(path: string): Promise<void> {
+  for (let attempt = 0; attempt < 300; attempt++) {
+    if (existsSync(path)) return;
+    await Bun.sleep(10);
+  }
+  throw new Error(`${path} was never created`);
 }
 
 interface ConfigurationErrorCase {
@@ -519,6 +528,34 @@ describe("the coding-agent executable", () => {
           exitCode: 130,
           result: { outcome: "cancelled", cancellation: { reason: "SIGINT" } },
         });
+      });
+    },
+  );
+
+  it.skipIf(noSignalHandlers || !cleanChain)(
+    "ignores the first signal and is ended by the second when no Agent Session has opened",
+    async () => {
+      await withTemporaryDirectory(async (directory) => {
+        await cp(NAMED_TASK_REPO, join(directory, "repo"), { recursive: true });
+        const run = startProcess(
+          [...bunLikeShebang, "--preload", hangSessionFactory, bin, ...namedTaskRun],
+          { cwd: directory, env: { GOOGLE_API_KEY: secret } },
+        );
+        try {
+          // The output directory exists once the configuration resolves, just before openSession.
+          await untilExists(join(directory, "out"));
+          run.signal("SIGINT");
+          const outcome = await Promise.race([run.finished, Bun.sleep(300).then(() => "running")]);
+          expect(outcome).toBe("running");
+          run.signal("SIGTERM");
+          const { killedBy, stdout, stderr } = await run.finished;
+
+          expect(killedBy).toBe("SIGTERM");
+          expect(stdout).toBe("");
+          expect(stderr).toBe("");
+        } finally {
+          run.signal("SIGKILL");
+        }
       });
     },
   );

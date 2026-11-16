@@ -54,14 +54,17 @@ becomes the cancellation reason in the Agent Result.
 - A signal that arrives before the Coding Task starts cancels the Agent Session in place of
   starting it. The run makes no Model Turn and still exits 130 with the three files.
 - A run whose active work ignores the cancellation past the grace period settles `failed` with
-  `CANCELLATION_TIMEOUT` and exits 1, with the three files written. That work may still be running
-  and would hold the process open, so in this case alone the run waits for what it printed to be
-  written and then calls `process.exit`.
-- Only the first signal cancels. A later one changes nothing, while the run is cancelling or after
-  it has settled, so it cannot interrupt the writing of `result.json`.
-- `src/cli.ts` listens for the signals from just before the ancestor check. A signal during the
-  check cancels the Agent Session as soon as it opens. An earlier one, during argument parsing or
-  hardening, ends the process in the default way, and nothing has been written at that point.
+  `CANCELLATION_TIMEOUT` and exits 1, with the three files written.
+- Only the first signal cancels. A later one changes nothing while the Agent Session is cancelling
+  or writing `result.json`.
+- `src/cli.ts` listens for the signals from just before the ancestor check until `runHeadless`
+  returns. A signal before the Agent Session opens cancels it as soon as it opens; a second one
+  before then ends the process by that signal, so a run stuck in configuration can still be
+  stopped. A signal outside that window ends the process in the default way.
+
+Work that outlived the Agent Result, such as a Model Turn that ignored the cancellation, would
+hold the process open. So on every path `src/cli.ts` waits until what it printed has been written
+and then calls `process.exit`.
 
 On Windows, sending a signal to another process ends it at once and runs no handler. The tests
 that send a signal to the executable are therefore skipped there, and Ctrl+C in a Windows console
