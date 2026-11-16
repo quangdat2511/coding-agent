@@ -13,6 +13,10 @@ export interface HeadlessOptions {
   readonly env: Readonly<Record<string, string | undefined>>;
   readonly stdout: (text: string) => void;
   readonly stderr: (text: string) => void;
+  // Aborting it dispatches `cancel`; a string abort reason becomes the cancellation reason.
+  readonly signal: AbortSignal;
+  // Called once the Agent Session can take `cancel`.
+  readonly onSessionOpened?: () => void;
 }
 
 export interface HeadlessResult {
@@ -113,6 +117,7 @@ export async function runHeadless(options: HeadlessOptions): Promise<HeadlessRes
 
   let running = false;
   let files: RunFiles | undefined;
+  let stopListening = (): void => undefined;
   try {
     const opened = await openSession(config);
     if (!opened.ok) {
@@ -128,9 +133,29 @@ export async function runHeadless(options: HeadlessOptions): Promise<HeadlessRes
     // Never awaited by the Agent Session, so a failed write surfaces only once it has settled.
     const logged = failureOf(files.logEvents(session.events()));
 
+    const cancel = () => {
+      const { reason } = options.signal;
+      return session.dispatch({
+        type: "cancel",
+        ...(typeof reason === "string" ? { reason } : {}),
+      });
+    };
+    const onAbort = () => {
+      cancel().catch((error: unknown) =>
+        stderr(internalError(`cancel was not dispatched: ${messageOf(error)}`)),
+      );
+    };
+    options.signal.addEventListener("abort", onAbort, { once: true });
+    stopListening = () => options.signal.removeEventListener("abort", onAbort);
+    options.onSessionOpened?.();
+
+    // A listener never runs for an abort that came first, so that abort cancels in place of `start`.
     const task = { objective: config.objective };
-    const started = await session.dispatch({ type: "start", task });
-    if (!started.accepted) throw new Error(`the Agent Session did not start: ${started.message}`);
+    const dispatched = await (options.signal.aborted
+      ? cancel()
+      : session.dispatch({ type: "start", task }));
+    if (!dispatched.accepted)
+      throw new Error(`the Agent Session refused its first command: ${dispatched.message}`);
     running = true;
 
     const result = await session.result();
@@ -158,6 +183,7 @@ export async function runHeadless(options: HeadlessOptions): Promise<HeadlessRes
     stderr(internalError(messageOf(error)));
     return { exitCode: 70 };
   } finally {
+    stopListening();
     await files?.close().catch(() => undefined);
   }
 }

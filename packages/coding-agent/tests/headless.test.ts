@@ -7,6 +7,8 @@ import { NAMED_TASK_FILE, NAMED_TASK_REPO, READ_ONLY_RUN } from "./support/named
 import { noFullDevice } from "./support/platform.ts";
 import { withTemporaryDirectory } from "./support/process.ts";
 import {
+  hang,
+  hangQuiescingAfter,
   type Respond,
   replayInOrder,
   type SentRequest,
@@ -32,13 +34,14 @@ interface Scenario {
   readonly env?: Record<string, string>;
   readonly prepare?: (repoRoot: string, outputDir: string) => Promise<unknown>;
   readonly stdout?: (text: string) => void;
+  readonly signal?: AbortSignal;
   readonly onRequest?: (outputDir: string, sent: readonly SentRequest[]) => void | Promise<void>;
 }
 
 async function runNamedTask(
   respond: Respond,
   inspect: (run: Run) => void | Promise<void>,
-  { env = {}, prepare, stdout, onRequest }: Scenario = {},
+  { env = {}, prepare, stdout, signal, onRequest }: Scenario = {},
 ): Promise<void> {
   await withTemporaryDirectory(async (directory) => {
     const repoRoot = join(await realpath(directory), "repo");
@@ -65,6 +68,7 @@ async function runNamedTask(
         },
         cwd: directory,
         env: { GOOGLE_API_KEY: secret, ...env },
+        signal: signal ?? new AbortController().signal,
         stdout:
           stdout ??
           ((text) => {
@@ -553,4 +557,103 @@ describe("a headless run of the named task on Google", () => {
       },
     );
   });
+
+  it("settles cancelled, exits 130 and writes the three files when cancelled during a Model Turn", async () => {
+    const cancellation = new AbortController();
+    await runNamedTask(
+      hang,
+      async ({ result, stdout, stderr, sent, outputDir }) => {
+        expect(result.exitCode).toBe(130);
+        expect(result.result).toMatchObject({
+          outcome: "cancelled",
+          cancellation: { reason: "SIGINT" },
+          workspaceChanged: false,
+          partialChangesPossible: false,
+        });
+        expect(sent).toHaveLength(1);
+        expect(stdout).toBe("");
+        expect(stderr).toBe("coding-agent: cancelled; workspace changed: no\n");
+
+        expect((await readdir(outputDir)).sort()).toEqual([
+          "events.jsonl",
+          "result.json",
+          "run.json",
+        ]);
+        expect(await Bun.file(join(outputDir, "result.json")).json()).toMatchObject({
+          schemaVersion: 1,
+          exitCode: 130,
+          result: { outcome: "cancelled", workspaceChanged: false, partialChangesPossible: false },
+        });
+        const events = await loggedEvents(outputDir);
+        expect(events.filter(({ type }) => type === "cancellation_requested")).toHaveLength(1);
+        expect(events.at(-1)).toMatchObject({
+          type: "session_settled",
+          data: { result: { outcome: "cancelled" } },
+        });
+      },
+      { signal: cancellation.signal, onRequest: () => cancellation.abort("SIGINT") },
+    );
+  });
+
+  it("exits 130 without a Model Turn, and writes the three files, when cancelled before the Coding Task starts", async () => {
+    await runNamedTask(
+      replayInOrder(readOnlyRun),
+      async ({ result, stderr, sent, outputDir }) => {
+        expect(result.exitCode).toBe(130);
+        expect(result.result).toMatchObject({
+          outcome: "cancelled",
+          cancellation: { reason: "SIGTERM" },
+        });
+        expect(sent).toHaveLength(0);
+        expect(stderr).toBe("coding-agent: cancelled; workspace changed: no\n");
+        expect((await readdir(outputDir)).sort()).toEqual([
+          "events.jsonl",
+          "result.json",
+          "run.json",
+        ]);
+        expect((await loggedEvents(outputDir)).map(({ type }) => type)).toEqual([
+          "cancellation_requested",
+          "session_settled",
+        ]);
+        expect(await Bun.file(join(outputDir, "result.json")).json()).toMatchObject({
+          exitCode: 130,
+          result: { outcome: "cancelled" },
+        });
+      },
+      { signal: AbortSignal.abort("SIGTERM") },
+    );
+  });
+
+  // The default profile's Cancellation Grace Period is 5,000 ms.
+  it("settles failed with CANCELLATION_TIMEOUT, exits 1 and writes the three files when the Model Turn ignores the cancellation", async () => {
+    const cancellation = new AbortController();
+    await runNamedTask(
+      hangQuiescingAfter(Number.POSITIVE_INFINITY),
+      async ({ result, stderr, outputDir }) => {
+        expect(result.exitCode).toBe(1);
+        expect(result.result).toMatchObject({
+          outcome: "failed",
+          failure: { code: "CANCELLATION_TIMEOUT" },
+          workspaceChanged: false,
+          partialChangesPossible: false,
+        });
+        expect(stderr).toStartWith("coding-agent: failed; workspace changed: no\n");
+        expect(stderr).toContain("coding-agent: CANCELLATION_TIMEOUT: ");
+        expect((await readdir(outputDir)).sort()).toEqual([
+          "events.jsonl",
+          "result.json",
+          "run.json",
+        ]);
+        expect(await Bun.file(join(outputDir, "result.json")).json()).toMatchObject({
+          exitCode: 1,
+          result: { outcome: "failed", failure: { code: "CANCELLATION_TIMEOUT" } },
+        });
+        expect((await loggedEvents(outputDir)).at(-1)).toMatchObject({
+          type: "session_settled",
+          data: { result: { outcome: "failed" } },
+        });
+      },
+      { signal: cancellation.signal, onRequest: () => cancellation.abort("SIGTERM") },
+    );
+  }, 15_000);
 });

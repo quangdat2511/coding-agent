@@ -27,7 +27,7 @@ export async function withTemporaryDirectory<T>(
 
 // Children get only PATH (to find bun) plus what a test adds, so a developer's own provider keys
 // never decide whether a credential is present.
-export async function runProcess(
+export function startProcess(
   command: readonly string[],
   options: { readonly cwd?: string; readonly env?: Record<string, string> } = {},
 ) {
@@ -37,10 +37,19 @@ export async function runProcess(
     stdout: "pipe",
     stderr: "pipe",
   });
-  const [exitCode, stdout, stderr] = await Promise.all([
+  const finished = Promise.all([
     child.exited,
     new Response(child.stdout).text(),
     new Response(child.stderr).text(),
-  ]);
-  return { exitCode, stdout, stderr };
+  ]).then(([exitCode, stdout, stderr]) => ({
+    exitCode,
+    stdout,
+    stderr,
+    // Bun gives a child that a signal killed the exit code 128 + n, as if it had exited itself.
+    killedBy: child.signalCode,
+  }));
+  return { finished, signal: (name: "SIGINT" | "SIGTERM" | "SIGKILL") => child.kill(name) };
 }
+
+export const runProcess = (...args: Parameters<typeof startProcess>) =>
+  startProcess(...args).finished;
