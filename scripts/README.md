@@ -158,7 +158,10 @@ After the note for a merge or a close, the script closes the post. Discord calls
 the post leaves the list of open posts in the forum. A webhook cannot archive a thread, so this
 step uses a Discord bot through `DISCORD_BOT_TOKEN`. The post is not locked. If a note comes later,
 for example after a reopen, Discord opens the post again. If the secret is not set, the post stays
-open. If Discord refuses the request, the post stays open and the run shows a warning.
+open. If Discord refuses the request, the post stays open and the run shows a warning. The warning
+gives the HTTP status and the Discord error code, such as `403, code 50013 (Missing Permissions)`.
+Code 50013 means that the bot lacks a permission. Code 50001 means that the bot cannot see the
+channel, for example because the token belongs to a bot that is not on the server.
 
 To get the token, create an application on the Discord Developer Portal and add a bot to it.
 Invite the bot to the server with the View Channels and Manage Threads permissions on

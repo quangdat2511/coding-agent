@@ -603,8 +603,26 @@ async function archivePost(
     body: JSON.stringify({ archived: true }),
   });
   // The token is never part of the message.
-  if (!response.ok) return `::warning::Discord did not close post ${id}: ${response.status}.`;
+  if (!response.ok) {
+    const detail = await discordErrorDetail(response);
+    return `::warning::Discord did not close post ${id}: ${response.status}${detail}.`;
+  }
   return `Closed post ${id}.`;
+}
+
+// Discord answers one HTTP status for many causes, and its JSON error code tells them apart: for
+// example 50001 when the bot cannot see the channel, 50013 when it lacks a permission. The message
+// is cut to one short line, because it ends up in a workflow command.
+async function discordErrorDetail(response: Response): Promise<string> {
+  try {
+    const { code, message } = (await response.json()) as { code?: unknown; message?: unknown };
+    if (typeof code !== "number") return "";
+    const text =
+      typeof message === "string" ? message.replace(/\s+/g, " ").trim().slice(0, 100) : "";
+    return text ? `, code ${code} (${text})` : `, code ${code}`;
+  } catch {
+    return "";
+  }
 }
 
 async function createPost(

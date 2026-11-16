@@ -379,6 +379,8 @@ describe("run", () => {
     eventName?: string;
     // The status the Discord bot API answers with when the script closes a post.
     archiveStatus?: number;
+    // The body of that answer, as Discord sends it.
+    archiveError?: string;
   };
 
   const API = "https://api.github.test/repos/acme/repo";
@@ -408,7 +410,8 @@ describe("run", () => {
           return new Response(JSON.stringify({ id: "1", channel_id: "4242" }), { status: 200 });
         }
         if (url.startsWith(`${CHANNELS}/`)) {
-          return new Response("{}", { status: fixture.archiveStatus ?? 200 });
+          const body = fixture.archiveError ?? "{}";
+          return new Response(body, { status: fixture.archiveStatus ?? 200 });
         }
         if (url === `${API}/actions/artifacts?name=discord-thread-pr-7&per_page=100`) {
           return Response.json({ artifacts: artifactListings.shift() ?? [] });
@@ -545,6 +548,18 @@ describe("run", () => {
     expect(result).toBe("Posted to thread 999.\n::warning::Discord did not close post 999: 403.");
     expect(result).not.toContain("bot-token");
     expect(calls.some((call) => call.url === `${WEBHOOK}?thread_id=999`)).toBe(true);
+  });
+
+  it("names Discord's error code when it refuses to close the post", async () => {
+    const { dependencies, env } = await setup(event({ action: "closed" }), {
+      comments: [[{ user: { login: "github-actions[bot]" }, body: marker(record()) }]],
+      archiveStatus: 403,
+      archiveError: JSON.stringify({ message: "Missing\nPermissions", code: 50013 }),
+    });
+
+    expect(await run({ ...env, DISCORD_BOT_TOKEN: "bot-token" }, dependencies)).toBe(
+      "Posted to thread 999.\n::warning::Discord did not close post 999: 403, code 50013 (Missing Permissions).",
+    );
   });
 
   it("does not close the post for a note that is not a merge or a close", async () => {
