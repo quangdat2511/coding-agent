@@ -2,7 +2,7 @@
 
 Status: accepted
 
-Date: 2026-09-13
+Date: 2026-09-13 (Amended: 2026-09-16, 2026-11-05, 2026-11-15)
 
 ## Context
 
@@ -72,6 +72,12 @@ When a model turn completes without tool calls, Agent Core detects a `Candidate 
         readonly error: string;
         readonly exitCode?: number; // e.g. 127 for command not found, 126 for non-executable, or shell syntax error
         readonly durationMs: number;
+      }
+    | {
+        readonly status: "cancelled";
+        readonly stdout: string;
+        readonly stderr: string;
+        readonly durationMs: number;
       };
   ```
 
@@ -88,6 +94,7 @@ When a model turn completes without tool calls, Agent Core detects a `Candidate 
      Please analyze the failure, adjust your changes, and verify again.
      ```
   4. **Execution and System Failures (`status === "timed_out"` or `status === "launch_failed"`)**: The command could not run to normal test completion (binary not found / ENOENT, exit code 127/126, shell syntax error, or command timeout). The policy returns `outcome: "failed"` with `AgentFailureCode: "VERIFICATION_FAILED"`. This immediately halts the session rather than trapping the model in an unrecoverable environment loop.
+  5. **Cancellation (`status === "cancelled"`)**: The abort signal ended the run, or had already aborted so nothing started. This is not a decision: Agent Core records the Verification as cancelled ([ADR 0002](./0002-agent-session-state-machine-and-event-protocol.md) §5), and the Verification Policy reports cancellation instead of returning `succeeded`, `continue`, or `failed`. `VerificationDecision` ([ADR 0004](./0004-package-apis-and-dependency-direction.md) §3) has no member for it yet; the type the policy reports it with is decided in [CDA-77](https://datn-fit-hcmus.atlassian.net/browse/CDA-77).
 
 - **Fallback Verification**: If no verification command is configured:
   - Fallback verification is non-gating: it unconditionally returns `outcome: "succeeded"` regardless of `workspaceChanged`, because `CodingTask` defines no field distinguishing read-only from mutating intent.
@@ -145,6 +152,64 @@ On 2026-11-05, [CDA-53](https://datn-fit-hcmus.atlassian.net/browse/CDA-53) amen
 - **Discovery stop condition** (§1): discovery stops at the first candidate that yields instructions: a regular file with non-whitespace content, or a link whose target is one and passes the Path Jail. A directory, an empty or whitespace-only file, or an unusable link is passed over and reported in `skipped`.
 - **Planning requirement** (§2): the sentence names the registered mutating tools instead of a fixed list. With `write`, `edit` and `bash` registered, it is the quoted sentence verbatim.
 - **Tool snippets** (§1): the prompt lists the name of each registered tool. Each tool's description and parameters reach the model through its tool definition on every request, so the prompt does not repeat them.
+
+On 2026-11-15, [CDA-74](https://datn-fit-hcmus.atlassian.net/browse/CDA-74) amended this record:
+
+- **Combined output** (§3): the command runs after `exec 2>&1`, as `bash` does (ADR 0001 §7), so
+  all of its output is in `stdout`, in the order it was written, and `stderr` is always empty. The
+  40 KiB budget applies to that combined output. Two pipes joined by arrival lose the order, and
+  splitting the budget between them is not an algorithm ADR 0001 defines.
+- **Cancelled runs** (§3): the runner result gains a fourth member,
+  `{ status: "cancelled"; stdout; stderr; durationMs }`, for a run the abort signal ended or one
+  whose signal had already aborted, in which case nothing starts. A cancelled run is neither a
+  finished command nor one that could not start, so neither existing member describes it. Agent
+  Core records the Verification as cancelled (ADR 0002 §5,
+  [CDA-73](https://datn-fit-hcmus.atlassian.net/browse/CDA-73)); the Verification Policy
+  ([CDA-77](https://datn-fit-hcmus.atlassian.net/browse/CDA-77)) reports cancellation rather than a
+  decision. §3's union and its list of policy cases include it.
+- **Shell syntax errors** (§3): the runner first runs `<shell> -n -c <command>`, which parses the
+  command without running any of it, and reports a non-zero result as `launch_failed` with that
+  exit code. The command's own exit code cannot show a syntax error, because a failing `make`
+  exits 2 as well, and without the check bash runs the lines before the error. A syntax error that
+  only appears at run time, inside `eval` or a sourced file, is `completed` with its exit code. A
+  check ended by a signal the runner did not send is `launch_failed` naming the signal, without an
+  exit code, since it says nothing about the command's syntax.
+- **Aborts before a launch** (§3): the runner asks the abort signal again right before each launch,
+  because an abort that arrives while it awaits, as while the repository root is checked, reaches
+  no listener; and the shared supervisor stops a command whose signal had already aborted when it
+  started.
+- **Exit codes 126 and 127** (§3): always `launch_failed`, with the exit code, even when a command
+  inside a script exits with one. The cost accepted is that a test suite whose last step is a
+  missing command ends the Agent Session rather than continuing.
+- **A shell ended by a signal the runner did not send** (§3), such as an out-of-memory kill or a
+  crash: `completed`, with 128 plus the signal's number as the exit code, as a shell reports such a
+  child. The crash is a failure the model may fix, not an environment that cannot run.
+- **Other launch failures** (§3): no shell, a repository root that no longer resolves to itself as
+  a directory (checked again before each run, as `bash` checks its start directory in `execute`),
+  and a shell that cannot be started are `launch_failed` without an exit code. The runner never
+  rejects. `launch_failed.error` holds a reason followed by the shell's output, within 40 KiB.
+- **Timeout** (§3): each runner is created with a `timeoutMs` within the `bash` bounds of ADR 0001
+  §3, 30,000 ms by default and at most 120,000 ms; any other value is `INVALID_CONFIGURATION` when
+  the runner is created. The syntax check and the command share that one deadline.
+
+Evidence behind this amendment:
+
+- *Read in source:* the `bash` supervision the runner shares (`packages/tools/src/process-run.ts`),
+  and Agent Core's handling of a Verification Policy that throws: the session fails with
+  `INTERNAL_ERROR` (`packages/agent-core/src/agent-session.ts`), which is why the runner never
+  rejects.
+- *Tried locally* (macOS, bash 3.2.57, uid 501): a missing command exits 127, a file with mode 644
+  exits 126, `if then` exits 2, `make -f /dev/null nothing` exits 2, and `kill -TERM $$` exits 143.
+  `bash -n -c "touch x"` exits 0 and creates nothing; `bash -n -c "if then"` exits 2. `Bun.spawn`
+  throws at once with `ENOENT` for a missing shell or start directory and `ENOTDIR` for a file
+  used as one. In `oven/bun:1.3.14` as root (bash 5.2.37), a file with mode 644 still exits 126,
+  and every runner test passes.
+- *Run in CI:* the Windows job (`windows-2025`) passes the runner tests, including the syntax check
+  with Git Bash's `-n`; not run on a Windows machine.
+- *Not yet run:* a host without bash, such as a minimal Alpine container, where `/bin/sh` is used,
+  including its `-n`.
+- *Prescriptions:* the four result members, the combined output, the syntax check, the meaning of
+  126, 127 and a foreign signal, and the shared deadline are decisions, not observations.
 
 ## Consequences
 

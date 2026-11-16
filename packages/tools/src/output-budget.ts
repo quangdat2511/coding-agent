@@ -2,7 +2,7 @@ import { Buffer } from "node:buffer";
 
 // ADR 0001 §3 bounds a tool's content at 40 KiB of UTF-8, the truncation marker included, so
 // noisy output cannot flood the context window. Every tool shares this budget, and the Verification
-// Runner will use it too.
+// Runner uses it too.
 export const MAX_TOOL_OUTPUT_BYTES = 40_960;
 
 // ADR 0001 §3's marker, counted against the budget.

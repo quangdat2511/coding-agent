@@ -19,6 +19,7 @@ import {
 } from "../src/index.ts";
 import { MAX_TOOL_OUTPUT_BYTES, TOOL_OUTPUT_TRUNCATION_MARKER } from "../src/output-budget.ts";
 import { noPosixSignals } from "./platform.ts";
+import { exitsSoon, isAlive } from "./support/processes.ts";
 
 let sandbox: string;
 let repo: string;
@@ -406,22 +407,3 @@ describe("reporting progress", () => {
 });
 
 const codeOf = (outcome: ToolOutcome) => (outcome.isError ? outcome.error.code : undefined);
-
-// A killed process can linger as a zombie until its new parent reaps it, and signal 0 still
-// reaches a zombie, so wait briefly for it to disappear.
-async function exitsSoon(pid: number): Promise<boolean> {
-  for (let waited = 0; waited < 2_000; waited += 50) {
-    if (!isAlive(pid)) return true;
-    await Bun.sleep(50);
-  }
-  return false;
-}
-
-function isAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-}
