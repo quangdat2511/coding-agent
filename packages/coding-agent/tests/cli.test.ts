@@ -11,6 +11,7 @@ import {
   runProcess,
   startProcess,
   withTemporaryDirectory,
+  writePreloadingBunfig,
 } from "./support/process.ts";
 import { withoutProfile } from "./support/profile.ts";
 import { HANG_QUIESCE_MS_ENV_VAR, REPLAY_FIXTURES_ENV_VAR } from "./support/recorded-provider.ts";
@@ -57,11 +58,6 @@ async function compileExecutable(
   ]);
   if (build.exitCode !== 0) throw new Error(`bun build --compile failed:\n${build.stderr}`);
   return [outfile];
-}
-
-async function writePreloadingBunfig(directory: string): Promise<void> {
-  await Bun.write(join(directory, "bunfig.toml"), 'preload = ["./preload.ts"]\n');
-  await Bun.write(join(directory, "preload.ts"), 'process.stderr.write("preloaded\\n");\n');
 }
 
 const launchPaths = [
@@ -216,7 +212,7 @@ describe("the coding-agent executable", () => {
     60_000,
   );
 
-  it.each(launchPaths)(
+  it.skipIf(!cleanChain).each(launchPaths)(
     "ignores a .env credential in the working directory, launched as $name",
     async ({ launch }) => {
       await withTemporaryDirectory(async (directory) => {

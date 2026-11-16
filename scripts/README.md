@@ -122,16 +122,22 @@ To build the artifact for a recorded job:
 1. Check out the commit on `main` that the job evaluates.
 2. Make sure that `git status` shows no changes and no untracked files.
 3. Make sure that Bun is the version in `.bun-version`.
-4. Run the build from the repository root on Linux or macOS:
+4. Run `bun ci --ignore-scripts`, so that `node_modules` matches `bun.lock`. The dirty check
+   does not look at `node_modules`, so do not build after `bun install`, `bun link`, or an edit
+   there.
+5. Make sure that no provider credential, such as `ANTHROPIC_API_KEY`, is in the environment or
+   in the repository's `.env`.
+6. Run the build from the repository root on Linux or macOS:
 
    ```sh
    bun run build:artifact
    ```
 
-5. Give the Harbor adapter the directory `dist/artifact`.
+7. Give the Harbor adapter the directory `dist/artifact`.
 
 The build writes three files into `dist/artifact`, or into the directory that `--out-dir <dir>`
-names. A relative `--out-dir` resolves against the working directory.
+names. A relative `--out-dir` resolves against the working directory. An `--out-dir` in the
+repository must be a path that git ignores.
 
 | File | Content |
 | --- | --- |
@@ -167,8 +173,11 @@ The build stops with exit code 1 in these cases:
 
 - The working tree has changes or untracked files. The message lists them.
 - The running Bun is not the version in `.bun-version`.
+- `--out-dir` is in the repository, and git does not ignore it.
+- A provider credential is in the environment of the build or of a process that started it,
+  and the host can run one of the executables.
 - `bun build` fails for a target.
-- The executable that this host can run fails a check.
+- The executable that this host can run fails a check, or a check runs longer than 30 seconds.
 
 Linux on x86-64 or on arm64 can run one of the executables. On such a host, the build runs that
 executable in a temporary directory and does two checks:
@@ -178,7 +187,8 @@ executable in a temporary directory and does two checks:
 - `run` must stop with the missing-credential error, next to a `.env` that sets
   `ANTHROPIC_API_KEY`.
 
-On macOS, the build cannot run either executable, so it prints that `--version` was not checked.
+On macOS, and on a musl Linux host such as Alpine, the build cannot run either executable, so it
+prints that `--version` was not checked.
 The CI job `Evaluation artifact` runs the build on `ubuntu-24.04`, so CI checks the x64 executable
 on every pull request. CI has no arm64 Linux runner. Run the build on an arm64 Linux host, or in an
 arm64 container, to check the arm64 executable.

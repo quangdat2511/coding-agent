@@ -77,6 +77,7 @@ describe("parseBuildArgs", () => {
   it.each([
     [["--out-dir"], "--out-dir requires a value"],
     [["--out-dir", " "], "--out-dir requires a value"],
+    [["--out-dir", "--allow-dirty"], "--out-dir requires a value"],
     [["--target", "bun-linux-x64"], 'unexpected argument "--target"'],
   ])("refuses %j", (argv, message) => {
     expect(parseBuildArgs(argv, cwd)).toEqual({ ok: false, message });
