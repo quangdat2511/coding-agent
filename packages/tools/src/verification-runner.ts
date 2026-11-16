@@ -140,6 +140,17 @@ export function createVerificationRunnerOn(
         if (!check.ok) return launchFailed(couldNotStart(shell.shell, check.error));
         const checkStopped = stopped(check.exit, check.collector);
         if (checkStopped !== undefined) return checkStopped;
+        // A check ended by a signal the runner did not send, such as an out-of-memory kill, says
+        // nothing about the command's syntax, so the error names the signal instead. There is no
+        // exit code: launch_failed's exit code is the one the shell reported for the command.
+        if (check.exit.signalCode) {
+          return launchFailed(
+            withOutput(
+              `the syntax check was ended by ${check.exit.signalCode}:\n`,
+              check.collector,
+            ),
+          );
+        }
         const checkCode = exitCodeOf(check.exit);
         if (checkCode !== 0) {
           return launchFailed(withOutput("shell syntax error:\n", check.collector), checkCode);

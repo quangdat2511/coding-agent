@@ -449,6 +449,22 @@ describe("the syntax check", () => {
     expect(result.durationMs).toBeLessThan(1_000);
   });
 
+  it.skipIf(noPosixSignals)(
+    "reports a syntax check ended by a signal as such, not as a syntax error",
+    async () => {
+      const { launcher: counting, started } = countingLauncher(slowSyntaxCheck("kill -KILL $$"));
+      const result = await runnerWith({ launcher: counting }).run("echo hi", {
+        signal: new AbortController().signal,
+      });
+
+      expect(withoutDuration(result)).toEqual({
+        status: "launch_failed",
+        error: "the syntax check was ended by SIGKILL:\n",
+      });
+      expect(started).toHaveLength(1);
+    },
+  );
+
   it("is stopped by the timeout and by cancellation too", async () => {
     const timedOut = await runnerWith({ launcher: slowSyntaxCheck("sleep 5"), timeoutMs: 300 }).run(
       "touch ran",
