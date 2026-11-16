@@ -730,8 +730,9 @@ amended this record:
 - **Verification Runner** (§4): `createVerificationRunner({ launcher, workspace, timeoutMs? })`
   returns `INVALID_CONFIGURATION` with `field: "timeoutMs"` for a timeout outside the `bash`
   bounds, or a runner whose `run(command, { signal })` never rejects and resolves to the result
-  ADR 0003 §5 records. The composition root binds the workspace, because the Verification
-  Policy's `verify` context carries none.
+  ADR 0003 §3 defines. The composition root will bind the workspace when it wires the runner in
+  [CDA-80](https://datn-fit-hcmus.atlassian.net/browse/CDA-80), because the Verification Policy's
+  `verify` context carries none.
 - **Pi names** (§8): the five new exports were checked on 2026-11-14 against Pi commit
   `9841914c71a74d81abe07f751aefd271fd924e63`; none occurs in its packages' source.
 

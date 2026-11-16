@@ -18,8 +18,8 @@ import { findShell, processShellHost, type ShellHost } from "./shell.ts";
 // What running the configured verification command produced (ADR 0003 §3), so the Verification
 // Policy above it never has to guess why a command produced nothing. The command runs after
 // `exec 2>&1`, as bash does, so all of its output is in stdout, in the order it was written, and
-// stderr is always empty. `cancelled` is not in ADR 0003's union: an aborted run is neither a
-// finished command nor one that could not start.
+// stderr is always empty. `cancelled` is the fourth member (ADR 0003 §3): an aborted run is
+// neither a finished command nor one that could not start.
 export type VerificationRunnerResult =
   | {
       readonly status: "completed";

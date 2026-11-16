@@ -72,6 +72,12 @@ When a model turn completes without tool calls, Agent Core detects a `Candidate 
         readonly error: string;
         readonly exitCode?: number; // e.g. 127 for command not found, 126 for non-executable, or shell syntax error
         readonly durationMs: number;
+      }
+    | {
+        readonly status: "cancelled";
+        readonly stdout: string;
+        readonly stderr: string;
+        readonly durationMs: number;
       };
   ```
 
@@ -88,6 +94,7 @@ When a model turn completes without tool calls, Agent Core detects a `Candidate 
      Please analyze the failure, adjust your changes, and verify again.
      ```
   4. **Execution and System Failures (`status === "timed_out"` or `status === "launch_failed"`)**: The command could not run to normal test completion (binary not found / ENOENT, exit code 127/126, shell syntax error, or command timeout). The policy returns `outcome: "failed"` with `AgentFailureCode: "VERIFICATION_FAILED"`. This immediately halts the session rather than trapping the model in an unrecoverable environment loop.
+  5. **Cancellation (`status === "cancelled"`)**: The abort signal ended the run, or had already aborted so nothing started. This is not a decision: Agent Core records the Verification as cancelled ([ADR 0002](./0002-agent-session-state-machine-and-event-protocol.md) §5), and the Verification Policy reports cancellation instead of returning `succeeded`, `continue`, or `failed`. `VerificationDecision` ([ADR 0004](./0004-package-apis-and-dependency-direction.md) §3) has no member for it yet; the type the policy reports it with is decided in [CDA-77](https://datn-fit-hcmus.atlassian.net/browse/CDA-77).
 
 - **Fallback Verification**: If no verification command is configured:
   - Fallback verification is non-gating: it unconditionally returns `outcome: "succeeded"` regardless of `workspaceChanged`, because `CodingTask` defines no field distinguishing read-only from mutating intent.
@@ -159,12 +166,18 @@ On 2026-11-15, [CDA-74](https://datn-fit-hcmus.atlassian.net/browse/CDA-74) amen
   Core records the Verification as cancelled (ADR 0002 §5,
   [CDA-73](https://datn-fit-hcmus.atlassian.net/browse/CDA-73)); the Verification Policy
   ([CDA-77](https://datn-fit-hcmus.atlassian.net/browse/CDA-77)) reports cancellation rather than a
-  decision.
+  decision. §3's union and its list of policy cases include it.
 - **Shell syntax errors** (§3): the runner first runs `<shell> -n -c <command>`, which parses the
   command without running any of it, and reports a non-zero result as `launch_failed` with that
   exit code. The command's own exit code cannot show a syntax error, because a failing `make`
   exits 2 as well, and without the check bash runs the lines before the error. A syntax error that
-  only appears at run time, inside `eval` or a sourced file, is `completed` with its exit code.
+  only appears at run time, inside `eval` or a sourced file, is `completed` with its exit code. A
+  check ended by a signal the runner did not send is `launch_failed` naming the signal, without an
+  exit code, since it says nothing about the command's syntax.
+- **Aborts before a launch** (§3): the runner asks the abort signal again right before each launch,
+  because an abort that arrives while it awaits, as while the repository root is checked, reaches
+  no listener; and the shared supervisor stops a command whose signal had already aborted when it
+  started.
 - **Exit codes 126 and 127** (§3): always `launch_failed`, with the exit code, even when a command
   inside a script exits with one. The cost accepted is that a test suite whose last step is a
   missing command ends the Agent Session rather than continuing.
@@ -191,8 +204,10 @@ Evidence behind this amendment:
   throws at once with `ENOENT` for a missing shell or start directory and `ENOTDIR` for a file
   used as one. In `oven/bun:1.3.14` as root (bash 5.2.37), a file with mode 644 still exits 126,
   and every runner test passes.
-- *Not yet run:* Git Bash on Windows, including `-n`, which CI's Windows job runs first; and a host
-  without bash, such as a minimal Alpine container, where `/bin/sh` is used, including its `-n`.
+- *Run in CI:* the Windows job (`windows-2025`) passes the runner tests, including the syntax check
+  with Git Bash's `-n`; not run on a Windows machine.
+- *Not yet run:* a host without bash, such as a minimal Alpine container, where `/bin/sh` is used,
+  including its `-n`.
 - *Prescriptions:* the four result members, the combined output, the syntax check, the meaning of
   126, 127 and a foreign signal, and the shared deadline are decisions, not observations.
 
