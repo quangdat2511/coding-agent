@@ -166,6 +166,52 @@ describe("Session Limits", () => {
     expect(result).toMatchObject({ outcome: "failed", failure: { code: "LIMIT_EXCEEDED" } });
   });
 
+  it("aborts Tool Call preparation when active duration expires", async () => {
+    let prepareSignal: AbortSignal | undefined;
+    let prepareStarted!: () => void;
+    let finishPrepare: (() => void) | undefined;
+    const started = new Promise<void>((resolve) => {
+      prepareStarted = resolve;
+    });
+    const slowPrepare: ExecutableTool = {
+      ...fakeTool({ name: "slow-prepare" }),
+      prepare(input, { signal }) {
+        prepareSignal = signal;
+        prepareStarted();
+        return new Promise((resolve) => {
+          finishPrepare = () =>
+            resolve({
+              ok: true,
+              prepared: { input, paths: [], summary: "prepared" },
+            });
+          signal.addEventListener("abort", () => finishPrepare?.(), { once: true });
+        });
+      },
+    };
+    const { session, clock, portCalls } = openTestSession({
+      tools: [slowPrepare],
+      model: {
+        turns: [toolCallTurn({ toolCallId: "call-1", name: "slow-prepare", input: {} })],
+      },
+      approvalPolicy: "auto-approve",
+      limits: { maxDurationMs: 10 },
+    });
+
+    await session.dispatch({ type: "start", task });
+    await started;
+    clock.advance(10);
+    if (!prepareSignal?.aborted) finishPrepare?.();
+    const result = await session.result();
+    const events = await collect(session.events());
+
+    expect(prepareSignal?.aborted).toBe(true);
+    expect(portCalls).not.toContain("tool.execute(slow-prepare)");
+    expect(events.find((event) => event.type === "runtime_limit_reached")).toMatchObject({
+      data: { kind: "maxDurationMs", limit: 10, observed: 10 },
+    });
+    expect(result).toMatchObject({ outcome: "failed", failure: { code: "LIMIT_EXCEEDED" } });
+  });
+
   it("excludes ready and awaiting_approval time from active duration", async () => {
     const write = fakeWriteTool();
     const { session, clock: sessionClock } = openTestSession({

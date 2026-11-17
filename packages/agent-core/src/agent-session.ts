@@ -675,7 +675,24 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
         return "settled";
       }
 
-      const preflight = await preflightToolCall(toolCall, preflightContext);
+      armDeadlineTimer();
+      if (breachedLimit !== undefined) {
+        breachLimit(breachedLimit);
+        return "settled";
+      }
+
+      let preflight: PreflightOutcome;
+      try {
+        preflight = await preflightToolCall(toolCall, preflightContext);
+      } finally {
+        recordDurationBreach();
+        clearDeadlineTimer();
+      }
+
+      if (breachedLimit !== undefined) {
+        breachLimit(breachedLimit);
+        return "settled";
+      }
 
       if (isCancellingOrTerminal()) {
         return undefined;
