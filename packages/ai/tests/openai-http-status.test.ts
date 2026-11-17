@@ -11,7 +11,7 @@ import { describe, expect, it } from "bun:test";
 import { stream } from "../src/api/openai-responses.ts";
 import { createProviderDirectory } from "../src/index.ts";
 import type { Context, Model, ModelStreamEvent } from "../src/types.ts";
-import { withCapturingFixtureFetch } from "./fixtures/fixture-fetch.ts";
+import { loadFixture, withCapturingFixtureFetch } from "./fixtures/fixture-fetch.ts";
 
 const context: Context = { messages: [{ role: "user", content: "Hello" }] };
 
@@ -43,6 +43,24 @@ describe("the HTTP status of a failed Chat Completions request", () => {
       expect(error.httpStatus).toBe(status);
       expect(error.message).toContain(String(status));
     });
+  });
+
+  // Recorded from the OpenCode Go gateway on 2026-11-17 by asking for a model it does not serve:
+  // HTTP 400 with an OpenAI-shaped JSON body and no retry-after header. The status of a real
+  // refusal is the one thing the hand-written bodies above cannot show.
+  it("records the status of a response recorded from the Go gateway", async () => {
+    const body = loadFixture("opencode/http-400-unknown-model.json");
+    await withCapturingFixtureFetch(
+      new Response(body, { status: 400, headers: { "content-type": "application/json" } }),
+      async (captured) => {
+        const error = await errorOf(stream(model, context, { apiKey: "k", maxRetries: 2 }));
+
+        // A 400 is not retried, so the one response is the last attempt's.
+        expect(captured).toHaveLength(1);
+        expect(error.httpStatus).toBe(400);
+        expect(error.message).toContain("isn't included in OpenCode Go");
+      },
+    );
   });
 
   it("records a 4xx outside the rerun rule too, so the rule decides and not the adapter", async () => {

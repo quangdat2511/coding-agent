@@ -1,0 +1,6 @@
+{
+  "error": {
+    "type": "server_error",
+    "message": "Model no-such-model isn't included in OpenCode Go. See the models it includes at https://opencode.ai/console/go."
+  }
+}

@@ -459,8 +459,8 @@ A trial is **rerun-eligible** when either condition holds:
   reward means the trial failed outside the Agent Session: while building or starting the
   environment, installing or launching the agent, or running the verifier.
 - Its Agent Result failed with `MODEL_FAILURE` and the failure details record an HTTP 401, 403, 429,
-  or 5xx response from the provider. This condition depends on a decision outside this record; see
-  Dependencies.
+  or 5xx response from the provider. The failure details carry that status in `httpStatus`; see
+  Dependencies for which providers record it.
 
 Every rerun-eligible trial runs exactly once more, in one rerun job with the same artifact and
 flags. A rerun trial is never rerun. A trial is **completed** when it has a verifier reward and is
@@ -563,12 +563,20 @@ them and decides neither.
   per-backend test, and §9 makes that criterion 4. Without it, a model-issued command can read the
   key and send it over the task's public network during a trial, which no later check can undo.
 - **The provider's HTTP status in `MODEL_FAILURE` details.** §7's second rerun condition reads it.
-  ADR 0002 §4 preserves a normalized provider reason in the failure details, but no decision says
-  the HTTP status is part of that reason. Until the provider error contract includes it, a
-  `MODEL_FAILURE` without a recorded status is not rerun-eligible and counts as an agent outcome.
-  [ADR 0007](./0007-evaluation-provider-and-model.md) names `opencode`, so
-  [CDA-83](https://datn-fit-hcmus.atlassian.net/browse/CDA-83) implements the status in that
-  adapter.
+  ADR 0002 §4 preserves a normalized provider reason in the failure details, but no decision said
+  the HTTP status is part of that reason. A `MODEL_FAILURE` without a recorded status is not
+  rerun-eligible and counts as an agent outcome.
+  [ADR 0007](./0007-evaluation-provider-and-model.md) names `opencode`.
+
+  On 2026-11-17, [CDA-83](https://datn-fit-hcmus.atlassian.net/browse/CDA-83) resolved this. The
+  status is `httpStatus` in the declared `ModelFailureDetails`, beside `phase`, `reason` and
+  `rawReason`, and `result.json` holds it. The Chat Completions adapter records it, which covers
+  `openai`, `openrouter`, `xai` and `opencode`. The `anthropic` and `google` adapters do not, so a
+  failure on either has no status and never meets the second condition. After the SDK's transport
+  retries, the status is the last attempt's. The adapter records any status and the rule in §7
+  chooses among them. Go answered a request for a model it does not serve with HTTP 400, which the
+  rule does not list. The status Go returns once an allowance window is exhausted has not been
+  observed yet, so the smoke job records it (ADR 0007 §2).
 
 ## Consequences
 
