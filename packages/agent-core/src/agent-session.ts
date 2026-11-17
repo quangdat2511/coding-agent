@@ -1127,7 +1127,15 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
       { ...state, task, transcript: [{ role: "user", content: objective }] },
       { type: "session_started", data: { task } },
     );
-    guard.resume();
+    try {
+      guard.resume();
+    } catch (error) {
+      closeActiveWork({
+        kind: "failed",
+        failure: { code: "INTERNAL_ERROR", message: messageOf(error) },
+      });
+      return { accepted: true, sequence };
+    }
     run().catch((error: unknown) => {
       if (breachedLimit !== undefined) {
         breachLimit(breachedLimit);
@@ -1181,7 +1189,16 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
     });
     const { resolve } = pendingApproval;
     pendingApproval = undefined;
-    guard.resume();
+    try {
+      guard.resume();
+    } catch (error) {
+      resolve({ decision: command.decision, ...(reason === undefined ? {} : { reason }) });
+      closeActiveWork({
+        kind: "failed",
+        failure: { code: "INTERNAL_ERROR", message: messageOf(error) },
+      });
+      return { accepted: true, sequence };
+    }
     resolve({ decision: command.decision, ...(reason === undefined ? {} : { reason }) });
     return { accepted: true, sequence };
   }

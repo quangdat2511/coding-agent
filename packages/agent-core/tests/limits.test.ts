@@ -204,6 +204,55 @@ describe("Session Limits", () => {
     expect(session.snapshot().activeDurationMs).toBe(500);
   });
 
+  it("settles failed if the active clock cannot start after session_started", async () => {
+    const { session, clock, model } = openTestSession({ model: { turns: [textTurn("Done.")] } });
+    clock.monotonicMs = () => {
+      throw new Error("monotonic clock failed at startup");
+    };
+
+    const start = await session.dispatch({ type: "start", task });
+    const result = await session.result();
+    const events = await collect(session.events());
+
+    expect(start.accepted).toBe(true);
+    expect(model.requests).toHaveLength(0);
+    expect(result).toMatchObject({
+      outcome: "failed",
+      failure: { code: "INTERNAL_ERROR", message: "monotonic clock failed at startup" },
+    });
+    expect(events.at(-1)?.type).toBe("session_settled");
+  });
+
+  it("settles failed without stranding the Tool Call if the clock cannot resume after Approval", async () => {
+    const { session, clock } = openTestSession({
+      tools: [fakeWriteTool()],
+      model: {
+        turns: [toolCallTurn({ toolCallId: "call-1", name: "write", input: { path: "src/a.ts" } })],
+      },
+    });
+
+    await session.dispatch({ type: "start", task });
+    await waitForEvent(session, "approval_requested");
+    clock.monotonicMs = () => {
+      throw new Error("monotonic clock failed after Approval");
+    };
+
+    const decision = await session.dispatch({
+      type: "resolve_approval",
+      approvalId: "approval-1",
+      decision: "allow",
+    });
+    const result = await session.result();
+    const events = await collect(session.events());
+
+    expect(decision.accepted).toBe(true);
+    expect(result).toMatchObject({
+      outcome: "failed",
+      failure: { code: "INTERNAL_ERROR", message: "monotonic clock failed after Approval" },
+    });
+    expect(events.at(-1)?.type).toBe("session_settled");
+  });
+
   it("aborts a mutating Tool Call on duration exhaustion and reports possible partial changes", async () => {
     let executionSignal: AbortSignal | undefined;
     const slowWriter: ExecutableTool = {
