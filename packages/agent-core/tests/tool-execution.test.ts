@@ -574,10 +574,20 @@ describe("executing auto-approved Tool Calls", () => {
 
   it("completes started call as failed, skips queued calls, and settles when a port throws after tool_execution_started", async () => {
     let throwClockNow = false;
-    let monotonicCalls = 0;
+    let toolExecuting = false;
+    const firstTool = fakeTool({ name: "first" });
 
     const { session, clock, config } = openTestSession({
-      tools: [fakeTool({ name: "first" }), fakeTool({ name: "second" })],
+      tools: [
+        {
+          ...firstTool,
+          async execute(prepared, context) {
+            toolExecuting = true;
+            return firstTool.execute(prepared, context);
+          },
+        },
+        fakeTool({ name: "second" }),
+      ],
       approvalPolicy: "auto-approve",
       model: {
         turns: [
@@ -591,9 +601,7 @@ describe("executing auto-approved Tool Calls", () => {
 
     const originalMonotonic = clock.monotonicMs;
     clock.monotonicMs = () => {
-      monotonicCalls++;
-      // Call 1 is startedMs (before executeTool). Call 2 is after executeTool
-      if (monotonicCalls >= 2) {
+      if (toolExecuting) {
         throwClockNow = true;
         config.ids.next = () => {
           throw new Error("ids hardware failure after tool_execution_started");

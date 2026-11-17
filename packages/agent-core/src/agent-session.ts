@@ -18,6 +18,7 @@ import type {
   VerificationStartedEvent,
 } from "./events.ts";
 import { isRecord, messageOf } from "./guards.ts";
+import { createLimitGuard, type LimitBreach } from "./limit-guard.ts";
 import { readModelResponse } from "./model-response.ts";
 import type { AgentFailure, AgentResult, UsageTotals } from "./result.ts";
 import type { AgentSession, CommandResult, OpenSessionConfig, SessionCommand } from "./session.ts";
@@ -143,6 +144,7 @@ function withoutPhase(state: AgentState): StateWithoutPhase {
 
 export function createAgentSession(config: OpenSessionConfig, initial: ReadyState): AgentSession {
   const log = createEventLog();
+  const guard = createLimitGuard(config.limits, config.clock);
   let state: AgentState = initial;
   const phase = (): AgentPhase => state.phase;
   const isTerminal = (): boolean =>
@@ -167,6 +169,8 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
   let currentFailedMessage: AssistantMessage | undefined;
   let cancellationReason: string | undefined;
   let cancelGraceTimer: (() => void) | undefined;
+  let deadlineTimer: (() => void) | undefined;
+  let breachedLimit: LimitBreach | undefined;
 
   const SAFE_FALLBACK_TIMESTAMP = "1970-01-01T00:00:00.000Z";
   let lastOccurredAt: string | undefined;
@@ -233,6 +237,10 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
     cancelGraceTimer = config.clock.setTimer(config.limits.cancellationGraceMs, () => {
       cancelGraceTimer = undefined;
       if (!isTerminal()) {
+        if (breachedLimit !== undefined) {
+          breachLimit(breachedLimit);
+          return;
+        }
         closeActiveWork({
           kind: "failed",
           failure: {
@@ -251,11 +259,59 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
     }
   }
 
+  function clearDeadlineTimer(): void {
+    if (deadlineTimer !== undefined) {
+      deadlineTimer();
+      deadlineTimer = undefined;
+    }
+  }
+
+  function recordDurationBreach(): void {
+    if (breachedLimit !== undefined || isCancellingOrTerminal()) return;
+    const observed = guard.elapsed();
+    if (observed < config.limits.maxDurationMs) return;
+    breachedLimit = {
+      kind: "maxDurationMs",
+      limit: config.limits.maxDurationMs,
+      observed,
+    };
+    abortEffects.abort();
+  }
+
+  function armDeadlineTimer(): void {
+    clearDeadlineTimer();
+    const remaining = guard.remainingMs();
+    if (remaining <= 0) {
+      recordDurationBreach();
+      return;
+    }
+    deadlineTimer = config.clock.setTimer(remaining, () => {
+      deadlineTimer = undefined;
+      if (breachedLimit !== undefined || isCancellingOrTerminal()) return;
+      let observed: number;
+      try {
+        observed = guard.elapsed();
+      } catch {
+        observed = config.limits.maxDurationMs;
+      }
+      if (observed < config.limits.maxDurationMs) return;
+      breachedLimit = {
+        kind: "maxDurationMs",
+        limit: config.limits.maxDurationMs,
+        observed,
+      };
+      abortEffects.abort();
+    });
+  }
+
   function settle(settlement: Settlement): "settled" {
     if (isTerminal()) {
       return "settled";
     }
     clearGraceTimer();
+    clearDeadlineTimer();
+    guard.pause();
+    const activeDurationMs = guard.elapsed();
     const partialChangesPossible =
       state.partialChangesPossible ||
       (settlement.outcome !== "succeeded" && state.workspaceChanged);
@@ -268,7 +324,7 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
     };
     try {
       commit(
-        { ...terminal(result), partialChangesPossible },
+        { ...terminal(result), activeDurationMs, partialChangesPossible },
         { type: "session_settled", data: { result } },
       );
     } finally {
@@ -466,6 +522,7 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
     }
     isClosingWork = true;
     clearGraceTimer();
+    clearDeadlineTimer();
 
     const outcome = mode.kind === "cancel" ? "cancelled" : "failed";
     const skipReason: SkipReason = mode.kind === "cancel" ? "CANCELLED" : mode.failure.code;
@@ -474,6 +531,22 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
     closeModelTurn(mode, outcome, skipReason);
     closeVerification(outcome);
     settleTerminal(mode);
+  }
+
+  function breachLimit(breach: LimitBreach): "settled" {
+    if (isTerminal()) return "settled";
+    commit(state, {
+      type: "runtime_limit_reached",
+      data: { kind: breach.kind, limit: breach.limit, observed: breach.observed },
+    });
+    closeActiveWork({
+      kind: "failed",
+      failure: {
+        code: "LIMIT_EXCEEDED",
+        message: `session limit ${breach.kind} exhausted: observed ${breach.observed}, limit ${breach.limit}`,
+      },
+    });
+    return "settled";
   }
 
   const isCancellingOrTerminal = (): boolean => isTerminal() || phase() === "cancelling";
@@ -545,13 +618,10 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
         name: block.name,
         arguments: block.arguments,
       };
-      commit(
-        { ...streaming(modelTurn, draft), counters: incremented("toolCalls") },
-        {
-          type: "tool_call_queued",
-          data: { modelTurnId: modelTurn.modelTurnId, queueIndex, toolCall },
-        },
-      );
+      commit(streaming(modelTurn, draft), {
+        type: "tool_call_queued",
+        data: { modelTurnId: modelTurn.modelTurnId, queueIndex, toolCall },
+      });
       return toolCall;
     });
   }
@@ -563,6 +633,12 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
     queuedToolCalls: readonly QueuedToolCall[],
     summary: string,
   ): Promise<ApprovalDecision> {
+    guard.pause();
+    const breach = guard.checkBeforeToolExecution(state.counters);
+    if (breach !== undefined) {
+      breachLimit(breach);
+      return { decision: "deny", reason: "session limit reached" };
+    }
     const approvalId = config.ids.next("approval");
     const resolver = Promise.withResolvers<ApprovalDecision>();
     commit(
@@ -587,10 +663,16 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
     modelTurn: ModelTurnRef,
     draft: AssistantMessageDraft,
     queue: readonly QueuedToolCall[],
-  ): Promise<AgentFailure | undefined> {
+  ): Promise<AgentFailure | "settled" | undefined> {
     for (const [index, toolCall] of queue.entries()) {
       if (isCancellingOrTerminal()) {
         return undefined;
+      }
+
+      const breach = guard.checkBeforeToolExecution(state.counters);
+      if (breach !== undefined) {
+        breachLimit(breach);
+        return "settled";
       }
 
       const preflight = await preflightToolCall(toolCall, preflightContext);
@@ -599,11 +681,18 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
         return undefined;
       }
 
+      const preflightBreach = guard.checkBeforeToolExecution(state.counters);
+      if (preflightBreach !== undefined) {
+        breachLimit(preflightBreach);
+        return "settled";
+      }
+
       const mutating = preflight.ok && preflight.tool.mutation === "mutating";
       const remaining = queue.slice(index + 1);
 
       let result: ToolResult;
       let outcome: "succeeded" | "failed" | "denied";
+      let countedAtExecutionStart = false;
 
       if (!preflight.ok) {
         result = rejectedResult(toolCall, preflight.error);
@@ -628,6 +717,11 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
             decidedBy: "user",
             ...(decision.reason === undefined ? {} : { reason: decision.reason }),
           };
+          armDeadlineTimer();
+          if (breachedLimit !== undefined) {
+            breachLimit(breachedLimit);
+            return "settled";
+          }
           result = await executeToolCall(
             modelTurn,
             draft,
@@ -636,13 +730,30 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
             preflight,
             approval,
           );
+          countedAtExecutionStart = true;
+          clearDeadlineTimer();
+          if (breachedLimit !== undefined) {
+            breachLimit(breachedLimit);
+            return "settled";
+          }
           if (isCancellingOrTerminal()) {
             return undefined;
           }
           outcome = result.isError ? "failed" : "succeeded";
         }
       } else {
+        armDeadlineTimer();
+        if (breachedLimit !== undefined) {
+          breachLimit(breachedLimit);
+          return "settled";
+        }
         result = await executeToolCall(modelTurn, draft, toolCall, remaining, preflight);
+        countedAtExecutionStart = true;
+        clearDeadlineTimer();
+        if (breachedLimit !== undefined) {
+          breachLimit(breachedLimit);
+          return "settled";
+        }
         if (isCancellingOrTerminal()) {
           return undefined;
         }
@@ -653,9 +764,13 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
         {
           ...afterToolCallResolved(modelTurn, draft, remaining),
           transcript: [...state.transcript, toolResultMessage(toolCall.providerId, result)],
-          counters: result.isError
-            ? incremented("consecutiveRecoverableFailures")
-            : { ...state.counters, consecutiveRecoverableFailures: 0 },
+          counters: {
+            ...state.counters,
+            toolCalls: state.counters.toolCalls + (countedAtExecutionStart ? 0 : 1),
+            consecutiveRecoverableFailures: result.isError
+              ? state.counters.consecutiveRecoverableFailures + 1
+              : 0,
+          },
           partialChangesPossible:
             state.partialChangesPossible || (outcome === "failed" && mutating),
         },
@@ -664,6 +779,12 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
           data: { toolCallId: toolCall.id, outcome, result },
         },
       );
+
+      const failureBreach = guard.checkAfterToolResult(state.counters);
+      if (failureBreach !== undefined) {
+        breachLimit(failureBreach);
+        return "settled";
+      }
     }
     return undefined;
   }
@@ -709,6 +830,7 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
         modelTurn,
         toolCall,
         queuedToolCalls,
+        counters: incremented("toolCalls"),
         workspaceChanged: state.workspaceChanged || mutation === "mutating",
       },
       { type: "tool_execution_started", data: { toolCallId: toolCall.id, mutation } },
@@ -719,7 +841,13 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
     // check covers a Tool Call completed while execute still runs, as when cancellation's grace
     // period expires: no update may follow its tool_call_completed or session_settled.
     const progress = createProgressGate(config.clock, (output) => {
-      if (state.phase !== "executing_tool" || state.toolCall.id !== toolCall.id) return;
+      if (
+        breachedLimit !== undefined ||
+        state.phase !== "executing_tool" ||
+        state.toolCall.id !== toolCall.id
+      ) {
+        return;
+      }
       commit(state, {
         type: "tool_execution_progress",
         data: { toolCallId: toolCall.id, update: { output } },
@@ -734,6 +862,7 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
         if (isRecord(update) && typeof update.output === "string") progress.report(update.output);
       },
     });
+    recordDurationBreach();
     progress.close();
     const durationMs = config.clock.monotonicMs() - startedMs;
     return {
@@ -773,6 +902,11 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
       data: { modelTurnId, messageId },
     });
 
+    armDeadlineTimer();
+    if (breachedLimit !== undefined) {
+      breachLimit(breachedLimit);
+      return "settled";
+    }
     const response = await readModelResponse(
       () =>
         config.model.stream(
@@ -784,7 +918,7 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
           { signal: abortEffects.signal, parallelToolCalls: false },
         ),
       (blockIndex, delta) => {
-        if (state.phase !== "streaming_model") return;
+        if (breachedLimit !== undefined || state.phase !== "streaming_model") return;
         const blocks = draft.blocks.slice();
         const block = blocks[blockIndex];
         blocks[blockIndex] = { kind: "text", text: (block?.text ?? "") + delta };
@@ -796,6 +930,13 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
         });
       },
     );
+    recordDurationBreach();
+    clearDeadlineTimer();
+
+    if (breachedLimit !== undefined) {
+      breachLimit(breachedLimit);
+      return "settled";
+    }
 
     if (settleIfCancelling()) {
       return "settled";
@@ -833,7 +974,7 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
     if (toolCalls.length > 0) {
       const queued = queueToolCalls(modelTurn, draft, toolCalls);
       const failure = await resolveToolCalls(modelTurn, draft, queued);
-      if (settleIfCancelling()) {
+      if (failure === "settled" || settleIfCancelling()) {
         return "settled";
       }
       completeTurn(usageOf(message), failure);
@@ -859,6 +1000,11 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
     if (settleIfCancelling()) {
       return "settled";
     }
+    const breach = guard.checkBeforeVerification();
+    if (breach !== undefined) {
+      breachLimit(breach);
+      return "settled";
+    }
     const verification = {
       verificationId: config.ids.next("verification"),
       candidate: messageRef,
@@ -870,6 +1016,11 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
     );
 
     let decision: VerificationDecision;
+    armDeadlineTimer();
+    if (breachedLimit !== undefined) {
+      breachLimit(breachedLimit);
+      return "settled";
+    }
     try {
       decision = structuredClone(
         await config.verification.verify(
@@ -882,6 +1033,12 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
         ),
       );
     } catch (error) {
+      recordDurationBreach();
+      clearDeadlineTimer();
+      if (breachedLimit !== undefined) {
+        breachLimit(breachedLimit);
+        return "settled";
+      }
       if (settleIfCancelling()) {
         return "settled";
       }
@@ -892,6 +1049,13 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
           message: `the Verification Policy threw: ${messageOf(error)}`,
         },
       });
+      return "settled";
+    }
+    recordDurationBreach();
+    clearDeadlineTimer();
+
+    if (breachedLimit !== undefined) {
+      breachLimit(breachedLimit);
       return "settled";
     }
 
@@ -931,6 +1095,11 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
       if (settleIfCancelling()) {
         return;
       }
+      const breach = guard.checkBeforeModelTurn(state.counters);
+      if (breach !== undefined) {
+        breachLimit(breach);
+        return;
+      }
       const turn = await runModelTurn();
       if (turn === "settled" || isTerminal()) {
         return;
@@ -958,7 +1127,12 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
       { ...state, task, transcript: [{ role: "user", content: objective }] },
       { type: "session_started", data: { task } },
     );
+    guard.resume();
     run().catch((error: unknown) => {
+      if (breachedLimit !== undefined) {
+        breachLimit(breachedLimit);
+        return;
+      }
       if (settleIfCancelling()) {
         return;
       }
@@ -1007,6 +1181,7 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
     });
     const { resolve } = pendingApproval;
     pendingApproval = undefined;
+    guard.resume();
     resolve({ decision: command.decision, ...(reason === undefined ? {} : { reason }) });
     return { accepted: true, sequence };
   }
@@ -1047,6 +1222,7 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
           },
         );
 
+        clearDeadlineTimer();
         abortEffects.abort();
 
         if (requestedFrom === "ready" || requestedFrom === "awaiting_approval") {
@@ -1066,7 +1242,7 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
       queueTail = handled.catch(() => {});
       return handled;
     },
-    snapshot: () => state,
+    snapshot: () => ({ ...state, activeDurationMs: guard.elapsed() }),
     events(afterSequence = 0) {
       if (!Number.isSafeInteger(afterSequence) || afterSequence < 0) {
         throw new RangeError(`afterSequence must be a non-negative integer, got ${afterSequence}`);
