@@ -517,6 +517,28 @@ describe("cancelling an Agent Session", () => {
         evidence: [],
       });
     });
+
+    it("settles as cancelled when the policy reports the aborted run as cancelled", async () => {
+      const { session } = openTestSession({
+        verification: [
+          async () => {
+            await waitForPhase(session, "cancelling");
+            return { outcome: "cancelled" };
+          },
+        ],
+        model: { turns: [textTurn("Done with code change")] },
+      });
+
+      await session.dispatch({ type: "start", task });
+      await waitForEvent(session, "verification_started");
+      await session.dispatch({ type: "cancel" });
+
+      expect((await session.result()).outcome).toBe("cancelled");
+      const events = await collect(session.events());
+      expect(events.filter((e) => e.type === "verification_completed")).toMatchObject([
+        { data: { verificationId: "verification-1", outcome: "cancelled", evidence: [] } },
+      ]);
+    });
   });
 
   describe("Cancellation between model turns", () => {

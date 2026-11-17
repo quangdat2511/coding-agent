@@ -61,6 +61,15 @@ export type VerificationDecision =
       readonly message: string;
     };
 
+// A Verification run the abort signal ended is not a decision (ADR 0003 §3): the policy reports it
+// as cancelled, and Agent Core records the run as cancelled when the session is cancelling.
+export interface VerificationCancelled {
+  readonly outcome: "cancelled";
+}
+
 export interface VerificationPolicy {
-  verify(candidate: VerificationCandidate, ctx: VerificationContext): Promise<VerificationDecision>;
+  verify(
+    candidate: VerificationCandidate,
+    ctx: VerificationContext,
+  ): Promise<VerificationDecision | VerificationCancelled>;
 }

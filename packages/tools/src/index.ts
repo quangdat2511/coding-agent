@@ -14,6 +14,8 @@ export { normalizeWindowsShellPath } from "./paths.ts";
 export { ReadParams, readTool } from "./read.ts";
 export { createDefaultTools } from "./registry.ts";
 export { READ_OPEN_FLAGS } from "./text-file.ts";
+export type { VerificationPolicyOptions } from "./verification-policy.ts";
+export { createVerificationPolicy } from "./verification-policy.ts";
 export type {
   CreateVerificationRunnerResult,
   VerificationRunner,

@@ -41,7 +41,7 @@ import { executeTool } from "./tool-execution.ts";
 import { createProgressGate } from "./tool-progress.ts";
 import type { ApprovalDecider, ToolError, ToolResult } from "./tool-result.ts";
 import { addUsage, usageOf } from "./usage.ts";
-import type { VerificationDecision } from "./verification.ts";
+import type { VerificationCancelled, VerificationDecision } from "./verification.ts";
 
 type Refusal = Extract<CommandResult, { accepted: false }>;
 
@@ -1034,7 +1034,7 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
       { type: "verification_started", data: verification },
     );
 
-    let verificationResult: DeadlineOutcome<VerificationDecision>;
+    let verificationResult: DeadlineOutcome<VerificationDecision | VerificationCancelled>;
     try {
       verificationResult = await runUnderDeadline(async () =>
         structuredClone(
@@ -1072,6 +1072,18 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
     const decision = verificationResult.value;
 
     if (settleIfCancelling()) {
+      return "settled";
+    }
+    // Only Agent Core aborts the signal, and only after a cancel it accepted, so a cancellation
+    // reported outside cancelling breaks the policy's contract.
+    if (decision.outcome === "cancelled") {
+      closeActiveWork({
+        kind: "failed",
+        failure: {
+          code: "INTERNAL_ERROR",
+          message: "the Verification Policy reported a cancellation that was not requested",
+        },
+      });
       return "settled";
     }
 

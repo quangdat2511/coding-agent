@@ -217,7 +217,8 @@ follow §4 of the
 ADR 0003 §4, as amended by [CDA-35](https://datn-fit-hcmus.atlassian.net/browse/CDA-35), states the
 counter's scope; this decision keeps the field name unchanged.
 
-The Verification port carries ADR 0002's three outcomes, spelled as in ADR 0003 §3:
+The Verification port carries ADR 0002's three outcomes, spelled as in ADR 0003 §3, and reports a
+run the abort signal ended beside them rather than as a fourth decision:
 
 ```typescript
 export interface VerificationPolicy {
@@ -228,7 +229,7 @@ export interface VerificationPolicy {
       workspaceChanged: boolean;
     },
     ctx: { signal: AbortSignal; onProgress(update: VerificationProgress): void },
-  ): Promise<VerificationDecision>;
+  ): Promise<VerificationDecision | VerificationCancelled>;
 }
 
 export type VerificationDecision =
@@ -239,6 +240,11 @@ export type VerificationDecision =
       feedback: VerificationFeedback;
     }
   | { outcome: "failed"; evidence: readonly VerificationEvidence[]; message: string };
+
+// A run the abort signal ended is reported, not decided (ADR 0003 §3, CDA-77).
+export interface VerificationCancelled {
+  outcome: "cancelled";
+}
 ```
 
 `VerificationEvidence` is the closed union that ADR 0003 §3 defines (`command_execution`,
@@ -398,11 +404,17 @@ export function createVerificationRunner(options: {
   workspace: WorkspaceResolver;
   timeoutMs?: number;
 }): CreateVerificationRunnerResult;
+export function createVerificationPolicy(options: {
+  command: string | null;
+  runner: VerificationRunner;
+}): VerificationPolicy;
 ```
 
 `createDefaultTools` registers `read`, `write`, `edit`, and `bash`. `createVerificationRunner`
 (CDA-74) takes the same configured launcher, so a Verification command gets the same filtered
-environment; it is not a tool and is not registered. The launcher arguments, added in
+environment; it is not a tool and is not registered. `createVerificationPolicy` (CDA-77) wraps
+a runner and the configured command, or `null` for none, in the one `VerificationPolicy` both entry
+points pass to `openAgentSession`. The launcher arguments, added in
 CDA-71, replace the original zero-argument sketches; they do not add tool timeout options.
 
 The composition root reads the complete `PROVIDER_CREDENTIAL_ENV_VARS` export from `ai` and
@@ -611,8 +623,8 @@ re-exports:
 
 | Package | Names checked | Exact matches with a Pi public export |
 | --- | --- | --- |
-| `agent-core` | the ADR 0001 and ADR 0002 types it exports and the names in §3 (41 names) | `AgentSession` (`pi-coding-agent`), `AgentState` (`pi-agent-core`), `JsonValue` (`pi-agent-core`, `pi-ai`), `IdGenerator` (`pi-agent-core`) |
-| `tools` | `createWorkspaceResolver`, `createDefaultTools`, `readTool`, `writeTool`, `editTool`, `bashTool`, `ReadParams`, `WriteParams`, `EditParams`, `BashParams`, `createChildEnvironmentBuilder`, `createChildProcessLauncher`, `ChildEnvironment`, `CreateChildEnvironmentResult`, `ChildLaunchOptions`, `ChildProcess`, `ChildProcessLauncher`, `CreateChildProcessLauncherResult`, `createVerificationRunner`, `VerificationRunner`, `VerificationRunnerOptions`, `VerificationRunnerResult`, `CreateVerificationRunnerResult` | none |
+| `agent-core` | the ADR 0001 and ADR 0002 types it exports and the names in §3 (42 names) | `AgentSession` (`pi-coding-agent`), `AgentState` (`pi-agent-core`), `JsonValue` (`pi-agent-core`, `pi-ai`), `IdGenerator` (`pi-agent-core`) |
+| `tools` | `createWorkspaceResolver`, `createDefaultTools`, `readTool`, `writeTool`, `editTool`, `bashTool`, `ReadParams`, `WriteParams`, `EditParams`, `BashParams`, `createChildEnvironmentBuilder`, `createChildProcessLauncher`, `ChildEnvironment`, `CreateChildEnvironmentResult`, `ChildLaunchOptions`, `ChildProcess`, `ChildProcessLauncher`, `CreateChildProcessLauncherResult`, `createVerificationRunner`, `VerificationRunner`, `VerificationRunnerOptions`, `VerificationRunnerResult`, `CreateVerificationRunnerResult`, `createVerificationPolicy`, `VerificationPolicyOptions` | none |
 | `tui` | `renderTui`, `TuiModel`, `TuiHandlers`, `TuiHandle` | none |
 | `coding-agent` | `runInteractive`, `runHeadless`, `projectSessionEvent`, `CliOptions`, `HeadlessOptions`, `HeadlessResult` | none |
 
@@ -734,6 +746,23 @@ amended this record:
   [CDA-80](https://datn-fit-hcmus.atlassian.net/browse/CDA-80), because the Verification Policy's
   `verify` context carries none.
 - **Pi names** (§8): the five new exports were checked on 2026-11-14 against Pi commit
+  `9841914c71a74d81abe07f751aefd271fd924e63`; none occurs in its packages' source.
+
+On 2026-11-17, [Decide Verification outcomes](https://datn-fit-hcmus.atlassian.net/browse/CDA-77)
+amended this record:
+
+- **Verification port** (§3): `verify` resolves to `VerificationDecision | VerificationCancelled`.
+  `VerificationCancelled` is `{ outcome: "cancelled" }`, the type ADR 0003 §3 left to CDA-77 for a
+  run the abort signal ended; it is reported beside the three decisions rather than added to them.
+  Agent Core settles `INTERNAL_ERROR` when it is reported outside `cancelling`.
+- **Verification Policy** (§4, §7): `createVerificationPolicy({ command, runner })` in `tools`
+  returns the one `VerificationPolicy` both entry points use; `command: null` is the non-gating
+  fallback, which never calls the runner. It lives in `tools` because `tools` implements Agent
+  Core's ports and holds the unexported 40 KiB output budget the policy applies. The composition
+  root constructs it and passes it to `openAgentSession` in
+  [CDA-80](https://datn-fit-hcmus.atlassian.net/browse/CDA-80).
+- **Pi names** (§8): `createVerificationPolicy`, `VerificationPolicyOptions` and
+  `VerificationCancelled` were checked on 2026-11-17 against the same Pi commit
   `9841914c71a74d81abe07f751aefd271fd924e63`; none occurs in its packages' source.
 
 ## Consequences

@@ -204,6 +204,32 @@ describe("verifying a Candidate Completion", () => {
     });
   });
 
+  it("settles INTERNAL_ERROR when the policy reports a cancellation nobody requested", async () => {
+    const { session } = openTestSession({
+      model: { turns: [textTurn("Fixed it.")] },
+      verification: [{ outcome: "cancelled" }],
+    });
+
+    await session.dispatch({ type: "start", task });
+    const result = await session.result();
+    const events = await collect(session.events());
+
+    expect(events.slice(-2)).toMatchObject([
+      {
+        type: "verification_completed",
+        data: { verificationId: "verification-1", outcome: "failed", evidence: [] },
+      },
+      { type: "session_settled", data: { result } },
+    ]);
+    expect(result).toMatchObject({
+      outcome: "failed",
+      failure: {
+        code: "INTERNAL_ERROR",
+        message: "the Verification Policy reported a cancellation that was not requested",
+      },
+    });
+  });
+
   it("marks partialChangesPossible when verification fails after workspace was changed by a mutating tool", async () => {
     const { session } = openTestSession({
       tools: [fakeWriteTool()],
