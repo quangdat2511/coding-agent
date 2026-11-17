@@ -363,6 +363,11 @@ agents convert their native logs to ATIF the same way.
 | `verification_completed` with `continue` | `user` step containing the injected feedback |
 | Agent Result | `final_metrics`, with outcome and failure in `extra` |
 
+The `agent` row names displayable reasoning, but Coding Agent has none to map: an Assistant Message
+carries text and Tool Calls only, the providers normalize no reasoning content into it, and §4
+omits the `assistant_content_delta` events that would carry it. The step therefore has no
+`reasoning_content`, and the reasoning tokens that a provider reports stay in the metrics.
+
 ### 7. Execution procedure
 
 Every job runs from the repository root with `uv run --project evaluation/terminalbench --frozen`.
