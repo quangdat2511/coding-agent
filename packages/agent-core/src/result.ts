@@ -17,11 +17,30 @@ export type AgentFailureCode =
   | "CANCELLATION_TIMEOUT"
   | "INTERNAL_ERROR";
 
-export interface AgentFailure {
-  readonly code: AgentFailureCode;
-  readonly message: string;
-  readonly details?: Readonly<Record<string, JsonValue>>;
-}
+export type ModelFailurePhase = "request" | "stream" | "finish";
+
+// The details of a MODEL_FAILURE (ADR 0002 §4): the phase and the normalized provider reason.
+// httpStatus is the provider's HTTP status when a response failed the request; ADR 0005 §7 makes
+// a trial rerun-eligible when it is 401, 403, 429 or 5xx. Only the Chat Completions adapter
+// (openai, openrouter, xai, opencode) records it.
+export type ModelFailureDetails = {
+  readonly phase: ModelFailurePhase;
+  readonly reason: string;
+  readonly rawReason?: string;
+  readonly httpStatus?: number;
+};
+
+export type AgentFailure =
+  | {
+      readonly code: "MODEL_FAILURE";
+      readonly message: string;
+      readonly details: ModelFailureDetails;
+    }
+  | {
+      readonly code: Exclude<AgentFailureCode, "MODEL_FAILURE">;
+      readonly message: string;
+      readonly details?: Readonly<Record<string, JsonValue>>;
+    };
 
 interface AgentResultBase {
   readonly finalMessage?: AssistantMessage;

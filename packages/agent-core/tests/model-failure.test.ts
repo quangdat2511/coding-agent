@@ -82,6 +82,35 @@ describe("settling a failed Model Turn", () => {
       },
     },
     {
+      name: "the provider rejects the request with an HTTP status",
+      turn: [{ type: "error", error: { message: "rate limited", httpStatus: 429 } }],
+      failure: {
+        code: "MODEL_FAILURE",
+        message: expect.stringContaining("rate limited"),
+        details: { phase: "request", reason: "error", httpStatus: 429 },
+      },
+    },
+    {
+      name: "the provider reports an error mid-stream with an HTTP status",
+      turn: [
+        ...opening,
+        {
+          type: "error",
+          error: { message: "unavailable", code: "overloaded_error", httpStatus: 503 },
+        },
+      ],
+      failure: {
+        code: "MODEL_FAILURE",
+        message: expect.stringContaining("unavailable"),
+        details: {
+          phase: "stream",
+          reason: "error",
+          rawReason: "overloaded_error",
+          httpStatus: 503,
+        },
+      },
+    },
+    {
       name: "the stream breaks mid-response",
       turn: failingStream(opening, new Error("socket hang up")),
       failure: {
@@ -199,6 +228,15 @@ describe("settling a failed Model Turn", () => {
       name: "an error code is not a string",
       turn: rawStream(streamStart, { type: "error", error: { message: "boom", code: { id: 1 } } }),
     },
+    ...[
+      { label: "a string", httpStatus: "429" },
+      { label: "not an integer", httpStatus: 429.5 },
+      { label: "below the HTTP range", httpStatus: 42 },
+      { label: "above the HTTP range", httpStatus: 600 },
+    ].map(({ label, httpStatus }) => ({
+      name: `an HTTP status is ${label}`,
+      turn: rawStream(streamStart, { type: "error", error: { message: "boom", httpStatus } }),
+    })),
     {
       name: "the final message has no finish reason",
       turn: endingWith({ role: "assistant", content: [], model: "fake-model" }),

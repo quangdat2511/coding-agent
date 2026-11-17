@@ -2,6 +2,7 @@ import { describe, expect, it } from "bun:test";
 import type { AssistantMessage } from "@coding-agent/ai";
 import { Type } from "typebox";
 import type {
+  AgentFailure,
   AgentFailureCode,
   AgentResult,
   AgentSession,
@@ -13,6 +14,7 @@ import type {
   IdKind,
   IdSource,
   JsonValue,
+  ModelFailureDetails,
   ModelPort,
   NormalizedToolCall,
   OpenSessionConfig,
@@ -454,13 +456,13 @@ describe("agent result", () => {
   });
 
   it("keeps raw Error values out of failure details (compile-time)", () => {
-    const details: Readonly<Record<string, JsonValue>> = { phase: "streaming_model", attempt: 1 };
+    const details: Readonly<Record<string, JsonValue>> = { phase: "verifying", attempt: 1 };
     const failed: AgentResult = {
       ...base,
       outcome: "failed",
       failure: {
-        code: "MODEL_FAILURE",
-        message: "stream failed",
+        code: "INTERNAL_ERROR",
+        message: "unexpected state",
         details,
       },
     };
@@ -469,6 +471,26 @@ describe("agent result", () => {
 
     expect(failed.outcome).toBe("failed");
     expect(leaked).toBeInstanceOf(Error);
+  });
+
+  // ADR 0005 §7 reads the provider's HTTP status from MODEL_FAILURE details, so it is part of the
+  // declared shape rather than an untyped extra field (CDA-83).
+  it("declares the shape of MODEL_FAILURE details, including the HTTP status (compile-time)", () => {
+    const details: ModelFailureDetails = { phase: "request", reason: "error", httpStatus: 429 };
+    const failure: AgentFailure = { code: "MODEL_FAILURE", message: "rate limited", details };
+
+    const statusOf = (found: AgentFailure): number | undefined =>
+      found.code === "MODEL_FAILURE" ? found.details.httpStatus : undefined;
+
+    // @ts-expect-error the HTTP status is a number, not a string
+    const spelled: ModelFailureDetails = { phase: "request", reason: "error", httpStatus: "429" };
+    // @ts-expect-error a field outside the declared shape is refused
+    const extra: ModelFailureDetails = { phase: "request", reason: "error", attempt: 1 };
+    // @ts-expect-error a MODEL_FAILURE always carries its details
+    const bare: AgentFailure = { code: "MODEL_FAILURE", message: "rate limited" };
+
+    expect(statusOf(failure)).toBe(429);
+    expect([spelled, extra, bare]).toHaveLength(3);
   });
 });
 

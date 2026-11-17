@@ -5,13 +5,13 @@ import type {
   NormalizedFinishReason,
 } from "@coding-agent/ai";
 import { type Fields, isNonEmptyString, isRecord, messageOf } from "./guards.ts";
-import type { AgentFailure } from "./result.ts";
+import type { AgentFailure, ModelFailurePhase } from "./result.ts";
 
 export type ModelResponse =
   | { readonly ok: true; readonly message: AssistantMessage }
   | { readonly ok: false; readonly failure: AgentFailure; readonly message?: AssistantMessage };
 
-type FailurePhase = "request" | "stream" | "finish";
+type FailurePhase = ModelFailurePhase;
 
 const failedFinishReasons: ReadonlySet<string> = new Set<NormalizedFinishReason>([
   "content_filter",
@@ -33,6 +33,9 @@ const isString = (value: unknown): boolean => typeof value === "string";
 const isCount = (value: unknown): boolean =>
   typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
 
+const isHttpStatus = (value: unknown): boolean =>
+  typeof value === "number" && Number.isInteger(value) && value >= 100 && value <= 599;
+
 const eventShapes = {
   stream_start: () => true,
   content_block_start: ({ index, block }) =>
@@ -43,7 +46,10 @@ const eventShapes = {
   turn_delta: () => true,
   turn_end: () => true,
   error: ({ error }) =>
-    isRecord(error) && isString(error.message) && isOptional(error.code, isString),
+    isRecord(error) &&
+    isString(error.message) &&
+    isOptional(error.code, isString) &&
+    isOptional(error.httpStatus, isHttpStatus),
 } satisfies Record<ModelStreamEvent["type"], (event: Fields) => boolean>;
 
 const isWellFormedEvent = (event: unknown): event is ModelStreamEvent =>
@@ -94,13 +100,19 @@ function modelFailure(
   detail: string,
   reason: string,
   rawReason?: string,
+  httpStatus?: number,
 ): ModelResponse {
   return {
     ok: false,
     failure: {
       code: "MODEL_FAILURE",
       message: `${describeFailure[phase]}: ${detail}`,
-      details: { phase, reason, ...(rawReason === undefined ? {} : { rawReason }) },
+      details: {
+        phase,
+        reason,
+        ...(rawReason === undefined ? {} : { rawReason }),
+        ...(httpStatus === undefined ? {} : { httpStatus }),
+      },
     },
   };
 }
@@ -147,7 +159,13 @@ export async function readModelResponse(
       const event = next.value;
       if (!isWellFormedEvent(event)) return protocolError("the model sent a malformed event");
       if (event.type === "error") {
-        return modelFailure(phase(), event.error.message, "error", event.error.code);
+        return modelFailure(
+          phase(),
+          event.error.message,
+          "error",
+          event.error.code,
+          event.error.httpStatus,
+        );
       }
       if (event.type === "stream_start") {
         if (streamOpened) return protocolError("the model stream opened twice");

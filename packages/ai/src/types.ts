@@ -132,7 +132,17 @@ export type ModelStreamEvent =
   | { type: "content_block_stop"; index: number }
   | { type: "turn_delta"; usage?: Usage; finishReason?: FinishReason }
   | { type: "turn_end"; message: AssistantMessage }
-  | { type: "error"; error: { message: string; code?: string } };
+  | {
+      type: "error";
+      error: {
+        message: string;
+        code?: string;
+        // The HTTP status of the provider response that failed the request, when one arrived.
+        // The Chat Completions adapter (openai, openrouter, xai, opencode) records it; the Anthropic
+        // and Google adapters do not. ADR 0005 §7 reads it to decide whether a trial is rerun.
+        httpStatus?: number;
+      };
+    };
 
 export type ModelStream = AsyncIterable<ModelStreamEvent> & {
   result(): Promise<AssistantMessage>;

@@ -375,9 +375,15 @@ export function stream(model: Model, context: Context, options?: StreamOptions):
       eventStream.end();
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : String(error);
+      // The SDK raises APIError for an HTTP error response. After its own retries, status is the
+      // last attempt's. A connection or stream failure has no status, so none is recorded.
+      const httpStatus = error instanceof OpenAI.APIError ? error.status : undefined;
       eventStream.push({
         type: "error",
-        error: { message: errorMessage },
+        error: {
+          message: errorMessage,
+          ...(typeof httpStatus === "number" ? { httpStatus } : {}),
+        },
       });
       eventStream.end();
     }

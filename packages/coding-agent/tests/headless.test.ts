@@ -13,6 +13,7 @@ import {
   hangQuiescingAfter,
   type Respond,
   replayInOrder,
+  replayRejection,
   type SentRequest,
   withProvider,
 } from "./support/recorded-provider.ts";
@@ -119,6 +120,42 @@ function toolResponses(request: SentRequest | undefined): unknown[] {
     parts.flatMap(({ functionResponse }) => (functionResponse ? [functionResponse.response] : [])),
   );
 }
+
+// ADR 0005 §7: a MODEL_FAILURE whose details record an HTTP 401, 403, 429 or 5xx from the provider
+// makes the trial rerun-eligible, so the status must reach the run files (CDA-83).
+describe("a headless run that OpenCode Go refuses with an HTTP status", () => {
+  const target = { provider: "opencode", model: "deepseek-v4.1-flash" } as const;
+
+  // The SDK retries 429 and 5xx up to the transport retry bound (2), and never retries a 401.
+  it.each([
+    { status: 429, attempts: 3 },
+    { status: 503, attempts: 3 },
+    { status: 401, attempts: 1 },
+  ])(
+    "records $status in MODEL_FAILURE details in result.json and events.jsonl",
+    async ({ status, attempts }) => {
+      await runNamedTask(
+        replayRejection(`opencode/http-${status}.json`, status),
+        async ({ result, sent, outputDir }) => {
+          expect(result.exitCode).toBe(1);
+          expect(sent).toHaveLength(attempts);
+
+          const failure = {
+            code: "MODEL_FAILURE",
+            details: { phase: "request", reason: "error", httpStatus: status },
+          };
+          const written = await Bun.file(join(outputDir, "result.json")).json();
+          expect(written).toMatchObject({ exitCode: 1, result: { outcome: "failed", failure } });
+          expect((await loggedEvents(outputDir)).at(-1)).toMatchObject({
+            type: "session_settled",
+            data: { result: { outcome: "failed", failure } },
+          });
+        },
+        { target, env: { OPENCODE_API_KEY: secret } },
+      );
+    },
+  );
+});
 
 describe("a headless run of the named task on OpenCode Go", () => {
   const target = { provider: "opencode", model: "deepseek-v4.1-flash" } as const;
