@@ -1,15 +1,14 @@
 // Builds the evaluation artifact of ADR 0005 §2: both Linux executables and artifact-manifest.json.
 // See scripts/README.md, "Evaluation artifact build", for the procedure.
 import { existsSync } from "node:fs";
-import { mkdir, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
+import { PROVIDER_CREDENTIAL_ENV_VARS, readEnvCredential } from "@coding-agent/ai";
+// ADR 0004 §6 keeps the public surface of @coding-agent/coding-agent to its entry points, so the
+// build reads these two modules from its source. Both are production code that the CLI runs.
+import { checkAncestorCredentials } from "../packages/coding-agent/src/ancestor-credentials.ts";
 import { formatVersion } from "../packages/coding-agent/src/build-info.ts";
-import { runnerChainIsClean } from "../packages/coding-agent/tests/support/ancestor-chain.ts";
-import {
-  startProcess,
-  withTemporaryDirectory,
-  writePreloadingBunfig,
-} from "../packages/coding-agent/tests/support/process.ts";
 
 export const MANIFEST_FILE = "artifact-manifest.json";
 
@@ -39,7 +38,7 @@ export type Target = (typeof TARGETS)[number];
 const AUTOLOAD_FLAGS = ["--no-compile-autoload-dotenv", "--no-compile-autoload-bunfig"] as const;
 
 const repoRoot = resolve(import.meta.dir, "..");
-const entry = join(repoRoot, "packages", "coding-agent", "src", "cli.ts");
+const packageRoot = join(repoRoot, "packages", "coding-agent");
 const defaultOutDir = join(repoRoot, "dist", "artifact");
 
 export interface BuildArgs {
@@ -107,29 +106,70 @@ export interface ArtifactManifest {
   }[];
 }
 
-// The executable that this host can run, if any, so the build can check its `--version`.
-export const runnableTarget = (platform: string, arch: string): Target | undefined =>
+// The target for this host's platform and architecture, if any.
+export const hostTarget = (platform: string, arch: string): Target | undefined =>
   TARGETS.find((target) => target.platform === platform && target.arch === arch);
 
+// The provider credential variable that this process holds, if any. process.env also holds what
+// Bun loaded from the repository's `.env`, which /proc/self/environ does not show.
+export const heldProviderCredential = (
+  env: Readonly<Record<string, string | undefined>>,
+): string | undefined => readEnvCredential(PROVIDER_CREDENTIAL_ENV_VARS, env)?.variable;
+
+// An out-dir in the repository that git does not ignore would make the next build find these files
+// and refuse the dirty tree. The trailing separator makes git match a directory pattern, such as
+// `dist/`, against a directory that does not exist yet.
+export async function outDirProblem(outDir: string, root = repoRoot): Promise<string | undefined> {
+  const inRepo = relative(root, outDir);
+  if (inRepo === ".." || inRepo.startsWith(`..${sep}`) || isAbsolute(inRepo)) return undefined;
+  const ignored =
+    inRepo !== "" &&
+    (await spawnAndCollect(["git", "check-ignore", "-q", `${outDir}${sep}`], root)).exitCode === 0;
+  return ignored
+    ? undefined
+    : `${outDir} is in the repository but git does not ignore it, so the next build would refuse the dirty tree; choose an ignored or outside directory`;
+}
+
+// An executable that read the .env would open an Agent Session and contact the provider, so a probe
+// that runs longer than this is killed.
+const PROBE_TIMEOUT_MS = 30_000;
+
 // Git and `bun build` keep the whole environment: Bun needs its cache and temporary directories to
-// download a cross-compilation target.
-async function run(command: readonly string[], cwd: string) {
+// download a cross-compilation target. A probe of a built executable gets only PATH, so a
+// credential of the caller cannot decide its outcome, and is killed after the timeout.
+async function spawnAndCollect(
+  command: readonly string[],
+  cwd: string,
+  options: { readonly probe?: boolean } = {},
+) {
   const child = Bun.spawn([...command], {
     cwd,
-    env: process.env,
+    env: options.probe === true ? { PATH: process.env.PATH ?? "" } : process.env,
     stdout: "pipe",
     stderr: "pipe",
   });
-  const [exitCode, stdout, stderr] = await Promise.all([
-    child.exited,
-    new Response(child.stdout).text(),
-    new Response(child.stderr).text(),
-  ]);
-  return { exitCode, stdout, stderr };
+  let timedOut = false;
+  const timer =
+    options.probe === true
+      ? setTimeout(() => {
+          timedOut = true;
+          child.kill("SIGKILL");
+        }, PROBE_TIMEOUT_MS)
+      : undefined;
+  try {
+    const [exitCode, stdout, stderr] = await Promise.all([
+      child.exited,
+      new Response(child.stdout).text(),
+      new Response(child.stderr).text(),
+    ]);
+    return { exitCode, stdout, stderr, timedOut };
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function git(args: readonly string[]): Promise<string> {
-  const result = await run(["git", ...args], repoRoot);
+  const result = await spawnAndCollect(["git", ...args], repoRoot);
   if (result.exitCode !== 0) throw new Error(`git ${args.join(" ")} failed:\n${result.stderr}`);
   return result.stdout;
 }
@@ -140,55 +180,43 @@ async function sha256(path: string): Promise<string> {
   return hasher.digest("hex");
 }
 
-// An executable that read the .env would open an Agent Session and contact the provider, so a probe
-// that runs longer than this is killed.
-const PROBE_TIMEOUT_MS = 30_000;
-
-// A probe of a built executable gets only PATH (startProcess), so a credential of the caller cannot
-// decide its outcome.
-async function probe(command: readonly string[], cwd: string) {
-  const child = startProcess(command, { cwd });
-  let timedOut = false;
-  const timer = setTimeout(() => {
-    timedOut = true;
-    child.signal("SIGKILL");
-  }, PROBE_TIMEOUT_MS);
+// A probe runs in a temporary directory next to a `bunfig.toml` whose preload writes "preloaded" to
+// standard error, so an executable that reads it shows.
+async function withProbeDirectory<T>(body: (directory: string) => Promise<T>): Promise<T> {
+  const directory = await mkdtemp(join(tmpdir(), "coding-agent-artifact-"));
   try {
-    const result = await child.finished;
-    return { ...result, timedOut };
+    await Bun.write(join(directory, "bunfig.toml"), 'preload = ["./preload.ts"]\n');
+    await Bun.write(join(directory, "preload.ts"), 'process.stderr.write("preloaded\\n");\n');
+    return await body(directory);
   } finally {
-    clearTimeout(timer);
+    await rm(directory, { recursive: true, force: true });
   }
 }
 
-const describe = (result: Awaited<ReturnType<typeof probe>>): string =>
+const describeProbeResult = (result: Awaited<ReturnType<typeof spawnAndCollect>>): string =>
   `${result.timedOut ? `killed after ${PROBE_TIMEOUT_MS / 1000} s, ` : ""}exit ${result.exitCode}, stdout ${JSON.stringify(result.stdout)}, stderr ${JSON.stringify(result.stderr)}`;
 
-// Runs `--version` next to a `bunfig.toml` whose preload would write to standard error, and
-// requires exactly the line the manifest implies.
+// `--version` must print exactly the line of the manifest, and standard error must stay empty.
 async function checkVersion(executable: string, expected: string): Promise<void> {
-  await withTemporaryDirectory(async (directory) => {
-    await writePreloadingBunfig(directory);
-    const result = await probe([executable, "--version"], directory);
+  await withProbeDirectory(async (directory) => {
+    const result = await spawnAndCollect([executable, "--version"], directory, { probe: true });
     const line = `${expected}\n`;
     if (result.exitCode !== 0 || result.stdout !== line || result.stderr !== "") {
       throw new Error(
-        `${executable} --version does not match the manifest: ${describe(result)}, expected stdout ${JSON.stringify(line)}`,
+        `${executable} --version does not match the manifest: ${describeProbeResult(result)}, expected stdout ${JSON.stringify(line)}`,
       );
     }
   });
 }
 
-// A `.env` that sets the provider credential must not supply it, so the run stops with the
-// configuration error of a missing credential.
-const MISSING_CREDENTIAL =
-  "coding-agent: no credential for --provider anthropic: set ANTHROPIC_API_KEY";
-
-async function checkDotenvIgnored(executable: string): Promise<void> {
-  await withTemporaryDirectory(async (directory) => {
+// A `.env` that sets the provider credential must not supply it, and the `bunfig.toml` preload must
+// not run. Exit 2 means that no Agent Session opened (ADR 0005 §3), and the error must name the
+// variable, so the run stopped because the credential was missing.
+async function checkRunIgnoresDotenvAndBunfig(executable: string): Promise<void> {
+  await withProbeDirectory(async (directory) => {
     await Bun.write(join(directory, ".env"), "ANTHROPIC_API_KEY=not-a-real-credential\n");
     await Bun.write(join(directory, "task.md"), "Print the working directory.\n");
-    const result = await probe(
+    const result = await spawnAndCollect(
       [
         executable,
         "run",
@@ -204,25 +232,33 @@ async function checkDotenvIgnored(executable: string): Promise<void> {
         "out",
       ],
       directory,
+      { probe: true },
     );
-    if (result.exitCode !== 2 || result.stderr.split("\n")[0] !== MISSING_CREDENTIAL) {
+    const first = result.stderr.split("\n")[0] ?? "";
+    if (
+      result.exitCode !== 2 ||
+      !first.includes("ANTHROPIC_API_KEY") ||
+      result.stderr.includes("preloaded")
+    ) {
       throw new Error(
-        `${executable} run did not stop with the missing-credential error, so it may have read the .env in its working directory: ${describe(result)}`,
+        `${executable} run did not stop on the missing credential without the preload, so it read the .env or the bunfig.toml in its working directory: ${describeProbeResult(result)}`,
       );
     }
   });
 }
 
-// An out-dir in the repository that git does not ignore would make the next build find these files
-// and refuse the dirty tree.
-async function outDirProblem(outDir: string): Promise<string | undefined> {
-  const inRepo = relative(repoRoot, outDir);
-  if (inRepo === ".." || inRepo.startsWith(`..${sep}`) || isAbsolute(inRepo)) return undefined;
-  const ignored =
-    inRepo !== "" && (await run(["git", "check-ignore", "-q", outDir], repoRoot)).exitCode === 0;
-  return ignored
+// The probe of `run` uses "auto-approve", so on Linux the executable refuses the run if this
+// process or one that started it holds a provider credential (ADR 0001 §8). The build refuses
+// first, so the probe cannot fail for that reason.
+async function credentialProblem(): Promise<string | undefined> {
+  const held = heldProviderCredential(process.env);
+  if (held !== undefined) {
+    return `${held} is set in the environment of this build, or in the repository's .env; unset it and run the build again`;
+  }
+  const ancestors = await checkAncestorCredentials("auto-approve");
+  return ancestors.ok
     ? undefined
-    : `${outDir} is in the repository but git does not ignore it, so the next build would refuse the dirty tree; choose an ignored or outside directory`;
+    : `the .env check cannot run: ${ancestors.message}; unset the credential and run the build again`;
 }
 
 async function main(argv: readonly string[]): Promise<number> {
@@ -241,9 +277,6 @@ async function main(argv: readonly string[]): Promise<number> {
     return 1;
   }
 
-  // An empty directory does not make the tree dirty, and git can tell whether it ignores it only
-  // once it exists.
-  await mkdir(outDir, { recursive: true });
   const problem = await outDirProblem(outDir);
   if (problem !== undefined) {
     process.stderr.write(`build-artifact: ${problem}\n`);
@@ -260,24 +293,29 @@ async function main(argv: readonly string[]): Promise<number> {
     return 1;
   }
   const { commit, dirty } = resolved;
-  const version = (
-    (await Bun.file(join(repoRoot, "packages", "coding-agent", "package.json")).json()) as {
-      version: string;
-    }
-  ).version;
-
-  const runnable = runnableTarget(process.platform, process.arch);
-  const checkable = runnable !== undefined && existsSync(runnable.loader) ? runnable : undefined;
-  // The .env probe runs under "auto-approve", so on Linux its ancestor check reads this process
-  // and the processes that started it. A provider key there, for example from the repository's
-  // .env that `bun run` loads, would stop the probe before the credential check.
-  if (checkable !== undefined && !(await runnerChainIsClean())) {
-    process.stderr.write(
-      "build-artifact: a provider credential is in the environment of this build or of a process that started it, so the .env check would stop at the ancestor check (ADR 0001 §8); unset it, or remove it from the repository's .env, and run the build again\n",
-    );
+  // The executable is built from the bin entry, the same file that the package runs.
+  const pkg = (await Bun.file(join(packageRoot, "package.json")).json()) as {
+    version: string;
+    bin?: Record<string, string>;
+  };
+  const bin = pkg.bin?.["coding-agent"];
+  if (bin === undefined) {
+    process.stderr.write("build-artifact: packages/coding-agent/package.json has no bin entry\n");
     return 1;
   }
+  const entry = resolve(packageRoot, bin);
 
+  const host = hostTarget(process.platform, process.arch);
+  const runnableOnHost = host !== undefined && existsSync(host.loader) ? host : undefined;
+  if (runnableOnHost !== undefined) {
+    const held = await credentialProblem();
+    if (held !== undefined) {
+      process.stderr.write(`build-artifact: ${held}\n`);
+      return 1;
+    }
+  }
+
+  await mkdir(outDir, { recursive: true });
   // A manifest left by an earlier build must not describe these executables.
   await rm(join(outDir, MANIFEST_FILE), { force: true });
 
@@ -285,7 +323,7 @@ async function main(argv: readonly string[]): Promise<number> {
     TARGETS.map(async ({ file, target }) => {
       const outfile = join(outDir, file);
       process.stderr.write(`build-artifact: building ${file} for ${target}\n`);
-      const build = await run(
+      const build = await spawnAndCollect(
         [
           process.execPath,
           "build",
@@ -312,32 +350,34 @@ async function main(argv: readonly string[]): Promise<number> {
     executables.push({ file, target, sha256: await sha256(outfile) });
   }
 
-  const expected = formatVersion({ version, commit });
-  if (runnable === undefined) {
-    process.stderr.write(
-      `build-artifact: this host (${process.platform} ${process.arch}) runs neither executable, so --version was not checked\n`,
-    );
-  } else if (checkable === undefined) {
-    process.stderr.write(
-      `build-artifact: this host has no glibc loader at ${runnable.loader}, so it cannot run ${runnable.file} and --version was not checked\n`,
-    );
-  } else {
-    const executable = join(outDir, checkable.file);
-    await checkVersion(executable, expected);
-    await checkDotenvIgnored(executable);
-    process.stderr.write(
-      `build-artifact: ${checkable.file} printed "${expected}" and ignored .env and bunfig.toml\n`,
-    );
-  }
-
   const manifest: ArtifactManifest = {
     schemaVersion: 1,
-    codingAgent: { version, commit },
+    codingAgent: { version: pkg.version, commit },
     dirty,
     bunVersion: Bun.version,
     executables,
   };
-  await Bun.write(join(outDir, MANIFEST_FILE), `${JSON.stringify(manifest, null, 2)}\n`);
+  // The check reads the manifest back from the text that is written, so it compares with the file.
+  const manifestText = `${JSON.stringify(manifest, null, 2)}\n`;
+  const expected = formatVersion((JSON.parse(manifestText) as ArtifactManifest).codingAgent);
+  if (host === undefined) {
+    process.stderr.write(
+      `build-artifact: this host (${process.platform} ${process.arch}) runs neither executable, so --version was not checked\n`,
+    );
+  } else if (runnableOnHost === undefined) {
+    process.stderr.write(
+      `build-artifact: this host has no glibc loader at ${host.loader}, so it cannot run ${host.file} and --version was not checked\n`,
+    );
+  } else {
+    const executable = join(outDir, runnableOnHost.file);
+    await checkVersion(executable, expected);
+    await checkRunIgnoresDotenvAndBunfig(executable);
+    process.stderr.write(
+      `build-artifact: ${runnableOnHost.file} printed "${expected}" and ignored .env and bunfig.toml\n`,
+    );
+  }
+
+  await Bun.write(join(outDir, MANIFEST_FILE), manifestText);
   process.stderr.write(`build-artifact: wrote ${join(outDir, MANIFEST_FILE)}\n`);
   return 0;
 }

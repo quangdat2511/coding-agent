@@ -119,14 +119,16 @@ that identifies the build.
 
 To build the artifact for a recorded job:
 
-1. Check out the commit on `main` that the job evaluates.
+1. Check out the commit on `main` that the job evaluates. The build does not check the branch, so
+   this step is yours.
 2. Make sure that `git status` shows no changes and no untracked files.
 3. Make sure that Bun is the version in `.bun-version`.
 4. Run `bun ci --ignore-scripts`, so that `node_modules` matches `bun.lock`. The dirty check
    does not look at `node_modules`, so do not build after `bun install`, `bun link`, or an edit
    there.
 5. Make sure that no provider credential, such as `ANTHROPIC_API_KEY`, is in the environment or
-   in the repository's `.env`.
+   in the repository's `.env`. On a host that runs one of the executables, the build refuses
+   either one.
 6. Run the build from the repository root on Linux or macOS:
 
    ```sh
@@ -155,7 +157,7 @@ with `--define CODING_AGENT_COMMIT`, so `run.json` and `--version` both name it.
 ```json
 {
   "schemaVersion": 1,
-  "codingAgent": { "version": "0.0.1", "commit": "<40-character commit>" },
+  "codingAgent": { "version": "0.0.1", "commit": "<40-character commit, or that commit and -dirty>" },
   "dirty": false,
   "bunVersion": "1.3.14",
   "executables": [
@@ -174,24 +176,33 @@ The build stops with exit code 1 in these cases:
 - The working tree has changes or untracked files. The message lists them.
 - The running Bun is not the version in `.bun-version`.
 - `--out-dir` is in the repository, and git does not ignore it.
-- A provider credential is in the environment of the build or of a process that started it,
-  and the host can run one of the executables.
+- A provider credential is in the environment of the build, in the repository's `.env`, or in
+  the environment of a process that started the build, and the host can run one of the
+  executables.
+- `packages/coding-agent/package.json` has no `coding-agent` bin entry. The build compiles that
+  entry.
 - `bun build` fails for a target.
 - The executable that this host can run fails a check, or a check runs longer than 30 seconds.
 
 Linux on x86-64 or on arm64 can run one of the executables. On such a host, the build runs that
-executable in a temporary directory and does two checks:
+executable in a temporary directory, next to a `bunfig.toml` with a preload that writes
+`preloaded` to standard error. It does two checks:
 
-- `--version` must print exactly the manifest line, next to a `bunfig.toml` with a preload that
-  writes to standard error. The output must not contain that line.
-- `run` must stop with the missing-credential error, next to a `.env` that sets
-  `ANTHROPIC_API_KEY`.
+- `--version` must print exactly the line that the manifest file implies. Standard error must
+  stay empty, so the preload's `preloaded` line must not appear.
+- `run` must exit 2 with an error that names `ANTHROPIC_API_KEY`, next to a `.env` that sets
+  `ANTHROPIC_API_KEY`. Exit 2 means that no Agent Session opened. Standard error must not contain
+  `preloaded`.
 
 On macOS, and on a musl Linux host such as Alpine, the build cannot run either executable, so it
 prints that `--version` was not checked.
 The CI job `Evaluation artifact` runs the build on `ubuntu-24.04`, so CI checks the x64 executable
-on every pull request. CI has no arm64 Linux runner. Run the build on an arm64 Linux host, or in an
-arm64 container, to check the arm64 executable.
+on every pull request. CI does not check the arm64 executable, because this private repository has
+no arm64 Linux runner. To check it, run the build on an arm64 Linux host or in an arm64 container.
+
+The CI build only checks that the build works. On a pull request, CI builds the merge commit
+`refs/pull/<n>/merge`, which is not a commit on `main`. Do not give the manifest or the
+executables of a pull request run to a recorded job.
 
 For a local test of uncommitted work, pass `--allow-dirty`. The build then records
 `"dirty": true`, and the commit in the manifest and in `--version` ends in `-dirty`. Do not give a
