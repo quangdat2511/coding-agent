@@ -19,10 +19,9 @@ export type AgentFailureCode =
 
 export type ModelFailurePhase = "request" | "stream" | "finish";
 
-// The details of a MODEL_FAILURE (ADR 0002 §4): the phase and the normalized provider reason.
-// httpStatus is the provider's HTTP status when a response failed the request; ADR 0005 §7 makes
-// a trial rerun-eligible when it is 401, 403, 429 or 5xx. Only the Chat Completions adapter
-// (openai, openrouter, xai, opencode) records it.
+// The details of a MODEL_FAILURE (ADR 0002 §8): the phase and the normalized provider reason.
+// httpStatus is the provider's HTTP status when one was recorded; which providers record it is
+// stated on the error member of ModelStreamEvent in @coding-agent/ai.
 export type ModelFailureDetails = {
   readonly phase: ModelFailurePhase;
   readonly reason: string;

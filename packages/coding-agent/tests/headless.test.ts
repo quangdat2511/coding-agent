@@ -135,7 +135,7 @@ describe("a headless run that OpenCode Go refuses with an HTTP status", () => {
     "records $status in MODEL_FAILURE details in result.json and events.jsonl",
     async ({ status, attempts }) => {
       await runNamedTask(
-        replayRejection(`opencode/http-${status}.json`, status),
+        replayRejection(`opencode/http-${status}.synthetic.json`, status),
         async ({ result, sent, outputDir }) => {
           expect(result.exitCode).toBe(1);
           expect(sent).toHaveLength(attempts);

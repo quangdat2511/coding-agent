@@ -90,8 +90,11 @@ describe("settling a failed Model Turn", () => {
         details: { phase: "request", reason: "error", httpStatus: 429 },
       },
     },
+    // Agent Core's contract, not the adapter's behaviour: it keeps a status in any phase. The Chat
+    // Completions adapter sets none after the stream opened, because the SDK raises such an error
+    // without one (packages/ai/tests/openai-http-status.test.ts).
     {
-      name: "the provider reports an error mid-stream with an HTTP status",
+      name: "an error event carries an HTTP status after the stream opened",
       turn: [
         ...opening,
         {

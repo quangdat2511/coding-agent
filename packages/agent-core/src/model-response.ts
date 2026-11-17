@@ -11,8 +11,6 @@ export type ModelResponse =
   | { readonly ok: true; readonly message: AssistantMessage }
   | { readonly ok: false; readonly failure: AgentFailure; readonly message?: AssistantMessage };
 
-type FailurePhase = ModelFailurePhase;
-
 const failedFinishReasons: ReadonlySet<string> = new Set<NormalizedFinishReason>([
   "content_filter",
   "max_output_tokens",
@@ -23,7 +21,7 @@ const describeFailure = {
   request: "the model request failed",
   stream: "the model stream failed",
   finish: "the model response ended with",
-} satisfies Record<FailurePhase, string>;
+} satisfies Record<ModelFailurePhase, string>;
 
 const isOptional = (value: unknown, check: (value: unknown) => boolean): boolean =>
   value === undefined || check(value);
@@ -96,7 +94,7 @@ function usableCopy(message: unknown): AssistantMessage | undefined {
 }
 
 function modelFailure(
-  phase: FailurePhase,
+  phase: ModelFailurePhase,
   detail: string,
   reason: string,
   rawReason?: string,
@@ -137,7 +135,7 @@ export async function readModelResponse(
   const textBlocks = new Set<number>();
   const displayIndexes = new Map<number, number>();
   let streamOpened = false;
-  const phase = (): FailurePhase => (streamOpened ? "stream" : "request");
+  const phase = (): ModelFailurePhase => (streamOpened ? "stream" : "request");
 
   let events: AsyncIterator<unknown>;
   try {

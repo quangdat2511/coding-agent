@@ -97,6 +97,28 @@ describe("the HTTP status of a failed Chat Completions request", () => {
     );
   });
 
+  // A provider can open the stream with HTTP 200 and then send an error event. The SDK raises that
+  // as an APIError without a status (openai@7.4.0, core/streaming.js), so the failure has none and
+  // never meets ADR 0005 §7's second rerun condition, however the provider words it.
+  it("records no status for an error the provider sends after a 200 response", async () => {
+    const body = [
+      'data: {"choices":[{"index":0,"delta":{"content":"Hi"},"finish_reason":null}]}',
+      "",
+      'data: {"error":{"message":"overloaded","type":"server_error"}}',
+      "",
+      "",
+    ].join("\n");
+    await withCapturingFixtureFetch(
+      new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } }),
+      async () => {
+        const error = await errorOf(stream(model, context, { apiKey: "k", maxRetries: 0 }));
+
+        expect(error.message).toContain("overloaded");
+        expect(error).not.toHaveProperty("httpStatus");
+      },
+    );
+  });
+
   it("records no status when the stream ends without a finish reason", async () => {
     const body =
       'data: {"choices":[{"index":0,"delta":{"content":"Hi"},"finish_reason":null}]}\n\n';

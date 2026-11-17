@@ -479,6 +479,16 @@ On 2026-11-12, [CDA-71](https://datn-fit-hcmus.atlassian.net/browse/CDA-71) amen
   is ignored. A command that prints for the full 120 s adds about 1 MB to the in-memory event log.
   ADR 0005 already leaves progress out of `events.jsonl`. Tool Progress is not part of Agent State.
 
+On 2026-11-17, [CDA-83](https://datn-fit-hcmus.atlassian.net/browse/CDA-83) amended this record:
+
+- **`MODEL_FAILURE` details** (§4): `AgentFailure` is a union. A `MODEL_FAILURE` always carries
+  `details` of the declared type `ModelFailureDetails`, `{ phase: "request" | "stream" | "finish";
+  reason: string; rawReason?: string; httpStatus?: number }`. The other failure codes keep the
+  `details` of §4 unchanged. `httpStatus` is the provider's HTTP status when a response failed the
+  request, an integer from 100 to 599. Agent Core settles `MODEL_PROTOCOL_ERROR` for any other
+  value. [ADR 0005](./0005-terminalbench-evaluation-protocol.md) §7 reads it, and its Dependencies
+  note says which providers record it.
+
 ## Consequences
 
 - TUI, headless evaluation, and tests consume the same ordered protocol without knowing provider
