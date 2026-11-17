@@ -76,7 +76,7 @@ def parse_manifest(data: Any, *, source: str = MANIFEST_FILE) -> ArtifactManifes
     def fail(message: str) -> ArtifactManifestError:
         return ArtifactManifestError(f"{source}: {message}")
 
-    # The build writes trimmed values, and CDA-88 compares them with `--version` output. A value
+    # The build writes trimmed values, and install() compares them with `--version` output. A value
     # with spaces around it is refused, not trimmed, so the manifest stays what the build wrote.
     def text(value: Any, field: str) -> str:
         if not isinstance(value, str) or value.strip() == "":

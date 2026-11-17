@@ -455,9 +455,10 @@ Rules for the recorded job:
 A trial is **rerun-eligible** when either condition holds:
 
 - Its `result.json` has no verifier reward. Harbor still verifies after `AgentTimeoutError` and
-  `NonZeroAgentExitCodeError`, the only errors the adapter's own logic raises (§6), so a missing
-  reward means the trial failed outside the Agent Session: while building or starting the
-  environment, installing or launching the agent, or running the verifier.
+  `NonZeroAgentExitCodeError`, the only errors that the adapter's `run()` raises (§6). The
+  adapter's `install()` raises `ArtifactInstallError`, which fails setup before the Agent Session
+  starts. So a missing reward means the trial failed outside the Agent Session: while building or
+  starting the environment, installing or launching the agent, or running the verifier.
 - Its Agent Result failed with `MODEL_FAILURE` and the failure details record an HTTP 401, 403, 429,
   or 5xx response from the provider. This condition depends on a decision outside this record; see
   Dependencies.

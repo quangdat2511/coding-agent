@@ -9,6 +9,7 @@ writes (ADR 0005 §4). It imports nothing from the TypeScript packages, so ADR 0
 is unchanged.
 """
 
+import asyncio
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, override
@@ -20,7 +21,19 @@ from harbor.environments.base import BaseEnvironment
 from harbor.models.agent.context import AgentContext
 from pydantic import Field, field_validator
 
-from coding_agent_terminalbench.manifest import ArtifactManifest, load_manifest
+from coding_agent_terminalbench.install import (
+    GLIBC_HINT,
+    INSTALLED_EXECUTABLE,
+    ArtifactInstallError,
+    check_executable,
+    check_version_output,
+    select_executable,
+)
+from coding_agent_terminalbench.manifest import (
+    ArtifactExecutable,
+    ArtifactManifest,
+    load_manifest,
+)
 from coding_agent_terminalbench.trajectory import AgentIdentity
 from coding_agent_terminalbench.trial_context import TRAJECTORY_FILE, populate_trial_context
 
@@ -97,8 +110,7 @@ class CodingAgent(BaseInstalledAgent):
     """Runs one Coding Agent artifact in a Harbor task container.
 
     The version that Harbor records comes from the artifact's manifest, so a trial result names the
-    build that ran. CDA-88 makes `install()` confirm that the uploaded executable prints the same
-    version.
+    build that ran. `install()` confirms that the uploaded executable prints the same version.
     """
 
     capabilities = AgentCapabilities(atif=True)
@@ -110,6 +122,9 @@ class CodingAgent(BaseInstalledAgent):
         self.manifest: ArtifactManifest = load_manifest(self.artifact_dir)
         # Harbor's `version()` and `setup()` read `_version`, so this is the agent's one version.
         self._version = self.manifest.agent_version
+        # The executable that install() uploaded and checked, so the trial's own build is known.
+        # The trial metadata records the SHA-256 of every executable in the artifact.
+        self.installed_executable: ArtifactExecutable | None = None
 
     @classmethod
     @override
@@ -129,11 +144,62 @@ class CodingAgent(BaseInstalledAgent):
 
     @override
     async def install(self, environment: BaseEnvironment) -> None:
-        # Harbor's setup() calls this, so the error fails setup and no trial runs an agent that was
-        # never installed.
-        raise NotImplementedError(
-            "CDA-88 implements install(): select, check and upload the executable"
-        )
+        """Installs the artifact's executable in the task container (ADR 0005 §6).
+
+        Harbor's `setup()` calls this. Every check raises `ArtifactInstallError`, so a container
+        that cannot run this exact build fails setup and never starts a trial.
+        """
+        # 1. The container's architecture selects the executable.
+        uname = await environment.exec(command="uname -m")
+        machine = (uname.stdout or "").strip()
+        if uname.return_code != 0:
+            raise ArtifactInstallError(
+                f"cannot read the task container's architecture: `uname -m` exited "
+                f"{uname.return_code} with stderr {(uname.stderr or '').strip()!r}"
+            )
+        if machine == "":
+            raise ArtifactInstallError(
+                "cannot read the task container's architecture: `uname -m` printed nothing"
+            )
+        executable = select_executable(self.manifest, machine)
+
+        # 2. The host copy must be the file that the build hashed. Hashing about 94 MB takes a
+        # moment, so it runs in a thread and concurrent trials keep running.
+        source = await asyncio.to_thread(check_executable, self.artifact_dir, executable)
+        await environment.upload_file(source, INSTALLED_EXECUTABLE)
+        # upload_file copies as root. Mode 0755 lets every user run the file, the agent user
+        # included, and only root can change it.
+        await self.exec_as_root(environment, command=f"chmod 0755 {INSTALLED_EXECUTABLE}")
+
+        # 3. ADR 0001's `bash` tool needs bash. Most images have it, so one check is the common
+        # case. Harbor's helper only logs a warning when the image has no package manager it
+        # knows, so a second check after the helper fails setup instead.
+        if not await self._has_bash(environment):
+            await self.ensure_system_dependencies(environment, ("bash",))
+            if not await self._has_bash(environment):
+                raise ArtifactInstallError(
+                    "the task container has no bash, and Harbor found no package manager to "
+                    "install it; the agent's bash tool needs it"
+                )
+
+        # 4. The uploaded file must print the manifest's version. It runs as the agent user, so
+        # this also proves that this user can run it.
+        printed = await environment.exec(command=f"{INSTALLED_EXECUTABLE} --version")
+        if printed.return_code != 0:
+            raise ArtifactInstallError(
+                f"{INSTALLED_EXECUTABLE} --version exited {printed.return_code} with stderr "
+                f"{(printed.stderr or '').strip()!r}"
+                + (GLIBC_HINT if printed.return_code == 127 else "")
+            )
+        check_version_output(self.manifest, printed.stdout)
+
+        # The output equals the manifest's version line, so `_version`, which the constructor read
+        # from the manifest, is now the version of the build that this trial runs.
+        self.installed_executable = executable
+
+    async def _has_bash(self, environment: BaseEnvironment) -> bool:
+        found = await environment.exec(command="command -v bash >/dev/null 2>&1", user="root")
+        return found.return_code == 0
 
     @override
     async def run(

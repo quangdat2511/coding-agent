@@ -6,6 +6,7 @@
 to one of those writers changes the fixture in the same pull request.
 """
 
+import hashlib
 import json
 from pathlib import Path
 from typing import Any
@@ -68,6 +69,22 @@ def manifest_data(**overrides: Any) -> dict[str, Any]:
         ],
     }
     data.update(overrides)
+    return data
+
+
+def write_artifact(artifact_dir: Path) -> dict[str, Any]:
+    """Writes both executables and a manifest whose SHA-256 values match them.
+
+    The executables are short byte strings, not programs: the tests never run them. Returns the
+    manifest data.
+    """
+    data = manifest_data()
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    for executable in data["executables"]:
+        content = f"fake {executable['target']} executable\n".encode()
+        (artifact_dir / executable["file"]).write_bytes(content)
+        executable["sha256"] = hashlib.sha256(content).hexdigest()
+    write_manifest(artifact_dir, data)
     return data
 
 
