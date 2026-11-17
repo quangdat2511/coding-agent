@@ -8,12 +8,17 @@ from typing import Any
 
 from harbor.models.trajectories import Trajectory
 
-from coding_agent_terminalbench.run_log import RunLog, load_run_log
-from coding_agent_terminalbench.trajectory import build_trajectory, write_trajectory
+from coding_agent_terminalbench.run_log import load_run_log
+from coding_agent_terminalbench.trajectory import (
+    AgentIdentity,
+    build_trajectory,
+    write_trajectory,
+)
 from tests.support import (
     CALL_1,
     CALL_2,
     COMMIT,
+    DEFAULT,
     FEEDBACK,
     FINAL_TEXT,
     OBJECTIVE,
@@ -25,14 +30,11 @@ from tests.support import (
     complete_events,
     failed_events,
     feedback_events,
-    result_record_data,
-    run_record_data,
     truncated_events,
     write_run_files,
 )
 
-# Tells the helper to leave result.json out, as a run killed before it settled leaves it out.
-NO_RESULT = object()
+AGENT = AgentIdentity(name="coding-agent", version=f"0.0.1 {COMMIT}")
 
 
 class TrajectoryTest(unittest.TestCase):
@@ -42,25 +44,12 @@ class TrajectoryTest(unittest.TestCase):
         self.root = Path(temp.name)
         self.output_dir = self.root / "coding-agent"
 
-    def log(
-        self,
-        *,
-        log: list[dict[str, Any]] | None = None,
-        record: dict[str, Any] | None = None,
-        result: Any = NO_RESULT,
-    ) -> RunLog:
-        write_run_files(
-            self.output_dir,
-            record=run_record_data() if record is None else record,
-            log=complete_events() if log is None else log,
-            result=result_record_data(agent_result()) if result is NO_RESULT else result,
-        )
-        return load_run_log(self.output_dir)
-
-    def build(self, **kwargs: Any) -> Trajectory:
-        return build_trajectory(
-            self.log(**kwargs), agent_name="coding-agent", agent_version=f"0.0.1 {COMMIT}"
-        )
+    def build(
+        self, *, record: Any = DEFAULT, log: Any = DEFAULT, result: Any = DEFAULT
+    ) -> Trajectory:
+        """Writes a run, naming only the file a test changes, and converts it."""
+        write_run_files(self.output_dir, record=record, log=log, result=result)
+        return build_trajectory(load_run_log(self.output_dir), agent=AGENT)
 
     def assert_validates(self, trajectory: Trajectory) -> dict[str, Any]:
         path = self.root / "trajectory.json"

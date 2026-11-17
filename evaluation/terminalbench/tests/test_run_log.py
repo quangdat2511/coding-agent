@@ -1,17 +1,16 @@
 """Reads run.json, events.jsonl and result.json (ADR 0005 §4)."""
 
-import json
 import tempfile
 import unittest
 from pathlib import Path
 from typing import Any
 
-from coding_agent_terminalbench.run_log import RunLogError, load_run_log
+from coding_agent_terminalbench.run_log import RunLog, RunLogError, load_run_log
 from tests.support import (
+    DEFAULT,
     OBJECTIVE,
     SESSION_ID,
     SYSTEM_PROMPT,
-    agent_result,
     complete_events,
     result_record_data,
     run_record_data,
@@ -24,35 +23,28 @@ class RunLogTest(unittest.TestCase):
     def setUp(self) -> None:
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)
-        # `coding-agent run --output-dir` writes here (ADR 0005 §6), and Harbor downloads the
-        # logs directory with this directory inside it.
+        # `coding-agent run --output-dir` writes here (ADR 0005 §6), and Harbor downloads this
+        # directory with the logs of the trial.
         self.output_dir = Path(temp.name) / "logs" / "coding-agent"
 
-    def write(
-        self,
-        *,
-        record: dict[str, Any] | None = None,
-        log: list[dict[str, Any]] | None = None,
-        result: dict[str, Any] | None = None,
-    ) -> None:
-        write_run_files(
-            self.output_dir,
-            record=run_record_data() if record is None else record,
-            log=complete_events() if log is None else log,
-            result=result_record_data(agent_result()) if result is None else result,
-        )
+    def read(
+        self, *, record: Any = DEFAULT, log: Any = DEFAULT, result: Any = DEFAULT
+    ) -> RunLog:
+        """Writes a run, naming only the file a test changes, and reads it back."""
+        write_run_files(self.output_dir, record=record, log=log, result=result)
+        return load_run_log(self.output_dir)
 
     def test_reads_the_three_files_of_a_complete_run(self) -> None:
-        self.write()
-        log = load_run_log(self.output_dir)
+        log = self.read()
 
         self.assertEqual(log.record.system_prompt, SYSTEM_PROMPT)
         self.assertEqual(log.record.provider, "google")
         self.assertEqual(log.record.model, "gemini-3.5-flash-lite")
         self.assertEqual(log.record.profile, "terminalbench")
-        self.assertEqual(log.record.tool_names, ("read", "write", "edit", "bash"))
         self.assertEqual(log.session_id, SESSION_ID)
         self.assertFalse(log.truncated)
+        self.assertEqual(log.model_turns, 2)
+        self.assertEqual(log.tool_calls, 1)
         assert log.agent_result is not None
         self.assertEqual(log.agent_result["outcome"], "succeeded")
         self.assertEqual(len(log.events), 16)
@@ -63,12 +55,7 @@ class RunLogTest(unittest.TestCase):
         self.assertEqual(log.events[-1].type, "session_settled")
 
     def test_a_log_that_does_not_end_with_session_settled_is_truncated(self) -> None:
-        write_run_files(
-            self.output_dir,
-            record=run_record_data(),
-            log=truncated_events(),
-        )
-        log = load_run_log(self.output_dir)
+        log = self.read(log=truncated_events(), result=None)
 
         self.assertTrue(log.truncated)
         self.assertIsNone(log.agent_result)
@@ -76,7 +63,7 @@ class RunLogTest(unittest.TestCase):
         self.assertEqual(log.events[-1].type, "tool_execution_started")
 
     def test_a_partly_written_last_line_is_dropped(self) -> None:
-        self.write(log=truncated_events())
+        self.read(log=truncated_events())
         with (self.output_dir / "events.jsonl").open("a", encoding="utf-8") as file:
             file.write('{"schemaVersion": 1, "sessionId": "session-1", "sequence": 16, "oc')
 
@@ -85,13 +72,23 @@ class RunLogTest(unittest.TestCase):
         self.assertEqual(len(log.events), 15)
         self.assertTrue(log.truncated)
 
-    def test_a_missing_result_json_leaves_the_settled_result(self) -> None:
-        write_run_files(
-            self.output_dir,
-            record=run_record_data(),
-            log=complete_events(),
+    def test_characters_that_are_not_line_breaks_stay_inside_their_event(self) -> None:
+        log = complete_events()
+        # JSON.stringify writes these raw inside a string; none of them ends a line of JSON Lines.
+        log[6]["data"]["result"]["content"] = "before\u2028middle\u0085after"
+        self.read(log=log)
+
+        text = (self.output_dir / "events.jsonl").read_text(encoding="utf-8")
+        self.assertIn("\u2028", text)
+        read = load_run_log(self.output_dir)
+        self.assertEqual(len(read.events), 16)
+        self.assertFalse(read.truncated)
+        self.assertEqual(
+            read.events[6].data["result"]["content"], "before\u2028middle\u0085after"
         )
-        log = load_run_log(self.output_dir)
+
+    def test_a_missing_result_json_leaves_the_settled_result(self) -> None:
+        log = self.read(result=None)
 
         self.assertFalse(log.truncated)
         assert log.agent_result is not None
@@ -99,12 +96,7 @@ class RunLogTest(unittest.TestCase):
         self.assertEqual(log.agent_result["usage"]["inputTokens"], 2_700)
 
     def test_a_missing_events_file_is_an_empty_truncated_log(self) -> None:
-        write_run_files(
-            self.output_dir,
-            record=run_record_data(),
-            result=result_record_data(agent_result()),
-        )
-        log = load_run_log(self.output_dir)
+        log = self.read(log=None)
 
         self.assertEqual(log.events, ())
         self.assertTrue(log.truncated)
@@ -113,54 +105,74 @@ class RunLogTest(unittest.TestCase):
 
     def test_a_missing_run_json_names_the_output_dir(self) -> None:
         with self.assertRaisesRegex(RunLogError, r"run\.json does not exist.*--output-dir"):
-            load_run_log(self.output_dir)
+            self.read(record=None)
 
     def test_invalid_json_in_run_json_is_refused(self) -> None:
-        self.output_dir.mkdir(parents=True)
+        write_run_files(self.output_dir, record=None)
         (self.output_dir / "run.json").write_text("{", encoding="utf-8")
-        with self.assertRaisesRegex(RunLogError, "run.json is not valid JSON"):
+        with self.assertRaisesRegex(RunLogError, r"run\.json is not valid JSON"):
             load_run_log(self.output_dir)
 
     def test_another_schema_version_is_refused(self) -> None:
         with self.subTest(file="run.json"):
-            self.write(record=run_record_data(schemaVersion=2))
             with self.assertRaisesRegex(
-                RunLogError, "run\\.json: schemaVersion must be 1, found 2"
+                RunLogError, r"run\.json: schemaVersion must be 1, found 2"
             ):
-                load_run_log(self.output_dir)
+                self.read(record=run_record_data(schemaVersion=2))
 
         with self.subTest(file="result.json"):
-            self.write(result={**result_record_data(agent_result()), "schemaVersion": 2})
+            result = {**result_record_data({"outcome": "succeeded"}), "schemaVersion": 2}
             with self.assertRaisesRegex(
-                RunLogError, "result\\.json: schemaVersion must be 1, found 2"
+                RunLogError, r"result\.json: schemaVersion must be 1, found 2"
             ):
-                load_run_log(self.output_dir)
+                self.read(result=result)
 
         with self.subTest(file="events.jsonl"):
             log = complete_events()
             log[0] = {**log[0], "schemaVersion": 2}
-            self.write(log=log)
             with self.assertRaisesRegex(
-                RunLogError, "events\\.jsonl line 1: schemaVersion must be 1, found 2"
+                RunLogError, r"events\.jsonl line 1: schemaVersion must be 1, found 2"
             ):
-                load_run_log(self.output_dir)
+                self.read(log=log)
 
     def test_a_record_without_a_system_prompt_is_refused(self) -> None:
-        self.write(record=run_record_data(systemPrompt=None))
         with self.assertRaisesRegex(RunLogError, "systemPrompt must be a string"):
-            load_run_log(self.output_dir)
+            self.read(record=run_record_data(systemPrompt=None))
 
     def test_an_events_file_that_is_not_a_log_of_objects_is_read_as_a_truncated_tail(self) -> None:
-        self.output_dir.mkdir(parents=True)
-        (self.output_dir / "run.json").write_text(
-            json.dumps(run_record_data()), encoding="utf-8"
-        )
+        write_run_files(self.output_dir)
         (self.output_dir / "events.jsonl").write_text("[1, 2, 3]\n", encoding="utf-8")
 
         log = load_run_log(self.output_dir)
 
         self.assertEqual(log.events, ())
         self.assertTrue(log.truncated)
+
+    def test_the_usage_comes_from_the_agent_result(self) -> None:
+        log = self.read()
+
+        self.assertEqual(log.usage.input, 2_700)
+        self.assertEqual(log.usage.output, 80)
+        self.assertEqual(log.usage.cached, 1_000)
+
+    def test_a_truncated_log_sums_the_usage_of_its_model_turns(self) -> None:
+        log = self.read(log=truncated_events(), result=None)
+
+        self.assertEqual(log.usage.input, 1_200)
+        self.assertEqual(log.usage.output, 48)
+        self.assertEqual(log.usage.cached, 1_000)
+
+    def test_a_count_that_no_provider_recorded_stays_absent(self) -> None:
+        log = complete_events()
+        for index, event in enumerate(log):
+            if event["type"] == "model_turn_completed":
+                log[index] = {**event, "data": {**event["data"], "usage": {"inputTokens": 7}}}
+        # The session never settled, so the log has no Agent Result to take the counts from.
+        truncation = self.read(log=log[:-1], result=None)
+
+        self.assertEqual(truncation.usage.input, 14)
+        self.assertIsNone(truncation.usage.output)
+        self.assertIsNone(truncation.usage.cached)
 
 
 if __name__ == "__main__":

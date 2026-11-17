@@ -14,14 +14,12 @@ from typing import Any
 
 from harbor.models.agent.context import AgentContext
 
-from coding_agent_terminalbench.run_log import (
-    CALL_QUEUED_EVENT,
-    LIMIT_REACHED_EVENT,
-    TURN_STARTED_EVENT,
-    RunLog,
-    load_run_log,
+from coding_agent_terminalbench.run_log import LIMIT_REACHED_EVENT, RunLog, load_run_log
+from coding_agent_terminalbench.trajectory import (
+    AgentIdentity,
+    build_trajectory,
+    write_trajectory,
 )
-from coding_agent_terminalbench.trajectory import build_trajectory, write_trajectory
 
 # Harbor reads the trajectory of an agent at `logs_dir / "trajectory.json"` (Harbor's
 # `trial/trial.py`), so the file sits beside the directory of the run files, not inside it.
@@ -33,34 +31,46 @@ def populate_trial_context(
     run_dir: Path,
     *,
     trajectory_path: Path,
-    agent_name: str,
-    agent_version: str,
+    agent: AgentIdentity,
     artifact_sha256: Mapping[str, str],
 ) -> None:
     """Reads `run_dir` into `context`, and writes the trajectory to `trajectory_path`.
+
+    The run files are read and the trajectory is built before the context is touched, so a log
+    that cannot be read or converted leaves the context as it was found. Only writing the file can
+    still fail afterwards.
 
     Raises `RunLogError` when the run files are missing or do not have the shape of ADR 0005 §4,
     and a validation error when the events cannot be represented in ATIF. The caller decides
     whether a trial survives either.
     """
     log = load_run_log(run_dir)
+    trajectory = build_trajectory(log, agent=agent)
+    _fill_usage(context, log)
+    context.metadata = _metadata(log, artifact_sha256)
+    write_trajectory(trajectory_path, trajectory)
+
+
+def _fill_usage(context: AgentContext, log: RunLog) -> None:
+    """Harbor's three token fields, from what the Agent Result recorded.
+
+    Harbor defines `n_input_tokens` as including cached tokens, and the providers of this
+    repository already count them there, except Anthropic: `packages/ai` reports its cache reads
+    beside `input_tokens`, so for that provider the trial's input count is the uncached one.
+    `n_cache_tokens` carries them either way, and cost stays unset because the provider contract
+    carries no pricing (ADR 0005 §6).
+    """
     tokens = log.usage
     context.n_input_tokens = tokens.input
     context.n_output_tokens = tokens.output
     context.n_cache_tokens = tokens.cached
-    # ADR 0005 §6 leaves the cost unset: the provider contract carries no pricing.
-    context.metadata = _metadata(log, artifact_sha256)
-    write_trajectory(
-        trajectory_path,
-        build_trajectory(log, agent_name=agent_name, agent_version=agent_version),
-    )
 
 
 def _metadata(log: RunLog, artifact_sha256: Mapping[str, str]) -> dict[str, Any]:
     """What the trial result names about the run (ADR 0005 §6)."""
     metadata: dict[str, Any] = {
-        "model_turns": _event_count(log, TURN_STARTED_EVENT),
-        "tool_calls": _event_count(log, CALL_QUEUED_EVENT),
+        "model_turns": log.model_turns,
+        "tool_calls": log.tool_calls,
         "profile": log.record.profile,
         # One hash per executable of the artifact. The run files do not say which architecture the
         # container selected, so the trial records every build the manifest pins.
@@ -80,10 +90,6 @@ def _metadata(log: RunLog, artifact_sha256: Mapping[str, str]) -> dict[str, Any]
     if limit is not None:
         metadata["limit_reached"] = limit
     return {key: value for key, value in metadata.items() if value is not None}
-
-
-def _event_count(log: RunLog, type_name: str) -> int:
-    return sum(1 for event in log.events if event.type == type_name)
 
 
 def _limit_reached(log: RunLog) -> dict[str, Any] | None:

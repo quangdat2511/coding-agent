@@ -10,23 +10,20 @@ from harbor.models.agent.context import AgentContext
 from harbor.models.trajectories import Trajectory
 
 from coding_agent_terminalbench.run_log import RunLogError
+from coding_agent_terminalbench.trajectory import AgentIdentity
 from coding_agent_terminalbench.trial_context import populate_trial_context
 from tests.support import (
     COMMIT,
+    DEFAULT,
     OCCURRED_AT,
     SESSION_ID,
-    agent_result,
     complete_events,
     failed_events,
-    result_record_data,
-    run_record_data,
     truncated_events,
     write_run_files,
 )
 
-NO_RESULT = object()
-
-AGENT_VERSION = f"0.0.1 {COMMIT}"
+AGENT = AgentIdentity(name="coding-agent", version=f"0.0.1 {COMMIT}")
 
 ARTIFACT_SHA256 = {"coding-agent-linux-x64": "a" * 64}
 
@@ -42,24 +39,15 @@ class PopulateTrialContextTest(unittest.TestCase):
         self.context = AgentContext()
 
     def populate(
-        self,
-        *,
-        log: list[dict[str, Any]] | None = None,
-        record: dict[str, Any] | None = None,
-        result: Any = NO_RESULT,
+        self, *, record: Any = DEFAULT, log: Any = DEFAULT, result: Any = DEFAULT
     ) -> AgentContext:
-        write_run_files(
-            self.run_dir,
-            record=run_record_data() if record is None else record,
-            log=complete_events() if log is None else log,
-            result=result_record_data(agent_result()) if result is NO_RESULT else result,
-        )
+        """Writes a run, naming only the file a test changes, and fills the context from it."""
+        write_run_files(self.run_dir, record=record, log=log, result=result)
         populate_trial_context(
             self.context,
             self.run_dir,
             trajectory_path=self.trajectory_path,
-            agent_name="coding-agent",
-            agent_version=AGENT_VERSION,
+            agent=AGENT,
             artifact_sha256=ARTIFACT_SHA256,
         )
         return self.context
@@ -135,7 +123,7 @@ class PopulateTrialContextTest(unittest.TestCase):
 
         trajectory = self.trajectory()
         self.assertEqual(trajectory.agent.name, "coding-agent")
-        self.assertEqual(trajectory.agent.version, AGENT_VERSION)
+        self.assertEqual(trajectory.agent.version, AGENT.version)
         self.assertEqual(trajectory.session_id, SESSION_ID)
         written = json.loads(self.trajectory_path.read_text(encoding="utf-8"))
         self.assertEqual(written["steps"][0]["source"], "system")
@@ -154,8 +142,7 @@ class PopulateTrialContextTest(unittest.TestCase):
                 self.context,
                 self.run_dir,
                 trajectory_path=self.trajectory_path,
-                agent_name="coding-agent",
-                agent_version=AGENT_VERSION,
+                agent=AGENT,
                 artifact_sha256=ARTIFACT_SHA256,
             )
         self.assertEqual(self.context, AgentContext())

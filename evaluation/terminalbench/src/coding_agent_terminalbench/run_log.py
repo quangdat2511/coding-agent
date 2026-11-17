@@ -6,7 +6,7 @@ The three files are the external contract of `coding-agent run`, so this module 
 """
 
 import json
-from collections.abc import Mapping
+from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -44,7 +44,6 @@ class RunRecord:
     provider: str | None
     model: str | None
     profile: str | None
-    tool_names: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -74,17 +73,6 @@ class TokenCounts:
         )
 
 
-def tokens_of(usage: Any) -> TokenCounts:
-    """The counts of a `UsageTotals` object, as run.json, result.json and the events write it."""
-    if not isinstance(usage, Mapping):
-        return TokenCounts()
-    return TokenCounts(
-        input=_count(usage.get("inputTokens")),
-        output=_count(usage.get("outputTokens")),
-        cached=_count(usage.get("cachedInputTokens")),
-    )
-
-
 @dataclass(frozen=True)
 class RunLog:
     """The files of one run, as the adapter reads them."""
@@ -109,19 +97,29 @@ class RunLog:
 
     @property
     def usage(self) -> TokenCounts:
-        """The token counts of the run, as Harbor defines them (cached tokens included).
+        """The token counts of the run, as the Agent Result records them.
 
-        The Agent Result is the authority when there is one. result.json is written after
-        `session_settled`, so a truncated log has no Agent Result and the usage of each completed
-        Model Turn is summed instead.
+        The Agent Result is the authority when there is one. A killed process loses the tail of the
+        log and never writes result.json, so the usage of each completed Model Turn is summed then,
+        which is the case that ADR 0005 §6 sends to the events. A log truncated by a failed append
+        can still have a result.json, and that file is the more complete record of the session.
         """
         if self.agent_result is not None:
             return tokens_of(self.agent_result.get("usage"))
         tokens = TokenCounts()
-        for event in self.events:
-            if event.type == TURN_COMPLETED_EVENT:
-                tokens = tokens.plus(tokens_of(event.data.get("usage")))
+        for event in events_of_type(self.events, TURN_COMPLETED_EVENT):
+            tokens = tokens.plus(tokens_of(event.data.get("usage")))
         return tokens
+
+    @property
+    def model_turns(self) -> int:
+        """How many Model Turns the session started."""
+        return sum(1 for _ in events_of_type(self.events, TURN_STARTED_EVENT))
+
+    @property
+    def tool_calls(self) -> int:
+        """How many Tool Calls the session queued."""
+        return sum(1 for _ in events_of_type(self.events, CALL_QUEUED_EVENT))
 
 
 def load_run_log(directory: Path) -> RunLog:
@@ -134,13 +132,43 @@ def load_run_log(directory: Path) -> RunLog:
     return RunLog(record=record, events=events, agent_result=agent_result)
 
 
+def events_of_type(events: Iterable[SessionEvent], type_name: str) -> Iterator[SessionEvent]:
+    """The events of one type, in the order the log holds them."""
+    return (event for event in events if event.type == type_name)
+
+
+def tokens_of(usage: Any) -> TokenCounts:
+    """The counts of a `UsageTotals` object, as run.json, result.json and the events write it."""
+    if not isinstance(usage, Mapping):
+        return TokenCounts()
+    return TokenCounts(
+        input=count_of(usage, "inputTokens"),
+        output=count_of(usage, "outputTokens"),
+        cached=count_of(usage, "cachedInputTokens"),
+    )
+
+
+def count_of(usage: Mapping[str, Any], key: str) -> int | None:
+    """A whole, non-negative count of a usage object, or None when it is absent or malformed."""
+    value = usage.get(key)
+    # bool is an int in Python, and a token count is a whole number of tokens.
+    return value if type(value) is int and value >= 0 else None
+
+
+def text_of(value: Any) -> str | None:
+    return value if isinstance(value, str) else None
+
+
 def _read_record(path: Path) -> RunRecord:
-    data = _read_document(
-        path,
-        missing=(
-            f"{path} does not exist; the adapter reads the directory that "
-            "`coding-agent run --output-dir` wrote"
+    data = _decode(
+        _read_required(
+            path,
+            missing=(
+                f"{path} does not exist; the adapter reads the directory that "
+                "`coding-agent run --output-dir` wrote"
+            ),
         ),
+        path,
     )
     if not isinstance(data, Mapping):
         raise RunLogError(f"{path}: the run record must be a JSON object")
@@ -148,30 +176,23 @@ def _read_record(path: Path) -> RunRecord:
     system_prompt = data.get("systemPrompt")
     if not isinstance(system_prompt, str):
         raise RunLogError(f"{path}: systemPrompt must be a string")
-    tools = data.get("tools")
     return RunRecord(
         system_prompt=system_prompt,
         provider=_optional_text(data, "provider"),
         model=_optional_text(data, "model"),
         profile=_optional_text(data, "profile"),
-        tool_names=(
-            tuple(name for name in tools if isinstance(name, str))
-            if isinstance(tools, list)
-            else ()
-        ),
     )
 
 
 def _read_events(path: Path) -> tuple[SessionEvent, ...]:
-    try:
-        text = path.read_text(encoding="utf-8")
-    except FileNotFoundError:
+    text = _read_optional(path)
+    if text is None:
         return ()
-    except OSError as exc:
-        raise RunLogError(f"cannot read {path}: {exc}") from exc
 
     events: list[SessionEvent] = []
-    for number, line in enumerate(text.splitlines(), start=1):
+    # Only the newline the writer appends ends an event. `str.splitlines` would also split on
+    # U+2028, U+0085 and the other separators it knows, which JSON.stringify leaves inside a string.
+    for number, line in enumerate(text.split("\n"), start=1):
         if line.strip() == "":
             continue
         try:
@@ -191,17 +212,11 @@ def _read_events(path: Path) -> tuple[SessionEvent, ...]:
 
 
 def _read_result(path: Path) -> Mapping[str, Any] | None:
-    try:
-        text = path.read_text(encoding="utf-8")
-    except FileNotFoundError:
+    text = _read_optional(path)
+    if text is None:
         # A run settles before it writes result.json, so the file is missing when it was killed.
         return None
-    except OSError as exc:
-        raise RunLogError(f"cannot read {path}: {exc}") from exc
-    try:
-        data = json.loads(text)
-    except json.JSONDecodeError as exc:
-        raise RunLogError(f"{path} is not valid JSON: {exc}") from exc
+    data = _decode(text, path)
     if not isinstance(data, Mapping):
         raise RunLogError(f"{path}: the result record must be a JSON object")
     _require_schema_version(data, path)
@@ -209,6 +224,30 @@ def _read_result(path: Path) -> Mapping[str, Any] | None:
     if not isinstance(result, Mapping):
         raise RunLogError(f"{path}: result must be a JSON object")
     return result
+
+
+def _read_optional(path: Path) -> str | None:
+    """The text of a file that a killed run may not have written, or None when it is missing."""
+    try:
+        return path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        raise RunLogError(f"cannot read {path}: {exc}") from exc
+
+
+def _read_required(path: Path, *, missing: str) -> str:
+    text = _read_optional(path)
+    if text is None:
+        raise RunLogError(missing)
+    return text
+
+
+def _decode(text: str, path: Path) -> Any:
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise RunLogError(f"{path} is not valid JSON: {exc}") from exc
 
 
 def _settled_result(events: tuple[SessionEvent, ...]) -> Mapping[str, Any] | None:
@@ -219,28 +258,10 @@ def _settled_result(events: tuple[SessionEvent, ...]) -> Mapping[str, Any] | Non
     return result if isinstance(result, Mapping) else None
 
 
-def _count(value: Any) -> int | None:
-    # bool is an int in Python, and a token count is a whole number of tokens.
-    return value if type(value) is int and value >= 0 else None
-
-
 def _added(first: int | None, second: int | None) -> int | None:
     if second is None:
         return first
     return second if first is None else first + second
-
-
-def _read_document(path: Path, *, missing: str) -> Any:
-    try:
-        text = path.read_text(encoding="utf-8")
-    except FileNotFoundError:
-        raise RunLogError(missing) from None
-    except OSError as exc:
-        raise RunLogError(f"cannot read {path}: {exc}") from exc
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError as exc:
-        raise RunLogError(f"{path} is not valid JSON: {exc}") from exc
 
 
 def _require_schema_version(
@@ -281,5 +302,4 @@ def _event_of(data: Mapping[str, Any]) -> SessionEvent | None:
 
 
 def _optional_text(data: Mapping[str, Any], key: str) -> str | None:
-    value = data.get(key)
-    return value if isinstance(value, str) else None
+    return text_of(data.get(key))

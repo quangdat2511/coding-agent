@@ -16,20 +16,14 @@ from coding_agent_terminalbench.agent import CodingAgent
 from coding_agent_terminalbench.manifest import ArtifactManifestError
 from tests.support import (
     COMMIT,
-    agent_result,
-    complete_events,
+    DEFAULT,
     manifest_data,
-    result_record_data,
-    run_record_data,
     truncated_events,
     write_manifest,
     write_run_files,
 )
 
 IMPORT_PATH = "coding_agent_terminalbench.agent:CodingAgent"
-
-# Tells the helper to leave result.json out, as a run killed before it settled leaves it out.
-NO_RESULT = object()
 
 
 class CodingAgentTest(unittest.TestCase):
@@ -127,20 +121,10 @@ class CodingAgentTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "config: .*reads no native config file"):
             AgentFactory.run_preflight(with_config)
 
-    def write_run(
-        self,
-        *,
-        log: list[dict[str, Any]] | None = None,
-        result: Any = NO_RESULT,
-    ) -> Path:
-        """Writes the files of a run and returns where Harbor expects the trajectory."""
+    def write_run(self, *, log: Any = DEFAULT, result: Any = DEFAULT) -> Path:
+        """Writes a run and returns where Harbor expects the trajectory."""
         self.logs_dir.mkdir(parents=True, exist_ok=True)
-        write_run_files(
-            self.logs_dir / "coding-agent",
-            record=run_record_data(),
-            log=complete_events() if log is None else log,
-            result=result_record_data(agent_result()) if result is NO_RESULT else result,
-        )
+        write_run_files(self.logs_dir / "coding-agent", log=log, result=result)
         return self.logs_dir / "trajectory.json"
 
     def test_populate_context_post_run_fills_the_trial_and_writes_the_trajectory(self) -> None:
@@ -203,7 +187,7 @@ class CodingAgentTest(unittest.TestCase):
 
         self.assertEqual(context, AgentContext())
         self.assertFalse((self.logs_dir / "trajectory.json").exists())
-        self.assertIn("no trial context or trajectory was written", captured.output[0])
+        self.assertIn("the trial context and trajectory are incomplete", captured.output[0])
 
     def test_install_and_run_fail_until_their_tickets_land(self) -> None:
         agent = self.create()

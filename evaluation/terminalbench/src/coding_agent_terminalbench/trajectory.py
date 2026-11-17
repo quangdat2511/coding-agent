@@ -13,6 +13,7 @@ reasoning is always absent: the providers' reasoning tokens are counted, not tra
 
 import json
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -38,15 +39,26 @@ from coding_agent_terminalbench.run_log import (
     RunLog,
     SessionEvent,
     TokenCounts,
+    count_of,
+    events_of_type,
+    text_of,
     tokens_of,
 )
 
+# The Assistant Message and Verification outcomes of packages/agent-core/src/events.ts.
+COMPLETED_OUTCOME = "completed"
 CONTINUE_OUTCOME = "continue"
 
-COMPLETED_OUTCOME = "completed"
+
+@dataclass(frozen=True)
+class AgentIdentity:
+    """The agent an ATIF trajectory names: what ran, and which build of it."""
+
+    name: str
+    version: str
 
 
-def build_trajectory(log: RunLog, *, agent_name: str, agent_version: str) -> Trajectory:
+def build_trajectory(log: RunLog, *, agent: AgentIdentity) -> Trajectory:
     """Builds the trajectory of `log`, validating it against Harbor's model as it goes."""
     queued_calls = _queued_calls(log.events)
     completed_calls = _completed_calls(log.events)
@@ -57,7 +69,7 @@ def build_trajectory(log: RunLog, *, agent_name: str, agent_version: str) -> Tra
     for event in log.events:
         data = event.data
         if event.type == TURN_STARTED_EVENT:
-            current_turn = _text_of(data.get("modelTurnId"))
+            current_turn = text_of(data.get("modelTurnId"))
         elif event.type == TURN_COMPLETED_EVENT:
             current_turn = None
         elif event.type == TASK_EVENT:
@@ -76,11 +88,7 @@ def build_trajectory(log: RunLog, *, agent_name: str, agent_version: str) -> Tra
 
     return Trajectory(
         session_id=log.session_id,
-        agent=Agent(
-            name=agent_name,
-            version=agent_version,
-            model_name=_model_name(log),
-        ),
+        agent=Agent(name=agent.name, version=agent.version, model_name=_model_name(log)),
         steps=steps,
         final_metrics=_final_metrics(log, steps),
     )
@@ -139,10 +147,10 @@ def _tool_call(
     """The Tool Call of an Assistant Message, under its Agent Core id (ADR 0005 §6)."""
     if block.get("type") != "tool_call":
         return None
-    function_name = _text_of(block.get("name"))
+    function_name = text_of(block.get("name"))
     if function_name is None:
         return None
-    provider_id = _text_of(block.get("toolCallId"))
+    provider_id = text_of(block.get("toolCallId"))
     # `tool_call_queued` gives the Agent Core id of the call, but it arrives after the message that
     # issued it, so it is looked up rather than read in order. A truncated log may not have it yet,
     # and then the provider's id is the only id the call has.
@@ -180,13 +188,13 @@ def _observation_result(call_id: str, data: Mapping[str, Any]) -> ObservationRes
     failed or was cancelled, so the outcome is kept even when there is no content to show.
     """
     extra: dict[str, Any] = {"outcome": data.get("outcome")}
-    reason = _text_of(data.get("reason"))
+    reason = text_of(data.get("reason"))
     if reason is not None:
         extra["reason"] = reason
     content: str | None = None
     result = data.get("result")
     if isinstance(result, Mapping):
-        content = _text_of(result.get("content"))
+        content = text_of(result.get("content"))
         error = result.get("error")
         if isinstance(error, Mapping):
             extra["error"] = {"code": error.get("code"), "message": error.get("message")}
@@ -195,7 +203,7 @@ def _observation_result(call_id: str, data: Mapping[str, Any]) -> ObservationRes
 
 def _message_extra(data: Mapping[str, Any]) -> dict[str, Any] | None:
     """The outcome of an Assistant Message that failed or was cancelled (ADR 0005 §6)."""
-    outcome = _text_of(data.get("outcome"))
+    outcome = text_of(data.get("outcome"))
     if outcome is None or outcome == COMPLETED_OUTCOME:
         return None
     extra: dict[str, Any] = {"outcome": outcome}
@@ -208,7 +216,7 @@ def _message_extra(data: Mapping[str, Any]) -> dict[str, Any] | None:
 def _metrics_of(usage: Mapping[str, Any]) -> Metrics | None:
     """The metrics of one Model Turn: its usage, with no cost, because the provider has none."""
     tokens = tokens_of(usage)
-    reasoning = _count_of(usage, "reasoningTokens")
+    reasoning = count_of(usage, "reasoningTokens")
     if tokens == TokenCounts() and reasoning is None:
         return None
     return Metrics(
@@ -224,7 +232,7 @@ def _final_metrics(log: RunLog, steps: list[Step]) -> FinalMetrics:
     tokens = log.usage
     extra: dict[str, Any] = {}
     if log.agent_result is not None:
-        outcome = _text_of(log.agent_result.get("outcome"))
+        outcome = text_of(log.agent_result.get("outcome"))
         if outcome is not None:
             extra["outcome"] = outcome
         for key in ("failure", "cancellation"):
@@ -245,15 +253,13 @@ def _final_metrics(log: RunLog, steps: list[Step]) -> FinalMetrics:
 def _queued_calls(events: tuple[SessionEvent, ...]) -> dict[tuple[str, str], str]:
     """The Agent Core id of every queued Tool Call, by Model Turn and provider id."""
     queued: dict[tuple[str, str], str] = {}
-    for event in events:
-        if event.type != CALL_QUEUED_EVENT:
-            continue
-        model_turn = _text_of(event.data.get("modelTurnId"))
+    for event in events_of_type(events, CALL_QUEUED_EVENT):
+        model_turn = text_of(event.data.get("modelTurnId"))
         call = event.data.get("toolCall")
         if model_turn is None or not isinstance(call, Mapping):
             continue
-        provider_id = _text_of(call.get("providerId"))
-        call_id = _text_of(call.get("id"))
+        provider_id = text_of(call.get("providerId"))
+        call_id = text_of(call.get("id"))
         if provider_id is not None and call_id is not None:
             queued[(model_turn, provider_id)] = call_id
     return queued
@@ -262,10 +268,8 @@ def _queued_calls(events: tuple[SessionEvent, ...]) -> dict[tuple[str, str], str
 def _completed_calls(events: tuple[SessionEvent, ...]) -> dict[str, Mapping[str, Any]]:
     """The `tool_call_completed` data of every Tool Call, by Agent Core id."""
     completed: dict[str, Mapping[str, Any]] = {}
-    for event in events:
-        if event.type != CALL_COMPLETED_EVENT:
-            continue
-        call_id = _text_of(event.data.get("toolCallId"))
+    for event in events_of_type(events, CALL_COMPLETED_EVENT):
+        call_id = text_of(event.data.get("toolCallId"))
         if call_id is not None:
             completed[call_id] = event.data
     return completed
@@ -274,10 +278,8 @@ def _completed_calls(events: tuple[SessionEvent, ...]) -> dict[str, Mapping[str,
 def _turn_usages(events: tuple[SessionEvent, ...]) -> dict[str, Mapping[str, Any]]:
     """The usage of every completed Model Turn, by Model Turn id."""
     usages: dict[str, Mapping[str, Any]] = {}
-    for event in events:
-        if event.type != TURN_COMPLETED_EVENT:
-            continue
-        model_turn = _text_of(event.data.get("modelTurnId"))
+    for event in events_of_type(events, TURN_COMPLETED_EVENT):
+        model_turn = text_of(event.data.get("modelTurnId"))
         usage = event.data.get("usage")
         if model_turn is not None and isinstance(usage, Mapping):
             usages[model_turn] = usage
@@ -286,7 +288,7 @@ def _turn_usages(events: tuple[SessionEvent, ...]) -> dict[str, Mapping[str, Any
 
 def _objective_of(data: Mapping[str, Any]) -> str | None:
     task = data.get("task")
-    return _text_of(task.get("objective")) if isinstance(task, Mapping) else None
+    return text_of(task.get("objective")) if isinstance(task, Mapping) else None
 
 
 def _content_blocks(message: Any) -> tuple[Mapping[str, Any], ...]:
@@ -301,7 +303,7 @@ def _text_of_blocks(blocks: tuple[Mapping[str, Any], ...]) -> str:
     return "\n".join(
         text
         for block in blocks
-        if block.get("type") == "text" and (text := _text_of(block.get("text"))) is not None
+        if block.get("type") == "text" and (text := text_of(block.get("text"))) is not None
     )
 
 
@@ -310,7 +312,7 @@ def _user_message_text(feedback: Any) -> str | None:
     if not isinstance(feedback, Mapping):
         return None
     content = feedback.get("content")
-    text = _text_of(content)
+    text = text_of(content)
     if text is not None:
         return text
     blocks = _content_blocks(feedback)
@@ -320,7 +322,7 @@ def _user_message_text(feedback: Any) -> str | None:
     parts = [
         part
         for block in blocks
-        if (part := _text_of(block.get("text") or block.get("content"))) is not None
+        if (part := text_of(block.get("text") or block.get("content"))) is not None
     ]
     return "\n".join(parts)
 
@@ -333,10 +335,3 @@ def _model_name(log: RunLog) -> str | None:
     return model or provider
 
 
-def _count_of(usage: Mapping[str, Any], key: str) -> int | None:
-    value = usage.get(key)
-    return value if type(value) is int and value >= 0 else None
-
-
-def _text_of(value: Any) -> str | None:
-    return value if isinstance(value, str) else None

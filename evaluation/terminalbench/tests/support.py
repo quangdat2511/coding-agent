@@ -517,21 +517,38 @@ def failed_events() -> list[dict[str, Any]]:
     )
 
 
+# A file that a caller does not name keeps the fixture of a complete run; `None` leaves it out.
+DEFAULT = object()
+
+
 def write_run_files(
     directory: Path,
     *,
-    record: dict[str, Any] | None = None,
-    log: list[dict[str, Any]] | None = None,
-    result: dict[str, Any] | None = None,
+    record: Any = DEFAULT,
+    log: Any = DEFAULT,
+    result: Any = DEFAULT,
 ) -> None:
-    """Writes the files of a run. `None` leaves that file out, as a killed run leaves it out."""
+    """Writes the files of a run into `directory`.
+
+    A complete run is the default, so a test names only the file it changes. `None` leaves a file
+    out, as a run killed before it settled leaves result.json out.
+    """
     directory.mkdir(parents=True, exist_ok=True)
+    # `ensure_ascii=False` mirrors `JSON.stringify`, which leaves non-ASCII characters raw.
     if record is not None:
-        (directory / "run.json").write_text(f"{json.dumps(record, indent=2)}\n", encoding="utf-8")
+        if record is DEFAULT:
+            record = run_record_data()
+        (directory / "run.json").write_text(
+            f"{json.dumps(record, indent=2, ensure_ascii=False)}\n", encoding="utf-8"
+        )
     if log is not None:
-        lines = "".join(f"{json.dumps(item)}\n" for item in log)
+        if log is DEFAULT:
+            log = complete_events()
+        lines = "".join(f"{json.dumps(item, ensure_ascii=False)}\n" for item in log)
         (directory / "events.jsonl").write_text(lines, encoding="utf-8")
     if result is not None:
+        if result is DEFAULT:
+            result = result_record_data(agent_result())
         (directory / "result.json").write_text(
-            f"{json.dumps(result, indent=2)}\n", encoding="utf-8"
+            f"{json.dumps(result, indent=2, ensure_ascii=False)}\n", encoding="utf-8"
         )

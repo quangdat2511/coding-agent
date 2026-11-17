@@ -21,6 +21,7 @@ from harbor.models.agent.context import AgentContext
 from pydantic import Field, field_validator
 
 from coding_agent_terminalbench.manifest import ArtifactManifest, load_manifest
+from coding_agent_terminalbench.trajectory import AgentIdentity
 from coding_agent_terminalbench.trial_context import TRAJECTORY_FILE, populate_trial_context
 
 AGENT_NAME = "coding-agent"
@@ -157,13 +158,12 @@ class CodingAgent(BaseInstalledAgent):
                 context,
                 self.logs_dir / RUN_DIR_NAME,
                 trajectory_path=self.logs_dir / TRAJECTORY_FILE,
-                agent_name=AGENT_NAME,
-                agent_version=self.version(),
+                agent=AgentIdentity(name=AGENT_NAME, version=self.version()),
                 artifact_sha256={
                     executable.file: executable.sha256 for executable in self.manifest.executables
                 },
             )
         except Exception as error:
             self.logger.warning(
-                f"no trial context or trajectory was written: {error}", exc_info=True
+                f"the trial context and trajectory are incomplete: {error}", exc_info=True
             )
