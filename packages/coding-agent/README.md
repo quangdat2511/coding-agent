@@ -220,6 +220,7 @@ and is never printed or written.
 | `anthropic` | `ANTHROPIC_API_KEY` |
 | `google` | `GOOGLE_API_KEY`, then `GEMINI_API_KEY` |
 | `openai` | `OPENAI_API_KEY` |
+| `opencode` | `OPENCODE_API_KEY` |
 | `openrouter` | `OPENROUTER_API_KEY` |
 | `xai` | `XAI_API_KEY` |
 
@@ -227,6 +228,11 @@ Surrounding whitespace is ignored, and a blank variable counts as unset, so `goo
 `GEMINI_API_KEY` when `GOOGLE_API_KEY` is blank. `@coding-agent/ai` declares these names
 (`PROVIDER_CREDENTIAL_ENV_VARS_BY_PROVIDER`), and its provider adapters read them with the same
 `readEnvCredential` lookup.
+
+`opencode` is OpenCode's Go subscription gateway (ADR 0007), not its Zen plan. Each request names
+the client with a `coding-agent/<version>` user agent, and every request of one Agent Session
+carries the same `x-opencode-session` header, which is what lets the gateway reuse its prompt
+cache.
 
 ### Verification command
 

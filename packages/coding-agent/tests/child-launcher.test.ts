@@ -7,7 +7,7 @@ import { bashTool, createWorkspaceResolver } from "@coding-agent/tools";
 import { createConfiguredChildLauncher } from "../src/child-launcher.ts";
 
 describe("configuring the child launcher in the composition root", () => {
-  it("removes all six MVP credential names while preserving variables outside that set", async () => {
+  it("removes all seven provider credential names while preserving variables outside that set", async () => {
     const fixture = {
       ANTHROPIC_API_KEY: "fake-anthropic",
       GOOGLE_API_KEY: "fake-google",
@@ -17,8 +17,8 @@ describe("configuring the child launcher in the composition root", () => {
       XAI_API_KEY: "fake-xai",
       GH_TOKEN: "fake-task-token",
       GOOGLE_API_KEY_BACKUP: "task-owned-backup",
-      // ADR 0001 §8's MVP credential residual: OpenCode is not CLI-selectable, so it is inherited.
-      OPENCODE_API_KEY: "outside-the-mvp-set",
+      // ADR 0007 promotes OpenCode to a CLI-selectable provider, so its key is scrubbed too.
+      OPENCODE_API_KEY: "fake-opencode",
     };
     const saved = Object.fromEntries(Object.keys(fixture).map((key) => [key, process.env[key]]));
     try {
@@ -39,7 +39,7 @@ describe("configuring the child launcher in the composition root", () => {
           xai: process.env.XAI_API_KEY ?? null,
           taskToken: process.env.GH_TOKEN,
           backup: process.env.GOOGLE_API_KEY_BACKUP,
-          opencode: process.env.OPENCODE_API_KEY,
+          opencode: process.env.OPENCODE_API_KEY ?? null,
         }));`,
       ]);
       const [exitCode, stdout, stderr] = await Promise.all([
@@ -59,7 +59,7 @@ describe("configuring the child launcher in the composition root", () => {
           xai: null,
           taskToken: "fake-task-token",
           backup: "task-owned-backup",
-          opencode: "outside-the-mvp-set",
+          opencode: null,
         },
         stderr: "",
       });

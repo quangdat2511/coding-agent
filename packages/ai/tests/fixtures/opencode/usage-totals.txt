@@ -1,0 +1,16 @@
+data: {"id":"gw-2abd6f0cdecb-729724","object":"chat.completion.chunk","created":1794815543,"model":"deepseek-v4.1-flash","choices":[{"index":0,"finish_reason":null,"delta":{"role":"assistant","content":""}}]}
+
+data: {"id":"gw-2abd6f0cdecb-729724","object":"chat.completion.chunk","created":1794815543,"model":"deepseek-v4.1-flash","choices":[{"index":0,"finish_reason":null,"delta":{"reasoning_content":"We"}}]}
+
+data: {"id":"gw-2abd6f0cdecb-729724","object":"chat.completion.chunk","created":1794815543,"model":"deepseek-v4.1-flash","choices":[{"index":0,"finish_reason":null,"delta":{"reasoning_content":" need answer single"}}]}
+
+data: {"id":"gw-2abd6f0cdecb-729724","object":"chat.completion.chunk","created":1794815543,"model":"deepseek-v4.1-flash","choices":[{"index":0,"finish_reason":null,"delta":{"reasoning_content":" word \"ok\". Need comply"}}]}
+
+data: {"id":"gw-2abd6f0cdecb-729724","object":"chat.completion.chunk","created":1794815543,"model":"deepseek-v4.1-flash","choices":[{"index":0,"finish_reason":null,"delta":{"reasoning_content":"."}}]}
+
+data: {"id":"gw-2abd6f0cdecb-729724","object":"chat.completion.chunk","created":1794815543,"model":"deepseek-v4.1-flash","choices":[{"index":0,"finish_reason":null,"delta":{"content":"ok"}}]}
+
+data: {"id":"gw-2abd6f0cdecb-729724","object":"chat.completion.chunk","created":1794815543,"model":"deepseek-v4.1-flash","choices":[{"index":0,"finish_reason":"stop","delta":{}}],"usage":{"prompt_tokens":100,"completion_tokens":42,"total_tokens":142,"prompt_tokens_details":{"cached_tokens":0},"completion_tokens_details":{"reasoning_tokens":11},"cost":0,"opencode":{"billing_source":"go","list_cost":0.0000279,"allowance":0.00001674,"tokens":{"input":100,"output":42,"reasoning":11,"cache_read":0,"cache_write_5m":0,"cache_write_1h":0}}}}
+
+data: [DONE]
+

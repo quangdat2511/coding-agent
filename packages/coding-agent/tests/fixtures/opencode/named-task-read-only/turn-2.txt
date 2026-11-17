@@ -1,0 +1,8 @@
+data: {"id":"gw-named-task-2","object":"chat.completion.chunk","created":1794816005,"model":"deepseek-v4.1-flash","choices":[{"index":0,"finish_reason":null,"delta":{"role":"assistant","content":"I have read `src/slugify.ts`. "}}]}
+
+data: {"id":"gw-named-task-2","object":"chat.completion.chunk","created":1794816005,"model":"deepseek-v4.1-flash","choices":[{"index":0,"finish_reason":null,"delta":{"content":"The failing test is not in place yet."}}]}
+
+data: {"id":"gw-named-task-2","object":"chat.completion.chunk","created":1794816005,"model":"deepseek-v4.1-flash","choices":[{"index":0,"finish_reason":"stop","delta":{}}],"usage":{"prompt_tokens":560,"completion_tokens":20,"total_tokens":580,"prompt_tokens_details":{"cached_tokens":320},"completion_tokens_details":{"reasoning_tokens":0}}}
+
+data: [DONE]
+

@@ -2,7 +2,9 @@ import { describe, expect, it } from "bun:test";
 import { existsSync } from "node:fs";
 import { chmod, cp, mkdir, readdir, realpath, symlink } from "node:fs/promises";
 import { join } from "node:path";
+import { BUILD_INFO } from "../src/build-info.ts";
 import { type HeadlessResult, runHeadless } from "../src/headless.ts";
+import type { ProviderId } from "../src/run-args.ts";
 import { NAMED_TASK_FILE, NAMED_TASK_REPO, READ_ONLY_RUN } from "./support/named-task.ts";
 import { noFullDevice } from "./support/platform.ts";
 import { withTemporaryDirectory } from "./support/process.ts";
@@ -31,6 +33,8 @@ interface Run {
 }
 
 interface Scenario {
+  // The provider and model the run is asked for; Google's recorded named task by default.
+  readonly target?: { readonly provider: ProviderId; readonly model: string };
   readonly env?: Record<string, string>;
   readonly prepare?: (repoRoot: string, outputDir: string) => Promise<unknown>;
   readonly stdout?: (text: string) => void;
@@ -41,7 +45,7 @@ interface Scenario {
 async function runNamedTask(
   respond: Respond,
   inspect: (run: Run) => void | Promise<void>,
-  { env = {}, prepare, stdout, signal, onRequest }: Scenario = {},
+  { target = READ_ONLY_RUN, env = {}, prepare, stdout, signal, onRequest }: Scenario = {},
 ): Promise<void> {
   await withTemporaryDirectory(async (directory) => {
     const repoRoot = join(await realpath(directory), "repo");
@@ -59,8 +63,8 @@ async function runNamedTask(
       const result = await runHeadless({
         args: {
           taskFile: NAMED_TASK_FILE,
-          provider: READ_ONLY_RUN.provider,
-          model: READ_ONLY_RUN.model,
+          provider: target.provider,
+          model: target.model,
           approvalPolicy: "auto-approve",
           outputDir,
           profile: "default",
@@ -115,6 +119,47 @@ function toolResponses(request: SentRequest | undefined): unknown[] {
     parts.flatMap(({ functionResponse }) => (functionResponse ? [functionResponse.response] : [])),
   );
 }
+
+describe("a headless run of the named task on OpenCode Go", () => {
+  const target = { provider: "opencode", model: "deepseek-v4.1-flash" } as const;
+  const turns = [1, 2].map((turn) => `opencode/named-task-read-only/turn-${turn}.txt`);
+
+  it("settles succeeded, sends to the Go gateway, and keeps one session header for both turns", async () => {
+    await runNamedTask(
+      replayInOrder(turns),
+      ({ result, sent }) => {
+        expect(result.exitCode).toBe(0);
+        expect(result.result?.outcome).toBe("succeeded");
+
+        expect(sent).toHaveLength(2);
+        for (const request of sent) {
+          expect(request.url).toBe("https://opencode.ai/inference/go/openai/v1/chat/completions");
+          expect(request.headers.get("user-agent")).toBe(`coding-agent/${BUILD_INFO.version}`);
+          expect(request.headers.get("authorization")).toBe(`Bearer ${secret}`);
+        }
+        const session = sent[0]?.headers.get("x-opencode-session");
+        expect(session).toBeTruthy();
+        expect(sent[1]?.headers.get("x-opencode-session")).toBe(session);
+      },
+      { target, env: { OPENCODE_API_KEY: secret } },
+    );
+  });
+
+  it("records provider opencode, the model id and the sampling entry in run.json", async () => {
+    await runNamedTask(
+      replayInOrder(turns),
+      async ({ outputDir }) => {
+        const written = await Bun.file(join(outputDir, "run.json")).json();
+        expect(written).toMatchObject({
+          provider: "opencode",
+          model: "deepseek-v4.1-flash",
+          sampling: { maxOutputTokens: null, temperature: null },
+        });
+      },
+      { target, env: { OPENCODE_API_KEY: secret } },
+    );
+  });
+});
 
 describe("a headless run of the named task on Google", () => {
   it("settles succeeded and exits 0 after a real read of the fixture repository", async () => {

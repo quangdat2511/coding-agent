@@ -6,10 +6,10 @@
 // that source; the composition root reads this set and supplies it to
 // `@coding-agent/tools` for the scrubbed child environment.
 //
-// Only MVP providers are listed. `opencode` keeps its adapter but is not
-// among the MVP provider values (ADR 0006 §2), so its variables are excluded.
-// ADR 0001 §8 explicitly records inherited OpenCode and configurable Custom
-// Provider credentials as outside the MVP isolation guarantee under both policies.
+// Only the six `--provider` values of ADR 0005 §3 are listed. ADR 0007 promoted `opencode` to
+// the sixth, so its key is scrubbed from child environments like the rest. A Custom Provider's
+// configurable `apiKeyEnv` is still outside this set and is not covered by the isolation
+// guarantee (ADR 0001 §8).
 // ---------------------------------------------------------------------------
 
 /**
@@ -23,6 +23,7 @@ export const PROVIDER_CREDENTIAL_ENV_VARS_BY_PROVIDER = Object.freeze({
   anthropic: Object.freeze(["ANTHROPIC_API_KEY"] as const),
   google: Object.freeze(["GOOGLE_API_KEY", "GEMINI_API_KEY"] as const),
   openai: Object.freeze(["OPENAI_API_KEY"] as const),
+  opencode: Object.freeze(["OPENCODE_API_KEY"] as const),
   openrouter: Object.freeze(["OPENROUTER_API_KEY"] as const),
   xai: Object.freeze(["XAI_API_KEY"] as const),
 });

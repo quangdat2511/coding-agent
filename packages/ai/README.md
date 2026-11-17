@@ -232,6 +232,10 @@ Fixtures are stored under `packages/ai/tests/fixtures/<family>/`:
 - `anthropic/`: Fixtures for Anthropic Messages API.
 - `openai/`: Fixtures for OpenAI Chat Completions-compatible streaming.
 - `xai/`: Fixtures for providers delivering whole tool arguments (e.g. xAI).
+- `opencode/`: Fixtures recorded from the OpenCode Go gateway with
+  `examples/opencode-record-fixtures.ts`. The text and usage values of `text-streaming.txt` and
+  `usage-totals.txt` are edited to the values the shared cases assert, and
+  `tool-call-malformed-args.txt` is hand-written.
 
 Each family provides standard test scenarios:
 - `text-streaming.txt`: Basic streaming text chunks.

@@ -2,7 +2,7 @@
 // resolving paths, reading the task file, and checking credentials or models belong in
 // run-config.ts, after the `parsed.ok` check in cli.ts.
 
-export type ProviderId = "anthropic" | "openrouter" | "openai" | "google" | "xai";
+export type ProviderId = "anthropic" | "openrouter" | "openai" | "google" | "xai" | "opencode";
 
 export type Profile = "default" | "terminalbench";
 
@@ -33,6 +33,7 @@ const providers = {
   openai: true,
   google: true,
   xai: true,
+  opencode: true,
 } satisfies Record<ProviderId, true>;
 
 const profiles = { default: true, terminalbench: true } satisfies Record<Profile, true>;

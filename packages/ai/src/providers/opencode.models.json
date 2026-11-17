@@ -20,6 +20,11 @@
     "provider": "opencode"
   },
   {
+    "id": "deepseek-v4.1-flash",
+    "name": "DeepSeek V4.1 Flash",
+    "provider": "opencode"
+  },
+  {
     "id": "gemini-3-flash",
     "name": "Gemini 3 Flash",
     "provider": "opencode"

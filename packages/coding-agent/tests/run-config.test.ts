@@ -113,6 +113,7 @@ describe("choosing the model settings", () => {
     ["openai", "gpt-4o-mini", "OPENAI_API_KEY", providerDefaults],
     ["openrouter", "openai/gpt-4o-mini", "OPENROUTER_API_KEY", providerDefaults],
     ["xai", "grok-4.3", "XAI_API_KEY", providerDefaults],
+    ["opencode", "deepseek-v4.1-flash", "OPENCODE_API_KEY", providerDefaults],
   ] as const)(
     "records the sampling settings %s runs with",
     async (provider, model, variable, sampling) => {
@@ -136,6 +137,30 @@ describe("selecting the provider and model", () => {
       "--model",
       '--model "no-such-model" is not a known anthropic model',
     );
+  });
+
+  it("refuses a model id absent from the opencode catalogue, which the CLI reports as exit 2", async () => {
+    await expectRefused(
+      await resolveWith(
+        { provider: "opencode", model: "no-such-model" },
+        { OPENCODE_API_KEY: secret },
+      ),
+      "--model",
+      '--model "no-such-model" is not a known opencode model',
+    );
+  });
+
+  it("resolves the opencode model the recorded job runs, with the credential it reads", async () => {
+    const resolved = await resolveWith(
+      { provider: "opencode", model: "deepseek-v4.1-flash" },
+      { OPENCODE_API_KEY: secret },
+    );
+    if (!resolved.ok) throw new Error(`expected a configuration, got: ${resolved.message}`);
+    expect(resolved.config.model).toMatchObject({
+      provider: "opencode",
+      id: "deepseek-v4.1-flash",
+    });
+    expect(resolved.config.credential.variable).toBe("OPENCODE_API_KEY");
   });
 });
 

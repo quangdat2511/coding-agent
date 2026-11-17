@@ -11,10 +11,12 @@ import {
   defaultProviders,
   GOOGLE_GENERATE_CONTENT_CAPABILITIES,
   OPENAI_CHAT_COMPLETIONS_CAPABILITIES,
+  OPENCODE_GO_CHAT_COMPLETIONS_CAPABILITIES,
   OPENROUTER_CHAT_COMPLETIONS_CAPABILITIES,
   XAI_CHAT_COMPLETIONS_CAPABILITIES,
 } from "../src/index.ts";
 import type { ApiVariant, ModelCapabilities } from "../src/types.ts";
+import { loadFixture, sseResponse, withCapturingFixtureFetch } from "./fixtures/fixture-fetch.ts";
 
 describe("Built-in Providers & Registry", () => {
   it("should register all 6 built-in providers in defaultProviders()", () => {
@@ -70,6 +72,12 @@ describe("Built-in Providers & Registry", () => {
         name: "openai",
         factory: createOpenAIProvider,
         expectedCapabilities: OPENAI_CHAT_COMPLETIONS_CAPABILITIES,
+        expectedVariant: "chat_completions",
+      },
+      {
+        name: "opencode",
+        factory: createOpencodeProvider,
+        expectedCapabilities: OPENCODE_GO_CHAT_COMPLETIONS_CAPABILITIES,
         expectedVariant: "chat_completions",
       },
       {
@@ -153,25 +161,14 @@ describe("Built-in Providers & Registry", () => {
     });
   });
 
-  describe("opencode is not an MVP provider", () => {
-    it("opencode models do not have capabilities set", () => {
-      const provider = createOpencodeProvider();
-      const models = provider.getModels();
-      expect(models.length).toBeGreaterThan(0);
-
-      for (const model of models) {
-        expect(model.capabilities).toBeUndefined();
-      }
-    });
-  });
-
   describe("createOpencodeProvider", () => {
-    it("should initialize OpenCode Zen provider with correct metadata and base URL", () => {
+    it("should initialize OpenCode Go provider with correct metadata and base URL", () => {
       const provider = createOpencodeProvider();
 
       expect(provider.id).toBe("opencode");
-      expect(provider.name).toBe("OpenCode Zen");
-      expect(provider.baseUrl).toBe("https://opencode.ai/zen/v1");
+      expect(provider.name).toBe("OpenCode Go");
+      // The SDK appends /chat/completions itself, so the root carries the OpenAI path only.
+      expect(provider.baseUrl).toBe("https://opencode.ai/inference/go/openai/v1");
     });
 
     it("should resolve API key from OPENCODE_API_KEY", async () => {
@@ -189,11 +186,11 @@ describe("Built-in Providers & Registry", () => {
       }
     });
 
-    it("should contain 35 models adhering to Model interface", () => {
+    it("should contain 36 models adhering to Model interface", () => {
       const provider = createOpencodeProvider();
       const models = provider.getModels();
 
-      expect(models.length).toBe(35);
+      expect(models.length).toBe(36);
       for (const model of models) {
         expect(model.id).toBeTruthy();
         expect(model.name).toBeTruthy();
@@ -202,31 +199,48 @@ describe("Built-in Providers & Registry", () => {
 
       const modelIds = new Set(models.map((m) => m.id));
       expect(modelIds.has("deepseek-v4-flash")).toBe(true);
+      expect(modelIds.has("deepseek-v4.1-flash")).toBe(true);
       expect(modelIds.has("gpt-5")).toBe(true);
       expect(modelIds.has("qwen3.6-plus")).toBe(true);
       expect(modelIds.has("big-pickle")).toBe(true);
     });
 
-    it("should configure dynamic x-session-id in headers", () => {
+    // The provider's headers are a function, so each call is what one request would send.
+    const headersOf = (provider: ReturnType<typeof createOpencodeProvider>) =>
+      (provider.headers as () => Record<string, string>)();
+
+    // ADR 0007 §6: Go reuses its prompt cache only when the session id stays the same for the
+    // whole Agent Session, and one Agent Session streams through one provider instance.
+    it("keeps x-opencode-session stable across calls on one instance", () => {
       const provider = createOpencodeProvider();
       expect(typeof provider.headers).toBe("function");
 
-      const headersFn = provider.headers as () => Record<string, string>;
-      const h1 = headersFn();
-      const h2 = headersFn();
+      const first = headersOf(provider)["x-opencode-session"];
+      const second = headersOf(provider)["x-opencode-session"];
 
-      expect(h1["x-session-id"]).toBeDefined();
-      expect(h2["x-session-id"]).toBeDefined();
-      expect(h1["x-session-id"]).not.toBe(h2["x-session-id"]);
+      expect(first).toBeTruthy();
+      expect(second).toBe(first);
     });
 
-    it("should respect OPENCODE_SESSION_ID when set", () => {
+    it("issues a different x-opencode-session for each instance", () => {
+      const sessionOf = () => headersOf(createOpencodeProvider())["x-opencode-session"];
+
+      expect(sessionOf()).not.toBe(sessionOf());
+    });
+
+    it("sends x-opencode-session instead of x-session-id", () => {
+      const headers = headersOf(createOpencodeProvider());
+
+      expect(headers).not.toHaveProperty("x-session-id");
+      expect(Object.keys(headers)).toContain("x-opencode-session");
+    });
+
+    it("ignores OPENCODE_SESSION_ID, which would share one id between Agent Sessions", () => {
       const originalSession = process.env.OPENCODE_SESSION_ID;
       try {
         process.env.OPENCODE_SESSION_ID = "custom-session-123";
-        const provider = createOpencodeProvider();
-        const headersFn = provider.headers as () => Record<string, string>;
-        expect(headersFn()["x-session-id"]).toBe("custom-session-123");
+        const headers = headersOf(createOpencodeProvider());
+        expect(headers["x-opencode-session"]).not.toBe("custom-session-123");
       } finally {
         if (originalSession === undefined) {
           delete process.env.OPENCODE_SESSION_ID;
@@ -234,6 +248,57 @@ describe("Built-in Providers & Registry", () => {
           process.env.OPENCODE_SESSION_ID = originalSession;
         }
       }
+    });
+
+    // The conformance suite calls the adapter directly, below defineProvider, so it never sees
+    // the base URL or the provider headers. This sends a recorded request through both.
+    it("sends the Go URL, the session header and the caller's user agent on the wire", async () => {
+      const provider = createOpencodeProvider();
+      const model = provider.getModels().find((m) => m.id === "deepseek-v4.1-flash");
+      expect(model).toBeDefined();
+      if (model === undefined) return;
+
+      await withCapturingFixtureFetch(
+        sseResponse(loadFixture("opencode/text-streaming.txt")),
+        async (captured) => {
+          const result = await provider
+            .stream(
+              model,
+              { messages: [{ role: "user", content: "Hello" }] },
+              { apiKey: "test-key", headers: { "user-agent": "coding-agent/9.9.9" } },
+            )
+            .result();
+
+          expect(result.finishReason.reason).toBe("end_turn");
+          expect(captured).toHaveLength(1);
+          const [request] = captured;
+          expect(request?.url).toBe("https://opencode.ai/inference/go/openai/v1/chat/completions");
+          expect(request?.headers["user-agent"]).toBe("coding-agent/9.9.9");
+          expect(request?.headers["x-opencode-session"]).toBeTruthy();
+          expect(request?.headers).not.toHaveProperty("x-session-id");
+        },
+      );
+    });
+
+    it("sends the same x-opencode-session on every request of one instance", async () => {
+      const provider = createOpencodeProvider();
+      const model = provider.getModels().find((m) => m.id === "deepseek-v4.1-flash");
+      if (model === undefined) throw new Error("deepseek-v4.1-flash is not in the catalogue");
+
+      await withCapturingFixtureFetch(
+        () => sseResponse(loadFixture("opencode/text-streaming.txt")),
+        async (captured) => {
+          for (let turn = 0; turn < 3; turn++) {
+            await provider
+              .stream(model, { messages: [{ role: "user", content: "Hello" }] }, { apiKey: "k" })
+              .result();
+          }
+
+          const sessions = captured.map((request) => request.headers["x-opencode-session"]);
+          expect(sessions).toHaveLength(3);
+          expect(new Set(sessions).size).toBe(1);
+        },
+      );
     });
   });
 

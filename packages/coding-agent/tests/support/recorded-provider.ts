@@ -1,6 +1,7 @@
 import { join } from "node:path";
 
 export interface SentRequest {
+  readonly url: string;
   readonly headers: Headers;
   readonly body: Record<string, unknown>;
   readonly signal: AbortSignal | undefined;
@@ -55,6 +56,7 @@ export function providerFetch(respond: Respond, sent: SentRequest[] = []): typeo
         input instanceof Request ? new Request(input, init) : new Request(input.toString(), init);
       const text = await raw.text();
       const request: SentRequest = {
+        url: raw.url,
         headers: raw.headers,
         body: text === "" ? {} : JSON.parse(text),
         signal: init?.signal ?? undefined,

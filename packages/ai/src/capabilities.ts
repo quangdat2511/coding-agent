@@ -78,6 +78,24 @@ export const XAI_CHAT_COMPLETIONS_CAPABILITIES: ModelCapabilities = Object.freez
   serverSideTools: false,
 });
 
+/**
+ * OpenCode Go Chat Completions gateway (ADR 0007), serving DeepSeek V4.1 Flash.
+ *
+ * - `parallelToolCallControl: false` — the gateway accepts `parallel_tool_calls` (HTTP 200) but
+ *   nothing shows it honours the flag, so it is not declared. Agent Core handles several Tool
+ *   Calls in one Model Turn.
+ * - `toolArgumentDelivery: "streamed"` — arguments arrive as several `arguments` fragments
+ *   (recorded fixture `opencode/tool-call.txt`).
+ * - `usageTiming: "final"` — usage arrives once, in the chunk that carries the finish reason.
+ */
+export const OPENCODE_GO_CHAT_COMPLETIONS_CAPABILITIES: ModelCapabilities = Object.freeze({
+  parallelToolCallControl: false,
+  cancellation: "client_abort_only",
+  toolArgumentDelivery: "streamed",
+  usageTiming: "final",
+  serverSideTools: false,
+});
+
 // ---------------------------------------------------------------------------
 // Per-model override mechanism & shared attacher
 // ---------------------------------------------------------------------------

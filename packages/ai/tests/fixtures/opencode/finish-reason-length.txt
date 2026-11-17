@@ -1,0 +1,16 @@
+data: {"id":"gw-2a5a3e22439a-7bc912","object":"chat.completion.chunk","created":1794815539,"model":"deepseek-v4.1-flash","choices":[{"index":0,"finish_reason":null,"delta":{"role":"assistant","content":""}}]}
+
+data: {"id":"gw-2a5a3e22439a-7bc912","object":"chat.completion.chunk","created":1794815539,"model":"deepseek-v4.1-flash","choices":[{"index":0,"finish_reason":null,"delta":{"reasoning_content":"We"}}]}
+
+data: {"id":"gw-2a5a3e22439a-7bc912","object":"chat.completion.chunk","created":1794815539,"model":"deepseek-v4.1-flash","choices":[{"index":0,"finish_reason":null,"delta":{"reasoning_content":" need answer ask"}}]}
+
+data: {"id":"gw-2a5a3e22439a-7bc912","object":"chat.completion.chunk","created":1794815539,"model":"deepseek-v4.1-flash","choices":[{"index":0,"finish_reason":null,"delta":{"reasoning_content":" \"Write a"}}]}
+
+data: {"id":"gw-2a5a3e22439a-7bc912","object":"chat.completion.chunk","created":1794815539,"model":"deepseek-v4.1-flash","choices":[{"index":0,"finish_reason":null,"delta":{"reasoning_content":" long story about a dragon.\""}}]}
+
+data: {"id":"gw-2a5a3e22439a-7bc912","object":"chat.completion.chunk","created":1794815539,"model":"deepseek-v4.1-flash","choices":[{"index":0,"finish_reason":null,"delta":{"reasoning_content":" Need write long"}}]}
+
+data: {"id":"gw-2a5a3e22439a-7bc912","object":"chat.completion.chunk","created":1794815539,"model":"deepseek-v4.1-flash","choices":[{"index":0,"finish_reason":"length","delta":{}}],"usage":{"prompt_tokens":38,"completion_tokens":16,"total_tokens":54,"prompt_tokens_details":{"cached_tokens":0},"completion_tokens_details":{"reasoning_tokens":16},"cost":0,"opencode":{"billing_source":"go","list_cost":0.0000306,"allowance":0.00001836,"tokens":{"input":38,"output":16,"reasoning":16,"cache_read":0,"cache_write_5m":0,"cache_write_1h":0}}}}
+
+data: [DONE]
+

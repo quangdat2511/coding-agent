@@ -52,7 +52,7 @@ import {
 //   - fixtureFamily: which fixture directory to use ("anthropic" | "openai")
 // ---------------------------------------------------------------------------
 
-type AdapterFamily = "anthropic" | "google" | "openai" | "openrouter" | "xai";
+type AdapterFamily = "anthropic" | "google" | "openai" | "opencode" | "openrouter" | "xai";
 
 interface ProviderEntry {
   id: string;
@@ -72,6 +72,7 @@ import {
   ANTHROPIC_MESSAGES_CAPABILITIES,
   GOOGLE_GENERATE_CONTENT_CAPABILITIES,
   OPENAI_CHAT_COMPLETIONS_CAPABILITIES,
+  OPENCODE_GO_CHAT_COMPLETIONS_CAPABILITIES,
   OPENROUTER_CHAT_COMPLETIONS_CAPABILITIES,
   XAI_CHAT_COMPLETIONS_CAPABILITIES,
 } from "../src/capabilities.ts";
@@ -94,6 +95,15 @@ const PROVIDERS: ProviderEntry[] = [
     capabilities: OPENAI_CHAT_COMPLETIONS_CAPABILITIES,
     streamFn: openaiStream,
     fixtureFamily: "openai",
+  },
+  // --- OpenCode Go (Chat Completions-compatible, ADR 0007) ---
+  {
+    id: "opencode",
+    label: "OpenCode Go (chat_completions)",
+    model: { id: "deepseek-v4.1-flash", name: "DeepSeek V4.1 Flash", provider: "opencode" },
+    capabilities: OPENCODE_GO_CHAT_COMPLETIONS_CAPABILITIES,
+    streamFn: openaiStream,
+    fixtureFamily: "opencode",
   },
   // --- OpenRouter (Chat Completions-compatible) ---
   {

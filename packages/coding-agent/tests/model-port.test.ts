@@ -5,6 +5,7 @@ import {
   GOOGLE_GENERATE_CONTENT_CAPABILITIES,
   type Model,
 } from "@coding-agent/ai";
+import { BUILD_INFO } from "../src/build-info.ts";
 import { createModelPort, type ModelPortConfig } from "../src/model-port.ts";
 import type { ProviderId } from "../src/run-args.ts";
 import { hang, replay, withProvider } from "./support/recorded-provider.ts";
@@ -194,6 +195,14 @@ const providers = [
     wire: chatCompletionsRequest,
   },
   {
+    provider: "opencode",
+    model: "deepseek-v4.1-flash",
+    credentialHeader: bearer,
+    // Go does not declare parallelToolCallControl, so the request is dropped as for Google.
+    disableParallel: null,
+    wire: chatCompletionsRequest,
+  },
+  {
     provider: "openrouter",
     model: "openai/gpt-4o-mini",
     credentialHeader: bearer,
@@ -255,6 +264,60 @@ describe("the request to disable parallel Tool Calls", () => {
         "tools",
       ]);
     });
+  });
+
+  it("is dropped for OpenCode Go, which does not declare it", async () => {
+    const port = createModelPort(configFor("opencode", "deepseek-v4.1-flash"));
+
+    await withProvider(replay("opencode/tool-call.txt"), async (sent) => {
+      await port.stream(context, request()).result();
+      expect(sent[0]?.body).not.toHaveProperty("parallel_tool_calls");
+    });
+  });
+});
+
+describe("the user agent a ModelPort sends", () => {
+  it.each([...providers])("names the Coding Agent and its version to $provider", async (target) => {
+    const port = createModelPort(configFor(target.provider, target.model));
+
+    await withProvider(replay(`${target.provider}/tool-call.txt`), async (sent) => {
+      await port.stream(context, request()).result();
+      expect(sent[0]?.headers.get("user-agent")).toBe(`coding-agent/${BUILD_INFO.version}`);
+    });
+  });
+});
+
+describe("the OpenCode Go request a ModelPort sends", () => {
+  it("goes to the Go gateway with the Coding Agent's version as its user agent", async () => {
+    const port = createModelPort(configFor("opencode", "deepseek-v4.1-flash"));
+
+    await withProvider(replay("opencode/tool-call.txt"), async (sent) => {
+      await port.stream(context, request()).result();
+      expect(sent[0]?.url).toBe("https://opencode.ai/inference/go/openai/v1/chat/completions");
+      expect(sent[0]?.headers.get("user-agent")).toBe(`coding-agent/${BUILD_INFO.version}`);
+      expect(sent[0]?.headers.get("x-opencode-session")).toBeTruthy();
+    });
+  });
+
+  // ADR 0007 §6: a per-turn id would defeat Go's prompt cache.
+  it("keeps one session id for every Model Turn and issues another to the next port", async () => {
+    const sessionsOf = async () => {
+      const port = createModelPort(configFor("opencode", "deepseek-v4.1-flash"));
+      let sessions: (string | null | undefined)[] = [];
+      await withProvider(replay("opencode/tool-call.txt"), async (sent) => {
+        await port.stream(context, request()).result();
+        await port.stream(context, request()).result();
+        sessions = sent.map((one) => one.headers.get("x-opencode-session"));
+      });
+      return sessions;
+    };
+
+    const first = await sessionsOf();
+    const second = await sessionsOf();
+    expect(first).toHaveLength(2);
+    expect(first[0]).toBeTruthy();
+    expect(first[1]).toBe(first[0]);
+    expect(second[0]).not.toBe(first[0]);
   });
 });
 

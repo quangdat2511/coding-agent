@@ -7,7 +7,7 @@ system to one provider.
 
 **Model Provider**:
 A service that fulfills model requests. The MVP providers are Anthropic, OpenRouter, OpenAI,
-Google, xAI, and OpenCode (OpenCode Zen).
+Google, xAI, and OpenCode (the OpenCode Go gateway).
 _Avoid_: LLM vendor, backend
 
 **Custom Provider**:
