@@ -215,8 +215,8 @@ files.
 | F3 | The oracle job of ADR 0005 §7 step 2 | The job completes on Modal and its harness-flaky tasks are listed |
 
 The oracle job is in the MVP because it receives no credential and no model spend, though it does
-cost Modal compute, so it is the one Harbor job that can prove the dataset pin, the Harbor pin, `uv --frozen`, and Modal access before the
-recorded job depends on all four.
+cost Modal compute, so it is the one Harbor job that can prove the job's dataset pin, the Harbor
+pin, `uv --frozen`, and Modal access before the recorded job depends on all four.
 
 ### 4. Join points
 
@@ -291,8 +291,9 @@ something works.
    the manifest. This is ADR 0005 §9 criterion 2.
 10. The adapter's tests pass in CI under `uv`. This is ADR 0005 §9 criterion 3.
 11. The oracle job has run on Modal and its harness-flaky tasks are recorded. This is the one tier-1
-    item that is not free: it needs a Modal account and pays compute for all 66 task environments,
-    three of them with an H100, though it uses no model and no credential.
+    item that is not free: it needs a Modal account and pays compute for one task environment per
+    task in the job's dataset, plus an H100 for each GPU task the dataset declares, though it uses
+    no model and no credential.
 12. ADR 0004 and ADR 0005 are marked `accepted`. This record marks them so; implementing against a
     proposed record invites re-litigating a five-package boundary decision mid-build.
 
@@ -303,6 +304,12 @@ only `verification_progress`, which stays without an emitter. Showing tool progr
 belongs to the projection of D4 ([CDA-82](https://datn-fit-hcmus.atlassian.net/browse/CDA-82)), which
 gives an executing Tool Call the latest output tail. ADR 0005 §4 still leaves both progress events
 out of `events.jsonl`.
+
+On 2026-11-17, [CDA-114](https://datn-fit-hcmus.atlassian.net/browse/CDA-114) amended this record:
+the evaluation dataset is a job parameter, and the counts a job reports derive from its task list,
+following [ADR 0008](./0008-evaluation-dataset-as-a-job-parameter.md). Item 11's task-environment
+count and its GPU count are therefore properties of the dataset the job names, not of this record.
+Track F's adapter and the record tooling take the dataset from the job configuration (ADR 0008 §5).
 
 ### 7. Tier 2: MVP evaluated
 

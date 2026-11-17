@@ -14,20 +14,24 @@ it. [The implementation order](./0006-implementation-order-and-mvp-completion-ch
 makes the choice the third item of the "MVP evaluated" checklist and warns that a cheap weak model
 produces a valid job that says nothing about the agent.
 
-Five facts bound the answer. The job runs 66 tasks, one attempt each, within 250 Model Turns and
-1,000 Tool Calls per task (protocol §5), so a per-task cost is multiplied by 66. The model must
-resolve through `ProviderDirectory.getModel`, which reads
-`packages/ai/src/providers/<provider>.models.json`, because an unlisted id is refused with exit 2
-before a session opens. `@coding-agent/ai` counts reasoning tokens but never requests a reasoning
-effort, so the job runs at each provider's default, while the published TerminalBench figures are
-produced at each vendor's maximum effort inside the vendor's own harness. No paid frontier account
-exists. And the job will be re-run, so the choice is judged per dollar of subscription rather than
-per token.
+Five facts bound the answer. The job runs one attempt over every task of its dataset, within 250
+Model Turns and 1,000 Tool Calls per task (protocol §5), so a per-task cost is multiplied by the
+job's task count, which its manifest derives from the dataset's task list rather than from a
+protocol constant ([ADR 0008](./0008-evaluation-dataset-as-a-job-parameter.md)); the cost figures
+below are computed at the default pin. The model must resolve through
+`ProviderDirectory.getModel`, which reads `packages/ai/src/providers/<provider>.models.json`,
+because an unlisted id is refused with exit 2 before a session opens. `@coding-agent/ai` counts
+reasoning tokens but never requests a reasoning effort, so the job runs at each provider's default,
+while the published TerminalBench
+figures are produced at each vendor's maximum effort inside the vendor's own harness. No paid
+frontier account exists. And the job will be re-run, so the choice is judged per dollar of
+subscription rather than per token.
 
-On [the Terminal-Bench leaderboard](https://www.tbench.ai/leaderboard) (66 tasks, five trials per
-row, read 2026-11-12): Claude Opus 5.5 65.8%, Claude Sonnet 5.5 63.9%, GPT-6.1 Sol 60.9%, Grok 4.7
-38.8%, GPT-5.6 Sol 38.5%, and Gemini 3.8 Flash 18.2% under mini-SWE-agent. No leaderboard row
-exists for the model this record chooses.
+On [the Terminal-Bench leaderboard](https://www.tbench.ai/leaderboard) as read 2026-11-12 (five
+trials per row on the 4.1.0 dataset, with the 4.0.0 score retained where no re-grade exists): Claude
+Opus 5.5 65.8%, Claude Sonnet 5.5 63.9%, GPT-6.1 Sol 60.9%, Grok 4.7 38.8%, GPT-5.6 Sol 38.5%, and
+Gemini 3.8 Flash 18.2% under mini-SWE-agent. No leaderboard row exists for the model this record
+chooses.
 
 Go's terms are quoted from [the Console Go documentation](https://opencode.ai/docs/console/go) and
 [the harnesses page](https://opencode.ai/docs/console/harnesses), both read 2026-11-12: $10 a month
@@ -99,9 +103,10 @@ Zen plan — with **`deepseek-v4.1-flash`**.
    not to make.
 
 4. **No second job on another model, for the MVP.** Protocol §7 permits additional jobs and never
-   pools their results, but a second job is a second 66-task run and a second set of task
-   environments, so it is an additive experiment rather than part of this effort. The subscription's
-   allowance is what makes such an experiment affordable later, without amending this record.
+   pools their results, but a second job is a second run over the dataset's task list and a second
+   set of task environments, so it is an additive experiment rather than part of this effort. The
+   subscription's allowance is what makes such an experiment affordable later, without amending this
+   record.
 
 5. **Long-session reliability is accepted as unmeasured, and made visible.** No independent
    long-horizon result exists for this model: it appears on no Terminal-Bench row, and a vendor
@@ -148,9 +153,10 @@ Zen plan — with **`deepseek-v4.1-flash`**.
 ## Considered options
 
 - **Claude Opus 5.5 or Sonnet 5.5 (65.8% and 63.9%).** The strongest measured models, and the only
-  ones that would support a capability claim. Rejected on budget and access: a 66-task job costs
-  roughly $150-950 depending on token burn, needs a paid Anthropic account on a tier above the entry
-  cap, and this harness cannot reproduce the maximum effort those scores used.
+  ones that would support a capability claim. Rejected on budget and access: a full-dataset job at
+  the default pin's task count costs roughly $150-950 depending on token burn, needs a paid
+  Anthropic account on a tier above the entry cap, and this harness cannot reproduce the maximum
+  effort those scores used.
 - **GPT-6.1 Sol (60.9%).** The same objection: a capability claim would need a paid account, and the
   ranking gap to the leaders is within noise at one attempt per task.
 - **Gemini 3.8 Flash.** Admissible without amending any record, free for a smoke job, and
@@ -200,8 +206,8 @@ Zen plan — with **`deepseek-v4.1-flash`**.
 - **The allowance is a subscription**, so an incomplete or invalid job spends allowance rather than
   dollars; the smoke job still runs first, because a rerun inside the same month competes for the
   same window.
-- The recorded job reports the profile it ran under and the date; a reader comparing two jobs
-  compares two manifests, not two narratives.
+- The recorded job reports the profile, the dataset pin and the date it ran under; a reader
+  comparing two jobs compares two manifests, not two narratives.
 
 ## Amendments
 
@@ -212,3 +218,11 @@ On 2026-11-17, [CDA-83](https://datn-fit-hcmus.atlassian.net/browse/CDA-83) amen
   records any status rather than assuming 429. An error that Go sends after it answered HTTP 200
   has no status, so a failure of that kind is never rerun-eligible. The
   [ADR 0005](./0005-terminalbench-evaluation-protocol.md) Dependencies note has the full rule.
+
+On 2026-11-17, [CDA-114](https://datn-fit-hcmus.atlassian.net/browse/CDA-114) amended this record:
+
+- **Dataset and cost figures**: the evaluation dataset is a job parameter, so the per-job cost
+  figures above are stated per job at the default pin and scale with the job's task list
+  ([ADR 0008](./0008-evaluation-dataset-as-a-job-parameter.md)). The provider and model choice is
+  unchanged and applies to any admissible dataset. A job on another dataset is a separate
+  experiment, and its result is not pooled with this one's.
