@@ -82,7 +82,7 @@ describe("parsing a documented invocation", () => {
     });
   });
 
-  it.each(["anthropic", "openrouter", "openai", "google", "xai"])(
+  it.each(["anthropic", "openrouter", "openai", "google", "xai", "opencode"])(
     "accepts the provider %s",
     (provider) => {
       expect(parseRunArgs([...without("--provider"), "--provider", provider], cwd)).toMatchObject({
@@ -135,7 +135,7 @@ describe("refusing a bad invocation", () => {
       argv: [...without("--provider"), "--provider", "mistral"],
       flag: "--provider",
       message:
-        '--provider must be one of anthropic, openrouter, openai, google, xai, not "mistral"',
+        '--provider must be one of anthropic, openrouter, openai, google, xai, opencode, not "mistral"',
     },
     {
       name: "an unknown profile",

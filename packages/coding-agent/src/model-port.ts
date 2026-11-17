@@ -1,5 +1,6 @@
 import type { ModelPort } from "@coding-agent/agent-core";
 import { createProviderDirectory, type StreamOptions } from "@coding-agent/ai";
+import { BUILD_INFO } from "./build-info.ts";
 import type { RunConfig } from "./run-config.ts";
 
 export type ModelPortConfig = Pick<
@@ -22,6 +23,9 @@ export function createModelPort({
     ...(sampling.maxOutputTokens === null ? {} : { maxTokens: sampling.maxOutputTokens }),
     ...(sampling.temperature === null ? {} : { temperature: sampling.temperature }),
     maxRetries: transportRetryBound,
+    // The Go gateway asks every client to name itself (ADR 0007 §6). The provider adapters merge
+    // these headers over their own, so the caller that knows its version supplies the value.
+    headers: { "user-agent": `coding-agent/${BUILD_INFO.version}` },
   };
 
   return {

@@ -1,0 +1,22 @@
+data: {"id":"gw-2aaead389ab9-60304a","object":"chat.completion.chunk","created":1794815535,"model":"deepseek-v4.1-flash","choices":[{"index":0,"finish_reason":null,"delta":{"role":"assistant","content":""}}]}
+
+data: {"id":"gw-2aaead389ab9-60304a","object":"chat.completion.chunk","created":1794815535,"model":"deepseek-v4.1-flash","choices":[{"index":0,"finish_reason":null,"delta":{"content":"I"}}]}
+
+data: {"id":"gw-2aaead389ab9-60304a","object":"chat.completion.chunk","created":1794815535,"model":"deepseek-v4.1-flash","choices":[{"index":0,"finish_reason":null,"delta":{"content":"'ll check the weather in"}}]}
+
+data: {"id":"gw-2aaead389ab9-60304a","object":"chat.completion.chunk","created":1794815535,"model":"deepseek-v4.1-flash","choices":[{"index":0,"finish_reason":null,"delta":{"content":" Tokyo for you."}}]}
+
+data: {"id":"gw-2aaead389ab9-60304a","object":"chat.completion.chunk","created":1794815535,"model":"deepseek-v4.1-flash","choices":[{"index":0,"finish_reason":null,"delta":{"tool_calls":[{"index":0,"id":"call_6fe7596ceff64b1a88c53ce7","type":"function","function":{"name":"get_weather","arguments":""}}]}}]}
+
+data: {"id":"gw-2aaead389ab9-60304a","object":"chat.completion.chunk","created":1794815535,"model":"deepseek-v4.1-flash","choices":[{"index":0,"finish_reason":null,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"city\":\""}}]}}]}
+
+data: {"id":"gw-2aaead389ab9-60304a","object":"chat.completion.chunk","created":1794815535,"model":"deepseek-v4.1-flash","choices":[{"index":0,"finish_reason":null,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"Tokyo"}}]}}]}
+
+data: {"id":"gw-2aaead389ab9-60304a","object":"chat.completion.chunk","created":1794815535,"model":"deepseek-v4.1-flash","choices":[{"index":0,"finish_reason":null,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\""}}]}}]}
+
+data: {"id":"gw-2aaead389ab9-60304a","object":"chat.completion.chunk","created":1794815535,"model":"deepseek-v4.1-flash","choices":[{"index":0,"finish_reason":null,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"}"}}]}}]}
+
+data: {"id":"gw-2aaead389ab9-60304a","object":"chat.completion.chunk","created":1794815535,"model":"deepseek-v4.1-flash","choices":[{"index":0,"finish_reason":"tool_calls","delta":{}}],"usage":{"prompt_tokens":314,"completion_tokens":49,"total_tokens":363,"prompt_tokens_details":{"cached_tokens":0},"completion_tokens_details":{"reasoning_tokens":0},"cost":0,"opencode":{"billing_source":"go","list_cost":0.000153,"allowance":0.0000918,"tokens":{"input":314,"output":49,"reasoning":0,"cache_read":0,"cache_write_5m":0,"cache_write_1h":0}}}}
+
+data: [DONE]
+

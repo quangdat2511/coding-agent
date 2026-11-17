@@ -1,0 +1,78 @@
+data: {"id":"gw-2a5a3e22439a-7bc601","object":"chat.completion.chunk","created":1794815532,"model":"deepseek-v4.1-flash","choices":[{"index":0,"finish_reason":null,"delta":{"role":"assistant","content":""}}]}
+
+data: {"id":"gw-2a5a3e22439a-7bc601","object":"chat.completion.chunk","created":1794815532,"model":"deepseek-v4.1-flash","choices":[{"index":0,"finish_reason":null,"delta":{"reasoning_content":"We"}}]}
+
+data: {"id":"gw-2a5a3e22439a-7bc601","object":"chat.completion.chunk","created":1794815532,"model":"deepseek-v4.1-flash","choices":[{"index":0,"finish_reason":null,"delta":{"reasoning_content":" need answer. User asks:"}}]}
+
+data: {"id":"gw-2a5a3e22439a-7bc601","object":"chat.completion.chunk","created":1794815532,"model":"deepseek-v4.1-flash","choices":[{"index":0,"finish_reason":null,"delta":{"reasoning_content":" \"Say hello in one short"}}]}
+
+data: {"id":"gw-2a5a3e22439a-7bc601","object":"chat.completion.chunk","created":1794815532,"model":"deepseek-v4.1-flash","choices":[{"index":0,"finish_reason":null,"delta":{"reasoning_content":" sentence.\" Need comply"}}]}
+
+data: {"id":"gw-2a5a3e22439a-7bc601","object":"chat.completion.chunk","created":1794815532,"model":"deepseek-v4.1-flash","choices":[{"index":0,"finish_reason":null,"delta":{"reasoning_content":" exactly one short"}}]}
+
+data: {"id":"gw-2a5a3e22439a-7bc601","object":"chat.completion.chunk","created":1794815532,"model":"deepseek-v4.1-flash","choices":[{"index":0,"finish_reason":null,"delta":{"reasoning_content":" sentence. \""}}]}
+
+data: {"id":"gw-2a5a3e22439a-7bc601","object":"chat.completion.chunk","created":1794815532,"model":"deepseek-v4.1-flash","choices":[{"index":0,"finish_reason":null,"delta":{"reasoning_content":"Hello!"}}]}
+
+data: {"id":"gw-2a5a3e22439a-7bc601","object":"chat.completion.chunk","created":1794815532,"model":"deepseek-v4.1-flash","choices":[{"index":0,"finish_reason":null,"delta":{"reasoning_content":" I"}}]}
+
+data: {"id":"gw-2a5a3e22439a-7bc601","object":"chat.completion.chunk","created":1794815532,"model":"deepseek-v4.1-flash","choices":[{"index":0,"finish_reason":null,"delta":{"reasoning_content":" hope"}}]}
+
+data: {"id":"gw-2a5a3e22439a-7bc601","object":"chat.completion.chunk","created":1794815532,"model":"deepseek-v4.1-flash","choices":[{"index":0,"finish_reason":null,"delta":{"reasoning_content":" you're having a"}}]}
+
+data: {"id":"gw-2a5a3e22439a-7bc601","object":"chat.completion.chunk","created":1794815532,"model":"deepseek-v4.1-flash","choices":[{"index":0,"finish_reason":null,"delta":{"reasoning_content":" great"}}]}
+
+data: {"id":"gw-2a5a3e22439a-7bc601","object":"chat.completion.chunk","created":1794815532,"model":"deepseek-v4.1-flash","choices":[{"index":0,"finish_reason":null,"delta":{"reasoning_content":" day.\" That's two"}}]}
+
+data: {"id":"gw-2a5a3e22439a-7bc601","object":"chat.completion.chunk","created":1794815532,"model":"deepseek-v4.1-flash","choices":[{"index":0,"finish_reason":null,"delta":{"reasoning_content":" sentences? Actually"}}]}
+
+data: {"id":"gw-2a5a3e22439a-7bc601","object":"chat.completion.chunk","created":1794815532,"model":"deepseek-v4.1-flash","choices":[{"index":0,"finish_reason":null,"delta":{"reasoning_content":" \"Hello!\""}}]}
+
+data: {"id":"gw-2a5a3e22439a-7bc601","object":"chat.completion.chunk","created":1794815532,"model":"deepseek-v4.1-flash","choices":[{"index":0,"finish_reason":null,"delta":{"reasoning_content":" is"}}]}
+
+data: {"id":"gw-2a5a3e22439a-7bc601","object":"chat.completion.chunk","created":1794815532,"model":"deepseek-v4.1-flash","choices":[{"index":0,"finish_reason":null,"delta":{"reasoning_content":" sentence, second"}}]}
+
+data: {"id":"gw-2a5a3e22439a-7bc601","object":"chat.completion.chunk","created":1794815532,"model":"deepseek-v4.1-flash","choices":[{"index":0,"finish_reason":null,"delta":{"reasoning_content":" is sentence"}}]}
+
+data: {"id":"gw-2a5a3e22439a-7bc601","object":"chat.completion.chunk","created":1794815532,"model":"deepseek-v4.1-flash","choices":[{"index":0,"finish_reason":null,"delta":{"reasoning_content":". Need one short"}}]}
+
+data: {"id":"gw-2a5a3e22439a-7bc601","object":"chat.completion.chunk","created":1794815532,"model":"deepseek-v4.1-flash","choices":[{"index":0,"finish_reason":null,"delta":{"reasoning_content":" sentence. \""}}]}
+
+data: {"id":"gw-2a5a3e22439a-7bc601","object":"chat.completion.chunk","created":1794815532,"model":"deepseek-v4.1-flash","choices":[{"index":0,"finish_reason":null,"delta":{"reasoning_content":"Hello,"}}]}
+
+data: {"id":"gw-2a5a3e22439a-7bc601","object":"chat.completion.chunk","created":1794815532,"model":"deepseek-v4.1-flash","choices":[{"index":0,"finish_reason":null,"delta":{"reasoning_content":" and"}}]}
+
+data: {"id":"gw-2a5a3e22439a-7bc601","object":"chat.completion.chunk","created":1794815532,"model":"deepseek-v4.1-flash","choices":[{"index":0,"finish_reason":null,"delta":{"reasoning_content":" welcome"}}]}
+
+data: {"id":"gw-2a5a3e22439a-7bc601","object":"chat.completion.chunk","created":1794815532,"model":"deepseek-v4.1-flash","choices":[{"index":0,"finish_reason":null,"delta":{"reasoning_content":"!\""}}]}
+
+data: {"id":"gw-2a5a3e22439a-7bc601","object":"chat.completion.chunk","created":1794815532,"model":"deepseek-v4.1-flash","choices":[{"index":0,"finish_reason":null,"delta":{"reasoning_content":" One"}}]}
+
+data: {"id":"gw-2a5a3e22439a-7bc601","object":"chat.completion.chunk","created":1794815532,"model":"deepseek-v4.1-flash","choices":[{"index":0,"finish_reason":null,"delta":{"reasoning_content":" sentence? It"}}]}
+
+data: {"id":"gw-2a5a3e22439a-7bc601","object":"chat.completion.chunk","created":1794815532,"model":"deepseek-v4.1-flash","choices":[{"index":0,"finish_reason":null,"delta":{"reasoning_content":" has"}}]}
+
+data: {"id":"gw-2a5a3e22439a-7bc601","object":"chat.completion.chunk","created":1794815532,"model":"deepseek-v4.1-flash","choices":[{"index":0,"finish_reason":null,"delta":{"reasoning_content":" one"}}]}
+
+data: {"id":"gw-2a5a3e22439a-7bc601","object":"chat.completion.chunk","created":1794815532,"model":"deepseek-v4.1-flash","choices":[{"index":0,"finish_reason":null,"delta":{"reasoning_content":" sentence with"}}]}
+
+data: {"id":"gw-2a5a3e22439a-7bc601","object":"chat.completion.chunk","created":1794815532,"model":"deepseek-v4.1-flash","choices":[{"index":0,"finish_reason":null,"delta":{"reasoning_content":" exclamation. Good. Need"}}]}
+
+data: {"id":"gw-2a5a3e22439a-7bc601","object":"chat.completion.chunk","created":1794815532,"model":"deepseek-v4.1-flash","choices":[{"index":0,"finish_reason":null,"delta":{"reasoning_content":" maybe just"}}]}
+
+data: {"id":"gw-2a5a3e22439a-7bc601","object":"chat.completion.chunk","created":1794815532,"model":"deepseek-v4.1-flash","choices":[{"index":0,"finish_reason":null,"delta":{"reasoning_content":" \"Hello there"}}]}
+
+data: {"id":"gw-2a5a3e22439a-7bc601","object":"chat.completion.chunk","created":1794815532,"model":"deepseek-v4.1-flash","choices":[{"index":0,"finish_reason":null,"delta":{"reasoning_content":"!\""}}]}
+
+data: {"id":"gw-2a5a3e22439a-7bc601","object":"chat.completion.chunk","created":1794815532,"model":"deepseek-v4.1-flash","choices":[{"index":0,"finish_reason":null,"delta":{"reasoning_content":" One"}}]}
+
+data: {"id":"gw-2a5a3e22439a-7bc601","object":"chat.completion.chunk","created":1794815532,"model":"deepseek-v4.1-flash","choices":[{"index":0,"finish_reason":null,"delta":{"reasoning_content":" short sentence. Final"}}]}
+
+data: {"id":"gw-2a5a3e22439a-7bc601","object":"chat.completion.chunk","created":1794815532,"model":"deepseek-v4.1-flash","choices":[{"index":0,"finish_reason":null,"delta":{"reasoning_content":". \n"}}]}
+
+data: {"id":"gw-2a5a3e22439a-7bc601","object":"chat.completion.chunk","created":1794815532,"model":"deepseek-v4.1-flash","choices":[{"index":0,"finish_reason":null,"delta":{"content":"Hello, world!"}}]}
+
+data: {"id":"gw-2a5a3e22439a-7bc601","object":"chat.completion.chunk","created":1794815532,"model":"deepseek-v4.1-flash","choices":[{"index":0,"finish_reason":"stop","delta":{}}],"usage":{"prompt_tokens":37,"completion_tokens":93,"total_tokens":130,"prompt_tokens_details":{"cached_tokens":0},"completion_tokens_details":{"reasoning_tokens":88},"cost":0,"opencode":{"billing_source":"go","list_cost":0.0001227,"allowance":0.00007362,"tokens":{"input":37,"output":93,"reasoning":88,"cache_read":0,"cache_write_5m":0,"cache_write_1h":0}}}}
+
+data: [DONE]
+

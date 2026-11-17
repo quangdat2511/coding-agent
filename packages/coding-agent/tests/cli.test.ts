@@ -290,7 +290,7 @@ describe("the coding-agent executable", () => {
       name: "an unknown provider",
       args: ["run", ...required.slice(0, 2), ...required.slice(4), "--provider", "mistral"],
       expected:
-        '--provider must be one of anthropic, openrouter, openai, google, xai, not "mistral"',
+        '--provider must be one of anthropic, openrouter, openai, google, xai, opencode, not "mistral"',
     },
     {
       name: "an approval policy of ask",
@@ -318,6 +318,12 @@ describe("the coding-agent executable", () => {
       name: "an unknown model",
       flags: { "--model": "no-such-model" },
       expected: '--model "no-such-model" is not a known anthropic model',
+    },
+    {
+      name: "an unknown opencode model",
+      flags: { "--provider": "opencode", "--model": "no-such-model" },
+      env: { OPENCODE_API_KEY: secret },
+      expected: '--model "no-such-model" is not a known opencode model',
     },
     {
       name: "a missing credential",

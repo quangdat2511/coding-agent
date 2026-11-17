@@ -50,6 +50,7 @@ export const SAMPLING_BY_PROVIDER: Readonly<Record<ProviderId, SamplingSettings>
   openai: Object.freeze({ maxOutputTokens: null, temperature: null }),
   openrouter: Object.freeze({ maxOutputTokens: null, temperature: null }),
   xai: Object.freeze({ maxOutputTokens: null, temperature: null }),
+  opencode: Object.freeze({ maxOutputTokens: null, temperature: null }),
 });
 
 export const TRANSPORT_RETRY_BOUND = 2;
