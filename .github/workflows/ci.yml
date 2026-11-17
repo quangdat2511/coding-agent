@@ -118,6 +118,47 @@ jobs:
       - name: Build workspace packages
         run: bun run build
 
+  # The Harbor adapter is the repository's only Python project. Biome, the import boundary check
+  # and `bun --filter` do not cover it, so this job is its only check (ADR 0005, Consequences).
+  terminalbench-adapter:
+    name: TerminalBench adapter
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    # The tests parse the manifest that the `artifact` job builds and uploads.
+    needs: [artifact]
+
+    # Every step runs in the repository root, as ADR 0005 §7 runs Harbor jobs.
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # `uv run --project` installs the Python version in evaluation/terminalbench/.python-version.
+      - name: Set up uv
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: "0.13.8"
+
+      - name: Download the built manifest
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: artifact-manifest
+          path: ${{ runner.temp }}/artifact
+
+      # `--frozen` installs from uv.lock without comparing it with pyproject.toml, so this step is
+      # what fails when the lock file is out of date.
+      - name: Check that uv.lock matches pyproject.toml
+        run: uv lock --project evaluation/terminalbench --check
+
+      - name: Run the adapter tests
+        env:
+          CODING_AGENT_ARTIFACT_DIR: ${{ runner.temp }}/artifact
+        run: >-
+          uv run --project evaluation/terminalbench --frozen
+          python -m unittest discover --start-directory evaluation/terminalbench/tests
+          --top-level-directory evaluation/terminalbench --verbose
+
   artifact:
     name: Evaluation artifact
     runs-on: ubuntu-24.04

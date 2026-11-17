@@ -1,0 +1,14 @@
+[project]
+name = "coding-agent-terminalbench"
+version = "0.0.1"
+description = "Harbor adapter that runs the Coding Agent artifact on TerminalBench (ADR 0005 §6)"
+requires-python = ">=3.12"
+# ADR 0005 §1 and §6: Harbor is the only direct dependency, pinned exactly. The tests use the
+# standard library's unittest, so no test runner is added.
+dependencies = ["harbor[modal]==0.23.0"]
+
+# The project is installed into its environment, so Harbor can import the agent class from its
+# import path when `uv run --project evaluation/terminalbench` starts in the repository root.
+[build-system]
+requires = ["uv_build>=0.13.8,<0.14"]
+build-backend = "uv_build"
