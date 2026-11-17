@@ -21,8 +21,13 @@ from harbor.models.agent.context import AgentContext
 from pydantic import Field, field_validator
 
 from coding_agent_terminalbench.manifest import ArtifactManifest, load_manifest
+from coding_agent_terminalbench.trial_context import TRAJECTORY_FILE, populate_trial_context
 
 AGENT_NAME = "coding-agent"
+
+# ADR 0005 §6 runs `coding-agent run --output-dir <environment_logs_dir>/coding-agent`, so the
+# three files of a run arrive in this directory of the logs that Harbor downloads.
+RUN_DIR_NAME = "coding-agent"
 
 
 class CodingAgentOptions(InstalledAgentOptions):
@@ -137,3 +142,28 @@ class CodingAgent(BaseInstalledAgent):
         context: AgentContext,
     ) -> None:
         raise NotImplementedError("CDA-89 implements run(): execute the agent and map exit codes")
+
+    @override
+    def populate_context_post_run(self, context: AgentContext) -> None:
+        """Fills the trial context and writes the ATIF trajectory (ADR 0005 §6).
+
+        Harbor calls this once it has downloaded the agent's logs, and only while the context is
+        empty. It runs after the trial, so a log that cannot be read must not turn a finished trial
+        into a harness exception: the problem is reported in the job log, and the context keeps
+        whatever could be filled in.
+        """
+        try:
+            populate_trial_context(
+                context,
+                self.logs_dir / RUN_DIR_NAME,
+                trajectory_path=self.logs_dir / TRAJECTORY_FILE,
+                agent_name=AGENT_NAME,
+                agent_version=self.version(),
+                artifact_sha256={
+                    executable.file: executable.sha256 for executable in self.manifest.executables
+                },
+            )
+        except Exception as error:
+            self.logger.warning(
+                f"no trial context or trajectory was written: {error}", exc_info=True
+            )
