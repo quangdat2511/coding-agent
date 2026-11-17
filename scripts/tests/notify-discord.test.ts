@@ -381,11 +381,14 @@ describe("run", () => {
     archiveStatus?: number;
     // The body of that answer, as Discord sends it.
     archiveError?: string;
+    // The bot API's answers to GET requests, by path, as a status and a JSON body.
+    botReads?: Record<string, [number, unknown]>;
   };
 
   const API = "https://api.github.test/repos/acme/repo";
   const WEBHOOK = "https://discord.test/api/webhooks/1/token";
-  const CHANNELS = "https://discord.com/api/v10/channels";
+  const BOT_API = "https://discord.com/api/v10";
+  const CHANNELS = `${BOT_API}/channels`;
 
   function artifact(id: number, createdAt: string, expired = false): Artifact {
     return { id, name: "discord-thread-pr-7", expired, created_at: createdAt };
@@ -408,6 +411,11 @@ describe("run", () => {
         calls.push({ method, url, body, headers: init.headers });
         if (url.startsWith("https://discord.test/")) {
           return new Response(JSON.stringify({ id: "1", channel_id: "4242" }), { status: 200 });
+        }
+        if (url.startsWith(`${BOT_API}/`) && method === "GET") {
+          const read = fixture.botReads?.[url.slice(BOT_API.length)];
+          if (read === undefined) return new Response("unexpected request", { status: 500 });
+          return Response.json(read[1], { status: read[0] });
         }
         if (url.startsWith(`${CHANNELS}/`)) {
           const body = fixture.archiveError ?? "{}";
@@ -545,7 +553,9 @@ describe("run", () => {
     });
 
     const result = await run({ ...env, DISCORD_BOT_TOKEN: "bot-token" }, dependencies);
-    expect(result).toBe("Posted to thread 999.\n::warning::Discord did not close post 999: 403.");
+    expect(result).toStartWith(
+      "Posted to thread 999.\n::warning::Discord did not close post 999: 403.\n",
+    );
     expect(result).not.toContain("bot-token");
     expect(calls.some((call) => call.url === `${WEBHOOK}?thread_id=999`)).toBe(true);
   });
@@ -557,9 +567,53 @@ describe("run", () => {
       archiveError: JSON.stringify({ message: "Missing\nPermissions", code: 50013 }),
     });
 
-    expect(await run({ ...env, DISCORD_BOT_TOKEN: "bot-token" }, dependencies)).toBe(
-      "Posted to thread 999.\n::warning::Discord did not close post 999: 403, code 50013 (Missing Permissions).",
+    expect(await run({ ...env, DISCORD_BOT_TOKEN: "bot-token" }, dependencies)).toStartWith(
+      "Posted to thread 999.\n::warning::Discord did not close post 999: 403, code 50013 (Missing Permissions).\n",
     );
+  });
+
+  it("names the bot, its servers and its access to the post after a refused close", async () => {
+    const { calls, dependencies, env } = await setup(event({ action: "closed" }), {
+      comments: [[{ user: { login: "github-actions[bot]" }, body: marker(record()) }]],
+      archiveStatus: 403,
+      archiveError: JSON.stringify({ message: "Missing Access", code: 50001 }),
+      botReads: {
+        "/users/@me": [200, { id: "555", username: "Other\nbot" }],
+        "/users/@me/guilds": [200, [{ id: "1", name: "Team A" }]],
+        "/channels/999": [403, { message: "Missing Access", code: 50001 }],
+      },
+    });
+
+    expect(await run({ ...env, DISCORD_BOT_TOKEN: "bot-token" }, dependencies)).toBe(
+      [
+        "Posted to thread 999.",
+        "::warning::Discord did not close post 999: 403, code 50001 (Missing Access).",
+        "The token belongs to bot Other bot (555).",
+        "The bot is in: Team A (1).",
+        "Discord did not tell whether the bot can read post 999: 403, code 50001 (Missing Access).",
+      ].join("\n"),
+    );
+    const reads = calls.filter((call) => call.method === "GET" && call.url.startsWith(BOT_API));
+    const signed = reads.map((call) => JSON.stringify(call.headers).includes("Bot bot-token"));
+    expect(signed).toEqual([true, true, true]);
+  });
+
+  it("reports a bot that can read the post and is in no server", async () => {
+    const { dependencies, env } = await setup(event({ action: "closed" }), {
+      comments: [[{ user: { login: "github-actions[bot]" }, body: marker(record()) }]],
+      archiveStatus: 403,
+      botReads: {
+        "/users/@me/guilds": [200, []],
+        "/channels/999": [200, { id: "999", parent_id: "77", guild_id: "1" }],
+      },
+    });
+
+    const lines = (await run({ ...env, DISCORD_BOT_TOKEN: "bot-token" }, dependencies)).split("\n");
+    expect(lines.slice(2)).toEqual([
+      "Discord did not tell which bot the token belongs to: 500.",
+      "The bot is in no server.",
+      "The bot can read post 999 in channel 77 of server 1.",
+    ]);
   });
 
   it("does not close the post for a note that is not a merge or a close", async () => {
