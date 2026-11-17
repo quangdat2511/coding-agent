@@ -301,6 +301,7 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
         observed,
       };
       abortEffects.abort();
+      startGraceTimer();
     });
   }
 

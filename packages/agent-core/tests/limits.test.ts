@@ -6,6 +6,7 @@ import {
   type VerificationDecision,
 } from "../src/index.ts";
 import {
+  abortIgnoringTool,
   collect,
   continueWith,
   createTestKit,
@@ -210,6 +211,50 @@ describe("Session Limits", () => {
       data: { kind: "maxDurationMs", limit: 10, observed: 10 },
     });
     expect(result).toMatchObject({ outcome: "failed", failure: { code: "LIMIT_EXCEEDED" } });
+  });
+
+  it("settles with LIMIT_EXCEEDED after grace when an in-flight Tool Call ignores abort", async () => {
+    const stubborn = abortIgnoringTool();
+    let executionSignal: AbortSignal | undefined;
+    const tool: ExecutableTool = {
+      ...stubborn,
+      execute(prepared, context) {
+        executionSignal = context.signal;
+        return stubborn.execute(prepared, context);
+      },
+    };
+    const { session, clock } = openTestSession({
+      tools: [tool],
+      approvalPolicy: "auto-approve",
+      model: {
+        turns: [toolCallTurn({ toolCallId: "call-1", name: "stubborn", input: {} })],
+      },
+      limits: { maxDurationMs: 10, cancellationGraceMs: 25 },
+    });
+
+    await session.dispatch({ type: "start", task });
+    await waitForEvent(session, "tool_execution_started");
+    clock.advance(10);
+    expect(executionSignal?.aborted).toBe(true);
+    expect(session.snapshot().phase).toBe("executing_tool");
+
+    clock.advance(25);
+    const settledAfterGrace = session.snapshot().phase === "failed";
+    if (!settledAfterGrace) stubborn.release();
+    const result = await session.result();
+    stubborn.release();
+    const events = await collect(session.events());
+
+    expect(settledAfterGrace).toBe(true);
+    expect(events.find((event) => event.type === "runtime_limit_reached")).toMatchObject({
+      data: { kind: "maxDurationMs", limit: 10, observed: 10 },
+    });
+    expect(result).toMatchObject({
+      outcome: "failed",
+      failure: { code: "LIMIT_EXCEEDED" },
+      partialChangesPossible: true,
+    });
+    expect(events.at(-1)?.type).toBe("session_settled");
   });
 
   it("excludes ready and awaiting_approval time from active duration", async () => {
