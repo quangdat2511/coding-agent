@@ -186,23 +186,25 @@ describe("Built-in Providers & Registry", () => {
       }
     });
 
-    it("should contain 36 models adhering to Model interface", () => {
-      const provider = createOpencodeProvider();
-      const models = provider.getModels();
+    // The catalogue lists only models the Go gateway serves (its /models listing, 2026-11-17), so
+    // `--model` refuses an id Go would reject at request time. Zen-only ids were removed.
+    it("lists only models the Go gateway serves, adhering to the Model interface", () => {
+      const models = createOpencodeProvider().getModels();
 
-      expect(models.length).toBe(36);
       for (const model of models) {
         expect(model.id).toBeTruthy();
         expect(model.name).toBeTruthy();
         expect(model.provider).toBe("opencode");
       }
+      expect(models.map((m) => m.id).sort()).toEqual(["deepseek-v4-pro", "deepseek-v4.1-flash"]);
+    });
 
-      const modelIds = new Set(models.map((m) => m.id));
-      expect(modelIds.has("deepseek-v4-flash")).toBe(true);
-      expect(modelIds.has("deepseek-v4.1-flash")).toBe(true);
-      expect(modelIds.has("gpt-5")).toBe(true);
-      expect(modelIds.has("qwen3.6-plus")).toBe(true);
-      expect(modelIds.has("big-pickle")).toBe(true);
+    // ADR 0007 Consequences: free-tier models are served only inside the OpenCode client, and every
+    // other harness receives HTTP 403.
+    it("lists no free-tier model, which an external harness cannot use", () => {
+      const models = createOpencodeProvider().getModels();
+
+      expect(models.filter((m) => m.id.endsWith("-free"))).toEqual([]);
     });
 
     // The provider's headers are a function, so each call is what one request would send.
@@ -414,9 +416,9 @@ describe("Built-in Providers & Registry", () => {
     it("should find models across providers", () => {
       const models = createProviderDirectory();
 
-      const opencodeModel = models.getModel("opencode", "gpt-5");
+      const opencodeModel = models.getModel("opencode", "deepseek-v4.1-flash");
       expect(opencodeModel).toBeDefined();
-      expect(opencodeModel?.name).toBe("GPT-5");
+      expect(opencodeModel?.name).toBe("DeepSeek V4.1 Flash");
 
       const openaiModel = models.getModel("openai", "gpt-4o");
       expect(openaiModel).toBeDefined();
