@@ -87,6 +87,49 @@ class RunLogTest(unittest.TestCase):
             read.events[6].data["result"]["content"], "before\u2028middle\u0085after"
         )
 
+    def test_a_last_line_cut_inside_a_character_is_dropped(self) -> None:
+        self.read(log=truncated_events(), result=None)
+        with (self.output_dir / "events.jsonl").open("ab") as file:
+            # The process died while appending a Tool Result with Vietnamese output, so the last
+            # byte of a multi byte character never reached the file.
+            file.write(
+                '{"schemaVersion": 1, "sessionId": "session-1", "data": "Tiế'.encode("utf-8")[:-1]
+            )
+
+        log = load_run_log(self.output_dir)
+
+        self.assertEqual(len(log.events), 15)
+        self.assertTrue(log.truncated)
+
+    def test_a_damaged_line_before_the_last_event_is_refused(self) -> None:
+        log = complete_events()
+        log[4] = {"schemaVersion": 1, "type": "tool_call_queued"}
+        with self.assertRaisesRegex(
+            RunLogError, r"events\.jsonl line 5 does not have the Session Event envelope"
+        ):
+            self.read(log=log)
+
+    def test_a_line_that_is_not_json_before_the_last_event_is_refused(self) -> None:
+        self.read()
+        path = self.output_dir / "events.jsonl"
+        lines = path.read_text(encoding="utf-8").split("\n")
+        lines.insert(1, "{oops")
+        path.write_text("\n".join(lines), encoding="utf-8")
+
+        with self.assertRaisesRegex(
+            RunLogError, r"events\.jsonl line 2 is not a whole Session Event"
+        ):
+            load_run_log(self.output_dir)
+
+    def test_invalid_utf8_in_run_json_is_refused(self) -> None:
+        write_run_files(self.output_dir, record=None)
+        (self.output_dir / "run.json").write_bytes(
+            b'{"schemaVersion": 1, "systemPrompt": "Ti\xff"}'
+        )
+
+        with self.assertRaisesRegex(RunLogError, r"run\.json is not valid UTF-8"):
+            load_run_log(self.output_dir)
+
     def test_a_missing_result_json_leaves_the_settled_result(self) -> None:
         log = self.read(result=None)
 

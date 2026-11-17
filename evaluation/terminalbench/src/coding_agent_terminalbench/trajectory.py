@@ -98,11 +98,18 @@ def write_trajectory(path: Path, trajectory: Trajectory) -> None:
     """Writes the document, but only once Harbor's model accepts what would be written.
 
     The check is on the text, not on the object, so a field that serialization drops or renames
-    cannot reach the file.
+    cannot reach the file. The document is renamed into place like the files of a run, so Harbor
+    never reads half of one when a write fails part way through.
     """
     text = f"{json.dumps(trajectory.to_json_dict(exclude_none=True), indent=2)}\n"
     Trajectory.model_validate_json(text)
-    path.write_text(text, encoding="utf-8")
+    partial = path.with_name(f"{path.name}.partial")
+    try:
+        partial.write_text(text, encoding="utf-8")
+        partial.replace(path)
+    except OSError:
+        partial.unlink(missing_ok=True)
+        raise
 
 
 def _user_step(step_id: int, event: SessionEvent, message: str) -> Step:

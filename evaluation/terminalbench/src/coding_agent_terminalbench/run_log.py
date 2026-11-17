@@ -160,13 +160,16 @@ def text_of(value: Any) -> str | None:
 
 
 def _read_record(path: Path) -> RunRecord:
-    data = _decode(
-        _read_required(
-            path,
-            missing=(
-                f"{path} does not exist; the adapter reads the directory that "
-                "`coding-agent run --output-dir` wrote"
+    data = _parse_json(
+        _decode_utf8(
+            _read_required(
+                path,
+                missing=(
+                    f"{path} does not exist; the adapter reads the directory that "
+                    "`coding-agent run --output-dir` wrote"
+                ),
             ),
+            path,
         ),
         path,
     )
@@ -185,38 +188,51 @@ def _read_record(path: Path) -> RunRecord:
 
 
 def _read_events(path: Path) -> tuple[SessionEvent, ...]:
-    text = _read_optional(path)
-    if text is None:
+    raw = _read_optional(path)
+    if raw is None:
         return ()
 
+    # The writer appends one line per event and stops after a failed write, so only the last line
+    # can be a write the process never finished. Splitting the bytes is safe because byte 0x0A
+    # never occurs inside a multi byte UTF-8 character, so a line cut inside a character fails to
+    # decode alone instead of taking the whole log with it. `str.splitlines` would also split on
+    # U+2028 and U+0085, which JSON.stringify leaves inside a string.
+    lines = raw.split(b"\n")
+    last = max((index for index, line in enumerate(lines) if line.strip()), default=-1)
     events: list[SessionEvent] = []
-    # Only the newline the writer appends ends an event. `str.splitlines` would also split on
-    # U+2028, U+0085 and the other separators it knows, which JSON.stringify leaves inside a string.
-    for number, line in enumerate(text.split("\n"), start=1):
-        if line.strip() == "":
+    for index, line in enumerate(lines):
+        if not line.strip():
             continue
         try:
-            data = json.loads(line)
-        except json.JSONDecodeError:
-            # The writer appends one line per event, so a line that does not decode is an event
-            # the process never finished appending, and nothing after it can be trusted.
-            return tuple(events)
+            data = json.loads(line.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            if index == last:
+                return tuple(events)
+            raise RunLogError(
+                f"{path} line {index + 1} is not a whole Session Event: {exc}"
+            ) from exc
         if not isinstance(data, Mapping):
-            return tuple(events)
-        _require_schema_version(data, path, line=number)
+            if index == last:
+                return tuple(events)
+            raise RunLogError(f"{path} line {index + 1} is not a JSON object")
+        _require_schema_version(data, path, line=index + 1)
         event = _event_of(data)
         if event is None:
-            return tuple(events)
+            if index == last:
+                return tuple(events)
+            raise RunLogError(
+                f"{path} line {index + 1} does not have the Session Event envelope"
+            )
         events.append(event)
     return tuple(events)
 
 
 def _read_result(path: Path) -> Mapping[str, Any] | None:
-    text = _read_optional(path)
-    if text is None:
+    raw = _read_optional(path)
+    if raw is None:
         # A run settles before it writes result.json, so the file is missing when it was killed.
         return None
-    data = _decode(text, path)
+    data = _parse_json(_decode_utf8(raw, path), path)
     if not isinstance(data, Mapping):
         raise RunLogError(f"{path}: the result record must be a JSON object")
     _require_schema_version(data, path)
@@ -226,24 +242,31 @@ def _read_result(path: Path) -> Mapping[str, Any] | None:
     return result
 
 
-def _read_optional(path: Path) -> str | None:
-    """The text of a file that a killed run may not have written, or None when it is missing."""
+def _read_optional(path: Path) -> bytes | None:
+    """The bytes of a file that a killed run may not have written, or None when it is missing."""
     try:
-        return path.read_text(encoding="utf-8")
+        return path.read_bytes()
     except FileNotFoundError:
         return None
     except OSError as exc:
         raise RunLogError(f"cannot read {path}: {exc}") from exc
 
 
-def _read_required(path: Path, *, missing: str) -> str:
-    text = _read_optional(path)
-    if text is None:
+def _read_required(path: Path, *, missing: str) -> bytes:
+    raw = _read_optional(path)
+    if raw is None:
         raise RunLogError(missing)
-    return text
+    return raw
 
 
-def _decode(text: str, path: Path) -> Any:
+def _decode_utf8(raw: bytes, path: Path) -> str:
+    try:
+        return raw.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise RunLogError(f"{path} is not valid UTF-8: {exc}") from exc
+
+
+def _parse_json(text: str, path: Path) -> Any:
     try:
         return json.loads(text)
     except json.JSONDecodeError as exc:

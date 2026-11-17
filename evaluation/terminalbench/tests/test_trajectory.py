@@ -54,6 +54,7 @@ class TrajectoryTest(unittest.TestCase):
     def assert_validates(self, trajectory: Trajectory) -> dict[str, Any]:
         path = self.root / "trajectory.json"
         write_trajectory(path, trajectory)
+        self.assertFalse(path.with_name(f"{path.name}.partial").exists())
         text = path.read_text(encoding="utf-8")
         Trajectory.model_validate_json(text)
         data: dict[str, Any] = json.loads(text)
