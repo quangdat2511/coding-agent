@@ -12,6 +12,10 @@ from pathlib import Path
 from typing import Any
 
 COMMIT = "64128afd1c0f27db530cf167b015d206ef67c707"
+IMPORT_PATH = "coding_agent_terminalbench.agent:CodingAgent"
+
+# A made-up key. The tests put it in a patched os.environ, as if the host had exported it.
+PROVIDER_KEY = "test-provider-key"
 
 SESSION_ID = "session-1"
 

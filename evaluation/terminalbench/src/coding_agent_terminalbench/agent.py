@@ -10,6 +10,8 @@ is unchanged.
 """
 
 import asyncio
+import os
+import tempfile
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, override
@@ -31,6 +33,15 @@ from coding_agent_terminalbench.install import (
     check_version_output,
     select_executable,
 )
+from coding_agent_terminalbench.launch import (
+    INSTRUCTION_PATH,
+    OUTPUT_DIR_NAME,
+    ModelChoice,
+    build_command,
+    check_agent_env,
+    session_settled,
+    split_model,
+)
 from coding_agent_terminalbench.manifest import (
     ArtifactExecutable,
     ArtifactManifest,
@@ -40,10 +51,6 @@ from coding_agent_terminalbench.trajectory import AgentIdentity
 from coding_agent_terminalbench.trial_context import TRAJECTORY_FILE, populate_trial_context
 
 AGENT_NAME = "coding-agent"
-
-# ADR 0005 §6 runs `coding-agent run --output-dir <environment_logs_dir>/coding-agent`, so the
-# three files of a run arrive in this directory of the logs that Harbor downloads.
-RUN_DIR_NAME = "coding-agent"
 
 
 class CodingAgentOptions(InstalledAgentOptions):
@@ -127,6 +134,12 @@ class CodingAgent(BaseInstalledAgent):
         # The executable that install() uploaded and checked. The trial metadata names its file,
         # because the version line of the x64 and arm64 builds is the same.
         self.installed_executable: ArtifactExecutable | None = None
+        # Harbor builds the agent when it creates a trial, before the container starts, so a bad
+        # -m or --ae value fails the trial before any setup.
+        self.model_choice: ModelChoice = split_model(self.model_name)
+        self.provider_key_variable = check_agent_env(
+            self.extra_env, os.environ, self.model_choice.provider
+        )
 
     @classmethod
     @override
@@ -135,9 +148,11 @@ class CodingAgent(BaseInstalledAgent):
         kwargs: dict[str, Any] | None = None,
         env: Mapping[str, str] | None = None,
     ) -> None:
-        # Harbor runs this once before it queues trials, so a bad artifact directory stops the job
-        # instead of failing every trial.
+        # Harbor runs this once before it queues trials, so a bad artifact directory or --ae value
+        # stops the job instead of failing every trial. Harbor passes no model here, so the
+        # constructor checks that the key belongs to the -m provider.
         load_manifest(_artifact_dir(cls.parse_options(kwargs, env)))
+        check_agent_env(env or {}, os.environ)
 
     @staticmethod
     @override
@@ -237,7 +252,29 @@ class CodingAgent(BaseInstalledAgent):
         environment: BaseEnvironment,
         context: AgentContext,
     ) -> None:
-        raise NotImplementedError("CDA-89 implements run(): execute the agent and map exit codes")
+        # ADR 0005 §5: the Coding Task objective is Harbor's instruction, verbatim. run() renders
+        # no prompt template and passes no MCP servers or skills directory, even when the task
+        # declares them.
+        with tempfile.TemporaryDirectory(prefix="coding-agent-instruction-") as temp_dir:
+            source = Path(temp_dir) / "instruction.md"
+            # write_bytes, not write_text: on a Windows host, write_text turns "\n" into "\r\n".
+            source.write_bytes(instruction.encode("utf-8"))
+            # upload_file copies as root, so the helper gives the file to the agent user.
+            await self._upload_agent_owned_file(environment, source, INSTRUCTION_PATH)
+
+        command = build_command(self.model_choice, self.environment_logs_dir)
+        self.logger.debug(f"Running command: {self._redact_command(command)}")
+        # environment.exec directly, not exec_as_agent (ADR 0005 §6): exec_as_agent prefixes
+        # `set -o pipefail;` and raises for every exit code other than 0. The call passes no env,
+        # so the only credential is the --ae key that Trial adds to every exec of the agent phase.
+        # It passes no cwd, so the agent starts where the task image places it, and no timeout,
+        # so only Harbor's agent timeout bounds the run.
+        result = await environment.exec(command=command)
+        if session_settled(result.return_code):
+            # A failed or cancelled Agent Result is an outcome that the verifier scores.
+            # populate_context_post_run fills the AgentContext from the files in --output-dir.
+            return
+        raise self._classify_exec_error(command, result)
 
     @override
     def populate_context_post_run(self, context: AgentContext) -> None:
@@ -251,7 +288,7 @@ class CodingAgent(BaseInstalledAgent):
         try:
             populate_trial_context(
                 context,
-                self.logs_dir / RUN_DIR_NAME,
+                self.logs_dir / OUTPUT_DIR_NAME,
                 trajectory_path=self.logs_dir / TRAJECTORY_FILE,
                 agent=AgentIdentity(name=AGENT_NAME, version=self.version()),
                 artifact_sha256={

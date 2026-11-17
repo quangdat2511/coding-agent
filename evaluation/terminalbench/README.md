@@ -117,6 +117,58 @@ trial. No trial runs. These problems fail setup:
 A trial that fails setup has no verifier reward. ADR 0005 §7 runs jobs with `-r 0`, so Harbor does
 not retry it. The rerun job runs it once more, with the same artifact.
 
+## Run step
+
+`run()` follows ADR 0005 §6. It uploads Harbor's instruction, byte for byte, to
+`/installed-agent/instruction.md` and gives the file to the agent user. It renders no prompt
+template, and it passes no extra instruction, skill, or MCP configuration, even when the task
+declares MCP servers or a skills directory. Then it runs this command, for example for
+`-m opencode/deepseek-v4.1-flash`:
+
+```sh
+exec /installed-agent/coding-agent run --task-file /installed-agent/instruction.md --provider opencode --model deepseek-v4.1-flash --approval-policy auto-approve --profile terminalbench --output-dir /logs/agent/coding-agent
+```
+
+The provider and the model come from the `-m` value, split at its first `/`. A model identifier
+keeps any further `/`, as in `-m openrouter/deepseek/deepseek-v4.1-flash-1017`. The output
+directory is `coding-agent` under the agent log directory of the trial, which is `/logs/agent` in a
+single-agent trial. The command sets no working directory and no timeout, so Coding Agent starts
+where the task image places it.
+
+Harbor runs the command through a shell that holds the provider key. The command `exec`s Coding
+Agent, so that shell does not stay alive with the key, and it has no pipeline. This is the
+`"auto-approve"` launch contract of ADR 0001 §8. Coding Agent's startup ancestor check refuses the
+run if an ancestor still holds the key.
+
+| Exit code | Meaning (ADR 0005 §3) | `run()` |
+| --- | --- | --- |
+| 0, 1, 130 | The Agent Session settled as succeeded, failed, or cancelled | Returns, and the verifier scores the trial |
+| Any other | No Agent Session settled | Raises the `NonZeroAgentExitCodeError` subclass that Harbor's `exec_as_agent` would raise, and Harbor still runs the verifier |
+
+### Provider key
+
+The agent's environment must hold exactly one provider key: the key of the `-m` provider. Pass it
+with `--ae` as a template of the host variable with the same name, so that its value is in neither
+the shell history nor the job's `config.json`:
+
+```sh
+--ae OPENCODE_API_KEY='${OPENCODE_API_KEY}'
+```
+
+The agent refuses the job in these cases:
+
+- No `--ae` value names a provider key.
+- `--ae` names two provider keys, for example `OPENCODE_API_KEY` and `OPENROUTER_API_KEY`, or both
+  `GOOGLE_API_KEY` and `GEMINI_API_KEY`.
+- The key is blank, or its value differs from the host variable with the same name. A literal
+  value, or a template of another host variable, fails this check.
+- The key belongs to another provider than the one of `-m`.
+
+Harbor's preflight makes all of these checks except the last one before it queues a trial, because
+Harbor gives preflight no model. The agent's constructor makes all of them when Harbor creates a
+trial. The provider list and the key names are in `launch.py`. They match ADR 0005 §3 and
+`packages/ai/src/credentials.ts`, and `tests/test_launch.py` fails if either one changes.
+
 ## Trial context and trajectory
 
 Harbor downloads the logs of a trial after its agent phase and calls `populate_context_post_run`
@@ -157,6 +209,3 @@ trial before the verifier runs. The agent therefore reports the problem as a war
 log instead of raising. The run files are read and the trajectory is built before the context is
 touched, so a log that cannot be read or converted leaves the context as it was found; only
 writing `trajectory.json` can fail after the counts and the metadata are set.
-
-`run()` is not implemented yet, so Harbor stops every trial after setup. CDA-89 adds the run
-step.
