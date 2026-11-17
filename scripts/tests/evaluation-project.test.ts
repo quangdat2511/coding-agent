@@ -37,17 +37,28 @@ describe("the TerminalBench adapter project", () => {
     expect(existsSync(join(repoRoot, PROJECT, "package.json"))).toBe(false);
   });
 
-  it("is outside every TypeScript project that the typecheck runs", async () => {
-    // `bun --filter '*' typecheck` runs in workspace packages only, and the root script adds
-    // tsconfig.json and scripts/tsconfig.json.
-    const include = patterns((await readJson("tsconfig.json")).include);
-    for (const pattern of include) {
-      for (const path of PROJECT_FILES) expect(new Glob(pattern).match(path)).toBe(false);
-    }
-    // scripts/tsconfig.json includes paths below scripts/ only.
-    expect(patterns((await readJson("scripts/tsconfig.json")).include)).toEqual(["**/*.ts"]);
+  it("is outside every TypeScript project that the typecheck runs", () => {
+    // The root `typecheck` script runs `bun --filter '*' typecheck`, which covers the workspace
+    // packages only (see the test above), and `tsc -p scripts/tsconfig.json`. This asks tsc for
+    // the files of that second project.
+    const result = Bun.spawnSync(
+      [
+        process.execPath,
+        join(repoRoot, "node_modules", "typescript", "bin", "tsc"),
+        "-p",
+        join(repoRoot, "scripts", "tsconfig.json"),
+        "--listFilesOnly",
+      ],
+      { cwd: repoRoot },
+    );
+    expect(result.exitCode).toBe(0);
+    const files = result.stdout.toString().trim().split(/\r?\n/);
+    expect(files.some((file) => file.includes("scripts/tests/evaluation-project.test.ts"))).toBe(
+      true,
+    );
+    expect(files.filter((file) => file.replaceAll("\\", "/").includes(`/${PROJECT}/`))).toEqual([]);
     expect(existsSync(join(repoRoot, PROJECT, "tsconfig.json"))).toBe(false);
-  });
+  }, 60_000);
 
   it("keeps its virtual environment away from Biome", async () => {
     const files = (await readJson("biome.json")).files as { includes: unknown };

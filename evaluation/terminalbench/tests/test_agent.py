@@ -70,6 +70,12 @@ class CodingAgentTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "version: .*remove this kwarg"):
             self.create(version="9.9.9")
 
+    def test_a_prompt_template_kwarg_is_refused(self) -> None:
+        with self.assertRaisesRegex(
+            ValueError, "prompt_template_path: .*runs Harbor's instruction verbatim"
+        ):
+            self.create(prompt_template_path="template.j2")
+
     def test_a_config_kwarg_is_refused(self) -> None:
         with self.assertRaisesRegex(ValueError, "config: .*reads no native config file"):
             self.create(config={"model": "x"})

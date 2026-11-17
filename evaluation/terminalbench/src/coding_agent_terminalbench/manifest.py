@@ -76,16 +76,20 @@ def parse_manifest(data: Any, *, source: str = MANIFEST_FILE) -> ArtifactManifes
     def fail(message: str) -> ArtifactManifestError:
         return ArtifactManifestError(f"{source}: {message}")
 
+    # The build writes trimmed values, and CDA-88 compares them with `--version` output. A value
+    # with spaces around it is refused, not trimmed, so the manifest stays what the build wrote.
     def text(value: Any, field: str) -> str:
         if not isinstance(value, str) or value.strip() == "":
             raise fail(f"{field} must be a non-empty string")
+        if value != value.strip():
+            raise fail(f"{field} has leading or trailing whitespace: {json.dumps(value)}")
         return value
 
     if not isinstance(data, dict):
         raise fail("the manifest must be a JSON object")
     schema_version = data.get("schemaVersion")
-    # `True == 1` in Python, so a boolean is refused before the comparison.
-    if isinstance(schema_version, bool) or schema_version != SCHEMA_VERSION:
+    # `True == 1` and `1.0 == 1` in Python, so the type must be exactly int.
+    if type(schema_version) is not int or schema_version != SCHEMA_VERSION:
         raise fail(
             f"schemaVersion must be {SCHEMA_VERSION}, found {json.dumps(schema_version)}; "
             "this adapter reads only that schema"

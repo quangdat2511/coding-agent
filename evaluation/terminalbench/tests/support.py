@@ -6,7 +6,11 @@ COMMIT = "64128afd1c0f27db530cf167b015d206ef67c707"
 
 
 def manifest_data(**overrides: Any) -> dict[str, Any]:
-    """A manifest with the shape that scripts/build-artifact.ts writes."""
+    """A manifest with the shape that scripts/build-artifact.ts writes.
+
+    The fixture is written by hand. test_built_manifest.py compares its shape with the manifest
+    that the build wrote in CI, so a change to the build's schema fails there.
+    """
     data: dict[str, Any] = {
         "schemaVersion": 1,
         "codingAgent": {"version": "0.0.1", "commit": COMMIT},

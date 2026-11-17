@@ -40,7 +40,8 @@ as Pi (see README). Pi is relevant background for design decisions here:
 This is a Bun workspace monorepo (`packages/*`). Run all commands from the repo root.
 
 - `bun install` — install dependencies (also runs `lefthook install` via postinstall)
-- `bun test` — run all tests (Bun's built-in test runner, uses `bun:test`)
+- `bun test` — run all Bun tests (Bun's built-in test runner, uses `bun:test`). The Python tests of
+  `evaluation/terminalbench/` run with uv, see below
 - `bun test <path>` — run a single test file
 - `bun --filter '*' typecheck` — typecheck all workspace packages (each package defines its own `typecheck` script, e.g. `tsc --noEmit`)
 - `biome check .` — lint + format check (Biome, not ESLint/Prettier)
@@ -50,9 +51,10 @@ This is a Bun workspace monorepo (`packages/*`). Run all commands from the repo 
 There is no build step defined yet.
 
 `evaluation/terminalbench/` is the Harbor adapter for TerminalBench (ADR 0005 §6). It is a Python
-project with its own `uv.lock`, outside the Bun workspaces. Biome, the import boundary check and
-`bun --filter` do not cover it, so the CI job `TerminalBench adapter` runs `uv lock --check` and its
-`unittest` tests with `uv run --frozen`. See `evaluation/terminalbench/README.md`.
+project with its own `uv.lock`, outside the Bun workspaces. Biome, the import boundary check,
+`bun --filter` and `bun test` do not cover it, so the CI job `TerminalBench adapter` runs
+`uv lock --check` and its `unittest` tests with `uv run --frozen`. See
+`evaluation/terminalbench/README.md`.
 
 **Platforms**: Linux, macOS, and Windows. Windows follows Pi's native-Windows approach: Git Bash,
 MSYS, Cygwin, and WSL drive paths are normalized before resolution, junctions are rejected like

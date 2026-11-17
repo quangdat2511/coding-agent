@@ -4,7 +4,7 @@ This directory is the Harbor adapter of
 [ADR 0005 §6](../../docs/adr/0005-terminalbench-evaluation-protocol.md). Harbor is the harness
 that runs TerminalBench. The adapter is the Harbor agent that runs the Coding Agent artifact in each
 task container. It is the only Python project in the repository. It is not a Bun workspace package,
-so Biome, the import boundary check, and `bun --filter` do not check it.
+so Biome, the import boundary check, `bun --filter`, and `bun test` do not check it.
 
 The adapter uses Coding Agent only through its command line and the files that it writes. It
 imports nothing from `packages/`.
@@ -32,6 +32,12 @@ To run the tests:
 ```sh
 uv run --project evaluation/terminalbench --frozen python -m unittest discover --start-directory evaluation/terminalbench/tests --top-level-directory evaluation/terminalbench
 ```
+
+Most tests read a manifest fixture that is written by hand in `tests/support.py`. The tests in
+`tests/test_built_manifest.py` read a manifest that `bun run build:artifact` wrote. They run only
+when `CODING_AGENT_ARTIFACT_DIR` names its directory, and otherwise they are skipped. In CI, the
+`TerminalBench adapter` job sets this variable to the manifest that the `Evaluation artifact` job
+uploads. If the build changes the manifest schema and the fixture stays the same, that job fails.
 
 To make sure that `uv.lock` matches `pyproject.toml`:
 
@@ -63,8 +69,9 @@ writes this version into each trial result, so the result names the build that r
 Harbor runs the preflight check of the agent once, before it queues the trials of a job. If the
 manifest is missing or does not have the shape that `scripts/build-artifact.ts` writes, this
 check stops the job. The agent refuses Harbor's `version` kwarg, because the
-manifest gives the version. It also refuses Harbor's `config` kwarg, because Coding Agent reads no
-native config file.
+manifest gives the version. It refuses Harbor's `prompt_template_path` kwarg, because ADR 0005 §5
+gives the agent Harbor's instruction verbatim. It also refuses Harbor's `config` kwarg, because
+Coding Agent reads no native config file.
 
 To show the kwargs that the agent accepts, run this command from the repository root:
 

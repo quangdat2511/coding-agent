@@ -38,6 +38,10 @@ class CodingAgentOptions(InstalledAgentOptions):
         default=None,
         description="Not accepted. The version comes from artifact-manifest.json in artifact_dir.",
     )
+    prompt_template_path: str | None = Field(
+        default=None,
+        description="Not accepted. The Coding Task objective is Harbor's instruction, verbatim.",
+    )
     config: Any = Field(
         default=None,
         description="Not accepted. Coding Agent reads no native config file.",
@@ -51,6 +55,18 @@ class CodingAgentOptions(InstalledAgentOptions):
         if value is not None:
             raise ValueError(
                 "the version comes from artifact-manifest.json in artifact_dir; remove this kwarg"
+            )
+        return None
+
+    # ADR 0005 §5 runs Harbor's instruction verbatim, with no prompt template. Harbor renders a
+    # template only through `with_prompt_template` on `run()`, so an accepted template would be
+    # ignored without an error.
+    @field_validator("prompt_template_path")
+    @classmethod
+    def _refuse_prompt_template(cls, value: str | None) -> None:
+        if value is not None:
+            raise ValueError(
+                f"{AGENT_NAME} runs Harbor's instruction verbatim (ADR 0005 §5); remove this kwarg"
             )
         return None
 

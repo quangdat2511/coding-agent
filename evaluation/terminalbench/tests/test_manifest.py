@@ -55,6 +55,17 @@ class ParseManifestTest(unittest.TestCase):
         self.assert_refused(manifest_data(schemaVersion=2), "schemaVersion must be 1, found 2")
         self.assert_refused(manifest_data(schemaVersion=True), "found true")
         self.assert_refused(manifest_data(schemaVersion="1"), 'found "1"')
+        self.assert_refused(manifest_data(schemaVersion=1.0), "found 1.0")
+
+    def test_a_value_with_surrounding_whitespace_is_refused(self) -> None:
+        self.assert_refused(
+            manifest_data(codingAgent={"version": " 0.0.1 ", "commit": COMMIT}),
+            'codingAgent.version has leading or trailing whitespace: " 0.0.1 "',
+        )
+        self.assert_refused(
+            manifest_data(codingAgent={"version": "0.0.1", "commit": f"{COMMIT}\n"}),
+            "codingAgent.commit has leading or trailing whitespace",
+        )
 
     def test_coding_agent_fields_are_required(self) -> None:
         self.assert_refused(manifest_data(codingAgent=None), "codingAgent must be an object")
