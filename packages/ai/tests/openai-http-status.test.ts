@@ -9,7 +9,7 @@
 
 import { describe, expect, it } from "bun:test";
 import { stream } from "../src/api/openai-responses.ts";
-import { createProviderDirectory } from "../src/index.ts";
+import { createCustomProvider, createProviderDirectory } from "../src/index.ts";
 import type { Context, Model, ModelStreamEvent } from "../src/types.ts";
 import { loadFixture, withCapturingFixtureFetch } from "./fixtures/fixture-fetch.ts";
 
@@ -150,6 +150,35 @@ describe("the HTTP status of a failed Chat Completions request", () => {
       );
 
       expect(error.httpStatus).toBe(429);
+    });
+  });
+
+  // A Custom Provider takes the adapter of its variant (providers/custom.ts), so the variant
+  // decides whether it records the status. The messages variant shares the Anthropic adapter.
+  it.each([
+    ["chat_completions", 429],
+    ["messages", undefined],
+  ] as const)("a Custom Provider of variant %s records status %p", async (variant, expected) => {
+    const directory = createProviderDirectory();
+    directory.setProvider(
+      createCustomProvider({
+        id: "custom-proxy",
+        variant,
+        baseUrl: "http://localhost:9/v1",
+        apiKey: "k",
+        models: [{ id: "any-model" }],
+      }),
+    );
+    const selected = directory.getModel("custom-proxy", "any-model");
+    if (selected === undefined) throw new Error("the custom provider lists no any-model");
+
+    await withCapturingFixtureFetch(failure(429), async () => {
+      const error = await errorOf(
+        directory.stream(selected, context, { apiKey: "k", maxRetries: 0 }),
+      );
+
+      if (expected === undefined) expect(error).not.toHaveProperty("httpStatus");
+      else expect(error.httpStatus).toBe(expected);
     });
   });
 });

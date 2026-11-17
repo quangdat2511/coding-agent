@@ -138,8 +138,11 @@ export type ModelStreamEvent =
         message: string;
         code?: string;
         // The HTTP status of a provider response that refused the request before the stream opened.
-        // Only the Chat Completions adapter (openai, openrouter, xai, opencode) records it, and it
-        // sets none for an error sent after a 200 response. ADR 0005 §7 reads it to rerun a trial.
+        // Only the Chat Completions adapter records it: the openai, openrouter, xai and opencode
+        // providers, and a Custom Provider whose variant is chat_completions. The other adapters
+        // (anthropic, google, and a Custom Provider whose variant is messages) record none, and no
+        // adapter sets one for an error sent after a 200 response. ADR 0005 §7 reads it to rerun a
+        // trial.
         httpStatus?: number;
       };
     };

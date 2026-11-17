@@ -129,7 +129,8 @@ optionally `rawReason` and `httpStatus`. `httpStatus` is the provider's HTTP sta
 failed the request; after the SDK's transport retries it is the last attempt's. ADR 0005 §7 reruns a
 trial whose `httpStatus` is 401, 403, 429 or 5xx. The `openai`, `openrouter`, `xai` and `opencode`
 providers record it; `anthropic` and `google` do not, so their failures are never rerun-eligible on
-this condition. An error that a provider sends after it answered HTTP 200 has no `httpStatus`
+this condition. A Custom Provider records it when its `variant` is `chat_completions` and does not
+when it is `messages`. An error that a provider sends after it answered HTTP 200 has no `httpStatus`
 either, because the SDK raises it without one. Only a request refused before the stream opened
 carries one.
 
