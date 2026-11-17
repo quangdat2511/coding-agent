@@ -3,6 +3,7 @@
 // or environment access, and configuration errors before any Agent Session opens; a run that opens
 // none removes the output directory it created.
 import { checkAncestorCredentials } from "./ancestor-credentials.ts";
+import { BUILD_INFO, formatVersion } from "./build-info.ts";
 import { createConfiguredChildLauncher } from "./child-launcher.ts";
 import { runHeadless } from "./headless.ts";
 import { markProcessNonDumpable } from "./non-dumpable.ts";
@@ -64,6 +65,12 @@ async function main(
   cwd: string,
   env: Readonly<Record<string, string | undefined>>,
 ): Promise<number> {
+  // The Harbor adapter compares this line with artifact-manifest.json (ADR 0005 §6). It opens no
+  // Agent Session and starts no child, so it needs no hardening.
+  if (argv.length === 1 && argv[0] === "--version") {
+    stdout.write(`${formatVersion(BUILD_INFO)}\n`);
+    return 0;
+  }
   const parsed = parseRunArgs(argv, cwd);
   if (!parsed.ok) {
     stderr.write(`coding-agent: ${parsed.message}\n\n${USAGE}\n`);

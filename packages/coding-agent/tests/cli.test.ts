@@ -11,6 +11,7 @@ import {
   runProcess,
   startProcess,
   withTemporaryDirectory,
+  writePreloadingBunfig,
 } from "./support/process.ts";
 import { withoutProfile } from "./support/profile.ts";
 import { HANG_QUIESCE_MS_ENV_VAR, REPLAY_FIXTURES_ENV_VAR } from "./support/recorded-provider.ts";
@@ -21,6 +22,7 @@ const cleanChain = await runnerChainIsClean();
 const packageRoot = join(import.meta.dir, "..");
 
 const manifest = (await Bun.file(join(packageRoot, "package.json")).json()) as {
+  version: string;
   bin?: Record<string, string>;
 };
 
@@ -38,7 +40,10 @@ const hangSessionFactory = join(import.meta.dir, "support", "hang-session-factor
 const command = onWindows ? [...bunLikeShebang, bin] : [bin];
 
 // The autoload flags of ADR 0005 §2, built for this host rather than the evaluation targets.
-async function compileExecutable(directory: string): Promise<string[]> {
+async function compileExecutable(
+  directory: string,
+  extraFlags: readonly string[] = [],
+): Promise<string[]> {
   const outfile = join(directory, onWindows ? "coding-agent.exe" : "coding-agent");
   const build = await runProcess([
     process.execPath,
@@ -47,16 +52,12 @@ async function compileExecutable(directory: string): Promise<string[]> {
     "--compile",
     "--no-compile-autoload-dotenv",
     "--no-compile-autoload-bunfig",
+    ...extraFlags,
     "--outfile",
     outfile,
   ]);
   if (build.exitCode !== 0) throw new Error(`bun build --compile failed:\n${build.stderr}`);
   return [outfile];
-}
-
-async function writePreloadingBunfig(directory: string): Promise<void> {
-  await Bun.write(join(directory, "bunfig.toml"), 'preload = ["./preload.ts"]\n');
-  await Bun.write(join(directory, "preload.ts"), 'process.stderr.write("preloaded\\n");\n');
 }
 
 const launchPaths = [
@@ -210,6 +211,63 @@ describe("the coding-agent executable", () => {
     },
     60_000,
   );
+
+  it.skipIf(!cleanChain).each(launchPaths)(
+    "ignores a .env credential in the working directory, launched as $name",
+    async ({ launch }) => {
+      await withTemporaryDirectory(async (directory) => {
+        await Bun.write(join(directory, ".env"), `ANTHROPIC_API_KEY=${secret}\n`);
+        await Bun.write(join(directory, "task.md"), "Add a failing test, then make it pass.\n");
+
+        const command = await launch(directory);
+        const { exitCode, stderr } = await runProcess([...command, ...validRun()], {
+          cwd: directory,
+        });
+        expect(firstLine(stderr)).toBe(
+          "coding-agent: no credential for --provider anthropic: set ANTHROPIC_API_KEY",
+        );
+        expect(exitCode).toBe(2);
+      });
+    },
+    60_000,
+  );
+
+  it.each(launchPaths)(
+    "prints the version and no commit for a build without one, launched as $name",
+    async ({ launch }) => {
+      await withTemporaryDirectory(async (directory) => {
+        const command = await launch(directory);
+        const result = await runProcess([...command, "--version"], { cwd: directory });
+        expect(result).toMatchObject({
+          exitCode: 0,
+          stdout: `coding-agent ${manifest.version} (no commit)\n`,
+          stderr: "",
+        });
+      });
+    },
+    60_000,
+  );
+
+  it("prints the commit that the build defines with --version", async () => {
+    await withTemporaryDirectory(async (directory) => {
+      const command = await compileExecutable(directory, [
+        "--define",
+        'CODING_AGENT_COMMIT="0123abc"',
+      ]);
+      const result = await runProcess([...command, "--version"], { cwd: directory });
+      expect(result).toMatchObject({
+        exitCode: 0,
+        stdout: `coding-agent ${manifest.version} 0123abc\n`,
+        stderr: "",
+      });
+    });
+  }, 60_000);
+
+  it("treats --version after another argument as a usage error", async () => {
+    const { exitCode, stderr } = await run(["run", "--version"]);
+    expect(firstLine(stderr)).toBe('coding-agent: unknown flag "--version"');
+    expect(exitCode).toBe(2);
+  });
 
   it.each([
     { name: "no arguments", args: [], expected: "a command is required" },

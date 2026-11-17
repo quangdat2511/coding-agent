@@ -110,6 +110,109 @@ export const bunChild = () => Bun.spawn(["echo", "probe"]);
 `noRestrictedGlobals` errors. The same rules run in the existing CI lint step and staged-file
 pre-commit check. Remove the probe afterwards; `child-process.ts` itself passes the lint check.
 
+## Evaluation artifact build
+
+A recorded TerminalBench job runs a standalone executable, not a source checkout
+([ADR 0005 §2](../docs/adr/0005-terminalbench-evaluation-protocol.md)).
+`scripts/build-artifact.ts` builds that executable for both Linux targets and writes the manifest
+that identifies the build.
+
+To build the artifact for a recorded job:
+
+1. Check out the commit on `main` that the job evaluates. The build does not check the branch, so
+   this step is yours.
+2. Make sure that `git status` shows no changes and no untracked files.
+3. Make sure that Bun is the version in `.bun-version`.
+4. Run `bun ci --ignore-scripts`, so that `node_modules` matches `bun.lock`. The dirty check
+   does not look at `node_modules`, so do not build after `bun install`, `bun link`, or an edit
+   there.
+5. Make sure that no provider credential, such as `ANTHROPIC_API_KEY`, is in the environment or
+   in the repository's `.env`. On a host that runs one of the executables, the build refuses
+   either one.
+6. Run the build from the repository root on Linux or macOS:
+
+   ```sh
+   bun run build:artifact
+   ```
+
+7. Give the Harbor adapter the directory `dist/artifact`.
+
+The build writes three files into `dist/artifact`, or into the directory that `--out-dir <dir>`
+names. A relative `--out-dir` resolves against the working directory. An `--out-dir` in the
+repository must be a path that git ignores.
+
+| File | Content |
+| --- | --- |
+| `coding-agent-linux-x64` | the executable for the `bun-linux-x64-baseline` target, which needs no AVX2 |
+| `coding-agent-linux-arm64` | the executable for the `bun-linux-arm64` target |
+| `artifact-manifest.json` | the manifest that the adapter checks before each trial |
+
+Each executable needs glibc 2.17 or newer and no other runtime. Both builds use
+`--no-compile-autoload-dotenv` and `--no-compile-autoload-bunfig`. A `.env` or `bunfig.toml` file
+in the working directory of a task therefore cannot configure the agent. The build sets the commit
+with `--define CODING_AGENT_COMMIT`, so `run.json` and `--version` both name it.
+
+`artifact-manifest.json` has this shape:
+
+```json
+{
+  "schemaVersion": 1,
+  "codingAgent": { "version": "0.0.1", "commit": "<40-character commit, or that commit and -dirty>" },
+  "dirty": false,
+  "bunVersion": "1.3.14",
+  "executables": [
+    { "file": "coding-agent-linux-x64", "target": "bun-linux-x64-baseline", "sha256": "<hex>" },
+    { "file": "coding-agent-linux-arm64", "target": "bun-linux-arm64", "sha256": "<hex>" }
+  ]
+}
+```
+
+`coding-agent --version` prints one line, `coding-agent <version> <commit>`, with the values of
+`codingAgent` in the manifest. A run from source has no commit and prints
+`coding-agent <version> (no commit)`.
+
+The build stops with exit code 1 in these cases:
+
+- The working tree has changes or untracked files. The message lists them.
+- The running Bun is not the version in `.bun-version`.
+- `--out-dir` is in the repository, and git does not ignore it.
+- A provider credential is in the environment of the build, in the repository's `.env`, or in
+  the environment of a process that started the build, and the host can run one of the
+  executables.
+- `packages/coding-agent/package.json` has no `coding-agent` bin entry. The build compiles that
+  entry.
+- `bun build` fails for a target.
+- The executable that this host can run fails a check, or a check runs longer than 30 seconds.
+
+Linux on x86-64 or on arm64 can run one of the executables. On such a host, the build runs that
+executable in a temporary directory, next to a `bunfig.toml` with a preload that writes
+`preloaded` to standard error. It does two checks:
+
+- `--version` must print exactly the line that the manifest file implies. Standard error must
+  stay empty, so the preload's `preloaded` line must not appear.
+- `run` must exit 2 with an error that names `ANTHROPIC_API_KEY`, next to a `.env` that sets
+  `ANTHROPIC_API_KEY`. Exit 2 means that no Agent Session opened. Standard error must not contain
+  `preloaded`.
+
+On macOS, and on a musl Linux host such as Alpine, the build cannot run either executable, so it
+prints that `--version` was not checked.
+The CI job `Evaluation artifact` runs the build on `ubuntu-24.04`, so CI checks the x64 executable
+on every pull request. CI does not check the arm64 executable, because this private repository has
+no arm64 Linux runner. To check it, run the build on an arm64 Linux host or in an arm64 container.
+
+The CI build only checks that the build works. On a pull request, CI builds the merge commit
+`refs/pull/<n>/merge`, which is not a commit on `main`. Do not give the manifest or the
+executables of a pull request run to a recorded job.
+
+For a local test of uncommitted work, pass `--allow-dirty`. The build then records
+`"dirty": true`, and the commit in the manifest and in `--version` ends in `-dirty`. Do not give a
+dirty artifact to a recorded job.
+
+Bun 1.3.14 on Windows cannot cross-compile these targets. It stops with
+`Failed to extract executable for 'bun-linux-x64-baseline-v1.3.14'`. On Windows, run the build in
+WSL or in a Linux container. Run `bun test scripts/tests/build-artifact.test.ts` for the unit
+tests.
+
 ## Discord PR posts
 
 The `Discord PR Post` workflow runs `scripts/notify-discord.ts` on pull requests into `main`. When a

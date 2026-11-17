@@ -14,6 +14,12 @@ export const bunLikeShebang: readonly string[] = [
 
 export const firstLine = (text: string): string => text.split("\n")[0] ?? "";
 
+// A bunfig.toml whose preload writes "preloaded" to standard error, so a launch that reads it shows.
+export async function writePreloadingBunfig(directory: string): Promise<void> {
+  await Bun.write(join(directory, "bunfig.toml"), 'preload = ["./preload.ts"]\n');
+  await Bun.write(join(directory, "preload.ts"), 'process.stderr.write("preloaded\\n");\n');
+}
+
 export async function withTemporaryDirectory<T>(
   body: (directory: string) => Promise<T>,
 ): Promise<T> {
