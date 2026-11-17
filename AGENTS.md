@@ -49,6 +49,11 @@ This is a Bun workspace monorepo (`packages/*`). Run all commands from the repo 
 
 There is no build step defined yet.
 
+`evaluation/terminalbench/` is the Harbor adapter for TerminalBench (ADR 0005 §6). It is a Python
+project with its own `uv.lock`, outside the Bun workspaces. Biome, the import boundary check and
+`bun --filter` do not cover it, so the CI job `TerminalBench adapter` runs `uv lock --check` and its
+`unittest` tests with `uv run --frozen`. See `evaluation/terminalbench/README.md`.
+
 **Platforms**: Linux, macOS, and Windows. Windows follows Pi's native-Windows approach: Git Bash,
 MSYS, Cygwin, and WSL drive paths are normalized before resolution, junctions are rejected like
 symbolic links, and the future `bash` tool should resolve Git Bash first with an optional

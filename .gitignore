@@ -3,6 +3,10 @@ node_modules/
 .pnp
 .pnp.js
 
+# Python (evaluation/terminalbench)
+.venv/
+__pycache__/
+
 # Build output
 dist/
 *.tsbuildinfo
