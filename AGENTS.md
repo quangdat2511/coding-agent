@@ -60,7 +60,9 @@ project with its own `uv.lock`, outside the Bun workspaces. Biome, the import bo
 MSYS, Cygwin, and WSL drive paths are normalized before resolution, junctions are rejected like
 symbolic links, and the future `bash` tool should resolve Git Bash first with an optional
 PowerShell tool, without requiring WSL. Windows-specific path handling is unit-tested on every
-host, and CI runs the test suite on Linux, macOS and Windows. A test that cannot run on Windows
+host. CI runs the test suite on Linux and Windows for each pull request. It runs on macOS only
+after each push to `main`, because macOS minutes cost ten times as much. For a platform-specific
+change, run the CI workflow by hand on the branch to add macOS. A test that cannot run on Windows
 is skipped there with `skipIf` and a comment giving the reason, usually on its guard constant in
 the package's `platform.ts` (`packages/tools/tests/platform.ts`,
 `packages/coding-agent/tests/support/platform.ts`). The `coding-agent` bin

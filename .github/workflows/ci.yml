@@ -75,8 +75,35 @@ jobs:
       matrix:
         os:
           - ubuntu-24.04
-          - macos-26
           - windows-2025
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: .bun-version
+
+      - name: Install dependencies
+        run: bun ci --ignore-scripts
+
+      - name: Run tests
+        run: bun run test
+
+  # A macOS minute counts as ten against the Actions minutes of a private repository, so pull
+  # requests skip this job. It runs on each push to main, and on a manual run of this workflow,
+  # which can target a pull request's branch. GitHub reports a job that `if` skips as a success, so
+  # the required "Test (macos-26)" check does not block a pull request. It is a job of its own
+  # because a job-level `if` cannot read the matrix.
+  test-macos:
+    name: Test (macos-26)
+    if: github.event_name != 'pull_request'
+    runs-on: macos-26
+    timeout-minutes: 15
 
     steps:
       - name: Check out repository
