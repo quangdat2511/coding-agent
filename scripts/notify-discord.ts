@@ -593,21 +593,82 @@ async function archivePost(
   id: string,
 ): Promise<string> {
   if (!token?.trim()) return "DISCORD_BOT_TOKEN is not set, so the post stays open.";
+  const headers = {
+    Authorization: `Bot ${token.trim()}`,
+    "Content-Type": "application/json",
+    "User-Agent": DISCORD_USER_AGENT,
+  };
   const response = await fetchImpl(`${DISCORD_API}/channels/${id}`, {
     method: "PATCH",
-    headers: {
-      Authorization: `Bot ${token.trim()}`,
-      "Content-Type": "application/json",
-      "User-Agent": DISCORD_USER_AGENT,
-    },
+    headers,
     body: JSON.stringify({ archived: true }),
   });
   // The token is never part of the message.
   if (!response.ok) {
     const detail = await discordErrorDetail(response);
-    return `::warning::Discord did not close post ${id}: ${response.status}${detail}.`;
+    const warning = `::warning::Discord did not close post ${id}: ${response.status}${detail}.`;
+    return [warning, ...(await diagnoseBot(fetchImpl, headers, id))].join("\n");
   }
   return `Closed post ${id}.`;
+}
+
+// After a refused close, the log names the bot that the token belongs to, the servers that bot is
+// in, and whether it can read the post. A wrong token and a missing permission give the same 403,
+// and these lines tell them apart. Each answer is read on its own, so one failure hides nothing.
+async function diagnoseBot(
+  fetchImpl: Fetch,
+  headers: Record<string, string>,
+  id: string,
+): Promise<string[]> {
+  const get = async (path: string): Promise<{ response: Response; body: unknown }> => {
+    const response = await fetchImpl(`${DISCORD_API}${path}`, { headers });
+    if (!response.ok) return { response, body: undefined };
+    return { response, body: await response.json() };
+  };
+  const failed = async (what: string, response: Response) =>
+    `Discord did not tell ${what}: ${response.status}${await discordErrorDetail(response)}.`;
+
+  const lines: string[] = [];
+  try {
+    const me = await get("/users/@me");
+    const bot = me.body as { id?: unknown; username?: unknown } | undefined;
+    lines.push(
+      bot
+        ? `The token belongs to bot ${oneLine(bot.username)} (${oneLine(bot.id)}).`
+        : await failed("which bot the token belongs to", me.response),
+    );
+
+    const guilds = await get("/users/@me/guilds");
+    if (Array.isArray(guilds.body)) {
+      const names = guilds.body.map((guild: { name?: unknown; id?: unknown }) => {
+        return `${oneLine(guild.name)} (${oneLine(guild.id)})`;
+      });
+      lines.push(
+        names.length > 0 ? `The bot is in: ${names.join(", ")}.` : "The bot is in no server.",
+      );
+    } else {
+      lines.push(await failed("which servers the bot is in", guilds.response));
+    }
+
+    const post = await get(`/channels/${id}`);
+    const thread = post.body as { parent_id?: unknown; guild_id?: unknown } | undefined;
+    lines.push(
+      thread
+        ? `The bot can read post ${id} in channel ${oneLine(thread.parent_id)} of server ${oneLine(thread.guild_id)}.`
+        : await failed(`whether the bot can read post ${id}`, post.response),
+    );
+  } catch (error) {
+    lines.push(`Discord did not answer: ${error instanceof Error ? oneLine(error.message) : "?"}.`);
+  }
+  return lines;
+}
+
+// Values from Discord go into the log, so each one stays a short single line.
+function oneLine(value: unknown): string {
+  return String(value ?? "?")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 100);
 }
 
 // Discord answers one HTTP status for many causes, and its JSON error code tells them apart: for

@@ -264,7 +264,9 @@ for example after a reopen, Discord opens the post again. If the secret is not s
 open. If Discord refuses the request, the post stays open and the run shows a warning. The warning
 gives the HTTP status and the Discord error code, such as `403, code 50013 (Missing Permissions)`.
 Code 50013 means that the bot lacks a permission. Code 50001 means that the bot cannot see the
-channel, for example because the token belongs to a bot that is not on the server.
+channel, for example because the token belongs to a bot that is not on the server. After the
+warning, the log names the bot that the token belongs to and the servers that the bot is in. It
+also tells whether the bot can read the post. The token itself never appears in the log.
 
 To get the token, create an application on the Discord Developer Portal and add a bot to it.
 Invite the bot to the server with the View Channels and Manage Threads permissions on
