@@ -93,8 +93,9 @@ còn lại. Gợi ý dạng bảng:
 Không liệt kê lại test, typecheck, lint, build mà CI đã chạy. Ghi:
 - Lệnh test riêng cho thay đổi này và kết quả.
 - Kịch bản mà test mới bao phủ: luồng chính và các edge case quan trọng.
-- Phần chưa kiểm thử được và lý do. CI chạy test trên Linux, macOS và Windows, nên chỉ cần ghi
-  test nào bị skip trên hệ điều hành nào và vì sao.
+- Phần chưa kiểm thử được và lý do. CI chạy test trên Linux và Windows cho mỗi PR, còn macOS chỉ
+  chạy sau khi merge vào main. Nên chỉ cần ghi test nào bị skip trên hệ điều hành nào và vì sao.
+  PR sửa phần riêng của hệ điều hành thì chạy tay workflow CI trên branch của PR để có cả macOS.
 - Cách reviewer tự tái hiện bằng tay, nếu có.
 Xóa mục này nếu PR không đổi code.
 -->
