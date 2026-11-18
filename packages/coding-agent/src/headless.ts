@@ -2,6 +2,7 @@ import type { AgentResult } from "@coding-agent/agent-core";
 import type { ChildProcessLauncher } from "@coding-agent/tools";
 import { BUILD_INFO } from "./build-info.ts";
 import { systemClock } from "./clock-and-ids.ts";
+import { messageOf, redactorOf } from "./diagnostics.ts";
 import type { RunArgs } from "./run-args.ts";
 import { type RunConfig, removeCreated, resolveRunConfig } from "./run-config.ts";
 import { openRunFiles, type RunFiles, type RunRecord } from "./run-files.ts";
@@ -42,9 +43,6 @@ interface Refusal {
 
 const diagnostic = (message: string): string => `coding-agent: ${message}\n`;
 const internalError = (message: string): string => diagnostic(`internal error: ${message}`);
-
-const messageOf = (error: unknown): string =>
-  error instanceof Error ? error.message : String(error);
 
 async function failureOf(task: Promise<void>): Promise<string | undefined> {
   return task.then(
@@ -109,7 +107,7 @@ export async function runHeadless(options: HeadlessOptions): Promise<HeadlessRes
     );
   const { config, createdDirectories } = resolved;
   // A provider error or a file the model read can carry the credential into the text printed here.
-  const redact = (text: string) => text.replaceAll(config.credential.reveal(), "[redacted]");
+  const redact = redactorOf(config.credential);
   const stdout = printer(options.stdout, redact);
   const stderr = printer(options.stderr, redact);
 

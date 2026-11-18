@@ -5,14 +5,15 @@
 // so ADR 0005 §3's command line for `run` is untouched.
 import {
   fail,
-  flagOf,
-  type ParseRunArgsResult,
+  fieldsOf,
   type ProviderId,
   providers,
   readFlags,
   requireOneOf,
   requireValue,
-} from "./run-args.ts";
+  type UsageError,
+} from "./flags.ts";
+import { flagOf } from "./run-args.ts";
 
 export interface InteractiveArgs {
   readonly provider: ProviderId;
@@ -22,7 +23,7 @@ export interface InteractiveArgs {
 
 export type ParseInteractiveArgsResult =
   | { readonly ok: true; readonly args: InteractiveArgs }
-  | Extract<ParseRunArgsResult, { ok: false }>;
+  | UsageError;
 
 const interactiveFlagOf = {
   provider: flagOf.provider,
@@ -30,9 +31,7 @@ const interactiveFlagOf = {
   repoRoot: flagOf.repoRoot,
 } as const satisfies Record<keyof InteractiveArgs, `--${string}`>;
 
-const fieldOf = new Map<string, keyof InteractiveArgs>(
-  Object.entries(interactiveFlagOf).map(([field, flag]) => [flag, field as keyof InteractiveArgs]),
-);
+const fieldOf = fieldsOf(interactiveFlagOf);
 
 export const INTERACTIVE_USAGE = `usage: coding-agent ${interactiveFlagOf.provider} <provider> ${interactiveFlagOf.model} <model-id>
                     [${interactiveFlagOf.repoRoot} <dir>]
@@ -46,13 +45,13 @@ export function parseInteractiveArgs(
   cwd: string,
 ): ParseInteractiveArgsResult {
   const read = readFlags(argv, fieldOf);
-  if ("problem" in read) return fail(read.problem) as ParseInteractiveArgsResult;
+  if ("problem" in read) return fail(read.problem);
   const { raw } = read;
 
   const provider = requireOneOf(interactiveFlagOf.provider, raw.provider, providers);
-  if (typeof provider !== "string") return fail(provider) as ParseInteractiveArgsResult;
+  if (typeof provider !== "string") return fail(provider);
   const model = requireValue(interactiveFlagOf.model, raw.model);
-  if (typeof model !== "string") return fail(model) as ParseInteractiveArgsResult;
+  if (typeof model !== "string") return fail(model);
 
   return { ok: true, args: { provider, model, repoRoot: raw.repoRoot ?? cwd } };
 }

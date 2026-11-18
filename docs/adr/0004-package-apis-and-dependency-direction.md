@@ -532,7 +532,7 @@ adapter over `ai`, the TUI projection, wiring, process lifecycle, and exit codes
 package with a `bin` entry and a build that produces an executable.
 
 ```typescript
-export function runInteractive(opts: CliOptions): Promise<number>;
+export function runInteractive(opts: InteractiveOptions): Promise<ExitCode>;
 export function runHeadless(opts: HeadlessOptions): Promise<HeadlessResult>;
 export function projectSessionEvent(event: SessionEvent, prev: TuiModel): TuiModel;
 ```
@@ -633,7 +633,7 @@ re-exports:
 | `agent-core` | the ADR 0001 and ADR 0002 types it exports and the names in §3 (42 names) | `AgentSession` (`pi-coding-agent`), `AgentState` (`pi-agent-core`), `JsonValue` (`pi-agent-core`, `pi-ai`), `IdGenerator` (`pi-agent-core`) |
 | `tools` | `createWorkspaceResolver`, `createDefaultTools`, `readTool`, `writeTool`, `editTool`, `bashTool`, `ReadParams`, `WriteParams`, `EditParams`, `BashParams`, `createChildEnvironmentBuilder`, `createChildProcessLauncher`, `ChildEnvironment`, `CreateChildEnvironmentResult`, `ChildLaunchOptions`, `ChildProcess`, `ChildProcessLauncher`, `CreateChildProcessLauncherResult`, `createVerificationRunner`, `VerificationRunner`, `VerificationRunnerOptions`, `VerificationRunnerResult`, `CreateVerificationRunnerResult`, `createVerificationPolicy`, `VerificationPolicyOptions` | none |
 | `tui` | `renderTui`, `TuiModel`, `TuiHandlers`, `TuiHandle` | none |
-| `coding-agent` | `runInteractive`, `runHeadless`, `projectSessionEvent`, `CliOptions`, `HeadlessOptions`, `HeadlessResult` | none |
+| `coding-agent` | `runInteractive`, `runHeadless`, `projectSessionEvent`, `InteractiveOptions`, `ExitCode`, `HeadlessOptions`, `HeadlessResult` | none |
 
 | Match | Decision |
 | --- | --- |
@@ -771,6 +771,26 @@ amended this record:
 - **Pi names** (§8): `createVerificationPolicy`, `VerificationPolicyOptions` and
   `VerificationCancelled` were checked on 2026-11-17 against the same Pi commit
   `9841914c71a74d81abe07f751aefd271fd924e63`; none occurs in its packages' source.
+
+On 2026-11-19, [Run the interactive path](https://datn-fit-hcmus.atlassian.net/browse/CDA-85)
+amended this record:
+
+- **Interactive entry point** (§6, §8): `runInteractive(opts: InteractiveOptions):
+  Promise<ExitCode>`. `InteractiveOptions` replaces the name `CliOptions` that the record sketched,
+  to pair with `HeadlessOptions`: it holds what the interactive path needs, not a parsed command
+  line. `ExitCode`, now exported, is the union of exit codes that ADR 0005 §3 defines, so the result is
+  still a number. The interactive path returns 0 when the person quits, 130 after a signal, 2 for a usage
+  or configuration error or when standard input or output is not a terminal, and 70 for an internal
+  error.
+- **Interactive command line** (§6): `coding-agent` with flags and no command starts the
+  interactive path with `--provider` and `--model`, both required, and `--repo-root`. It takes no
+  `--approval-policy` (the path always asks), no `--task-file` or `--output-dir` (the Coding Task is
+  typed and no files are written), and no `--profile` (it runs the `default` Session Limits). The
+  command line of `coding-agent run` in ADR 0005 §3 is unchanged. A command line that is empty
+  fails like any interactive line, with `--provider is required` and the usage of both entry points.
+- **Pi names** (§8): the two new exports, `InteractiveOptions` and `ExitCode`, were checked on
+  2026-11-19 against Pi commit `9841914c71a74d81abe07f751aefd271fd924e63`; neither occurs in its
+  packages' source.
 
 ## Consequences
 

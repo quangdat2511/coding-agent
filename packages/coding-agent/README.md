@@ -76,6 +76,10 @@ transcript keeps the earlier ones.
 | 2 | invalid invocation or configuration, or no terminal; nothing was opened |
 | 70 | internal Coding Agent error |
 
+A signal that comes while a session is still opening does not wait for it past the Cancellation
+Grace Period, because an open cannot be cancelled: the run ends with 130, and a session that opens
+after that is cancelled in place of started.
+
 The TUI shows the outcome of every Agent Session, a failed one included, and none of them changes
 the exit code: it describes how the run ended, not what the Coding Task achieved.
 

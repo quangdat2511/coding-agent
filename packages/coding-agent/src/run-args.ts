@@ -1,7 +1,20 @@
-// Keep this module import-free so usage errors are decided before any I/O. Values stay verbatim;
-// resolving paths, reading the task file, and checking credentials or models belong in
-// run-config.ts, after the `parsed.ok` check in cli.ts.
-export type ProviderId = "anthropic" | "openrouter" | "openai" | "google" | "xai" | "opencode";
+// Parses `coding-agent run` (ADR 0005 §3). Its only import is flags.ts, which imports nothing, so
+// usage errors are decided before any I/O. Values stay verbatim; resolving paths, reading the task
+// file, and checking credentials or models belong in run-config.ts, after the `parsed.ok` check in
+// cli.ts.
+import {
+  fail,
+  fieldsOf,
+  type ProviderId,
+  problem,
+  providers,
+  readFlags,
+  requireOneOf,
+  requireValue,
+  type UsageError,
+} from "./flags.ts";
+
+export type { ProviderId };
 
 export type Profile = "default" | "terminalbench";
 
@@ -15,25 +28,7 @@ export interface RunArgs {
   readonly repoRoot: string;
 }
 
-export type ParseRunArgsResult =
-  | { readonly ok: true; readonly args: RunArgs }
-  | {
-      readonly ok: false;
-      readonly code: "USAGE_ERROR";
-      readonly message: string;
-      readonly flag?: string;
-    };
-
-export type UsageProblem = Pick<Extract<ParseRunArgsResult, { ok: false }>, "flag" | "message">;
-
-export const providers = {
-  anthropic: true,
-  openrouter: true,
-  openai: true,
-  google: true,
-  xai: true,
-  opencode: true,
-} satisfies Record<ProviderId, true>;
+export type ParseRunArgsResult = { readonly ok: true; readonly args: RunArgs } | UsageError;
 
 const profiles = { default: true, terminalbench: true } satisfies Record<Profile, true>;
 
@@ -49,16 +44,9 @@ export const flagOf = {
   repoRoot: "--repo-root",
 } as const satisfies Record<keyof RunArgs, `--${string}`>;
 
-const fieldOf = new Map<string, keyof RunArgs>(
-  Object.entries(flagOf).map(([field, flag]) => [flag, field as keyof RunArgs]),
-);
+const fieldOf = fieldsOf(flagOf);
 
 const command = "run";
-
-const oneOf = (options: object): string => {
-  const names = Object.keys(options);
-  return names.length === 1 ? `"${names[0]}"` : `one of ${names.join(", ")}`;
-};
 
 export const USAGE = `usage: coding-agent ${command} ${flagOf.taskFile} <path> ${flagOf.provider} <provider>
                     ${flagOf.model} <model-id> ${flagOf.approvalPolicy} auto-approve
@@ -72,69 +60,6 @@ export const USAGE = `usage: coding-agent ${command} ${flagOf.taskFile} <path> $
   ${flagOf.outputDir} <dir>              required  directory the run writes its files into
   ${flagOf.profile} <name>                optional  ${Object.keys(profiles).join(" | ")} (default: default)
   ${flagOf.repoRoot} <dir>               optional  defaults to the working directory`;
-
-export const problem = (flag: string | undefined, message: string): UsageProblem =>
-  flag === undefined ? { message } : { flag, message };
-
-export const fail = (found: UsageProblem): Extract<ParseRunArgsResult, { ok: false }> => ({
-  ok: false,
-  code: "USAGE_ERROR",
-  ...found,
-});
-
-export function requireValue(flag: string, raw: string | undefined): string | UsageProblem {
-  return raw === undefined ? problem(flag, `${flag} is required`) : raw;
-}
-
-export function requireOneOf<T extends string>(
-  flag: string,
-  raw: string | undefined,
-  options: Record<T, true>,
-): T | UsageProblem {
-  if (raw === undefined) return problem(flag, `${flag} is required`);
-  return Object.hasOwn(options, raw)
-    ? (raw as T)
-    : problem(flag, `${flag} must be ${oneOf(options)}, not "${raw}"`);
-}
-
-// Reads `--flag value` and `--flag=value` tokens into the field each flag names. Both entry points
-// read their flags here, so a repeated flag, a missing value or an unknown flag is refused in the
-// same words on either.
-export function readFlags<Field extends string>(
-  tokens: readonly string[],
-  fieldOf: ReadonlyMap<string, Field>,
-): { readonly raw: Partial<Record<Field, string>> } | { readonly problem: UsageProblem } {
-  const raw: Partial<Record<Field, string>> = {};
-  for (let index = 0; index < tokens.length; index++) {
-    const token = tokens[index];
-    if (token === undefined) break;
-
-    const separator = token.startsWith("--") ? token.indexOf("=") : -1;
-    const flag = separator === -1 ? token : token.slice(0, separator);
-    const field = fieldOf.get(flag);
-    if (field === undefined) {
-      return {
-        problem: token.startsWith("-")
-          ? problem(flag, `unknown flag "${flag}"`)
-          : problem(undefined, `unexpected argument "${token}"`),
-      };
-    }
-    if (raw[field] !== undefined)
-      return { problem: problem(flag, `${flag} was given more than once`) };
-
-    let value = separator === -1 ? undefined : token.slice(separator + 1);
-    const next = tokens[index + 1];
-    if (separator === -1 && next !== undefined && !next.startsWith("-")) {
-      value = next;
-      index++;
-    }
-    if (value === undefined || value.trim() === "") {
-      return { problem: problem(flag, `${flag} requires a value`) };
-    }
-    raw[field] = value;
-  }
-  return { raw };
-}
 
 export function parseRunArgs(argv: readonly string[], cwd: string): ParseRunArgsResult {
   const [given, ...tokens] = argv;

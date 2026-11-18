@@ -1,5 +1,6 @@
 import type { AgentSession, SessionEvent } from "@coding-agent/agent-core";
 import { renderTui, type TuiHandle, type TuiHandlers, type TuiModel } from "@coding-agent/tui";
+import { messageOf, redactorOf } from "./diagnostics.ts";
 import type { ExitCode } from "./headless.ts";
 import type { InteractiveArgs } from "./interactive-args.ts";
 import { projectSessionEvent } from "./projection.ts";
@@ -15,9 +16,6 @@ import {
 
 // A second cancel key within this time, with no Coding Task running, quits.
 const QUIT_WINDOW_MS = 1_000;
-
-// How many times in a row the event subscription is reopened after it failed.
-const MAX_RESUBSCRIPTIONS = 3;
 
 export interface InteractiveOptions {
   readonly args: InteractiveArgs;
@@ -36,10 +34,20 @@ export interface InteractiveOptions {
   readonly render?: (props: { model: TuiModel; handlers: TuiHandlers }) => TuiHandle;
   readonly openSession?: (config: SessionConfig) => Promise<SessionFactoryResult>;
   readonly now?: () => number;
+  // How long a signal waits for a session that is still opening, which cannot be cancelled. A
+  // session that is open settles within its own Cancellation Grace Period. Defaults to that period.
+  readonly openGraceMs?: number;
 }
 
-const messageOf = (error: unknown): string =>
-  error instanceof Error ? error.message : String(error);
+// Resolves when `promise` does, or after `ms`, whichever comes first.
+async function within(promise: Promise<void>, ms: number): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const expired = new Promise<void>((resolve) => {
+    timer = setTimeout(resolve, ms);
+  });
+  await Promise.race([promise, expired]);
+  clearTimeout(timer);
+}
 
 // Replaces the strings of `value` through `redact`, and returns `value` itself when none changed,
 // so an event that carries no credential is projected as it came.
@@ -64,6 +72,7 @@ export async function runInteractive(options: InteractiveOptions): Promise<ExitC
   const render = options.render ?? renderTui;
   const openSession = options.openSession ?? openRealSession;
   const now = options.now ?? Date.now;
+  const openGraceMs = options.openGraceMs ?? SESSION_LIMITS_BY_PROFILE.default.cancellationGraceMs;
 
   // Configuration is resolved once, before the TUI takes the screen, so a refusal reads as a
   // plain error on the terminal and exits 2 without opening anything.
@@ -82,9 +91,7 @@ export async function runInteractive(options: InteractiveOptions): Promise<ExitC
   if (signal.aborted) return 130;
 
   const settings = resolved.value;
-  const secret = settings.credential.reveal();
-  // A provider error or a file the model read can carry the credential into the transcript.
-  const redact = (text: string) => text.replaceAll(secret, "[redacted]");
+  const redact = redactorOf(settings.credential);
 
   let model: TuiModel = { transcript: [] };
   let notices = 0;
@@ -93,7 +100,8 @@ export async function runInteractive(options: InteractiveOptions): Promise<ExitC
   let cancelRequested = false;
   let quitPressedAt: number | undefined;
   let session: AgentSession | undefined;
-  let task: Promise<void> = Promise.resolve();
+  // Settles when the Coding Task that was submitted last has run to its end, or failed to start.
+  let sessionLifecycle: Promise<void> = Promise.resolve();
   const { promise: exit, resolve: requestExit } = Promise.withResolvers<ExitCode>();
 
   // `model` is the whole state, so a draw that failed is repaired by the next one.
@@ -126,25 +134,11 @@ export async function runInteractive(options: InteractiveOptions): Promise<ExitC
   }
 
   // Reads a snapshot and follows the events after its last sequence, so nothing between the
-  // snapshot and the subscription is lost (ADR 0002 §7). A subscription that fails resumes after
-  // the last event it delivered.
+  // snapshot and the subscription is lost (ADR 0002 §7).
   async function follow(active: AgentSession): Promise<void> {
-    let after = active.snapshot().lastSequence;
-    let failures = 0;
-    while (failures <= MAX_RESUBSCRIPTIONS) {
-      try {
-        for await (const event of active.events(after)) {
-          after = event.sequence;
-          failures = 0;
-          consume(event);
-        }
-        return;
-      } catch (error) {
-        failures++;
-        notify(`The event stream failed (${messageOf(error)}); resuming after event ${after}.`);
-      }
+    for await (const event of active.events(active.snapshot().lastSequence)) {
+      consume(event);
     }
-    notify("The event stream could not be resumed; the display stops following this session.");
   }
 
   async function runTask(objective: string): Promise<void> {
@@ -192,7 +186,7 @@ export async function runInteractive(options: InteractiveOptions): Promise<ExitC
     }
     busy = true;
     cancelRequested = false;
-    task = runTask(text).finally(() => {
+    sessionLifecycle = runTask(text).finally(() => {
       busy = false;
       session = undefined;
     });
@@ -270,8 +264,10 @@ export async function runInteractive(options: InteractiveOptions): Promise<ExitC
 
   const code = await exit;
   signal.removeEventListener("abort", onAbort);
-  // The Agent Session settles, and its outcome reaches the transcript, before the TUI goes.
-  await task;
+  // The Agent Session settles, and its outcome reaches the transcript, before the TUI goes. A
+  // session that is still opening cannot be cancelled, so the wait for it is bounded: the run ends
+  // once the grace has passed, and a session that opens after that is cancelled in place of started.
+  await (session === undefined && busy ? within(sessionLifecycle, openGraceMs) : sessionLifecycle);
   await handle.unmount();
   return code;
 }

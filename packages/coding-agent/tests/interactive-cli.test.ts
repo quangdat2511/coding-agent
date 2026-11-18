@@ -102,6 +102,44 @@ describe("the coding-agent executable on the interactive path", () => {
     expect(stderr).not.toContain(secret);
   });
 
+  // The one test that gives the TUI a real terminal, so it runs only where Bun can open one. It
+  // needs no provider: the TUI has to take the screen, and two presses of the cancel key quit.
+  it.skipIf(onWindows)(
+    "takes the screen on a terminal and quits on two cancel keys",
+    async () => {
+      await withTemporaryDirectory(async (cwd) => {
+        let output = "";
+        const decoder = new TextDecoder();
+        const child = Bun.spawn([...command, ...provider], {
+          cwd,
+          env: { PATH: process.env.PATH ?? "", GOOGLE_API_KEY: secret },
+          terminal: {
+            cols: 100,
+            rows: 30,
+            data(_terminal: unknown, data: Uint8Array) {
+              output += decoder.decode(data, { stream: true });
+            },
+          },
+        } as Parameters<typeof Bun.spawn>[1]);
+        const press = (key: string) =>
+          (child as unknown as { terminal: { write(k: string): void } }).terminal.write(key);
+        const started = Date.now();
+
+        // The keyboard may not be listened to yet, so the first press repeats until its notice shows.
+        while (!output.includes("Press Esc or Ctrl+C again")) {
+          if (Date.now() - started > 15_000) throw new Error(`no notice on the screen:\n${output}`);
+          press("\u0003");
+          await Bun.sleep(250);
+        }
+        press("\u0003");
+
+        expect(await child.exited).toBe(0);
+        expect(output).toContain("\u001b[?1049h");
+      });
+    },
+    30_000,
+  );
+
   it("keeps the headless command line as it was", async () => {
     const { exitCode, stderr } = await run(["run", "--approval-policy", "ask"]);
 

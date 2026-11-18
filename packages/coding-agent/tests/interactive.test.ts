@@ -41,6 +41,7 @@ interface Setup {
   readonly model?: string;
   readonly signal?: AbortSignal;
   readonly repoRoot?: string;
+  readonly openGraceMs?: number;
 }
 
 function start(setup: Setup = {}) {
@@ -63,6 +64,7 @@ function start(setup: Setup = {}) {
       ? { openSession: setup.openSession }
       : { openSession: scriptedAgent() }),
     ...(setup.now === undefined ? {} : { now: setup.now }),
+    ...(setup.openGraceMs === undefined ? {} : { openGraceMs: setup.openGraceMs }),
   });
   return { tui, stderr, controller, exited };
 }
@@ -292,6 +294,27 @@ describe("cancelling", () => {
     expect(calls).toEqual(["events(0)", "dispatch:cancel"]);
     const atUnmount = run.tui.unmountedWith();
     expect(atUnmount && outcomes(atUnmount)).toEqual(["cancelled"]);
+  });
+
+  it("ends the run on a signal even when the session never finishes opening", async () => {
+    let opened = 0;
+    const run = start({
+      // An open that never returns, and has no way to be cancelled.
+      openSession: () => {
+        opened++;
+        return new Promise(() => undefined);
+      },
+      openGraceMs: 30,
+    });
+    await waitFor(() => run.tui.mounted(), "the TUI");
+    run.tui.handlers().onSubmit("Make the tests pass");
+    await waitFor(() => opened === 1, "the session to start opening");
+
+    run.controller.abort("SIGINT");
+
+    expect(await run.exited).toBe(130);
+    const atUnmount = run.tui.unmountedWith();
+    expect(atUnmount && outcomes(atUnmount)).toEqual([]);
   });
 
   it("ends the run without a TUI when the signal came before it started", async () => {
