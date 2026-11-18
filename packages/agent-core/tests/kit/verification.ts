@@ -1,12 +1,15 @@
 import type {
+  VerificationCancelled,
   VerificationCandidate,
   VerificationDecision,
   VerificationPolicy,
 } from "../../src/index.ts";
 
+type ScriptedResult = VerificationDecision | VerificationCancelled;
+
 export type ScriptedDecision =
-  | VerificationDecision
-  | ((candidate: VerificationCandidate) => Promise<VerificationDecision>);
+  | ScriptedResult
+  | ((candidate: VerificationCandidate) => Promise<ScriptedResult>);
 
 export interface FakeVerification extends VerificationPolicy {
   readonly candidates: readonly VerificationCandidate[];

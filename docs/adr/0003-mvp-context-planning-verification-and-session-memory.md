@@ -87,14 +87,14 @@ When a model turn completes without tool calls, Agent Core detects a `Candidate 
   3. **Test Assertion Failures (`status === "completed"` with `exitCode !== 0`, excluding launch errors)**: The command ran to completion but test assertions failed. The policy returns `outcome: "continue"`. A structured user message containing the bounded output is injected into the next Model Turn:
      ```text
      [Verification Failed]
-     Command: {command}
+     Command: {quoted command}
      Exit code: {exitCode}
      Output:
      {output}
      Please analyze the failure, adjust your changes, and verify again.
      ```
   4. **Execution and System Failures (`status === "timed_out"` or `status === "launch_failed"`)**: The command could not run to normal test completion (binary not found / ENOENT, exit code 127/126, shell syntax error, or command timeout). The policy returns `outcome: "failed"` with `AgentFailureCode: "VERIFICATION_FAILED"`. This immediately halts the session rather than trapping the model in an unrecoverable environment loop.
-  5. **Cancellation (`status === "cancelled"`)**: The abort signal ended the run, or had already aborted so nothing started. This is not a decision: Agent Core records the Verification as cancelled ([ADR 0002](./0002-agent-session-state-machine-and-event-protocol.md) §5), and the Verification Policy reports cancellation instead of returning `succeeded`, `continue`, or `failed`. `VerificationDecision` ([ADR 0004](./0004-package-apis-and-dependency-direction.md) §3) has no member for it yet; the type the policy reports it with is decided in [CDA-77](https://datn-fit-hcmus.atlassian.net/browse/CDA-77).
+  5. **Cancellation (`status === "cancelled"`)**: The abort signal ended the run, or had already aborted so nothing started. This is not a decision: Agent Core records the Verification as cancelled ([ADR 0002](./0002-agent-session-state-machine-and-event-protocol.md) §5), and the Verification Policy reports cancellation instead of returning `succeeded`, `continue`, or `failed`. It reports it as `VerificationCancelled`, `{ outcome: "cancelled" }`, which `verify` returns beside `VerificationDecision` rather than as one of its members ([ADR 0004](./0004-package-apis-and-dependency-direction.md) §3, [CDA-77](https://datn-fit-hcmus.atlassian.net/browse/CDA-77)).
 
 - **Fallback Verification**: If no verification command is configured:
   - Fallback verification is non-gating: it unconditionally returns `outcome: "succeeded"` regardless of `workspaceChanged`, because `CodingTask` defines no field distinguishing read-only from mutating intent.
@@ -210,6 +210,50 @@ Evidence behind this amendment:
   including its `-n`.
 - *Prescriptions:* the four result members, the combined output, the syntax check, the meaning of
   126, 127 and a foreign signal, and the shared deadline are decisions, not observations.
+
+On 2026-11-17, [CDA-77](https://datn-fit-hcmus.atlassian.net/browse/CDA-77) amended this record:
+
+- **Reporting cancellation** (§3): the policy reports a `cancelled` runner result as
+  `VerificationCancelled`, `{ outcome: "cancelled" }`, with no evidence, since the closed evidence
+  union has no member for a cancelled run and Agent Core already records a cancelled
+  Verification with empty evidence. It is not a `VerificationDecision` member: ADR 0002 §4's policy
+  still returns exactly one of three decisions when it decides. Agent Core records the Verification
+  as cancelled when the session is cancelling, and settles `LIMIT_EXCEEDED` when a breached limit
+  aborted the run ([ADR 0002](./0002-agent-session-state-machine-and-event-protocol.md) §4,
+  [CDA-76](https://datn-fit-hcmus.atlassian.net/browse/CDA-76)). Those are the only times it aborts
+  the signal it passes, so it settles `INTERNAL_ERROR` when a policy reports a cancellation at any
+  other time, as it does when a policy throws.
+- **Feedback layout** (§3): the template's `{quoted command}` is the command as a JSON string,
+  the way every tool result quotes text that can hold a newline, so a command that spans lines
+  cannot pass for output. `{output}` is the combined output after the 40 KiB budget. Output that
+  does not end with a newline gets one before the closing line, and empty output reads
+  `(no output)`, as `bash` writes its status line (ADR 0001 §7). The budget bounds the output, not
+  the whole message: the header, that newline and the closing line are not counted against it, so
+  output of exactly 40,960 bytes reaches the model whole.
+- **Bounding in the policy** (§3): the policy applies the budget to one combined output before it
+  records or sends it, and to a `launch_failed` error. The combined output is what the runner
+  already writes: everything in `stdout`, `stderr` empty, as the CDA-74 amendment above fixes.
+  Evidence records it the same way, `stdout` holding it and `stderr` empty, and the feedback sends
+  the same text. The policy never splits the budget between the two streams, which no ADR defines:
+  a runner that fills `stderr` has it appended to `stdout`, on a line of its own, before the
+  budget is applied. The runner already captures within the budget, so this changes nothing for
+  the runner's results and cuts only a result from a runner that does not.
+- **Failure message**: a `failed` decision's message names the command and why it could not run:
+  `the verification command "<command>" timed out after <timeoutMs> ms`, or
+  `... could not run: <error>`. The `timed_out` evidence message is `timed out after <timeoutMs>
+  ms`, the wording of `bash`'s status line; the `launch_failed` one is the runner's error.
+
+Evidence behind this amendment:
+
+- *Read in source:* Agent Core aborts the Verification signal only in `cancel` and when it records
+  a breached duration limit (`packages/agent-core/src/agent-session.ts`). After `verify` returns,
+  it settles `LIMIT_EXCEEDED` when a limit was breached and cancelled when the session is
+  cancelling, whatever the policy returned.
+- *Run locally* (Linux, Bun 1.3.14): the policy's tests with a scripted runner and with the real
+  runner in a temporary repository, and Agent Core's tests for a reported cancellation with and
+  without a cancel.
+- *Prescriptions:* the separate cancellation type, the quoted command, the feedback layout, the
+  single combined output and the failure wording are decisions, not observations.
 
 ## Consequences
 

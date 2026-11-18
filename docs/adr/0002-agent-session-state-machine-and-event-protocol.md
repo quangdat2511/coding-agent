@@ -494,6 +494,15 @@ On 2026-11-17, [CDA-83](https://datn-fit-hcmus.atlassian.net/browse/CDA-83) amen
   value. [ADR 0005](./0005-terminalbench-evaluation-protocol.md) §7 reads it, and its Dependencies
   note says which providers record it.
 
+On 2026-11-18, [CDA-77](https://datn-fit-hcmus.atlassian.net/browse/CDA-77) amended this record:
+
+- **A cancelled Verification run** (§4, §5): when the policy decides, it still returns exactly one
+  of the three decisions. A run the abort signal ended is not decided: the policy reports it as
+  cancelled (`VerificationCancelled`, ADR 0004 §3), and Agent Core completes the Verification run
+  with a cancelled outcome as §5 states. When a breached limit aborted the run, the session
+  settles `LIMIT_EXCEEDED` as §4 states. A cancelled report at any other time settles
+  `INTERNAL_ERROR`.
+
 ## Consequences
 
 - TUI, headless evaluation, and tests consume the same ordered protocol without knowing provider

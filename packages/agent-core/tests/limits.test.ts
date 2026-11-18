@@ -3,6 +3,7 @@ import {
   type AgentSession,
   type ExecutableTool,
   openAgentSession,
+  type VerificationCancelled,
   type VerificationDecision,
 } from "../src/index.ts";
 import {
@@ -494,6 +495,37 @@ describe("Session Limits", () => {
       data: { kind: "maxDurationMs", limit: 10, observed: 10 },
     });
     expect(result).toMatchObject({ outcome: "failed", failure: { code: "LIMIT_EXCEEDED" } });
+  });
+
+  // The Verification Policy reports a run the signal ended as cancelled. When the deadline ended
+  // it, the breach decides the session, not the unrequested-cancellation INTERNAL_ERROR.
+  it("settles LIMIT_EXCEEDED when the policy reports the run the deadline aborted as cancelled", async () => {
+    const kit = createTestKit({
+      model: { turns: [textTurn("Done.")] },
+      limits: { maxDurationMs: 10 },
+    });
+    const opened = openAgentSession({
+      ...kit.config,
+      verification: {
+        verify(_candidate, { signal }) {
+          return new Promise<VerificationCancelled>((resolve) => {
+            signal.addEventListener("abort", () => resolve({ outcome: "cancelled" }), {
+              once: true,
+            });
+          });
+        },
+      },
+    });
+    if (!opened.ok) throw new Error(`expected a session, got: ${opened.message}`);
+
+    await opened.session.dispatch({ type: "start", task });
+    await waitForEvent(opened.session, "verification_started");
+    kit.clock.advance(10);
+
+    expect(await opened.session.result()).toMatchObject({
+      outcome: "failed",
+      failure: { code: "LIMIT_EXCEEDED" },
+    });
   });
 
   it("ends after maxConsecutiveRecoverableFailures and skips the rest of the batch", async () => {
