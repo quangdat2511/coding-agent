@@ -33,7 +33,8 @@ This decision was checked against Harbor at `1e5c5c6` and Terminal-Bench at `452
 dataset is a job parameter, not a pin of this protocol
 ([ADR 0008](./0008-evaluation-dataset-as-a-job-parameter.md)); that record moves the default pin to
 4.1.0 at `4070d6c`, and its release adds and removes no task and makes no agent-facing environment
-change, so the facts below describe the default pin as well. These facts shape it:
+change, so the environment facts below describe the default pin as well. The verifier facts below
+are 4.0.0's; ADR 0008 §4 records the default pin's own. These facts shape it:
 
 - Terminal-Bench 4.0.0, released on 2026-08-26, ten days after the research, removes 8 of
   3.0.0's 74 tasks and revises every remaining task. Harbor 0.22.0 and 0.23.0 followed; 0.23.0
@@ -439,10 +440,11 @@ The oracle job receives no credential and is not gated.
    denominator.
 3. **Smoke job**, only after the credential isolation precondition holds for its backend: the
    recorded-job command below, restricted with `-i` to the smoke tasks recorded for that dataset
-   (ADR 0008 §4 records the default pin's set, and a dataset's set is part of its data). The smoke
-   set is three CPU-only single-container tasks with small resource requests, and which three is
-   dataset data. It may use `-e docker`. It passes when each trial has a reward, the three Coding
-   Agent files, a validated `trajectory.json`, and token counts.
+   before the smoke job starts: ADR 0008 §4 for the default pin, and the committed dataset record of
+   ADR 0008 §1 for any other dataset. The smoke set is three CPU-only single-container tasks with
+   small resource requests, and which three is dataset data. It may use `-e docker`. It passes when
+   each trial has a reward, the three Coding Agent files, a validated `trajectory.json`, and token
+   counts.
 4. **Recorded job**, only after the credential isolation precondition holds on Modal for the
    artifact being evaluated:
 
@@ -640,9 +642,9 @@ them and decides neither.
   ([ADR 0008](./0008-evaluation-dataset-as-a-job-parameter.md)), so a job on another admissible
   dataset is recorded and reported on its own and never pooled with another pin's result.
 - Known limitations are measured rather than worked around: the 120,000 ms `bash` cap constrains
-  long builds; the two tasks with MCP servers or skills run without them; and in the six tasks that
-  hand all of `/app` to the verifier, any Scratchpad files reach the verifier. Removing one of these
-  amends ADR 0001, ADR 0003, or the MVP scope, not this protocol.
+  long builds; the two tasks with MCP servers or skills run without them; and in the tasks that hand
+  all of `/app` to the verifier (ADR 0008 §4 lists the default pin's), any Scratchpad files reach the
+  verifier. Removing one of these amends ADR 0001, ADR 0003, or the MVP scope, not this protocol.
 - A trial that fails outside Coding Agent is rerun once in a separate job. That costs a second task
   environment, but it keeps the failed trial's evidence. A persistent backend or provider fault
   leaves the job without a headline result instead of shrinking the denominator.

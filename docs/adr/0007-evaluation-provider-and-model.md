@@ -27,11 +27,11 @@ figures are produced at each vendor's maximum effort inside the vendor's own har
 frontier account exists. And the job will be re-run, so the choice is judged per dollar of
 subscription rather than per token.
 
-On [the Terminal-Bench leaderboard](https://www.tbench.ai/leaderboard) as read 2026-11-12 (five
-trials per row on the 4.1.0 dataset, with the 4.0.0 score retained where no re-grade exists): Claude
-Opus 5.5 65.8%, Claude Sonnet 5.5 63.9%, GPT-6.1 Sol 60.9%, Grok 4.7 38.8%, GPT-5.6 Sol 38.5%, and
-Gemini 3.8 Flash 18.2% under mini-SWE-agent. No leaderboard row exists for the model this record
-chooses.
+On [the Terminal-Bench leaderboard](https://www.tbench.ai/leaderboard), read again on 2026-11-18
+from the 4.1.0 rows in the [4.1.0 release table](https://www.tbench.ai/news/terminal-bench-4-1)
+(five trials per row): Claude Opus 5.5 65.8%, Claude Sonnet 5.5 63.9%, GPT-6.1 Sol 60.9%, GPT-6
+Astra 60.3%, and GPT-5.6 Sol 38.5% under mini-SWE-agent. No leaderboard row exists for the model
+this record chooses.
 
 Go's terms are quoted from [the Console Go documentation](https://opencode.ai/docs/console/go) and
 [the harnesses page](https://opencode.ai/docs/console/harnesses), both read 2026-11-12: $10 a month
@@ -163,7 +163,8 @@ Zen plan — with **`deepseek-v4.1-flash`**.
   $0.75/$3.75 paid — about $16 a job — though it too needs a catalogue entry, since
   `google.models.json` stops at `gemini-3.6-flash`. Rejected because it is several times the
   subscription's marginal cost for the same class of claim, and its only public TerminalBench row
-  (18.2%) comes from a weaker harness, so it is not a like-for-like comparison either.
+  (18.2% on the 4.0.0 leaderboard) comes from a weaker harness, so it is not a like-for-like
+  comparison either.
 - **A configurable OpenAI-compatible provider** (the `custom` factory, with `CUSTOM_BASE_URL` and a
   caller-chosen `apiKeyEnv`). Rejected: it needs dynamic credential-name discovery, which
   [ADR 0001](./0001-tool-contracts-and-safety-policy.md) §8 states a static set cannot cover, and it

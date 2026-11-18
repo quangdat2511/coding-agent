@@ -59,15 +59,20 @@ smoke task comes from the protocol rather than from the dataset it names. A reco
 records what it actually ran. Every job requires an explicit registry version: this protocol refuses
 `latest`, an unversioned name, and a local path, because none of them fixes the task list.
 
+The default pin's dataset data is §4. Any other dataset records the same fields, with the evidence
+for §3's properties, in a committed file at
+`evaluation/terminalbench/datasets/<org>/<name>@<version>.md` before the first job that names it; the
+file has the fields and evidence §4's table shows. A job whose dataset has no such record is not
+admissible.
+
 A recorded job's `manifest.json` records its dataset: the identifier, the source repository and
 release tag, the resolved release commit, the task count, the resolved task list, and the smoke task
 names the smoke job used. Those values are recorded per job, not fixed by this record's rules. The
 identifier, count, and list come from the job's resolved task list. The release commit is resolved
-from the dataset's release tag in its source repository; the job's dataset data records the
-repository and tag, and §4 is the default pin's. The manifest records both the values and how they
-were resolved. Harbor's `config.json` already carries the dataset name and reference that Harbor
-resolved, and `lock.json` carries each task's identity and digest, so the record can be checked
-against the job rather than against a constant.
+from the dataset's release tag in its source repository; the dataset data records the repository and
+tag. The manifest records both the values and how they were resolved. Harbor's `config.json` already
+carries the dataset name and reference that Harbor resolved, and `lock.json` carries each task's
+identity and digest, so the record can be checked against the job rather than against a constant.
 
 The manifest derives `N` from the job's resolved task list. A recorded job has no task filtering
 (ADR 0005 §7), so that list is the dataset's task list. A rerun job selects tasks with `-i`, but `N`
@@ -94,6 +99,9 @@ change what the benchmark measures. 4.0.0 remains a valid pin: results reported 
 comparable only with each other, and a job that runs it is a separate pin. No job has run yet
 (ADR 0005's Evidence), so no result has to be relabelled.
 
+The default pin includes GPU tasks, so the oracle job exercises the GPU path that is one reason the
+recorded job's backend is Modal and not Harbor's Docker environment.
+
 Changing this default is a new decision that amends this record. Passing a different admissible
 dataset to a job does not.
 
@@ -119,17 +127,16 @@ manifest records the evidence for each, and a job that cannot show one is not va
    timeout is at least the `terminalbench` profile's 3,600,000 ms `maxDurationMs`, so Coding Agent
    settles inside its own session and writes `result.json` instead of being cancelled by Harbor
    from outside.
-5. **At least one GPU task.** The dataset includes a task that declares a GPU, so the oracle job
-   exercises the GPU path that is one reason the recorded job's backend is Modal and not Harbor's
-   Docker environment.
+5. **A smoke set.** The dataset contains at least three CPU-only, single-container tasks with small
+   resource requests, so the smoke job of ADR 0005 §7 can run before any credential-carrying job.
 
 A dataset that satisfies these properties is still subject to ADR 0005 §7's credential-isolation
 precondition, which is a property of the artifact and the backend, not of the dataset.
 
 ### 4. Dataset data at the default pin
 
-This section is data, not protocol: a job on another pin records its own data without changing §1 to
-§3, and only a new default pin changes §2.
+This section is the default pin's dataset record and is data, not protocol: another pin records its
+own file (§1) without changing §1 to §3, and only a new default pin changes §2.
 
 | Item | Value at the default pin |
 | --- | --- |
@@ -144,6 +151,7 @@ This section is data, not protocol: a job on another pin records its own data wi
 | Per-task agent timeout | 28,800 s |
 | GPU tasks | `fp8-rmsnorm-gemm`, `jax-speedrun-gpu`, `math-eval-grader`, one H100 each |
 | Smoke tasks | `bun-sourcemap-leak`, `music-harmony`, `photonic-waveguide-routing` |
+| Tasks with whole `/app` verifier artifacts | `coq-block-bound`, `jax-speedrun-gpu`, `ks-solver-cpp`, `risk-scorer-replay`, `vf2-speedup-networkx`, `wal-recovery-ordering` |
 
 The three smoke tasks are CPU-only, single-container, small-resource tasks (2 CPUs, 4 GiB of memory,
 10 GiB of storage, no GPU), with a separate verifier and the standard 28,800 s agent timeout. The
@@ -189,6 +197,7 @@ the `v4.1.0` tag, which resolves to `4070d6cef56a7d20cb5dc98d5e10ada88a6b9440`.
 | At the default pin every task is single-step, declares a separate verifier environment and a 28,800 s agent timeout, and has a Dockerfile; eleven tasks also have a Compose file | every `task.toml` and `environment/` under [`tasks/`](https://github.com/harbor-framework/terminal-bench/tree/v4.1.0/tasks), parsed by script |
 | The GPU tasks are `fp8-rmsnorm-gemm`, `jax-speedrun-gpu` and `math-eval-grader`, at one H100 each | their `task.toml` under the same tag |
 | The three smoke tasks exist, are CPU-only, single-container, and use the standard verifier and timeout | their `task.toml` under the same tag |
+| The tasks with whole `/app` verifier artifacts are the same at 4.1.0 as at 4.0.0 | their `task.toml` `artifacts` under [`tasks/`](https://github.com/harbor-framework/terminal-bench/tree/v4.1.0/tasks), parsed by script |
 
 **Not executed.** No Harbor job has run, so the registry resolution, the job configuration and the
 `lock.json` facts are read in source rather than observed in a finished job. The smoke job is the
@@ -209,9 +218,9 @@ resolved dataset.
   parameter is routine.
 - **`latest` or an unversioned name.** Rejected: either can change the task list without changing
   anything the manifest records.
-- **`terminal-bench-cpu@4.1.0` as the default.** Rejected: it has no GPU task, so it fails property
-  5 and the oracle job cannot exercise Modal's GPU path; its task list is also smaller, so its
-  results would not describe the full benchmark.
+- **`terminal-bench-cpu@4.1.0` as the default.** Rejected: it has no GPU task, so the oracle job
+  would not exercise Modal's GPU path; its task list is also smaller, so its results would not
+  describe the full benchmark.
 - **Pool 4.0.0 and 4.1.0 results.** Rejected: the re-grade is within 4.0.0's confidence intervals,
   but the pins differ, and a pooled mean would describe neither release. A report names one pin.
 - **Admit any Harbor dataset.** Rejected: a dataset without the five properties can fail for
