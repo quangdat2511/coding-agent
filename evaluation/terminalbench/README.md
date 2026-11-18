@@ -84,6 +84,39 @@ To show the kwargs that the agent accepts, run this command from the repository 
 uv run --project evaluation/terminalbench --frozen harbor agent schema coding_agent_terminalbench.agent:CodingAgent
 ```
 
+## Install step
+
+Harbor calls `install()` during the setup of each trial. It does these steps in the task container,
+in this order:
+
+1. It reads `uname -m`. For `x86_64` it selects the `bun-linux-x64-baseline` executable of the
+   manifest, and for `aarch64` the `bun-linux-arm64` executable.
+2. It computes the SHA-256 of that file on the host and compares it with the manifest. Then it
+   uploads the file to `/installed-agent/coding-agent`, and runs `sha256sum` on it in the
+   container, so the bytes that will run are the bytes that the build hashed. Root sets the mode
+   to `0755`, so every user can run the file and only root can change it.
+3. It ensures `bash` through Harbor's `ensure_system_dependencies`, because the `bash` tool of
+   Coding Agent needs it. If `bash` is present, nothing is installed. Nothing else is installed.
+4. It runs `/installed-agent/coding-agent --version` as the user that Harbor runs the agent as.
+   The output must be the version line of the manifest, for example
+   `coding-agent 0.0.1 64128afd1c0f27db530cf167b015d206ef67c707`.
+
+If a step finds a problem, it raises `ArtifactInstallError`, and Harbor fails the setup of the
+trial. No trial runs. These problems fail setup:
+
+- An architecture other than `x86_64` or `aarch64`, or a manifest without exactly one executable
+  for the architecture. If `uname -m` exits 126 or 127, the image probably has no `bash`: Harbor's
+  Docker and Modal environments run every command through `bash -c`.
+- A missing executable, or a SHA-256 that differs from the manifest, on the host or in the
+  container. If the container has no `sha256sum`, the job log has a warning, and only the host
+  check runs.
+- No `bash` in the container and no package manager that Harbor knows.
+- A `--version` command that exits with a nonzero code, or prints a different line. Exit code 127
+  usually means an image with musl libc, for example Alpine, because the executable needs glibc.
+
+A trial that fails setup has no verifier reward. ADR 0005 §7 runs jobs with `-r 0`, so Harbor does
+not retry it. The rerun job runs it once more, with the same artifact.
+
 ## Trial context and trajectory
 
 Harbor downloads the logs of a trial after its agent phase and calls `populate_context_post_run`
@@ -99,7 +132,8 @@ of ADR 0005 §4 from `coding-agent/` in the downloaded logs, and fills the trial
   because the provider contract carries no pricing.
 - `metadata` names the Agent Result outcome and failure code, any runtime limit that ended the
   session, the Model Turn and Tool Call counts, the Evaluation Profile, the SHA-256 of every
-  executable in the artifact, and whether the log was truncated.
+  executable in the artifact, the file that `install()` put in the container
+  (`installed_executable`), and whether the log was truncated.
 - `trajectory.json` is written beside the `coding-agent/` directory, at the path Harbor reads a
   trajectory from. It is the event log converted to ATIF following the table of ADR 0005 §6:
   `run.json`'s system prompt is the system step, the Coding Task and Verification feedback are
@@ -124,5 +158,5 @@ log instead of raising. The run files are read and the trajectory is built befor
 touched, so a log that cannot be read or converted leaves the context as it was found; only
 writing `trajectory.json` can fail after the counts and the metadata are set.
 
-`install()` and `run()` are not implemented yet, so Harbor stops the setup of every trial.
-CDA-88 adds the install step and CDA-89 adds the run step.
+`run()` is not implemented yet, so Harbor stops every trial after setup. CDA-89 adds the run
+step.

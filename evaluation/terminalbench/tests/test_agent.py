@@ -147,6 +147,8 @@ class CodingAgentTest(unittest.TestCase):
             context.metadata["artifact_sha256"],
             {"coding-agent-linux-x64": "a" * 64, "coding-agent-linux-arm64": "b" * 64},
         )
+        # No install() ran in this test, so the metadata names no installed executable.
+        self.assertNotIn("installed_executable", context.metadata)
         trajectory = Trajectory.model_validate_json(trajectory_path.read_text(encoding="utf-8"))
         self.assertEqual(trajectory.agent.name, "coding-agent")
         self.assertEqual(trajectory.agent.version, agent.version())
@@ -189,13 +191,10 @@ class CodingAgentTest(unittest.TestCase):
         self.assertFalse((self.logs_dir / "trajectory.json").exists())
         self.assertIn("the trial context and trajectory are incomplete", captured.output[0])
 
-    def test_install_and_run_fail_until_their_tickets_land(self) -> None:
+    def test_run_fails_until_its_ticket_lands(self) -> None:
         agent = self.create()
-        environment = MagicMock()
-        with self.assertRaisesRegex(NotImplementedError, "CDA-88"):
-            asyncio.run(agent.install(environment))
         with self.assertRaisesRegex(NotImplementedError, "CDA-89"):
-            asyncio.run(agent.run("instruction", environment, MagicMock()))
+            asyncio.run(agent.run("instruction", MagicMock(), MagicMock()))
 
 
 if __name__ == "__main__":
