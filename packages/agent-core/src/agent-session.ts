@@ -1074,8 +1074,8 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
     if (settleIfCancelling()) {
       return "settled";
     }
-    // Only Agent Core aborts the signal, and only after a cancel it accepted, so a cancellation
-    // reported outside cancelling breaks the policy's contract.
+    // Agent Core aborts the signal only after a cancel it accepted or a breached limit, and both
+    // settle above, so a cancellation reported here breaks the policy's contract.
     if (decision.outcome === "cancelled") {
       return failInternal("the Verification Policy reported a cancellation that was not requested");
     }

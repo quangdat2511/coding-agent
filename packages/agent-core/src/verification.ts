@@ -62,10 +62,10 @@ export type VerificationDecision =
     };
 
 // A Verification run the abort signal ended is not a decision (ADR 0003 §3): the policy reports it
-// as cancelled, and Agent Core records the run as cancelled when the session is cancelling. Only
-// Agent Core aborts that signal, after a cancel it accepted, so a policy that reports cancelled at
-// any other time fails the session with INTERNAL_ERROR. A policy that gives up on its own, as on
-// a timeout of its own, decides failed instead.
+// as cancelled. Agent Core aborts that signal only after a cancel it accepted, when it records the
+// run as cancelled, or after a breached limit, when the session settles LIMIT_EXCEEDED. A policy
+// that reports cancelled at any other time fails the session with INTERNAL_ERROR. A policy that
+// gives up on its own, as on a timeout of its own, decides failed instead.
 export interface VerificationCancelled {
   readonly outcome: "cancelled";
 }

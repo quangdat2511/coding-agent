@@ -218,9 +218,11 @@ On 2026-11-17, [CDA-77](https://datn-fit-hcmus.atlassian.net/browse/CDA-77) amen
   union has no member for a cancelled run and Agent Core already records a cancelled
   Verification with empty evidence. It is not a `VerificationDecision` member: ADR 0002 §4's policy
   still returns exactly one of three decisions when it decides. Agent Core records the Verification
-  as cancelled when the session is cancelling, and settles `INTERNAL_ERROR` when a policy reports a
-  cancellation nobody requested, as it does when a policy throws, because only an accepted cancel
-  aborts the signal it passes.
+  as cancelled when the session is cancelling, and settles `LIMIT_EXCEEDED` when a breached limit
+  aborted the run ([ADR 0002](./0002-agent-session-state-machine-and-event-protocol.md) §4,
+  [CDA-76](https://datn-fit-hcmus.atlassian.net/browse/CDA-76)). Those are the only times it aborts
+  the signal it passes, so it settles `INTERNAL_ERROR` when a policy reports a cancellation at any
+  other time, as it does when a policy throws.
 - **Feedback layout** (§3): the template's `{quoted command}` is the command as a JSON string,
   the way every tool result quotes text that can hold a newline, so a command that spans lines
   cannot pass for output. `{output}` is the combined output after the 40 KiB budget. Output that
@@ -243,9 +245,10 @@ On 2026-11-17, [CDA-77](https://datn-fit-hcmus.atlassian.net/browse/CDA-77) amen
 
 Evidence behind this amendment:
 
-- *Read in source:* Agent Core aborts the Verification signal only in `cancel`
-  (`packages/agent-core/src/agent-session.ts`), and after `verify` returns it settles cancelled
-  whenever the session is cancelling, whatever the policy returned.
+- *Read in source:* Agent Core aborts the Verification signal only in `cancel` and when it records
+  a breached duration limit (`packages/agent-core/src/agent-session.ts`). After `verify` returns,
+  it settles `LIMIT_EXCEEDED` when a limit was breached and cancelled when the session is
+  cancelling, whatever the policy returned.
 - *Run locally* (Linux, Bun 1.3.14): the policy's tests with a scripted runner and with the real
   runner in a temporary repository, and Agent Core's tests for a reported cancellation with and
   without a cancel.
