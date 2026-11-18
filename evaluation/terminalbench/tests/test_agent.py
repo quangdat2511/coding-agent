@@ -161,10 +161,27 @@ class CodingAgentTest(unittest.TestCase):
         )
         agent = AgentFactory.create_agent_from_config(config, logs_dir=self.logs_dir)
         self.assertEqual(agent.extra_env, {"OPENCODE_API_KEY": PROVIDER_KEY})
-        # A literal value would be in the shell history and in the job's config.json.
+        # A literal that differs from the host's key cannot be a resolved template of that key.
         literal = config.model_copy(update={"env": {"OPENCODE_API_KEY": "another-key"}})
-        with self.assertRaisesRegex(LaunchError, "as a value; pass the template"):
+        with self.assertRaisesRegex(LaunchError, "differs from the host's OPENCODE_API_KEY"):
             AgentFactory.create_agent_from_config(literal, logs_dir=self.logs_dir)
+
+    def test_a_literal_equal_to_the_host_key_passes_and_harbor_stores_a_template(self) -> None:
+        # Harbor resolves templates before preflight and the constructor, so the agent sees the
+        # same value for `${OPENCODE_API_KEY}` and for the literal key. Only the shell history
+        # differs, which no agent hook can see.
+        config = AgentConfig(
+            import_path=IMPORT_PATH,
+            model_name="opencode/some-model",
+            kwargs={"artifact_dir": str(self.artifact_dir)},
+            env={"OPENCODE_API_KEY": PROVIDER_KEY},
+        )
+        AgentFactory.run_preflight(config)
+        agent = AgentFactory.create_agent_from_config(config, logs_dir=self.logs_dir)
+        self.assertEqual(agent.extra_env, {"OPENCODE_API_KEY": PROVIDER_KEY})
+        # The job's config.json holds the template, not the key.
+        self.assertEqual(config.model_dump(mode="json")["env"], KEY_TEMPLATE)
+        self.assertNotIn(PROVIDER_KEY, config.model_dump_json())
 
     def test_preflight_checks_the_manifest_before_trials_are_queued(self) -> None:
         config = AgentConfig(
@@ -265,7 +282,7 @@ class CodingAgentTest(unittest.TestCase):
         literal = AgentConfig(
             import_path=IMPORT_PATH, kwargs=kwargs, env={"OPENCODE_API_KEY": "another-key"}
         )
-        with self.assertRaisesRegex(LaunchError, "as a value; pass the template"):
+        with self.assertRaisesRegex(LaunchError, "differs from the host's OPENCODE_API_KEY"):
             AgentFactory.run_preflight(literal)
 
 

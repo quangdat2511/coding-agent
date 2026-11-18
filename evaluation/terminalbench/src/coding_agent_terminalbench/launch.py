@@ -83,9 +83,13 @@ def check_agent_env(
 
     `agent_env` holds the `--ae` values after Harbor resolved their templates, and `host_env` is
     the environment of the Harbor process. ADR 0005 §7 passes the key as the template
-    `NAME='${NAME}'`, so its resolved value must equal the host's NAME. A literal value would be in
-    the shell history and in the job's config.json. `provider` is None in preflight, which Harbor
-    calls without the model.
+    `NAME='${NAME}'`, so its resolved value must equal the host's NAME. `provider` is None in
+    preflight, which Harbor calls without the model.
+
+    Harbor resolves the templates before it calls preflight or the constructor, so this check sees
+    values only. It refuses a template of another host variable and a literal that differs from
+    the host's NAME. A literal that equals the host's NAME passes, because its resolved value is the
+    same as the template's. Harbor stores that literal in config.json as `${NAME}`.
 
     The messages name variables and never print a value.
     """
@@ -106,8 +110,8 @@ def check_agent_env(
         raise LaunchError(f"--ae passes {variable} with a blank value")
     if host_env.get(variable) != value:
         raise LaunchError(
-            f"--ae passes {variable} as a value; pass the template {variable}='${{{variable}}}', "
-            f"so the value comes from the host's {variable} and stays out of config.json"
+            f"--ae passes {variable} with a value that differs from the host's {variable}; pass "
+            f"the template {variable}='${{{variable}}}', so the agent uses the host's key"
         )
     if provider is not None and variable not in PROVIDER_KEY_VARIABLES[provider]:
         raise LaunchError(

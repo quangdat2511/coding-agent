@@ -72,7 +72,7 @@ class CheckAgentEnvTest(unittest.TestCase):
         with self.assertRaisesRegex(LaunchError, "OPENCODE_API_KEY with a blank value"):
             check_agent_env({"OPENCODE_API_KEY": " "}, {"OPENCODE_API_KEY": " "})
 
-    def test_a_literal_key_is_refused(self) -> None:
+    def test_a_value_that_differs_from_the_host_key_is_refused(self) -> None:
         for host_env in ({}, {"OPENCODE_API_KEY": "another-key"}):
             with self.subTest(host_env=host_env):
                 with self.assertRaises(LaunchError) as raised:
@@ -82,6 +82,12 @@ class CheckAgentEnvTest(unittest.TestCase):
                 # A message never prints a value.
                 self.assertNotIn(PROVIDER_KEY, message)
                 self.assertNotIn("another-key", message)
+
+    def test_a_literal_equal_to_the_host_key_cannot_be_told_from_a_template(self) -> None:
+        # The check receives values that Harbor already resolved, so a literal with the host's
+        # value is the same input as `${OPENCODE_API_KEY}`.
+        same = {"OPENCODE_API_KEY": PROVIDER_KEY}
+        self.assertEqual(check_agent_env(same, same, "opencode"), "OPENCODE_API_KEY")
 
     def test_the_key_of_another_provider_is_refused(self) -> None:
         opencode = {"OPENCODE_API_KEY": PROVIDER_KEY}

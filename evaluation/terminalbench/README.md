@@ -148,8 +148,8 @@ run if an ancestor still holds the key.
 ### Provider key
 
 The agent's environment must hold exactly one provider key: the key of the `-m` provider. Pass it
-with `--ae` as a template of the host variable with the same name, so that its value is in neither
-the shell history nor the job's `config.json`:
+with `--ae` as a template of the host variable with the same name, so that its value is not in the
+shell history (ADR 0005 §7):
 
 ```sh
 --ae OPENCODE_API_KEY='${OPENCODE_API_KEY}'
@@ -160,13 +160,21 @@ The agent refuses the job in these cases:
 - No `--ae` value names a provider key.
 - `--ae` names two provider keys, for example `OPENCODE_API_KEY` and `OPENROUTER_API_KEY`, or both
   `GOOGLE_API_KEY` and `GEMINI_API_KEY`.
-- The key is blank, or its value differs from the host variable with the same name. A literal
-  value, or a template of another host variable, fails this check.
+- The key is blank, or its value differs from the host variable with the same name. A template of
+  another host variable, or a literal that differs from the host value, fails this check.
 - The key belongs to another provider than the one of `-m`.
 
 Harbor's preflight makes all of these checks except the last one before it queues a trial, because
 Harbor gives preflight no model. The agent's constructor makes all of them when Harbor creates a
-trial. The provider list and the key names are in `launch.py`. They match ADR 0005 §3 and
+trial.
+
+The agent cannot tell a template from a literal. Harbor resolves the templates before it calls
+preflight or the constructor, so both receive the values only. A literal that equals the host
+variable with the same name therefore passes every check, and it stays in the shell history. Harbor
+never writes the key to the job's `config.json`: it stores that literal as the template
+`${OPENCODE_API_KEY}`, and it redacts any other value of a variable whose name contains `KEY`. To
+refuse every literal, a check must read `--ae` before Harbor resolves it, and Harbor 0.23.0 gives an
+agent no such hook. The provider list and the key names are in `launch.py`. They match ADR 0005 §3 and
 `packages/ai/src/credentials.ts`, and `tests/test_launch.py` fails if either one changes.
 
 ## Trial context and trajectory
