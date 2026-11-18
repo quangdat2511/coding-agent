@@ -30,8 +30,7 @@ subscription rather than per token.
 On [the Terminal-Bench leaderboard](https://www.tbench.ai/leaderboard), read again on 2026-11-18
 from the 4.1.0 rows in the [4.1.0 release table](https://www.tbench.ai/news/terminal-bench-4-1)
 (five trials per row): Claude Opus 5.5 65.8%, Claude Sonnet 5.5 63.9%, GPT-6.1 Sol 60.9%, GPT-6
-Astra 60.3%, and GPT-5.6 Sol 38.5% under mini-SWE-agent. No leaderboard row exists for the model
-this record chooses.
+Astra 60.3%, and GPT-5.6 Sol 38.5%. No leaderboard row exists for the model this record chooses.
 
 Go's terms are quoted from [the Console Go documentation](https://opencode.ai/docs/console/go) and
 [the harnesses page](https://opencode.ai/docs/console/harnesses), both read 2026-11-12: $10 a month
