@@ -156,7 +156,7 @@ export function projectSessionEvent(event: SessionEvent, prev: TuiModel): TuiMod
         const { progress: _cleared, ...call } = entry;
         if (data.outcome === "skipped") {
           // A Skipped Tool Call never gets a Tool Result (ADR 0002 §3).
-          return { ...call, status: "skipped" };
+          return { ...call, status: "skipped", skipReason: data.reason };
         }
         return data.result === undefined
           ? { ...call, status: data.outcome }

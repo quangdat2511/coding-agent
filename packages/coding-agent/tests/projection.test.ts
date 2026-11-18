@@ -247,7 +247,7 @@ describe("projectSessionEvent", () => {
       });
     });
 
-    it("show a Skipped Tool Call without a Tool Result", () => {
+    it("show a Skipped Tool Call with its reason and without a Tool Result", () => {
       const model = project([
         started,
         bashQueued,
@@ -260,6 +260,7 @@ describe("projectSessionEvent", () => {
         toolName: "bash",
         summary: "bun test",
         status: "skipped",
+        skipReason: "CANCELLED",
       });
     });
 

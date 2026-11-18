@@ -87,8 +87,14 @@ function userLines(entry: Entry<"user">, columns: number): string[] {
 
 function toolCallLines(entry: Entry<"tool_call">, columns: number): string[] {
   const { result } = entry;
-  // Status, error code and truncation are spelled out because colors depend on the terminal.
-  const details = [entry.status, result?.errorCode, result?.truncated ? "truncated" : undefined]
+  // Status, error code, skip reason and truncation are spelled out because colors depend on the
+  // terminal.
+  const details = [
+    entry.status,
+    result?.errorCode,
+    entry.skipReason,
+    result?.truncated ? "truncated" : undefined,
+  ]
     .filter(Boolean)
     .join(", ");
   const header = [entry.toolName, entry.summary, `[${details}]`].filter(Boolean).join(" ");

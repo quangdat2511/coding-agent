@@ -66,6 +66,8 @@ export type TranscriptEntry =
         readonly errorCode?: string;
         readonly truncated?: boolean;
       };
+      // Why a skipped call never ran: "CANCELLED" or an Agent Failure code, kept as a plain string.
+      readonly skipReason?: string;
       // The latest tail of an executing call's output (Tool Progress). Each update replaces the
       // previous one, and it is absent once the call completes.
       readonly progress?: string;

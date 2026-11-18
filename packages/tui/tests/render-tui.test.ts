@@ -94,7 +94,14 @@ describe("renderTui", () => {
         status: "denied",
         result: { content: "Approval denied", isError: true, errorCode: "APPROVAL_DENIED" },
       },
-      { kind: "tool_call", id: "t-4", toolName: "edit", summary: "src/math.ts", status: "skipped" },
+      {
+        kind: "tool_call",
+        id: "t-4",
+        toolName: "edit",
+        summary: "src/math.ts",
+        status: "skipped",
+        skipReason: "CANCELLED",
+      },
       { kind: "tool_call", id: "t-5", toolName: "bash", summary: "sleep 60", status: "cancelled" },
     ]);
     await tui.flush();
@@ -118,7 +125,7 @@ describe("renderTui", () => {
         "write src/math.ts [denied, APPROVAL_DENIED]",
         "  Approval denied",
         "",
-        "edit src/math.ts [skipped]",
+        "edit src/math.ts [skipped, CANCELLED]",
         "",
         "bash sleep 60 [cancelled]",
       ),
