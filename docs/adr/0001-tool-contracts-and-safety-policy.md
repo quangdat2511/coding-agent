@@ -204,11 +204,9 @@ On 2026-11-12, [CDA-71](https://datn-fit-hcmus.atlassian.net/browse/CDA-71) amen
 - **Error classification** (§1): `TIMEOUT` is decided by bash's own timer, not by the signal the
   shell died of, since a command can send itself the same signal. `SIGNAL` means the shell itself
   was ended by a signal bash did not send; a killed child of a shell that goes on is a normal
-  exit. A cancelled call reports `SIGNAL` with `[cancelled; ...]`. Agent Core will record it as
-  cancelled (ADR 0002 §5) once session cancellation lands in
-  [CDA-73](https://datn-fit-hcmus.atlassian.net/browse/CDA-73); until then Agent Core refuses
-  `cancel` and never aborts a running Tool Call, so only a caller that aborts the signal itself
-  reaches this path.
+  exit. A cancelled call reports `SIGNAL` with `[cancelled; ...]`. Session cancellation aborts the
+  active Tool Call through its signal; once the call quiesces, Agent Core records it as cancelled
+  (ADR 0002 §5, [CDA-73](https://datn-fit-hcmus.atlassian.net/browse/CDA-73)).
 - **Process lifetime** (§3): a timeout or cancellation sends `SIGTERM` to the command's process
   group and `SIGKILL` 1 s later, so what the command started stops too; on Windows `taskkill /T
   /F`, started through the same launcher, ends the tree at once. Windows therefore has no grace
