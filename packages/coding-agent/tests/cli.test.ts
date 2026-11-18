@@ -267,7 +267,7 @@ describe("the coding-agent executable", () => {
   });
 
   it.each([
-    { name: "no arguments", args: [], expected: "a command is required" },
+    { name: "no arguments", args: [], expected: "--provider is required" },
     {
       name: "a missing --task-file",
       args: ["run", ...required.slice(2)],
