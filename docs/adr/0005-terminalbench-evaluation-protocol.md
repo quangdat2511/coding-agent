@@ -29,17 +29,22 @@ container and records Harbor's own rewards. Earlier decisions constrain the prot
   [Agent Session state-machine decision](./0002-agent-session-state-machine-and-event-protocol.md)
   requires a schema version once Session Events become persistent data (§7).
 
-This decision was checked against the Harbor and Terminal-Bench source at the commits pinned in §1.
-These facts shape it:
+This decision was checked against Harbor at `1e5c5c6` and Terminal-Bench at `452bf30` (4.0.0). The
+dataset is a job parameter, not a pin of this protocol
+([ADR 0008](./0008-evaluation-dataset-as-a-job-parameter.md)); that record moves the default pin to
+4.1.0 at `4070d6c`, and its release adds and removes no task and makes no agent-facing environment
+change, so the environment facts below describe the default pin as well. The verifier facts below
+are 4.0.0's; ADR 0008 §4 records the default pin's own. These facts shape it:
 
 - Terminal-Bench 4.0.0, released on 2026-08-26, ten days after the research, removes 8 of
   3.0.0's 74 tasks and revises every remaining task. Harbor 0.22.0 and 0.23.0 followed; 0.23.0
   moves agents from `SUPPORTS_*` flags, now deprecated aliases, to a `capabilities` declaration.
-- All 66 tasks in 4.0.0 give the agent 28,800 s, use a separate verifier environment, and have a
+- Every task in 4.0.0 gives the agent 28,800 s, uses a separate verifier environment, and has a
   single step. Three request one H100 GPU and eleven are multi-container Docker Compose
   environments. None sets a network mode, so Harbor's default `public` applies.
   `medical-claims-processing` declares an MCP server and `cumulative-layout-shift` a skills
-  directory.
+  directory. These are dataset facts, not protocol constants: §1 makes the dataset a job parameter,
+  and ADR 0008 records the default pin's own data and the properties a dataset must have.
 - Every base image is a glibc Linux distribution (Debian, Ubuntu, or Fedora); none is Alpine. The
   final-stage `WORKDIR` of the task image, or of the main service's image in a Compose task, is
   `/app` for 58 tasks, `/workspace` for 5, and `/app/sglang`, `/app/vllm`, or `/task` for one task
@@ -87,7 +92,7 @@ a running job.
 | Modal declares GPU support outside its VM runtime; Harbor's Docker environment declares none | [`environments/modal.py` L987](https://github.com/harbor-framework/harbor/blob/1e5c5c6/src/harbor/environments/modal.py#L987), [`environments/docker/docker.py` L311](https://github.com/harbor-framework/harbor/blob/1e5c5c6/src/harbor/environments/docker/docker.py#L311) |
 | The default ATIF version is ATIF-v1.8 (ATIF-v1.7 at Harbor 0.21.0) | [`models/trajectories/trajectory.py` L26](https://github.com/harbor-framework/harbor/blob/1e5c5c6/src/harbor/models/trajectories/trajectory.py#L26) |
 | The separate verifier environment is built from the task's tests | [`trial/trial.py` L912](https://github.com/harbor-framework/harbor/blob/1e5c5c6/src/harbor/trial/trial.py#L912) |
-| The dataset statistics in the context | every `task.toml`, `environment/Dockerfile` (final-stage `WORKDIR`), `environment/docker-compose.yaml`, and `instruction.md` under [`tasks/`](https://github.com/harbor-framework/terminal-bench/tree/452bf30/tasks), parsed by script |
+| The dataset statistics in the context | every `task.toml`, `environment/Dockerfile` (final-stage `WORKDIR`), `environment/docker-compose.yaml`, and `instruction.md` under [`tasks/`](https://github.com/harbor-framework/terminal-bench/tree/452bf30/tasks), parsed by script; ADR 0008 parsed the 4.1.0 task list the same way |
 
 The Linux behavior behind §7's credential isolation precondition was read in Linux v6.16.
 `/proc/<pid>/environ` opens in read mode
@@ -115,8 +120,8 @@ a loader test. The Coding Agent CLI does not exist yet, so its size and behavior
 
 - No Harbor job has run: Harbor was not installed, the Docker daemon was not running, and no Modal
   account was used.
-- That `terminal-bench/terminal-bench@4.0.0` resolves from the registry is taken from the
-  [release notes](https://github.com/harbor-framework/terminal-bench/releases/tag/v4.0.0).
+- That the default pin, `terminal-bench/terminal-bench@4.1.0`, resolves from the registry is taken
+  from its [release notes](https://github.com/harbor-framework/terminal-bench/releases/tag/v4.1.0).
 - Uploading a roughly 94 MB executable within Harbor's default 360 s agent-setup timeout is
   untested.
 - In the eleven Compose tasks, the process starting in the main image's `WORKDIR` follows Docker
@@ -136,26 +141,41 @@ and §9 is where they are shown to work.
 
 | Component | Pin |
 | --- | --- |
-| Dataset | `terminal-bench/terminal-bench@4.0.0`, release commit `452bf30`, 66 tasks |
+| Dataset | a job parameter, `name@version` (ADR 0008 §1); the MVP's default pin is `terminal-bench/terminal-bench@4.1.0`, release commit `4070d6c` |
 | Harness | `harbor[modal]==0.23.0`, commit `1e5c5c6`, Python 3.12 or newer, resolved through a committed `uv.lock` |
 | Recorded-job backend | Modal |
 | Coding Agent | one immutable artifact per recorded job (§2), identified by source commit and SHA-256 |
 
-These pins replace CDA-21's Terminal-Bench 3.0.0 and Harbor 0.21.0 baseline. Version 4.0.0 is the
-dataset its maintainers currently publish, so a 3.0.0 result would describe a superseded
-benchmark. Harbor is pinned exactly rather than by range because its agent API changed between
-0.21.0 and 0.23.0. The trial behaviors listed in the context are identical in both versions.
+These pins replace CDA-21's Terminal-Bench 3.0.0 and Harbor 0.21.0 baseline. The dataset is not a
+pin of this protocol: a job names its dataset, and the table records only the MVP's default. Version
+4.1.0 is the dataset its maintainers currently publish, so a 3.0.0 result would describe a
+superseded benchmark. The recorded job's manifest records the dataset it actually ran with its
+release commit and task count. Harbor is pinned exactly rather than by range because its agent API
+changed between 0.21.0 and 0.23.0. The trial behaviors listed in the context are identical in both
+versions.
 
 Modal records the run because the benchmark's maintainers develop and validate tasks on it and it
-can schedule the three GPU tasks, which Harbor's Docker environment cannot. Docker is permitted
-only for the smoke job (§7).
+can schedule GPU tasks, which Harbor's Docker environment cannot. Docker is permitted only for the
+smoke job (§7).
 
-Changing a pin is a new decision that amends this record. Results are never pooled across pins.
+Changing the Harbor, backend, or Coding Agent pin is a new decision that amends this record;
+changing the default dataset pin amends
+[ADR 0008](./0008-evaluation-dataset-as-a-job-parameter.md) instead. A job may name another
+admissible dataset without amending either record. Results are never pooled across dataset pins.
 
 On 2026-11-12, [CDA-30](https://datn-fit-hcmus.atlassian.net/browse/CDA-30) amended this record in
 four places: §3 accepts `opencode` as a sixth provider value, §7 names the choice that
 [ADR 0007](./0007-evaluation-provider-and-model.md) makes, §8 adds the `oc_sk_` prefix to the secret
 scan, and the note under Dependencies records that CDA-83 carries the status for this adapter.
+
+On 2026-11-17, [CDA-114](https://datn-fit-hcmus.atlassian.net/browse/CDA-114) amended this record:
+the dataset became a job parameter and the default pin moved from 4.0.0 to 4.1.0, following
+[ADR 0008](./0008-evaluation-dataset-as-a-job-parameter.md). §1's dataset row names a default
+rather than one dataset for every job; §5 states the session bound in terms of an admissible
+dataset; §7's two commands take `<dataset>`, its isolation precondition names the job dataset's
+images, and its validity rule includes ADR 0008 §3's properties; §8 derives `N` from the job's task
+list; and the Consequences follow the job's task list. The task count and smoke task names left this
+record for ADR 0008's dataset data.
 
 ### 2. Coding Agent artifact
 
@@ -256,13 +276,14 @@ discovery, the Scratchpad convention, the tools, and the model settings are the 
 | `maxConsecutiveRecoverableFailures` | 3 | 10 |
 | `cancellationGraceMs` | Coding Agent default | same as `default` |
 
-Under the defaults most tasks would end with `LIMIT_EXCEEDED` before meaningful work: each task
-allows 28,800 s, and an ordinary `grep` that finds nothing returns a `NON_ZERO_EXIT` error Tool
-Result, which advances the consecutive-failure counter. A 3,600,000 ms session ends well inside
-Harbor's timeout, so the CLI settles and writes `result.json` itself instead of being cancelled
-from outside; Harbor's timeout is left unchanged. The turn and Tool Call limits bound model cost per
-trial. Both profiles are Coding Agent configuration, which ADR 0003 §4 makes the owner of concrete
-limit values, and `default` remains the MVP default.
+Under the defaults most tasks would end with `LIMIT_EXCEEDED` before meaningful work: each task in
+the default pin allows 28,800 s, and ADR 0008 requires every admissible dataset to give each task
+at least the 3,600,000 ms session, while an ordinary `grep` that finds nothing returns a
+`NON_ZERO_EXIT` error Tool Result, which advances the consecutive-failure counter. A 3,600,000 ms
+session ends well inside Harbor's timeout, so the CLI settles and writes `result.json` itself
+instead of being cancelled from outside; Harbor's timeout is left unchanged. The turn and Tool Call
+limits bound model cost per trial. Both profiles are Coding Agent configuration, which ADR 0003 §4
+makes the owner of concrete limit values, and `default` remains the MVP default.
 
 Inside a task container:
 
@@ -380,11 +401,11 @@ count.
 
 | Flag | Meaning at `1e5c5c6` | Source |
 | --- | --- | --- |
-| `-k`, `--n-attempts` | independent attempts per task; default 1 | [`cli/jobs.py` L457](https://github.com/harbor-framework/harbor/blob/1e5c5c6/src/harbor/cli/jobs.py#L457), [`models/job/config.py` L403](https://github.com/harbor-framework/harbor/blob/1e5c5c6/src/harbor/models/job/config.py#L403) |
-| `-n`, `--n-concurrent` | number of trials running at the same time; affects wall-clock time only | [`cli/jobs.py` L538](https://github.com/harbor-framework/harbor/blob/1e5c5c6/src/harbor/cli/jobs.py#L538) |
-| `-r`, `--max-retries` | reruns of a trial that ended with an exception; default 0. An exception qualifies by exact class name, and the trial directory is deleted before each rerun | [`cli/jobs.py` L563](https://github.com/harbor-framework/harbor/blob/1e5c5c6/src/harbor/cli/jobs.py#L563), [`trial/queue.py` L83](https://github.com/harbor-framework/harbor/blob/1e5c5c6/src/harbor/trial/queue.py#L83), [L222](https://github.com/harbor-framework/harbor/blob/1e5c5c6/src/harbor/trial/queue.py#L222) |
-| `-i`, `--include-task-name` | runs only the named tasks; glob patterns allowed | [`cli/jobs.py` L1151](https://github.com/harbor-framework/harbor/blob/1e5c5c6/src/harbor/cli/jobs.py#L1151) |
-| `--ae`, `--agent-env` | `KEY=VALUE` environment variable for the agent | [`cli/jobs.py` L669](https://github.com/harbor-framework/harbor/blob/1e5c5c6/src/harbor/cli/jobs.py#L669) |
+| `-k`, `--n-attempts` | independent attempts per task; default 1 | [`cli/jobs.py` L458](https://github.com/harbor-framework/harbor/blob/1e5c5c6/src/harbor/cli/jobs.py#L458), [`models/job/config.py` L403](https://github.com/harbor-framework/harbor/blob/1e5c5c6/src/harbor/models/job/config.py#L403) |
+| `-n`, `--n-concurrent` | number of trials running at the same time; affects wall-clock time only | [`cli/jobs.py` L539](https://github.com/harbor-framework/harbor/blob/1e5c5c6/src/harbor/cli/jobs.py#L539) |
+| `-r`, `--max-retries` | reruns of a trial that ended with an exception; default 0. An exception qualifies by exact class name, and the trial directory is deleted before each rerun | [`cli/jobs.py` L564](https://github.com/harbor-framework/harbor/blob/1e5c5c6/src/harbor/cli/jobs.py#L564), [`trial/queue.py` L83](https://github.com/harbor-framework/harbor/blob/1e5c5c6/src/harbor/trial/queue.py#L83), [L222](https://github.com/harbor-framework/harbor/blob/1e5c5c6/src/harbor/trial/queue.py#L222) |
+| `-i`, `--include-task-name` | runs only the named tasks; glob patterns allowed | [`cli/jobs.py` L1152](https://github.com/harbor-framework/harbor/blob/1e5c5c6/src/harbor/cli/jobs.py#L1152) |
+| `--ae`, `--agent-env` | `KEY=VALUE` environment variable for the agent | [`cli/jobs.py` L670](https://github.com/harbor-framework/harbor/blob/1e5c5c6/src/harbor/cli/jobs.py#L670) |
 | `harbor jobs resume -f`, `--filter-error-type` | before resuming, deletes trials without `result.json` and trials whose exception type is listed; default `CancelledError` | [`cli/jobs.py` L2190](https://github.com/harbor-framework/harbor/blob/1e5c5c6/src/harbor/cli/jobs.py#L2190), [`job.py` L268](https://github.com/harbor-framework/harbor/blob/1e5c5c6/src/harbor/job.py#L268) |
 
 **Credential isolation precondition.** The smoke, recorded, and rerun jobs place a provider
@@ -403,31 +424,33 @@ jobs may start until all of the following hold:
    non-dumpable or a security module denies it, and serves that file from the process's original
    environment region (see Evidence).
 3. The artifact under evaluation implements the resolution, and an automated test demonstrates it
-   on every backend the job will use. The test runs inside containers built from Terminal-Bench
-   4.0.0 task images, as the user Harbor runs the agent as: at least one task whose agent runs as
-   root and one whose agent runs as a non-root user. Tool Calls in the test attempt each path in
-   item 2, and none reveals the credential. The artifact manifest records the ADR amendment and the
-   passing test run for the artifact's commit and backend.
+   on every backend the job will use. The test runs inside containers built from the task images of
+   the dataset the job will use, as the user Harbor runs the agent as: at least one task whose agent
+   runs as root and one whose agent runs as a non-root user. Tool Calls in the test attempt each
+   path in item 2, and none reveals the credential. The artifact manifest records the ADR amendment
+   and the passing test run for the artifact's commit and backend.
 
 If CDA-29 resolves that tool processes may obtain the credential, these jobs remain blocked until a
 new decision amends this record, for example by keeping the credential out of the task container.
 The oracle job receives no credential and is not gated.
 
 1. **Build** the artifact at the evaluated commit (§2).
-2. **Oracle job**: `harbor run -d terminal-bench/terminal-bench@4.0.0 -a oracle -e modal -k 1`.
+2. **Oracle job**: `harbor run -d <dataset> -a oracle -e modal -k 1`.
    A task whose oracle reward is below 1 is listed in the report as harness-flaky and stays in the
    denominator.
 3. **Smoke job**, only after the credential isolation precondition holds for its backend: the
-   recorded-job command below, restricted with `-i` to `bun-sourcemap-leak`, `music-harmony`, and
-   `photonic-waveguide-routing`, three CPU-only single-container tasks with small resource
-   requests. It may use `-e docker`. It passes when each trial has a reward, the
-   three Coding Agent files, a validated `trajectory.json`, and token counts.
+   recorded-job command below, restricted with `-i` to the smoke tasks recorded for that dataset
+   before the smoke job starts: ADR 0008 §4 for the default pin, and the committed dataset record of
+   ADR 0008 §1 for any other dataset. The smoke set is three CPU-only single-container tasks with
+   small resource requests, and which three is dataset data. It may use `-e docker`. It passes when
+   each trial has a reward, the three Coding Agent files, a validated `trajectory.json`, and token
+   counts.
 4. **Recorded job**, only after the credential isolation precondition holds on Modal for the
    artifact being evaluated:
 
    ```sh
    uv run --project evaluation/terminalbench --frozen harbor run \
-     -d terminal-bench/terminal-bench@4.0.0 \
+     -d <dataset> \
      -a <adapter import path> -m <provider>/<model-id> \
      --ak artifact_dir=<artifact directory> \
      --ae <PROVIDER_KEY_ENV>='${<PROVIDER_KEY_ENV>}' \
@@ -436,13 +459,22 @@ The oracle job receives no credential and is not gated.
    ```
 
 5. **Rerun job**, only when the rule below selects trials: the recorded-job command, under the same
-   precondition, with one `-i` per selected task and `--job-name <job name>-rerun`.
+   precondition, with the same `<dataset>`, one `-i` per selected task and
+   `--job-name <job name>-rerun`.
+
+`<dataset>` is a `name@version` registry dataset, not a local path and not `latest` (ADR 0008 §1).
+The MVP's recorded job uses the default pin; a job that names another admissible dataset is a
+separate experiment and records it in its manifest. The manifest records the dataset fields §8
+lists. No rule here depends on the default pin's task count or smoke names.
 
 Rules for the recorded job:
 
 - Exactly one provider and model per job, declared in the manifest. This decision does not choose
   the model; [ADR 0007](./0007-evaluation-provider-and-model.md) chooses `opencode` with
   `deepseek-v4.1-flash` and bounds what that job may claim.
+- Exactly one dataset pin per job, declared in the manifest with its release commit and task count.
+  Results are comparable only within that pin and are never pooled across pins (ADR 0008 §1). A
+  recorded-job and its rerun job use the same pin.
 - One attempt per task (`-k 1`). Additional attempts for measuring variance are separate jobs,
   reported separately.
 - No task filtering outside the rerun job, and no timeout override or timeout multiplier.
@@ -469,27 +501,34 @@ not rerun-eligible. Each task's recorded outcome is its original trial when that
 and its rerun trial otherwise.
 
 The recorded job is **valid** when every task has a completed trial in the recorded job or the
-rerun job. A job that is not valid publishes no headline reward, but both jobs are still archived
-and reported.
+rerun job, and the job's dataset has the properties
+[ADR 0008](./0008-evaluation-dataset-as-a-job-parameter.md) §3 requires. A job that is not valid
+publishes no headline reward, but both jobs are still archived and reported.
 
 ### 8. Records and reporting
 
 For each recorded job, `evaluation/terminalbench/runs/<job name>/` is committed with two files:
 
 - **`manifest.json`**: the §1 pins, including the Harbor and Modal SDK versions from `uv.lock`; the
+  job's dataset identifier, source repository and release tag, resolved release commit, task count,
+  resolved task list, and smoke set, with the evidence that the dataset has the properties
+  [ADR 0008](./0008-evaluation-dataset-as-a-job-parameter.md) §3 requires; the
   Coding Agent commit, version, Bun version, and artifact SHA-256 values; the `terminalbench`
   profile values; provider, model, and sampling settings; every Harbor flag used; the names, never
   the values, of the environment variables passed; job start and end times; the oracle, smoke, and
   rerun job names; the secret scan's patterns, file count, and result; and the SHA-256 of every
   archive part.
-- **`report.md`**: whether the job is valid (§7); the mean reward over the 66 recorded outcomes,
-  computed as Harbor's `mean` computes it, and the reward distribution; a per-task table of
-  reward, Agent Result outcome and failure code, Model Turns, Tool Calls, tokens, duration, and
-  trial exception type; a cross-tabulation of Agent Result outcome against reward; every
-  rerun-eligible trial with its reason, meaning the exception type and the phase it occurred in
-  (from the trial's `environment_setup`, `agent_setup`, `agent_execution`, and `verifier` timings)
-  or the provider's HTTP status, together with its rerun's outcome; the harness-flaky tasks; and the
-  tasks whose declared MCP servers or skills were ignored.
+- **`report.md`**: whether the job is valid (§7); the dataset identifier and release commit the
+  report describes, and that its result is comparable only with jobs on that pin and is never
+  pooled with another; the mean reward over the job's `N` recorded outcomes, where `N` is the
+  number of tasks in the job's resolved task list rather than a constant, computed as Harbor's
+  `mean` computes it, and the reward distribution; a per-task table of reward, Agent Result outcome
+  and failure code, Model Turns, Tool Calls, tokens, duration, and trial exception type; a
+  cross-tabulation of Agent Result outcome against reward; every rerun-eligible trial with its
+  reason, meaning the exception type and the phase it occurred in (from the trial's
+  `environment_setup`, `agent_setup`, `agent_execution`, and `verifier` timings) or the provider's
+  HTTP status, together with its rerun's outcome; the harness-flaky tasks; and the tasks whose
+  declared MCP servers or skills were ignored.
 
 The complete Harbor job directories of the recorded and rerun jobs, including every trial's
 `config.json`, `lock.json`, `result.json`, verifier output, and agent logs, are too large to commit.
@@ -593,14 +632,19 @@ them and decides neither.
   change to them changes the adapter in the same pull request.
 - The repository gains its first Python project. CI needs a job that runs the adapter's tests with
   `uv`; Biome, the import-boundary hook, and `bun --filter` do not cover it.
-- Each recorded job costs Modal compute for 66 task environments, three with an H100 GPU, plus model
-  usage bounded by 250 Model Turns per task. The oracle job adds compute without model usage.
+- Each recorded job costs Modal compute for one task environment per task in the job's dataset, and
+  an H100 for each GPU task the dataset declares, plus model usage bounded by 250 Model Turns per
+  task. The oracle job adds compute without model usage. A job on another admissible dataset costs
+  in proportion to its task list and GPU tasks.
 - Evaluation results describe the `terminalbench` Evaluation Profile, not the shipped defaults.
   Reports name the profile and do not present its results as the `default` profile's.
+- A result is comparable only within one dataset pin. The dataset is a job parameter
+  ([ADR 0008](./0008-evaluation-dataset-as-a-job-parameter.md)), so a job on another admissible
+  dataset is recorded and reported on its own and never pooled with another pin's result.
 - Known limitations are measured rather than worked around: the 120,000 ms `bash` cap constrains
-  long builds; the two tasks with MCP servers or skills run without them; and in the six tasks that
-  hand all of `/app` to the verifier, any Scratchpad files reach the verifier. Removing one of these
-  amends ADR 0001, ADR 0003, or the MVP scope, not this protocol.
+  long builds; the two tasks with MCP servers or skills run without them; and in the tasks that hand
+  all of `/app` to the verifier (ADR 0008 §4 lists the default pin's), any Scratchpad files reach the
+  verifier. Removing one of these amends ADR 0001, ADR 0003, or the MVP scope, not this protocol.
 - A trial that fails outside Coding Agent is rerun once in a separate job. That costs a second task
   environment, but it keeps the failed trial's evidence. A persistent backend or provider fault
   leaves the job without a headline result instead of shrinking the denominator.
