@@ -330,6 +330,11 @@ process exit behavior.
 An accepted cancellation enters `cancelling` immediately, schedules no new work, and signals the
 active model, tool, or Verification adapter through its `AbortSignal`.
 
+For active duration, the first committed `runtime_limit_reached` event decides the race: a breach
+recorded before `cancel` owns settlement with `LIMIT_EXCEEDED`, while an accepted cancellation
+before the breach remains a cancellation. The limit event is committed as soon as the deadline is
+observed, even when the session must still wait for the active effect or its grace period to end.
+
 - With no active effect, the session quiesces synchronously.
 - A pending Approval resolves as cancelled with `decidedBy: "user"`, because the accepted `cancel`
   command is the user's decision to terminate the session.

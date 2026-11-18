@@ -157,7 +157,7 @@ not been shown to work.
 | A1 | Construction and ports: `openAgentSession`, `ModelPort`, `Clock`, `IdSource`, `SessionLimits`, `WorkspaceResolver`, `RepoPath`, `ExecutableTool`, `ToolRegistry`, `VerificationPolicy`, and the full Agent State and Session Event type surface | Invalid construction returns `INVALID_CONFIGURATION` and creates no session, event, or transition |
 | A2 | Loop core: `ready`, `streaming_model`, `executing_tool`, `verifying`, `succeeded`, `failed`; transcript commitment; Candidate Completion; sequential dispatch; preflight in ADR 0002 §4 order; the auto-approved path | A fake `ModelPort` and fake tool drive a task to `succeeded` with the event sequence asserted |
 | A3 | Approval: `awaiting_approval`, `approval_requested`, `approval_resolved`, deny paths, and the self-transitions of ADR 0002 §2 | Allow, deny with a queued call remaining, and deny with none remaining each reach the right state |
-| A4 | Cancellation and limits: `cancelling`, the grace period, `runtime_limit_reached`, `LIMIT_EXCEEDED`, `partialChangesPossible` | Cancellation from every nonterminal state settles as `cancelled`, or as `failed` with `CANCELLATION_TIMEOUT` |
+| A4 | Cancellation and limits: `cancelling`, the grace period, `runtime_limit_reached`, `LIMIT_EXCEEDED`, `partialChangesPossible` | Cancellation from every nonterminal state settles as `cancelled`, or as `failed` with `CANCELLATION_TIMEOUT`, unless a duration breach was already recorded; that breach settles as `LIMIT_EXCEEDED` |
 
 **Track B, Tools.** Starts once A1 has published the ports.
 

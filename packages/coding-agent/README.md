@@ -46,11 +46,6 @@ This is the walking skeleton of
 These parts are still to come:
 
 - `read` is the only registered tool, and Verification is a stand-in. CDA-80 (D5) replaces both.
-- The session limits are resolved but not enforced. Agent Core does not yet compare its counters
-  with `maxModelTurns`, `maxToolCalls` or `maxDurationMs`, so a live run whose model keeps calling
-  tools runs until the process is killed, and spends tokens all the while. CDA-76 (A4.2) enforces
-  the limits. Until then, `SIGINT` or `SIGTERM` cancels such a run (see
-  [Cancelling a run](#cancelling-a-run)).
 
 ### Cancelling a run
 
