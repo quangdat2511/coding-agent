@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import { FOOTER_HEIGHT, KEY_HINTS } from "../src/frame.tsx";
 import * as publicApi from "../src/index.ts";
+import { PROGRESS_ROWS } from "../src/rows.ts";
 import type { TranscriptEntry } from "../src/types.ts";
 import { createTestTerminal } from "./support/terminal.ts";
 import { mountOn, unmountTui } from "./support/tui.ts";
@@ -93,7 +94,14 @@ describe("renderTui", () => {
         status: "denied",
         result: { content: "Approval denied", isError: true, errorCode: "APPROVAL_DENIED" },
       },
-      { kind: "tool_call", id: "t-4", toolName: "edit", summary: "src/math.ts", status: "skipped" },
+      {
+        kind: "tool_call",
+        id: "t-4",
+        toolName: "edit",
+        summary: "src/math.ts",
+        status: "skipped",
+        skipReason: "CANCELLED",
+      },
       { kind: "tool_call", id: "t-5", toolName: "bash", summary: "sleep 60", status: "cancelled" },
     ]);
     await tui.flush();
@@ -117,9 +125,110 @@ describe("renderTui", () => {
         "write src/math.ts [denied, APPROVAL_DENIED]",
         "  Approval denied",
         "",
-        "edit src/math.ts [skipped]",
+        "edit src/math.ts [skipped, CANCELLED]",
         "",
         "bash sleep 60 [cancelled]",
+      ),
+    );
+  });
+
+  it("shows reasoning before the text, indented under the header", async () => {
+    const { tui, terminal } = mount([
+      {
+        kind: "assistant",
+        id: "a-1",
+        reasoning: "The test expects a sum.",
+        text: "I'll fix add.",
+        status: "streaming",
+      },
+    ]);
+    await tui.flush();
+
+    expect(terminal.screen()).toEqual(
+      screenOf("assistant [streaming]", "  The test expects a sum.", "I'll fix add."),
+    );
+  });
+
+  it("shows the last rows of an executing call's progress, and its result once it completes", async () => {
+    const progress = `${Array.from({ length: 8 }, (_, line) => `line ${line + 1}`).join("\n")}\n`;
+    const running: TranscriptEntry = {
+      kind: "tool_call",
+      id: "t-1",
+      toolName: "bash",
+      summary: "bun test",
+      status: "executing",
+      progress,
+    };
+    const { tui, terminal } = mount([running]);
+    await tui.flush();
+
+    expect(terminal.screen()).toEqual(
+      screenOf(
+        "bash bun test [executing]",
+        ...Array.from({ length: PROGRESS_ROWS }, (_, row) => `  line ${row + 4}`),
+      ),
+    );
+
+    tui.update({
+      transcript: [
+        {
+          kind: "tool_call",
+          id: "t-1",
+          toolName: "bash",
+          summary: "bun test",
+          status: "succeeded",
+          result: { content: "8 pass", isError: false },
+        },
+      ],
+    });
+    await tui.flush();
+
+    expect(terminal.screen()).toEqual(screenOf("bash bun test [succeeded]", "  8 pass"));
+  });
+
+  it("shows Verification, notices and the settled outcome of a session", async () => {
+    const { tui, terminal } = mount([
+      { kind: "verification", id: "v-1", status: "running" },
+      {
+        kind: "verification",
+        id: "v-2",
+        status: "continue",
+        evidence: ["bun test exited 1"],
+      },
+      { kind: "notice", id: "n-1", text: "limit reached: maxToolCalls (observed 101, limit 100)" },
+      {
+        kind: "outcome",
+        id: "o-1",
+        status: "failed",
+        failure: { code: "LIMIT_EXCEEDED", message: "Tool Call limit exceeded" },
+        workspaceChanged: true,
+        partialChangesPossible: true,
+      },
+      {
+        kind: "outcome",
+        id: "o-2",
+        status: "succeeded",
+        workspaceChanged: false,
+        partialChangesPossible: false,
+      },
+    ]);
+    await tui.flush();
+
+    expect(terminal.screen()).toEqual(
+      screenOf(
+        "verification [running]",
+        "",
+        "verification [continue]",
+        "  bun test exited 1",
+        "",
+        "limit reached: maxToolCalls (observed 101, limit 100)",
+        "",
+        "session [failed, LIMIT_EXCEEDED]",
+        "  Tool Call limit exceeded",
+        "  workspace changed, partial changes possible",
+        "",
+        "session [succeeded]",
+        "  workspace unchanged",
       ),
     );
   });

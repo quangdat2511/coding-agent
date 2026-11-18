@@ -9,9 +9,6 @@ export interface TuiModel {
   // The Approval awaiting a decision, from approval_requested. The overlay shows it until the
   // person decides, and the decision goes to onApproval with this approvalId.
   readonly pendingApproval?: PendingApproval;
-  // Planned optional fields:
-  // - session: the Agent Session status shown outside the transcript.
-  // - limitNotice: limit kind, configured limit and observed value from runtime_limit_reached.
 }
 
 // Not exported from index.ts, like TranscriptEntry. Consumers derive this type with
@@ -27,7 +24,8 @@ export interface PendingApproval {
 // Consumers derive this type with TuiModel["transcript"][number].
 //
 // Statuses mirror ADR 0002 §6 but are declared here, because tui imports no sibling package.
-// Planned member: a Verification entry carrying verification_completed's outcomes.
+// What ends an Agent Session (a cancellation, a limit, the settled Agent Result) is an entry too,
+// so the outcome of each Coding Task stays in the transcript after the next one starts.
 export type TranscriptEntry =
   | {
       readonly kind: "user";
@@ -38,8 +36,9 @@ export type TranscriptEntry =
       readonly kind: "assistant";
       readonly id: string;
       readonly text: string;
+      // Displayable reasoning (ADR 0002 §3), absent when the message streamed none.
+      readonly reasoning?: string;
       // assistant_message_completed outcomes, plus "streaming" until that event arrives.
-      // Planned optional field: displayable reasoning (ADR 0002 §3).
       readonly status: "streaming" | "completed" | "failed" | "cancelled";
     }
   | {
@@ -67,6 +66,36 @@ export type TranscriptEntry =
         readonly errorCode?: string;
         readonly truncated?: boolean;
       };
+      // Why a skipped call never ran: "CANCELLED" or an Agent Failure code, kept as a plain string.
+      readonly skipReason?: string;
+      // The latest tail of an executing call's output (Tool Progress). Each update replaces the
+      // previous one, and it is absent once the call completes.
+      readonly progress?: string;
+    }
+  | {
+      readonly kind: "verification";
+      readonly id: string;
+      // verification_completed outcomes, plus "running" after verification_started.
+      readonly status: "running" | "succeeded" | "continue" | "failed" | "cancelled";
+      // One line per piece of Verification Evidence, written by the projection.
+      readonly evidence?: readonly string[];
+    }
+  | {
+      // Something that happened to the Agent Session as a whole, such as a requested
+      // cancellation or a limit reached. One line, written by the projection.
+      readonly kind: "notice";
+      readonly id: string;
+      readonly text: string;
+    }
+  | {
+      // The settled Agent Result, the last entry of its Agent Session.
+      readonly kind: "outcome";
+      readonly id: string;
+      readonly status: "succeeded" | "failed" | "cancelled";
+      // The failure of a failed session. code is an Agent Failure code, kept as a plain string.
+      readonly failure?: { readonly code: string; readonly message: string };
+      readonly workspaceChanged: boolean;
+      readonly partialChangesPossible: boolean;
     };
 
 // Decisions the person makes in the TUI. onApproval mirrors ADR 0002's resolve_approval command.

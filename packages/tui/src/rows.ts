@@ -14,6 +14,8 @@ type Entry<Kind extends TranscriptEntry["kind"]> = Extract<TranscriptEntry, { ki
 const TAB = "    ";
 const ESC = "\u001b";
 const INDENT = "  ";
+// How many rows of Tool Progress an executing call shows.
+export const PROGRESS_ROWS = 5;
 
 // The marker in front of a Coding Task: on a submitted task's first row here, and in the Prompt
 // while a task is typed, so a task keeps its look once it is submitted. The task's other rows start
@@ -57,9 +59,18 @@ function layoutEntry(entry: TranscriptEntry, columns: number): string[] {
     case "user":
       return userLines(entry, columns);
     case "assistant":
-      return [...wrap(`assistant [${entry.status}]`, columns), ...wrap(entry.text, columns)];
+      return assistantLines(entry, columns);
     case "tool_call":
       return toolCallLines(entry, columns);
+    case "verification":
+      return [
+        ...wrap(`verification [${entry.status}]`, columns),
+        ...(entry.evidence ?? []).flatMap((line) => indented(line, columns)),
+      ];
+    case "notice":
+      return wrap(entry.text, columns);
+    case "outcome":
+      return outcomeLines(entry, columns);
     default: {
       const unhandled: never = entry;
       throw new Error(`Unhandled transcript entry: ${JSON.stringify(unhandled)}`);
@@ -76,16 +87,61 @@ function userLines(entry: Entry<"user">, columns: number): string[] {
 
 function toolCallLines(entry: Entry<"tool_call">, columns: number): string[] {
   const { result } = entry;
-  // Status, error code and truncation are spelled out because colors depend on the terminal.
-  const details = [entry.status, result?.errorCode, result?.truncated ? "truncated" : undefined]
+  // Status, error code, skip reason and truncation are spelled out because colors depend on the
+  // terminal.
+  const details = [
+    entry.status,
+    result?.errorCode,
+    entry.skipReason,
+    result?.truncated ? "truncated" : undefined,
+  ]
     .filter(Boolean)
     .join(", ");
   const header = [entry.toolName, entry.summary, `[${details}]`].filter(Boolean).join(" ");
   const output =
     result === undefined
-      ? []
-      : wrap(result.content, columns - INDENT.length).map((line) => INDENT + line);
+      ? progressLines(entry.progress, columns)
+      : indented(result.content, columns);
   return [...wrap(header, columns), ...output];
+}
+
+// Reasoning comes before the text, indented under the header, so it reads as the model thinking
+// rather than as its answer.
+function assistantLines(entry: Entry<"assistant">, columns: number): string[] {
+  return [
+    ...wrap(`assistant [${entry.status}]`, columns),
+    ...indented(entry.reasoning ?? "", columns),
+    ...wrap(entry.text, columns),
+  ];
+}
+
+// The last rows of an executing call's output, so a long command does not look stalled while the
+// call keeps a fixed height. The Tool Result replaces them when the call completes.
+function progressLines(progress: string | undefined, columns: number): string[] {
+  if (progress === undefined) {
+    return [];
+  }
+  return indented(progress.replace(/\n+$/, ""), columns).slice(-PROGRESS_ROWS);
+}
+
+function outcomeLines(entry: Entry<"outcome">, columns: number): string[] {
+  const { failure } = entry;
+  const header = `session [${[entry.status, failure?.code].filter(Boolean).join(", ")}]`;
+  const workspace = [
+    entry.workspaceChanged ? "workspace changed" : "workspace unchanged",
+    entry.partialChangesPossible ? "partial changes possible" : undefined,
+  ]
+    .filter(Boolean)
+    .join(", ");
+  return [
+    ...wrap(header, columns),
+    ...indented(failure?.message ?? "", columns),
+    ...indented(workspace, columns),
+  ];
+}
+
+function indented(text: string, columns: number): string[] {
+  return wrap(text, columns - INDENT.length).map((line) => INDENT + line);
 }
 
 // Wraps text the way Ink wraps a <Text> (ink/build/wrap-text.js), so a row never needs wrapping
