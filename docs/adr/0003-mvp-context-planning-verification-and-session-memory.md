@@ -87,7 +87,7 @@ When a model turn completes without tool calls, Agent Core detects a `Candidate 
   3. **Test Assertion Failures (`status === "completed"` with `exitCode !== 0`, excluding launch errors)**: The command ran to completion but test assertions failed. The policy returns `outcome: "continue"`. A structured user message containing the bounded output is injected into the next Model Turn:
      ```text
      [Verification Failed]
-     Command: {command}
+     Command: {quoted command}
      Exit code: {exitCode}
      Output:
      {output}
@@ -221,16 +221,21 @@ On 2026-11-17, [CDA-77](https://datn-fit-hcmus.atlassian.net/browse/CDA-77) amen
   as cancelled when the session is cancelling, and settles `INTERNAL_ERROR` when a policy reports a
   cancellation nobody requested, as it does when a policy throws, because only an accepted cancel
   aborts the signal it passes.
-- **Feedback layout** (§3): the template's `{output}` is the combined output after the 40 KiB
-  budget. Output that does not end with a newline gets one before the closing line, and empty
-  output reads `(no output)`, as `bash` writes its status line (ADR 0001 §7). The budget bounds the
-  output, not the whole message, so the header and closing lines are not counted against it.
-- **Bounding in the policy** (§3): the policy applies the budget before it records or sends
-  output: to the combined output in the feedback, to an evidence record's `stdout` and `stderr`
-  together, and to a `launch_failed` error. In evidence each stream gets half the budget, and a
-  stream that needs less gives the rest to the other. The runner already captures within the
-  budget and leaves `stderr` empty, so this changes nothing for the runner's results and cuts only
-  a result from a runner that does not.
+- **Feedback layout** (§3): the template's `{quoted command}` is the command as a JSON string,
+  the way every tool result quotes text that can hold a newline, so a command that spans lines
+  cannot pass for output. `{output}` is the combined output after the 40 KiB budget. Output that
+  does not end with a newline gets one before the closing line, and empty output reads
+  `(no output)`, as `bash` writes its status line (ADR 0001 §7). The budget bounds the output, not
+  the whole message: the header, that newline and the closing line are not counted against it, so
+  output of exactly 40,960 bytes reaches the model whole.
+- **Bounding in the policy** (§3): the policy applies the budget to one combined output before it
+  records or sends it, and to a `launch_failed` error. The combined output is what the runner
+  already writes: everything in `stdout`, `stderr` empty, as the CDA-74 amendment above fixes.
+  Evidence records it the same way, `stdout` holding it and `stderr` empty, and the feedback sends
+  the same text. The policy never splits the budget between the two streams, which no ADR defines:
+  a runner that fills `stderr` has it appended to `stdout`, on a line of its own, before the
+  budget is applied. The runner already captures within the budget, so this changes nothing for
+  the runner's results and cuts only a result from a runner that does not.
 - **Failure message**: a `failed` decision's message names the command and why it could not run:
   `the verification command "<command>" timed out after <timeoutMs> ms`, or
   `... could not run: <error>`. The `timed_out` evidence message is `timed out after <timeoutMs>
@@ -244,8 +249,8 @@ Evidence behind this amendment:
 - *Run locally* (Linux, Bun 1.3.14): the policy's tests with a scripted runner and with the real
   runner in a temporary repository, and Agent Core's tests for a reported cancellation with and
   without a cancel.
-- *Prescriptions:* the separate cancellation type, the feedback layout and the failure wording are
-  decisions, not observations.
+- *Prescriptions:* the separate cancellation type, the quoted command, the feedback layout, the
+  single combined output and the failure wording are decisions, not observations.
 
 ## Consequences
 

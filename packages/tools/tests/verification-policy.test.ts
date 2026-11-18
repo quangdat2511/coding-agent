@@ -127,7 +127,7 @@ describe("deciding a configured command's result", () => {
         role: "user",
         content:
           "[Verification Failed]\n" +
-          "Command: bun test\n" +
+          'Command: "bun test"\n' +
           "Exit code: 1\n" +
           "Output:\n" +
           "1 fail\n" +
@@ -172,15 +172,29 @@ describe("writing the [Verification Failed] feedback", () => {
 
   it("starts the closing line on its own line when the output does not end with a newline", async () => {
     expect(await feedbackFor("make: *** [check] Error 1")).toBe(
-      "[Verification Failed]\nCommand: make check\nExit code: 2\nOutput:\n" +
+      '[Verification Failed]\nCommand: "make check"\nExit code: 2\nOutput:\n' +
         "make: *** [check] Error 1\n" +
         "Please analyze the failure, adjust your changes, and verify again.",
     );
   });
 
+  it("quotes a command that spans lines, so its second line cannot pass for output", async () => {
+    const decision = await decisionFor("bun test\necho done", {
+      status: "completed",
+      exitCode: 1,
+      stdout: "1 fail\n",
+      stderr: "",
+      durationMs: 5,
+    });
+
+    expect(continued(decision).content).toStartWith(
+      '[Verification Failed]\nCommand: "bun test\\necho done"\nExit code: 1\nOutput:\n1 fail\n',
+    );
+  });
+
   it("says (no output) when the command printed nothing, as bash does", async () => {
     expect(await feedbackFor("")).toBe(
-      "[Verification Failed]\nCommand: make check\nExit code: 2\nOutput:\n" +
+      '[Verification Failed]\nCommand: "make check"\nExit code: 2\nOutput:\n' +
         "(no output)\n" +
         "Please analyze the failure, adjust your changes, and verify again.",
     );
@@ -226,7 +240,8 @@ describe("keeping output within the 40 KiB budget", () => {
     expectWithinBudget(evidence.stdout);
   });
 
-  it("keeps output of exactly 40,960 bytes whole", async () => {
+  // The newline before the closing line is part of the template, outside the budget like the header.
+  it("keeps output of exactly 40,960 bytes whole, adding the closing line's newline after it", async () => {
     const exact = `${"a".repeat(MAX_TOOL_OUTPUT_BYTES - 2)}é`;
 
     const { evidence, output } = await decideCompleted(exact);
@@ -256,10 +271,34 @@ describe("keeping output within the 40 KiB budget", () => {
     expectWithinBudget(evidence.stdout ?? "");
   });
 
-  // ADR 0003 §3 applies the budget to combined stdout and stderr. The runner leaves stderr empty,
-  // so only a runner that fills both streams reaches this.
+  // ADR 0003 §3 applies the budget to combined stdout and stderr, and the runner records that
+  // combined output in stdout. Only a runner that fills stderr too reaches these.
+  it("records a runner's stderr after its stdout as one output, on lines of their own", async () => {
+    const { evidence, content } = continued(
+      await decisionFor("bun test", {
+        status: "completed",
+        exitCode: 1,
+        stdout: "1 fail",
+        stderr: "stack",
+        durationMs: 5,
+      }),
+    );
+
+    expect(evidence).toEqual([
+      {
+        type: "command_execution",
+        command: "bun test",
+        exitCode: 1,
+        stdout: "1 fail\nstack",
+        stderr: "",
+        durationMs: 5,
+      },
+    ]);
+    expect(content).toContain("\nOutput:\n1 fail\nstack\nPlease analyze");
+  });
+
   for (const status of ["completed", "timed_out"] as const) {
-    it(`keeps a ${status} run's two streams within one budget together`, async () => {
+    it(`keeps a ${status} run's two full streams within one budget`, async () => {
       const streams = { stdout: "a".repeat(30_000), stderr: "b".repeat(30_000) };
       const decision = await decisionFor(
         "bun test",
@@ -272,30 +311,14 @@ describe("keeping output within the 40 KiB budget", () => {
       if (evidence === undefined || evidence.type === "no_command_configured") {
         throw new Error("expected a command run");
       }
-      const { stdout = "", stderr = "" } = evidence;
-      expect(bytes(stdout) + bytes(stderr)).toBeLessThanOrEqual(MAX_TOOL_OUTPUT_BYTES);
+      const { stdout = "", stderr } = evidence;
+      expect(bytes(stdout)).toBeLessThanOrEqual(MAX_TOOL_OUTPUT_BYTES);
       expect(stdout).toStartWith("aaaa");
       expect(stdout).toContain(TOOL_OUTPUT_TRUNCATION_MARKER);
-      expect(stderr).toEndWith("bbbb");
-      expect(stderr).toContain(TOOL_OUTPUT_TRUNCATION_MARKER);
+      expect(stdout).toEndWith("bbbb");
+      expect(stderr).toBe("");
     });
   }
-
-  it("keeps a short stream whole and gives the rest of the budget to the long one", async () => {
-    const stdout = "a".repeat(10_000);
-    const decision = await decisionFor("bun test", {
-      status: "completed",
-      exitCode: 1,
-      stdout,
-      stderr: "b".repeat(50_000),
-      durationMs: 5,
-    });
-
-    const [evidence] = decision.evidence;
-    if (evidence?.type !== "command_execution") throw new Error("expected command_execution");
-    expect(evidence.stdout).toBe(stdout);
-    expect(bytes(evidence.stderr)).toBe(MAX_TOOL_OUTPUT_BYTES - 10_000);
-  });
 
   it("bounds the error of a command that could not run", async () => {
     const decision = await decisionFor("bun test", {
@@ -441,7 +464,7 @@ describe("deciding what the real runner reports", () => {
     );
 
     expect(content).toStartWith(
-      `[Verification Failed]\nCommand: ${command}\nExit code: 3\nOutput:\nline 0 of a long test log\n`,
+      `[Verification Failed]\nCommand: ${JSON.stringify(command)}\nExit code: 3\nOutput:\nline 0 of a long test log\n`,
     );
     expect(content).toContain(TOOL_OUTPUT_TRUNCATION_MARKER);
     expect(content).toEndWith(

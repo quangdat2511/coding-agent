@@ -1012,6 +1012,13 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
     return { modelTurnId, messageId, message };
   }
 
+  // A Verification Policy that throws or breaks its contract fails the session: neither is a
+  // decision the session can act on.
+  function failInternal(message: string): "settled" {
+    closeActiveWork({ kind: "failed", failure: { code: "INTERNAL_ERROR", message } });
+    return "settled";
+  }
+
   async function verifyCandidate({
     message,
     ...messageRef
@@ -1056,14 +1063,7 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
       if (settleIfCancelling()) {
         return "settled";
       }
-      closeActiveWork({
-        kind: "failed",
-        failure: {
-          code: "INTERNAL_ERROR",
-          message: `the Verification Policy threw: ${messageOf(error)}`,
-        },
-      });
-      return "settled";
+      return failInternal(`the Verification Policy threw: ${messageOf(error)}`);
     }
     if (verificationResult.kind === "breached") {
       breachLimit(verificationResult.breach);
@@ -1077,14 +1077,7 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
     // Only Agent Core aborts the signal, and only after a cancel it accepted, so a cancellation
     // reported outside cancelling breaks the policy's contract.
     if (decision.outcome === "cancelled") {
-      closeActiveWork({
-        kind: "failed",
-        failure: {
-          code: "INTERNAL_ERROR",
-          message: "the Verification Policy reported a cancellation that was not requested",
-        },
-      });
-      return "settled";
+      return failInternal("the Verification Policy reported a cancellation that was not requested");
     }
 
     const summary = { outcome: decision.outcome, evidence: decision.evidence };

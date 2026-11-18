@@ -1,11 +1,10 @@
-import { Buffer } from "node:buffer";
 import type {
   VerificationCancelled,
   VerificationDecision,
   VerificationPolicy,
 } from "@coding-agent/agent-core";
 import { quote } from "./messages.ts";
-import { boundToolOutput, MAX_TOOL_OUTPUT_BYTES } from "./output-budget.ts";
+import { boundToolOutput } from "./output-budget.ts";
 import type { VerificationRunner, VerificationRunnerResult } from "./verification-runner.ts";
 
 export interface VerificationPolicyOptions {
@@ -34,33 +33,17 @@ export function createVerificationPolicy({
 // ADR 0003 §3 bounds output with ADR 0001's 40 KiB head+tail rule before it is recorded or sent.
 // The runner already captures within that budget, so this only cuts a result from a runner that
 // does not.
-function bounded(output: string, budget = MAX_TOOL_OUTPUT_BYTES): string {
-  return boundToolOutput(output, budget).content;
+function bounded(output: string): string {
+  return boundToolOutput(output).content;
 }
 
-// The budget covers stdout and stderr together (ADR 0003 §3). Evidence keeps the two streams apart,
-// so they share the budget: each gets half, and a stream that needs less gives the rest to the
-// other. A stream that is cut keeps at least half, enough for the marker and both ends; bounding
-// one stream first and giving the other what remains could leave it nothing. The runner leaves
-// stderr empty, which gives stdout all of it.
-function boundedStreams(
-  stdout: string,
-  stderr: string,
-): { readonly stdout: string; readonly stderr: string } {
-  const outBytes = byteLength(stdout);
-  const errBytes = byteLength(stderr);
-  if (outBytes + errBytes <= MAX_TOOL_OUTPUT_BYTES) return { stdout, stderr };
-  const half = Math.floor(MAX_TOOL_OUTPUT_BYTES / 2);
-  const errBudget = Math.min(errBytes, Math.max(half, MAX_TOOL_OUTPUT_BYTES - outBytes));
-  return {
-    stdout: bounded(stdout, MAX_TOOL_OUTPUT_BYTES - errBudget),
-    stderr: bounded(stderr, errBudget),
-  };
-}
-
-// Buffer.from gives the real byte count where Bun's Buffer.byteLength miscounts (output-budget.ts).
-function byteLength(text: string): number {
-  return Buffer.from(text, "utf8").byteLength;
+// The one output a run printed, within the budget. The runner writes it all to stdout after
+// `exec 2>&1` and leaves stderr empty (ADR 0003 §5, CDA-74), and the budget applies to that
+// combined output. A runner that fills stderr gets it after stdout, on a line of its own, rather
+// than a budget split between the streams, which no ADR defines.
+function combinedOutput(stdout: string, stderr: string): string {
+  if (stdout === "" || stderr === "" || stdout.endsWith("\n")) return bounded(stdout + stderr);
+  return bounded(`${stdout}\n${stderr}`);
 }
 
 function decide(
@@ -70,13 +53,18 @@ function decide(
   switch (result.status) {
     case "completed": {
       const { exitCode, durationMs } = result;
-      const { stdout, stderr } = boundedStreams(result.stdout, result.stderr);
+      const output = combinedOutput(result.stdout, result.stderr);
       const evidence = [
-        { type: "command_execution", command, exitCode, stdout, stderr, durationMs } as const,
+        {
+          type: "command_execution",
+          command,
+          exitCode,
+          stdout: output,
+          stderr: "",
+          durationMs,
+        } as const,
       ];
       if (exitCode === 0) return { outcome: "succeeded", evidence };
-      // The feedback has one Output section, so it bounds the two streams joined.
-      const output = bounded(result.stdout + result.stderr);
       return {
         outcome: "continue",
         evidence,
@@ -94,7 +82,8 @@ function decide(
             command,
             failureKind: "timed_out",
             message,
-            ...boundedStreams(result.stdout, result.stderr),
+            stdout: combinedOutput(result.stdout, result.stderr),
+            stderr: "",
             durationMs,
           },
         ],
@@ -126,15 +115,17 @@ function decide(
   }
 }
 
-// ADR 0003 §3's template. Output that does not end with a newline gets one, so the closing line
-// always starts a line of its own, and empty output reads "(no output)", both as bash writes its
-// status line.
+// ADR 0003 §3's template. The command is quoted, as every tool result quotes text that can hold a
+// newline, so a command that spans lines cannot pass for output. Output that does not end with a
+// newline gets one, so the closing line always starts a line of its own, and empty output reads
+// "(no output)", both as bash writes its status line. The budget bounds the output only: the
+// header, this newline and the closing line are outside it.
 function failureFeedback(command: string, exitCode: number, output: string): string {
   const shown = output === "" ? "(no output)" : output;
   const separator = shown.endsWith("\n") ? "" : "\n";
   return (
     "[Verification Failed]\n" +
-    `Command: ${command}\n` +
+    `Command: ${quote(command)}\n` +
     `Exit code: ${exitCode}\n` +
     "Output:\n" +
     `${shown}${separator}` +

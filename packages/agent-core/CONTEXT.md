@@ -82,7 +82,7 @@ Evidence gathered after a change to determine whether the Coding Task's result i
 _Avoid_: Testing, validation
 
 **Verification Policy**:
-The injected rule set that evaluates a Candidate Completion and decides whether the Agent Session succeeds, continues with feedback, or fails.
+The injected rule set that evaluates a Candidate Completion and decides whether the Agent Session succeeds, continues with feedback, or fails. A Verification run ended by Cancellation is reported as cancelled rather than decided.
 _Avoid_: Test runner, evaluation script, completion validator
 
 **Verification Runner**:

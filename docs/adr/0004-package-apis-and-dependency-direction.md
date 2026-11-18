@@ -253,6 +253,12 @@ export interface VerificationCancelled {
 `continue` outcome. ADR 0003 §3 defines no progress payload, so `VerificationProgress` remains ADR
 0002's bounded progress update.
 
+`VerificationCancelled` is for a run that the `ctx.signal` abort ended, and only Agent Core aborts
+that signal, after a `cancel` it accepted. Agent Core then records the Verification as cancelled.
+A policy that reports `cancelled` while the session is not cancelling breaks the port's contract,
+and Agent Core settles `INTERNAL_ERROR`, as it does when a policy throws. A policy that gives up on
+its own, as on a timeout of its own, returns `failed`.
+
 As amended in ADR 0001 §2, Agent Core owns the path-validation step: when it runs (preflight, before
 Approval), what it guarantees, and what a failure becomes. The step is expressed as a port with a
 branded path type, so an unvalidated string cannot be passed where a validated path is required:
