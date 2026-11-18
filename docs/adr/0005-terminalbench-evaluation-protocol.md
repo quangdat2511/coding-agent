@@ -570,6 +570,22 @@ them and decides neither.
   [CDA-83](https://datn-fit-hcmus.atlassian.net/browse/CDA-83) implements the status in that
   adapter.
 
+  On 2026-11-17, CDA-83 amended this note. The status is `httpStatus` in the declared
+  `ModelFailureDetails` of a `MODEL_FAILURE`, beside `phase`, `reason` and `rawReason`, and
+  `result.json` holds it, so the second condition of §7 now has the value it reads. These limits
+  decide which failures can meet that condition:
+  - Only the Chat Completions adapter records it, which covers `openai`, `openrouter`, `xai` and
+    `opencode`. The `anthropic` and `google` adapters do not, so a failure on either never meets
+    the condition.
+  - It is the status of a response that failed the request. After the SDK's transport retries it
+    is the last attempt's.
+  - An error that the provider sends after it answered HTTP 200 has no status, because the SDK
+    raises it without one, so it never meets the condition, however the provider words it. Only a
+    request that the provider refused before the stream opened can.
+  - The adapter records any status and §7 chooses among them. Go answered a request for a model it
+    does not serve with HTTP 400, which §7 does not list. The status Go returns once an allowance
+    window is exhausted has not been observed, and the smoke job records it (ADR 0007 §2).
+
 ## Consequences
 
 - `coding-agent run`'s flags, exit codes, and three files become a versioned external contract. A

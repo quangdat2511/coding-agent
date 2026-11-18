@@ -17,11 +17,29 @@ export type AgentFailureCode =
   | "CANCELLATION_TIMEOUT"
   | "INTERNAL_ERROR";
 
-export interface AgentFailure {
-  readonly code: AgentFailureCode;
-  readonly message: string;
-  readonly details?: Readonly<Record<string, JsonValue>>;
-}
+export type ModelFailurePhase = "request" | "stream" | "finish";
+
+// The details of a MODEL_FAILURE (ADR 0002 §8): the phase and the normalized provider reason.
+// httpStatus is the provider's HTTP status when one was recorded; which providers record it is
+// stated on the error member of ModelStreamEvent in @coding-agent/ai.
+export type ModelFailureDetails = {
+  readonly phase: ModelFailurePhase;
+  readonly reason: string;
+  readonly rawReason?: string;
+  readonly httpStatus?: number;
+};
+
+export type AgentFailure =
+  | {
+      readonly code: "MODEL_FAILURE";
+      readonly message: string;
+      readonly details: ModelFailureDetails;
+    }
+  | {
+      readonly code: Exclude<AgentFailureCode, "MODEL_FAILURE">;
+      readonly message: string;
+      readonly details?: Readonly<Record<string, JsonValue>>;
+    };
 
 interface AgentResultBase {
   readonly finalMessage?: AssistantMessage;

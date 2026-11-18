@@ -202,3 +202,13 @@ Zen plan — with **`deepseek-v4.1-flash`**.
   same window.
 - The recorded job reports the profile it ran under and the date; a reader comparing two jobs
   compares two manifests, not two narratives.
+
+## Amendments
+
+On 2026-11-17, [CDA-83](https://datn-fit-hcmus.atlassian.net/browse/CDA-83) amended this record:
+
+- **Failure handling** (§7): the adapter no longer drops the HTTP status. It records the status of a
+  failed response as `httpStatus` in the `MODEL_FAILURE` details, so `result.json` holds it, and it
+  records any status rather than assuming 429. An error that Go sends after it answered HTTP 200
+  has no status, so a failure of that kind is never rerun-eligible. The
+  [ADR 0005](./0005-terminalbench-evaluation-protocol.md) Dependencies note has the full rule.

@@ -124,6 +124,30 @@ last newline.
 event. It holds `exitCode`, `result` (the Agent Result) and `finishedAt` (the time the run received
 the Agent Result, in ISO 8601).
 
+A `MODEL_FAILURE` carries `details` with `phase` (`request`, `stream` or `finish`), `reason`, and
+optionally `rawReason` and `httpStatus`. `httpStatus` is the provider's HTTP status when a response
+failed the request; after the SDK's transport retries it is the last attempt's. ADR 0005 §7 reruns a
+trial whose `httpStatus` is 401, 403, 429 or 5xx. The `openai`, `openrouter`, `xai` and `opencode`
+providers record it; `anthropic` and `google` do not, so their failures are never rerun-eligible on
+this condition. A Custom Provider records it when its `variant` is `chat_completions` and does not
+when it is `messages`. An error that a provider sends after it answered HTTP 200 has no `httpStatus`
+either, because the SDK raises it without one. Only a request refused before the stream opened
+carries one.
+
+```json
+{
+  "exitCode": 1,
+  "result": {
+    "outcome": "failed",
+    "failure": {
+      "code": "MODEL_FAILURE",
+      "message": "the model request failed: 429 Rate limit exceeded for this window",
+      "details": { "phase": "request", "reason": "error", "httpStatus": 429 }
+    }
+  }
+}
+```
+
 These rules apply to all three files:
 
 - The credential value is never written. Each string and each property name goes through the same

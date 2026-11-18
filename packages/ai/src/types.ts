@@ -132,7 +132,20 @@ export type ModelStreamEvent =
   | { type: "content_block_stop"; index: number }
   | { type: "turn_delta"; usage?: Usage; finishReason?: FinishReason }
   | { type: "turn_end"; message: AssistantMessage }
-  | { type: "error"; error: { message: string; code?: string } };
+  | {
+      type: "error";
+      error: {
+        message: string;
+        code?: string;
+        // The HTTP status of a provider response that refused the request before the stream opened.
+        // Only the Chat Completions adapter records it: the openai, openrouter, xai and opencode
+        // providers, and a Custom Provider whose variant is chat_completions. The other adapters
+        // (anthropic, google, and a Custom Provider whose variant is messages) record none, and no
+        // adapter sets one for an error sent after a 200 response. ADR 0005 §7 reads it to rerun a
+        // trial.
+        httpStatus?: number;
+      };
+    };
 
 export type ModelStream = AsyncIterable<ModelStreamEvent> & {
   result(): Promise<AssistantMessage>;

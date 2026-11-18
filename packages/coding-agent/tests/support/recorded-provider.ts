@@ -18,6 +18,16 @@ export function replay(fixture: string): Respond {
     });
 }
 
+// A provider refusing the request with an HTTP status and a JSON error body. `retry-after-ms: 0`
+// lets the SDK's transport retries run without waiting.
+export function replayRejection(fixture: string, status: number): Respond {
+  return async () =>
+    new Response(await Bun.file(join(fixturesDir, fixture)).text(), {
+      status,
+      headers: { "content-type": "application/json", "retry-after-ms": "0" },
+    });
+}
+
 // Read by replay-provider.ts: the fixtures to replay, in order, separated by commas.
 export const REPLAY_FIXTURES_ENV_VAR = "CODING_AGENT_TEST_REPLAY_FIXTURES";
 

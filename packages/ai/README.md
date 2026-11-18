@@ -204,6 +204,9 @@ directory.setProvider(customProvider);
 directory.setProvider(localOllama);
 ```
 
+The `variant` also decides whether a failed request records its HTTP status as `httpStatus` on the
+error event: a `chat_completions` Custom Provider records it, a `messages` one does not.
+
 
 ## Running Examples
 

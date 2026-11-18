@@ -82,6 +82,38 @@ describe("settling a failed Model Turn", () => {
       },
     },
     {
+      name: "the provider rejects the request with an HTTP status",
+      turn: [{ type: "error", error: { message: "rate limited", httpStatus: 429 } }],
+      failure: {
+        code: "MODEL_FAILURE",
+        message: expect.stringContaining("rate limited"),
+        details: { phase: "request", reason: "error", httpStatus: 429 },
+      },
+    },
+    // Agent Core's contract, not the adapter's behaviour: it keeps a status in any phase. The Chat
+    // Completions adapter sets none after the stream opened, because the SDK raises such an error
+    // without one (packages/ai/tests/openai-http-status.test.ts).
+    {
+      name: "an error event carries an HTTP status after the stream opened",
+      turn: [
+        ...opening,
+        {
+          type: "error",
+          error: { message: "unavailable", code: "overloaded_error", httpStatus: 503 },
+        },
+      ],
+      failure: {
+        code: "MODEL_FAILURE",
+        message: expect.stringContaining("unavailable"),
+        details: {
+          phase: "stream",
+          reason: "error",
+          rawReason: "overloaded_error",
+          httpStatus: 503,
+        },
+      },
+    },
+    {
       name: "the stream breaks mid-response",
       turn: failingStream(opening, new Error("socket hang up")),
       failure: {
@@ -199,6 +231,15 @@ describe("settling a failed Model Turn", () => {
       name: "an error code is not a string",
       turn: rawStream(streamStart, { type: "error", error: { message: "boom", code: { id: 1 } } }),
     },
+    ...[
+      { label: "a string", httpStatus: "429" },
+      { label: "not an integer", httpStatus: 429.5 },
+      { label: "below the HTTP range", httpStatus: 42 },
+      { label: "above the HTTP range", httpStatus: 600 },
+    ].map(({ label, httpStatus }) => ({
+      name: `an HTTP status is ${label}`,
+      turn: rawStream(streamStart, { type: "error", error: { message: "boom", httpStatus } }),
+    })),
     {
       name: "the final message has no finish reason",
       turn: endingWith({ role: "assistant", content: [], model: "fake-model" }),
