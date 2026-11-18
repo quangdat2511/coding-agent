@@ -79,24 +79,30 @@ export interface VerificationConfig {
   readonly command: string | null;
 }
 
-export interface RunConfig {
-  readonly objective: string;
-  readonly taskFile: string;
+// What every entry point resolves before it opens an Agent Session: the model, its credential and
+// the repository. `coding-agent run` adds a task and an output directory to it; the interactive
+// path adds neither, because the person types the Coding Task and nothing is written to files.
+export interface SessionSettings {
   readonly model: Model;
   readonly credential: ResolvedCredential;
   readonly sampling: SamplingSettings;
   readonly transportRetryBound: number;
-  readonly approvalPolicy: RunArgs["approvalPolicy"];
   // The canonical Repository Root.
   readonly repoRoot: string;
   // The root as the command line spelled it, resolved against the working directory. It may pass
   // through a symbolic link, and the Workspace Resolver needs it to move an absolute path spelled
   // through it onto `repoRoot`.
   readonly givenRepoRoot: string;
+  readonly verification: VerificationConfig;
+}
+
+export interface RunConfig extends SessionSettings {
+  readonly objective: string;
+  readonly taskFile: string;
+  readonly approvalPolicy: RunArgs["approvalPolicy"];
   readonly outputDir: string;
   readonly profile: Profile;
   readonly limits: SessionLimits;
-  readonly verification: VerificationConfig;
 }
 
 export type ResolveRunConfigResult =
@@ -329,23 +335,26 @@ async function prepareOutputDir(cwd: string, given: string): Promise<Checked<Out
   return pass({ path, created });
 }
 
-// Checks run from the cheapest to the only one that writes, and the first problem wins: the output
-// directory is created only once every other check has passed, and removed again if it is refused.
-export async function resolveRunConfig(
-  args: RunArgs,
+// The checks that need no file written, cheapest first, and the first problem wins. Both entry
+// points call it, so a refusal reads the same on either, and it creates nothing to remove.
+export async function resolveSessionSettings(
+  selection: Pick<RunArgs, "provider" | "model" | "repoRoot">,
   { cwd, env }: ResolveRunConfigContext,
-): Promise<ResolveRunConfigResult> {
-  const model = createProviderDirectory().getModel(args.provider, args.model);
+): Promise<Checked<SessionSettings>> {
+  const model = createProviderDirectory().getModel(selection.provider, selection.model);
   if (model === undefined) {
-    return refuse("--model", `--model "${args.model}" is not a known ${args.provider} model`);
+    return refuse(
+      "--model",
+      `--model "${selection.model}" is not a known ${selection.provider} model`,
+    );
   }
 
-  const variables = PROVIDER_CREDENTIAL_ENV_VARS_BY_PROVIDER[args.provider];
+  const variables = PROVIDER_CREDENTIAL_ENV_VARS_BY_PROVIDER[selection.provider];
   const credential = readEnvCredential(variables, env);
   if (credential === undefined) {
     return refuse(
       variables[0],
-      `no credential for --provider ${args.provider}: set ${variables.join(" or ")}`,
+      `no credential for --provider ${selection.provider}: set ${variables.join(" or ")}`,
     );
   }
 
@@ -357,31 +366,46 @@ export async function resolveRunConfig(
     );
   }
 
-  const repoRoot = await resolveRepoRoot(cwd, args.repoRoot);
+  const repoRoot = await resolveRepoRoot(cwd, selection.repoRoot);
   if (!repoRoot.ok) return repoRoot;
-  const task = await readObjective(cwd, args.taskFile);
-  if (!task.ok) return task;
-  const outputDir = await prepareOutputDir(cwd, args.outputDir);
-  if (!outputDir.ok) return outputDir;
 
   const { variable, value } = credential;
+  return pass({
+    model,
+    credential: { variable, reveal: () => value },
+    sampling: SAMPLING_BY_PROVIDER[selection.provider],
+    transportRetryBound: TRANSPORT_RETRY_BOUND,
+    repoRoot: repoRoot.value.canonical,
+    givenRepoRoot: repoRoot.value.given,
+    verification: { command: command ?? null },
+  });
+}
+
+// The session settings first, then the task, and the output directory last because it is the only
+// check that writes: it is created only once every other check has passed, and removed again if it
+// is refused.
+export async function resolveRunConfig(
+  args: RunArgs,
+  context: ResolveRunConfigContext,
+): Promise<ResolveRunConfigResult> {
+  const settings = await resolveSessionSettings(args, context);
+  if (!settings.ok) return settings;
+  const task = await readObjective(context.cwd, args.taskFile);
+  if (!task.ok) return task;
+  const outputDir = await prepareOutputDir(context.cwd, args.outputDir);
+  if (!outputDir.ok) return outputDir;
+
   return {
     ok: true,
     createdDirectories: outputDir.value.created,
     config: {
+      ...settings.value,
       objective: task.value.objective,
       taskFile: task.value.path,
-      model,
-      credential: { variable, reveal: () => value },
-      sampling: SAMPLING_BY_PROVIDER[args.provider],
-      transportRetryBound: TRANSPORT_RETRY_BOUND,
       approvalPolicy: args.approvalPolicy,
-      repoRoot: repoRoot.value.canonical,
-      givenRepoRoot: repoRoot.value.given,
       outputDir: outputDir.value.path,
       profile: args.profile,
       limits: SESSION_LIMITS_BY_PROFILE[args.profile],
-      verification: { command: command ?? null },
     },
   };
 }

@@ -18,6 +18,7 @@ import {
   parentIsFile,
   type RunConfig,
   resolveRunConfig,
+  resolveSessionSettings,
   SESSION_LIMITS_BY_PROFILE,
 } from "../src/run-config.ts";
 import { noFifos, permissionsIgnored } from "./support/platform.ts";
@@ -70,6 +71,34 @@ async function expectRefused(
   expect(resolved).toStrictEqual(refusal(field, message));
   expect((await readdir(directory)).sort()).toEqual(["repo", "task.md"]);
 }
+
+describe("resolving the settings every entry point shares", () => {
+  const selection = { provider: "anthropic", model: "claude-haiku-4-5", repoRoot: "repo" } as const;
+  const env = { ANTHROPIC_API_KEY: secret };
+
+  it("resolves the model, credential and repository without a task file or output directory", async () => {
+    const resolved = await resolveSessionSettings(selection, { cwd: directory, env });
+
+    expect(resolved.ok).toBe(true);
+    if (!resolved.ok) return;
+    expect(resolved.value.model.id).toBe("claude-haiku-4-5");
+    expect(resolved.value.repoRoot).toBe(join(directory, "repo"));
+    expect(resolved.value.credential.reveal()).toBe(secret);
+    expect(resolved.value.verification).toEqual({ command: null });
+    expect(await readdir(directory)).not.toContain("out");
+  });
+
+  it("refuses a model the provider does not list, as the invocation does", async () => {
+    const resolved = await resolveSessionSettings(
+      { ...selection, model: "no-such-model" },
+      { cwd: directory, env },
+    );
+
+    expect(resolved).toEqual(
+      refusal("--model", '--model "no-such-model" is not a known anthropic model'),
+    );
+  });
+});
 
 describe("resolving a valid invocation", () => {
   it("resolves the model, paths, task, limits and Verification configuration", async () => {
