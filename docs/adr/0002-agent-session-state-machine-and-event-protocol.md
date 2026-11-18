@@ -103,6 +103,11 @@ command must name the currently pending Approval. A repeated cancellation while 
 cancelled is an accepted no-op and returns the current sequence. Cancellation after success or
 failure returns `ALREADY_SETTLED`.
 
+For an active-duration breach, committing `runtime_limit_reached` is the termination point for
+cancellation ordering. A `cancel` command after that event is an accepted no-op while the active
+effect quiesces; the session settles with `LIMIT_EXCEEDED`. A cancellation accepted before the
+event retains precedence and follows the cancellation rules below.
+
 Session construction validates required adapters, tools, policies, and limits before producing a
 `ready` session. Invalid construction returns a configuration error and creates no Agent Session,
 state transition, or Session Event.
@@ -329,6 +334,11 @@ process exit behavior.
 
 An accepted cancellation enters `cancelling` immediately, schedules no new work, and signals the
 active model, tool, or Verification adapter through its `AbortSignal`.
+
+For active duration, the first committed `runtime_limit_reached` event decides the race: a breach
+recorded before `cancel` owns settlement with `LIMIT_EXCEEDED`, while an accepted cancellation
+before the breach remains a cancellation. The limit event is committed as soon as the deadline is
+observed, even when the session must still wait for the active effect or its grace period to end.
 
 - With no active effect, the session quiesces synchronously.
 - A pending Approval resolves as cancelled with `decidedBy: "user"`, because the accepted `cancel`

@@ -257,6 +257,81 @@ describe("Session Limits", () => {
     expect(events.at(-1)?.type).toBe("session_settled");
   });
 
+  it("keeps a duration breach ahead of a cancellation requested while the effect quiesces", async () => {
+    const stubborn = abortIgnoringTool();
+    const tool: ExecutableTool = {
+      ...stubborn,
+      execute(prepared, context) {
+        return stubborn.execute(prepared, context);
+      },
+    };
+    const { session, clock } = openTestSession({
+      tools: [tool],
+      approvalPolicy: "auto-approve",
+      model: {
+        turns: [toolCallTurn({ toolCallId: "call-1", name: "stubborn", input: {} })],
+      },
+      limits: { maxDurationMs: 10, cancellationGraceMs: 25 },
+    });
+
+    await session.dispatch({ type: "start", task });
+    await waitForEvent(session, "tool_execution_started");
+    clock.advance(10);
+    const limitEvent = await waitForEvent(session, "runtime_limit_reached");
+    const cancellation = await session.dispatch({ type: "cancel", reason: "stop" });
+
+    expect(cancellation).toEqual({ accepted: true, sequence: limitEvent.sequence });
+    expect(session.snapshot().phase).toBe("executing_tool");
+
+    stubborn.release();
+    const result = await session.result();
+    const events = await collect(session.events());
+    const limitIndex = events.findIndex((event) => event.type === "runtime_limit_reached");
+    const settledIndex = events.findIndex((event) => event.type === "session_settled");
+
+    expect(result).toMatchObject({
+      outcome: "failed",
+      failure: {
+        code: "LIMIT_EXCEEDED",
+        details: { kind: "maxDurationMs", limit: 10, observed: 10 },
+      },
+    });
+    expect(events.some((event) => event.type === "cancellation_requested")).toBe(false);
+    expect(limitIndex).toBeGreaterThanOrEqual(0);
+    expect(settledIndex).toBeGreaterThan(limitIndex);
+  });
+
+  it("checks duration before Verification when it expires between effects", async () => {
+    const { session, clock, config, model, verification } = openTestSession({
+      model: { turns: [textTurn("Done.")] },
+      limits: { maxDurationMs: 10 },
+    });
+    const originalMonotonicMs = clock.monotonicMs;
+    let expiredBetweenEffects = false;
+    clock.monotonicMs = () => (expiredBetweenEffects ? 10 : originalMonotonicMs());
+    clock.setTimer = () => () => {
+      expiredBetweenEffects = true;
+    };
+    config.clock.setTimer = (delayMs, callback) => clock.setTimer(delayMs, callback);
+
+    await session.dispatch({ type: "start", task });
+    const result = await session.result();
+    const events = await collect(session.events());
+
+    expect(model.requests).toHaveLength(1);
+    expect(verification.candidates).toHaveLength(0);
+    expect(events.find((event) => event.type === "runtime_limit_reached")).toMatchObject({
+      data: { kind: "maxDurationMs", limit: 10, observed: 10 },
+    });
+    expect(result).toMatchObject({
+      outcome: "failed",
+      failure: {
+        code: "LIMIT_EXCEEDED",
+        details: { kind: "maxDurationMs", limit: 10, observed: 10 },
+      },
+    });
+  });
+
   it("excludes ready and awaiting_approval time from active duration", async () => {
     const write = fakeWriteTool();
     const { session, clock: sessionClock } = openTestSession({

@@ -171,6 +171,7 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
   let cancelGraceTimer: (() => void) | undefined;
   let deadlineTimer: (() => void) | undefined;
   let breachedLimit: LimitBreach | undefined;
+  let limitEventCommitted = false;
 
   const SAFE_FALLBACK_TIMESTAMP = "1970-01-01T00:00:00.000Z";
   let lastOccurredAt: string | undefined;
@@ -187,7 +188,8 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
         isCancellingOrTerminal() ||
         next.phase === "cancelling" ||
         next.phase === "failed" ||
-        event.type === "session_settled"
+        event.type === "session_settled" ||
+        event.type === "runtime_limit_reached"
       ) {
         occurredAt = lastOccurredAt ?? SAFE_FALLBACK_TIMESTAMP;
       } else {
@@ -266,16 +268,35 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
     }
   }
 
-  function recordDurationBreach(): void {
-    if (breachedLimit !== undefined || isCancellingOrTerminal()) return;
-    const observed = guard.elapsed();
-    if (observed < config.limits.maxDurationMs) return;
-    breachedLimit = {
-      kind: "maxDurationMs",
-      limit: config.limits.maxDurationMs,
-      observed,
-    };
+  function commitLimitReached(breach: LimitBreach): void {
+    if (limitEventCommitted) return;
+    commit(state, {
+      type: "runtime_limit_reached",
+      data: { kind: breach.kind, limit: breach.limit, observed: breach.observed },
+    });
+    limitEventCommitted = true;
+  }
+
+  function recordDurationBreach(
+    options: { readonly assumeExpiredOnClockFailure?: boolean } = {},
+  ): LimitBreach | undefined {
+    if (breachedLimit !== undefined || isCancellingOrTerminal()) return breachedLimit;
+    let breach: LimitBreach | undefined;
+    try {
+      breach = guard.checkDuration();
+    } catch (error) {
+      if (!options.assumeExpiredOnClockFailure) throw error;
+      breach = {
+        kind: "maxDurationMs",
+        limit: config.limits.maxDurationMs,
+        observed: config.limits.maxDurationMs,
+      };
+    }
+    if (breach === undefined) return undefined;
+    breachedLimit = breach;
+    commitLimitReached(breach);
     abortEffects.abort();
+    return breach;
   }
 
   function armDeadlineTimer(): void {
@@ -287,22 +308,33 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
     }
     deadlineTimer = config.clock.setTimer(remaining, () => {
       deadlineTimer = undefined;
-      if (breachedLimit !== undefined || isCancellingOrTerminal()) return;
-      let observed: number;
-      try {
-        observed = guard.elapsed();
-      } catch {
-        observed = config.limits.maxDurationMs;
+      if (recordDurationBreach({ assumeExpiredOnClockFailure: true }) !== undefined) {
+        startGraceTimer();
       }
-      if (observed < config.limits.maxDurationMs) return;
-      breachedLimit = {
-        kind: "maxDurationMs",
-        limit: config.limits.maxDurationMs,
-        observed,
-      };
-      abortEffects.abort();
-      startGraceTimer();
     });
+  }
+
+  type DeadlineOutcome<T> =
+    | { readonly kind: "completed"; readonly value: T }
+    | { readonly kind: "breached"; readonly breach: LimitBreach };
+
+  async function runUnderDeadline<T>(effect: () => Promise<T>): Promise<DeadlineOutcome<T>> {
+    recordDurationBreach();
+    if (breachedLimit !== undefined) return { kind: "breached", breach: breachedLimit };
+
+    armDeadlineTimer();
+    if (breachedLimit !== undefined) return { kind: "breached", breach: breachedLimit };
+
+    let value: T;
+    try {
+      value = await effect();
+    } finally {
+      recordDurationBreach();
+      clearDeadlineTimer();
+    }
+
+    if (breachedLimit !== undefined) return { kind: "breached", breach: breachedLimit };
+    return { kind: "completed", value };
   }
 
   function settle(settlement: Settlement): "settled" {
@@ -536,15 +568,13 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
 
   function breachLimit(breach: LimitBreach): "settled" {
     if (isTerminal()) return "settled";
-    commit(state, {
-      type: "runtime_limit_reached",
-      data: { kind: breach.kind, limit: breach.limit, observed: breach.observed },
-    });
+    commitLimitReached(breach);
     closeActiveWork({
       kind: "failed",
       failure: {
         code: "LIMIT_EXCEEDED",
         message: `session limit ${breach.kind} exhausted: observed ${breach.observed}, limit ${breach.limit}`,
+        details: { kind: breach.kind, limit: breach.limit, observed: breach.observed },
       },
     });
     return "settled";
@@ -676,24 +706,14 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
         return "settled";
       }
 
-      armDeadlineTimer();
-      if (breachedLimit !== undefined) {
-        breachLimit(breachedLimit);
+      const preparation = await runUnderDeadline(() =>
+        preflightToolCall(toolCall, preflightContext),
+      );
+      if (preparation.kind === "breached") {
+        breachLimit(preparation.breach);
         return "settled";
       }
-
-      let preflight: PreflightOutcome;
-      try {
-        preflight = await preflightToolCall(toolCall, preflightContext);
-      } finally {
-        recordDurationBreach();
-        clearDeadlineTimer();
-      }
-
-      if (breachedLimit !== undefined) {
-        breachLimit(breachedLimit);
-        return "settled";
-      }
+      const preflight = preparation.value;
 
       if (isCancellingOrTerminal()) {
         return undefined;
@@ -735,43 +755,30 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
             decidedBy: "user",
             ...(decision.reason === undefined ? {} : { reason: decision.reason }),
           };
-          armDeadlineTimer();
-          if (breachedLimit !== undefined) {
-            breachLimit(breachedLimit);
-            return "settled";
-          }
-          result = await executeToolCall(
-            modelTurn,
-            draft,
-            toolCall,
-            remaining,
-            preflight,
-            approval,
+          const execution = await runUnderDeadline(() =>
+            executeToolCall(modelTurn, draft, toolCall, remaining, preflight, approval),
           );
-          countedAtExecutionStart = true;
-          clearDeadlineTimer();
-          if (breachedLimit !== undefined) {
-            breachLimit(breachedLimit);
+          if (execution.kind === "breached") {
+            breachLimit(execution.breach);
             return "settled";
           }
+          result = execution.value;
+          countedAtExecutionStart = true;
           if (isCancellingOrTerminal()) {
             return undefined;
           }
           outcome = result.isError ? "failed" : "succeeded";
         }
       } else {
-        armDeadlineTimer();
-        if (breachedLimit !== undefined) {
-          breachLimit(breachedLimit);
+        const execution = await runUnderDeadline(() =>
+          executeToolCall(modelTurn, draft, toolCall, remaining, preflight),
+        );
+        if (execution.kind === "breached") {
+          breachLimit(execution.breach);
           return "settled";
         }
-        result = await executeToolCall(modelTurn, draft, toolCall, remaining, preflight);
+        result = execution.value;
         countedAtExecutionStart = true;
-        clearDeadlineTimer();
-        if (breachedLimit !== undefined) {
-          breachLimit(breachedLimit);
-          return "settled";
-        }
         if (isCancellingOrTerminal()) {
           return undefined;
         }
@@ -880,7 +887,6 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
         if (isRecord(update) && typeof update.output === "string") progress.report(update.output);
       },
     });
-    recordDurationBreach();
     progress.close();
     const durationMs = config.clock.monotonicMs() - startedMs;
     return {
@@ -920,41 +926,36 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
       data: { modelTurnId, messageId },
     });
 
-    armDeadlineTimer();
-    if (breachedLimit !== undefined) {
-      breachLimit(breachedLimit);
-      return "settled";
-    }
-    const response = await readModelResponse(
-      () =>
-        config.model.stream(
-          {
-            systemPrompt: config.systemPrompt,
-            messages: state.transcript.map((message) => structuredClone(message)),
-            tools,
-          },
-          { signal: abortEffects.signal, parallelToolCalls: false },
-        ),
-      (blockIndex, delta) => {
-        if (breachedLimit !== undefined || state.phase !== "streaming_model") return;
-        const blocks = draft.blocks.slice();
-        const block = blocks[blockIndex];
-        blocks[blockIndex] = { kind: "text", text: (block?.text ?? "") + delta };
-        draft = { messageId, blocks };
-        currentDraft = draft;
-        commit(streaming(modelTurn, draft), {
-          type: "assistant_content_delta",
-          data: { messageId, blockIndex, kind: "text", delta },
-        });
-      },
+    const modelResponse = await runUnderDeadline(() =>
+      readModelResponse(
+        () =>
+          config.model.stream(
+            {
+              systemPrompt: config.systemPrompt,
+              messages: state.transcript.map((message) => structuredClone(message)),
+              tools,
+            },
+            { signal: abortEffects.signal, parallelToolCalls: false },
+          ),
+        (blockIndex, delta) => {
+          if (breachedLimit !== undefined || state.phase !== "streaming_model") return;
+          const blocks = draft.blocks.slice();
+          const block = blocks[blockIndex];
+          blocks[blockIndex] = { kind: "text", text: (block?.text ?? "") + delta };
+          draft = { messageId, blocks };
+          currentDraft = draft;
+          commit(streaming(modelTurn, draft), {
+            type: "assistant_content_delta",
+            data: { messageId, blockIndex, kind: "text", delta },
+          });
+        },
+      ),
     );
-    recordDurationBreach();
-    clearDeadlineTimer();
-
-    if (breachedLimit !== undefined) {
-      breachLimit(breachedLimit);
+    if (modelResponse.kind === "breached") {
+      breachLimit(modelResponse.breach);
       return "settled";
     }
+    const response = modelResponse.value;
 
     if (settleIfCancelling()) {
       return "settled";
@@ -1033,26 +1034,21 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
       { type: "verification_started", data: verification },
     );
 
-    let decision: VerificationDecision;
-    armDeadlineTimer();
-    if (breachedLimit !== undefined) {
-      breachLimit(breachedLimit);
-      return "settled";
-    }
+    let verificationResult: DeadlineOutcome<VerificationDecision>;
     try {
-      decision = structuredClone(
-        await config.verification.verify(
-          structuredClone({
-            transcript: state.transcript,
-            finalMessage: message,
-            workspaceChanged: state.workspaceChanged,
-          }),
-          { signal: abortEffects.signal, onProgress: () => {} },
+      verificationResult = await runUnderDeadline(async () =>
+        structuredClone(
+          await config.verification.verify(
+            structuredClone({
+              transcript: state.transcript,
+              finalMessage: message,
+              workspaceChanged: state.workspaceChanged,
+            }),
+            { signal: abortEffects.signal, onProgress: () => {} },
+          ),
         ),
       );
     } catch (error) {
-      recordDurationBreach();
-      clearDeadlineTimer();
       if (breachedLimit !== undefined) {
         breachLimit(breachedLimit);
         return "settled";
@@ -1069,13 +1065,11 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
       });
       return "settled";
     }
-    recordDurationBreach();
-    clearDeadlineTimer();
-
-    if (breachedLimit !== undefined) {
-      breachLimit(breachedLimit);
+    if (verificationResult.kind === "breached") {
+      breachLimit(verificationResult.breach);
       return "settled";
     }
+    const decision = verificationResult.value;
 
     if (settleIfCancelling()) {
       return "settled";
@@ -1231,7 +1225,11 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
         if (state.phase === "succeeded" || state.phase === "failed") {
           return refuse("ALREADY_SETTLED", `the session has already ${state.phase}`);
         }
-        if (state.phase === "cancelling" || state.phase === "cancelled") {
+        if (
+          breachedLimit !== undefined ||
+          state.phase === "cancelling" ||
+          state.phase === "cancelled"
+        ) {
           return { accepted: true, sequence: state.lastSequence };
         }
 

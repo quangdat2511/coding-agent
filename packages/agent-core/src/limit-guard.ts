@@ -13,6 +13,7 @@ export interface LimitGuard {
   pause(): void;
   elapsed(): number;
   remainingMs(): number;
+  checkDuration(): LimitBreach | undefined;
   checkBeforeModelTurn(counters: SessionCounters): LimitBreach | undefined;
   checkBeforeToolExecution(counters: SessionCounters): LimitBreach | undefined;
   checkBeforeVerification(): LimitBreach | undefined;
@@ -50,6 +51,7 @@ export function createLimitGuard(limits: SessionLimits, clock: Clock): LimitGuar
     },
     elapsed,
     remainingMs: () => Math.max(0, limits.maxDurationMs - elapsed()),
+    checkDuration: durationBreach,
     checkBeforeModelTurn(counters) {
       if (counters.modelTurns >= limits.maxModelTurns) {
         return {
