@@ -43,3 +43,8 @@ not used to run the whole task. `tests/headless.test.ts` replays them.
 `packages/ai` fixture of the same name: one Google response that ends at the output token limit, so
 a run that replays it settles `failed`.
 `tests/cli.test.ts` uses it for the exit code 1 smoke test.
+
+`../google/credential-probe/` is not a recording either. Its two responses are hand-written in
+Google's stream format: a `bash` call that prints whether `GOOGLE_API_KEY` is set, then a text
+answer. `tests/cli.test.ts` replays them with a verification command that prints the same, to show
+that neither child gets the credential.

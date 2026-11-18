@@ -5,12 +5,16 @@ import {
   type IdSource,
   type OpenSessionResult,
   openAgentSession,
-  type ToolRegistry,
-  type VerificationPolicy,
 } from "@coding-agent/agent-core";
-import { createWorkspaceResolver, readTool } from "@coding-agent/tools";
+import {
+  type ChildProcessLauncher,
+  createDefaultTools,
+  createVerificationPolicy,
+  createVerificationRunner,
+  createWorkspaceResolver,
+} from "@coding-agent/tools";
 import { createModelPort } from "./model-port.ts";
-import { type RunConfig, VERIFICATION_COMMAND_ENV_VAR } from "./run-config.ts";
+import type { RunConfig } from "./run-config.ts";
 import { assembleSystemPrompt, type SkippedProjectInstructions } from "./system-prompt.ts";
 
 export type SessionConfig = Pick<
@@ -32,8 +36,7 @@ export type SessionFactoryResult =
       readonly toolNames: readonly string[];
       readonly skippedInstructions: readonly SkippedProjectInstructions[];
     }
-  | Extract<OpenSessionResult, { ok: false }>
-  | { readonly ok: false; readonly code: "NOT_IMPLEMENTED"; readonly message: string };
+  | Extract<OpenSessionResult, { ok: false }>;
 
 const systemClock: Clock = {
   now: () => new Date().toISOString(),
@@ -46,47 +49,31 @@ const systemClock: Clock = {
 
 const randomIds: IdSource = { next: (kind) => `${kind}-${crypto.randomUUID()}` };
 
-// Temporary: the walking skeleton registers read only. CDA-80 (D5) registers all four tools.
-function registeredTools(): ToolRegistry {
-  const read = readTool();
-  return { get: (name) => (name === read.name ? read : undefined), list: () => [read] };
-}
-
-// Temporary: CDA-80 (D5) replaces this stand-in with the Verification Policy of CDA-77 (B4.2).
-const nonGatingVerification: VerificationPolicy = {
-  verify: async ({ workspaceChanged }) => ({
-    outcome: "succeeded",
-    evidence: [{ type: "no_command_configured", workspaceChanged }],
-  }),
-};
-
-export async function openSession(config: SessionConfig): Promise<SessionFactoryResult> {
+export async function openSession(
+  config: SessionConfig,
+  launcher: ChildProcessLauncher,
+): Promise<SessionFactoryResult> {
   const workspace = await createWorkspaceResolver(config.givenRepoRoot);
   if (!workspace.ok) return workspace;
-  const tools = registeredTools();
+  const tools = createDefaultTools(launcher);
   const prompt = await assembleSystemPrompt({
     workspace: workspace.workspace,
     tools,
     platform: process.platform,
   });
   if (!prompt.ok) return prompt;
-  // Temporary: the stand-in runs no command, and skipping one would report a check that never ran.
-  if (config.verification.command !== null) {
-    return {
-      ok: false,
-      code: "NOT_IMPLEMENTED",
-      message:
-        `${VERIFICATION_COMMAND_ENV_VAR} is set, but no verification command runs yet; ` +
-        "CDA-80 (D5) wires in the Verification Policy",
-    };
-  }
+  const runner = createVerificationRunner({ launcher, workspace: workspace.workspace });
+  if (!runner.ok) throw new Error(runner.message);
   const opened = openAgentSession({
     model: createModelPort(config),
     systemPrompt: prompt.systemPrompt,
     tools,
     workspace: workspace.workspace,
     approvalPolicy: config.approvalPolicy,
-    verification: nonGatingVerification,
+    verification: createVerificationPolicy({
+      command: config.verification.command,
+      runner: runner.runner,
+    }),
     limits: config.limits,
     clock: systemClock,
     ids: randomIds,
