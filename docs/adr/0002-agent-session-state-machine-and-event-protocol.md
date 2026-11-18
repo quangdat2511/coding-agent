@@ -103,11 +103,6 @@ command must name the currently pending Approval. A repeated cancellation while 
 cancelled is an accepted no-op and returns the current sequence. Cancellation after success or
 failure returns `ALREADY_SETTLED`.
 
-For an active-duration breach, committing `runtime_limit_reached` is the termination point for
-cancellation ordering. A `cancel` command after that event is an accepted no-op while the active
-effect quiesces; the session settles with `LIMIT_EXCEEDED`. A cancellation accepted before the
-event retains precedence and follows the cancellation rules below.
-
 Session construction validates required adapters, tools, policies, and limits before producing a
 `ready` session. Invalid construction returns a configuration error and creates no Agent Session,
 state transition, or Session Event.

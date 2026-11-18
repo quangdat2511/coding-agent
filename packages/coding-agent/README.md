@@ -46,10 +46,6 @@ This is the walking skeleton of
 These parts are still to come:
 
 - `read` is the only registered tool, and Verification is a stand-in. CDA-80 (D5) replaces both.
-- Agent Core enforces `maxModelTurns`, `maxToolCalls`, `maxDurationMs`, and
-  `maxConsecutiveRecoverableFailures`. Exhaustion emits `runtime_limit_reached` and settles with
-  `LIMIT_EXCEEDED`. Active duration counts model streaming, Tool Call execution, and Verification;
-  it excludes `ready` and human time in `awaiting_approval`, and aborts an active effect on expiry.
 
 ### Cancelling a run
 
