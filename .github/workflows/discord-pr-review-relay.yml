@@ -22,6 +22,14 @@ concurrency:
 jobs:
   relay:
     name: Relay the review
+    # The post script gives no note for a review by the author, such as a reply in a review thread,
+    # or by a bot. Skipping them here saves the two-minute wait and the post job. About half of the
+    # reviews in November 2026 were the author's replies. A run whose only job is skipped does not
+    # conclude with success, so the Discord PR Post workflow does not start a job for it.
+    if: >-
+      github.event.review.user.login != github.event.pull_request.user.login &&
+      github.event.review.user.type != 'Bot' &&
+      !endsWith(github.event.review.user.login, '[bot]')
     runs-on: ubuntu-24.04
     timeout-minutes: 5
 

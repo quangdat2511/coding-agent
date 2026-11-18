@@ -233,7 +233,8 @@ open longer than 90 days, it loses its artifact, and later events no longer reac
 
 Two more events add a note to the post. When a reviewer submits a review, the note names the
 verdict (approved, changes requested, or commented) and mentions the pull request author. Reviews
-by the author, such as replies to review threads, and reviews by bots get no note.
+by the author, such as replies to review threads, and reviews by bots get no note. The relay
+workflow skips them, so they use no Actions minutes.
 
 GitHub makes a separate review with the commented verdict for each single comment and for each
 reply in a review thread. The relay workflow waits two minutes before it relays such a review. If
