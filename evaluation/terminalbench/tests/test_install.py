@@ -8,6 +8,7 @@ from typing import Any
 
 from harbor.agents.factory import AgentFactory
 from harbor.environments.base import ExecResult
+from harbor.models.agent.context import AgentContext
 
 from coding_agent_terminalbench.agent import CodingAgent
 from coding_agent_terminalbench.install import (
@@ -15,7 +16,13 @@ from coding_agent_terminalbench.install import (
     ArtifactInstallError,
 )
 from coding_agent_terminalbench.manifest import parse_manifest
-from tests.support import COMMIT, manifest_data, write_artifact, write_manifest
+from tests.support import (
+    COMMIT,
+    manifest_data,
+    write_artifact,
+    write_manifest,
+    write_run_files,
+)
 
 IMPORT_PATH = "coding_agent_terminalbench.agent:CodingAgent"
 VERSION_LINE = f"coding-agent 0.0.1 {COMMIT}"
@@ -43,6 +50,9 @@ class FakeEnvironment:
 
     machine: str = "x86_64"
     uname_return_code: int = 0
+    has_sha256sum: bool = True
+    # The bytes that arrive in the container differ from the ones the host sent.
+    damage_upload: bool = False
     has_bash: bool = True
     package_manager: str = "apt-get"
     version_stdout: str = f"{VERSION_LINE}\n"
@@ -75,6 +85,13 @@ class FakeEnvironment:
             self.installed.append(command.removeprefix("apt-get update && apt-get install -y "))
             self.has_bash = True
             return ExecResult(return_code=0)
+        if command == f"sha256sum {INSTALLED_EXECUTABLE}":
+            if not self.has_sha256sum:
+                return ExecResult(stderr="bash: sha256sum: command not found", return_code=127)
+            [upload] = self.uploads()
+            content = upload.content + (b"\0" if self.damage_upload else b"")
+            digest = hashlib.sha256(content).hexdigest()
+            return ExecResult(stdout=f"{digest}  {INSTALLED_EXECUTABLE}\n", return_code=0)
         if command == f"chmod 0755 {INSTALLED_EXECUTABLE}":
             return ExecResult(return_code=0)
         if command == f"{INSTALLED_EXECUTABLE} --version":
@@ -162,8 +179,21 @@ class InstallTest(unittest.TestCase):
         )
         self.assert_setup_fails(
             FakeEnvironment(uname_return_code=1),
-            "cannot read the task container's architecture: `uname -m` exited 1",
+            "cannot read the task container's architecture: `uname -m` exited 1 with stderr ''$",
         )
+
+    def test_a_container_without_bash_fails_at_uname_and_names_bash(self) -> None:
+        # Docker and Modal run every command through `bash -c`, so the first command already
+        # fails: 126 when bash cannot run, 127 when it is not found.
+        for code in (126, 127):
+            with self.subTest(code=code):
+                environment = FakeEnvironment(uname_return_code=code)
+                self.assert_setup_fails(
+                    environment,
+                    f"`uname -m` exited {code} .*Harbor runs every command through bash, so the "
+                    "image may have no bash",
+                )
+                self.assertEqual(environment.uploads(), [])
 
     def test_a_manifest_without_the_architecture_fails_setup(self) -> None:
         self.data["executables"] = [
@@ -200,6 +230,35 @@ class InstallTest(unittest.TestCase):
         environment = FakeEnvironment()
         self.assert_setup_fails(environment, "coding-agent-linux-x64 does not exist")
         self.assertEqual(environment.uploads(), [])
+
+    # SHA-256 check in the container.
+
+    def test_the_uploaded_bytes_are_hashed_in_the_container_before_they_run(self) -> None:
+        environment = FakeEnvironment()
+        self.setup_agent(environment)
+        commands = [command.removeprefix("set -o pipefail; ") for command in environment.commands()]
+        self.assertLess(
+            commands.index(f"sha256sum {INSTALLED_EXECUTABLE}"),
+            commands.index(f"{INSTALLED_EXECUTABLE} --version"),
+        )
+
+    def test_a_damaged_upload_fails_setup(self) -> None:
+        environment = FakeEnvironment(damage_upload=True)
+        expected = self.data["executables"][0]["sha256"]
+        self.assert_setup_fails(
+            environment,
+            f"SHA-256 of {INSTALLED_EXECUTABLE} in the task container is '[0-9a-f]{{64}}', but "
+            f"artifact-manifest.json records {expected} for coding-agent-linux-x64",
+        )
+        self.assertNotIn(f"{INSTALLED_EXECUTABLE} --version", environment.commands())
+
+    def test_a_container_without_sha256sum_keeps_the_host_check(self) -> None:
+        environment = FakeEnvironment(has_sha256sum=False)
+        agent = self.create()
+        with self.assertLogs(agent.logger, level="WARNING") as captured:
+            asyncio.run(agent.setup(environment))  # type: ignore[arg-type]
+        self.assertIn("has no sha256sum", captured.output[0])
+        self.assertIsNotNone(agent.installed_executable)
 
     # Upload and permissions.
 
@@ -290,6 +349,17 @@ class InstallTest(unittest.TestCase):
         self.assertEqual(agent.to_agent_info().version, f"0.0.1 {COMMIT}")
         assert agent.installed_executable is not None
         self.assertEqual(agent.installed_executable.sha256, self.data["executables"][0]["sha256"])
+
+    def test_the_trial_metadata_names_the_installed_executable(self) -> None:
+        # Both builds print the same version line, so only this field says which one ran.
+        agent = self.setup_agent(FakeEnvironment(machine="aarch64"))
+        write_run_files(self.root / "logs" / "coding-agent")
+        context = AgentContext()
+
+        agent.populate_context_post_run(context)
+
+        assert context.metadata is not None
+        self.assertEqual(context.metadata["installed_executable"], "coding-agent-linux-arm64")
 
 
 class ManifestFixtureTest(unittest.TestCase):

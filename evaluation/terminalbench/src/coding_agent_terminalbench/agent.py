@@ -22,10 +22,12 @@ from harbor.models.agent.context import AgentContext
 from pydantic import Field, field_validator
 
 from coding_agent_terminalbench.install import (
+    BASH_HINT,
     GLIBC_HINT,
     INSTALLED_EXECUTABLE,
     ArtifactInstallError,
     check_executable,
+    check_uploaded_sha256,
     check_version_output,
     select_executable,
 )
@@ -122,8 +124,8 @@ class CodingAgent(BaseInstalledAgent):
         self.manifest: ArtifactManifest = load_manifest(self.artifact_dir)
         # Harbor's `version()` and `setup()` read `_version`, so this is the agent's one version.
         self._version = self.manifest.agent_version
-        # The executable that install() uploaded and checked, so the trial's own build is known.
-        # The trial metadata records the SHA-256 of every executable in the artifact.
+        # The executable that install() uploaded and checked. The trial metadata names its file,
+        # because the version line of the x64 and arm64 builds is the same.
         self.installed_executable: ArtifactExecutable | None = None
 
     @classmethod
@@ -156,6 +158,7 @@ class CodingAgent(BaseInstalledAgent):
             raise ArtifactInstallError(
                 f"cannot read the task container's architecture: `uname -m` exited "
                 f"{uname.return_code} with stderr {(uname.stderr or '').strip()!r}"
+                + (BASH_HINT if uname.return_code in (126, 127) else "")
             )
         if machine == "":
             raise ArtifactInstallError(
@@ -167,13 +170,16 @@ class CodingAgent(BaseInstalledAgent):
         # moment, so it runs in a thread and concurrent trials keep running.
         source = await asyncio.to_thread(check_executable, self.artifact_dir, executable)
         await environment.upload_file(source, INSTALLED_EXECUTABLE)
+        await self._check_uploaded_bytes(environment, executable)
         # upload_file copies as root. Mode 0755 lets every user run the file, the agent user
         # included, and only root can change it.
         await self.exec_as_root(environment, command=f"chmod 0755 {INSTALLED_EXECUTABLE}")
 
         # 3. ADR 0001's `bash` tool needs bash. Most images have it, so one check is the common
         # case. Harbor's helper only logs a warning when the image has no package manager it
-        # knows, so a second check after the helper fails setup instead.
+        # knows, so a second check after the helper fails setup instead. On Docker and Modal an
+        # image without bash already failed at `uname -m`, because Harbor runs commands through
+        # bash; this step covers environments that do not.
         if not await self._has_bash(environment):
             await self.ensure_system_dependencies(environment, ("bash",))
             if not await self._has_bash(environment):
@@ -196,6 +202,29 @@ class CodingAgent(BaseInstalledAgent):
         # The output equals the manifest's version line, so `_version`, which the constructor read
         # from the manifest, is now the version of the build that this trial runs.
         self.installed_executable = executable
+
+    async def _check_uploaded_bytes(
+        self, environment: BaseEnvironment, executable: ArtifactExecutable
+    ) -> None:
+        """Hashes the uploaded file in the container, when the image has `sha256sum`.
+
+        coreutils and BusyBox both provide it. An image without it keeps the host check only, and
+        the job log says so: installing a tool for this would break "nothing else is installed"
+        (ADR 0005 §6).
+        """
+        digest = await environment.exec(command=f"sha256sum {INSTALLED_EXECUTABLE}", user="root")
+        if digest.return_code == 127:
+            self.logger.warning(
+                "the task container has no sha256sum, so install() checked the SHA-256 of the "
+                "executable on the host only"
+            )
+            return
+        if digest.return_code != 0:
+            raise ArtifactInstallError(
+                f"sha256sum {INSTALLED_EXECUTABLE} exited {digest.return_code} with stderr "
+                f"{(digest.stderr or '').strip()!r}"
+            )
+        check_uploaded_sha256(executable, digest.stdout)
 
     async def _has_bash(self, environment: BaseEnvironment) -> bool:
         found = await environment.exec(command="command -v bash >/dev/null 2>&1", user="root")
@@ -228,6 +257,9 @@ class CodingAgent(BaseInstalledAgent):
                 artifact_sha256={
                     executable.file: executable.sha256 for executable in self.manifest.executables
                 },
+                installed_executable=(
+                    self.installed_executable.file if self.installed_executable else None
+                ),
             )
         except Exception as error:
             self.logger.warning(

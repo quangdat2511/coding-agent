@@ -27,6 +27,11 @@ GLIBC_HINT = (
 )
 
 
+# Harbor's Docker and Modal environments run every command through `bash -c`, so in an image
+# without bash the first command of install() exits 126 or 127 before it reaches the container.
+BASH_HINT = "; Harbor runs every command through bash, so the image may have no bash"
+
+
 class ArtifactInstallError(RuntimeError):
     """The artifact cannot be installed as the build that the manifest names.
 
@@ -73,6 +78,23 @@ def check_executable(artifact_dir: Path, executable: ArtifactExecutable) -> Path
             f"{executable.sha256}; rebuild the artifact or give the directory that built it"
         )
     return path
+
+
+def check_uploaded_sha256(executable: ArtifactExecutable, stdout: str | None) -> None:
+    """Fails unless `sha256sum` in the container printed the manifest's SHA-256.
+
+    The host check runs before the upload, so this one catches bytes that changed on the host
+    after it, or that the upload damaged. `--version` does not: a Bun executable with its end cut
+    off can still print the right version line.
+    """
+    printed = (stdout or "").split()
+    actual = printed[0] if printed else ""
+    if actual != executable.sha256:
+        raise ArtifactInstallError(
+            f"the SHA-256 of {INSTALLED_EXECUTABLE} in the task container is {actual!r}, but "
+            f"artifact-manifest.json records {executable.sha256} for {executable.file}; the upload "
+            "changed the file, or the file on the host changed after the check"
+        )
 
 
 def check_version_output(manifest: ArtifactManifest, stdout: str | None) -> None:

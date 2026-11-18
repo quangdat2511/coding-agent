@@ -147,6 +147,8 @@ class CodingAgentTest(unittest.TestCase):
             context.metadata["artifact_sha256"],
             {"coding-agent-linux-x64": "a" * 64, "coding-agent-linux-arm64": "b" * 64},
         )
+        # No install() ran in this test, so the metadata names no installed executable.
+        self.assertNotIn("installed_executable", context.metadata)
         trajectory = Trajectory.model_validate_json(trajectory_path.read_text(encoding="utf-8"))
         self.assertEqual(trajectory.agent.name, "coding-agent")
         self.assertEqual(trajectory.agent.version, agent.version())

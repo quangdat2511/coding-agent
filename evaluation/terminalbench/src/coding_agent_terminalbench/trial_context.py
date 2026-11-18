@@ -33,8 +33,12 @@ def populate_trial_context(
     trajectory_path: Path,
     agent: AgentIdentity,
     artifact_sha256: Mapping[str, str],
+    installed_executable: str | None = None,
 ) -> None:
     """Reads `run_dir` into `context`, and writes the trajectory to `trajectory_path`.
+
+    `installed_executable` is the file of the artifact that `install()` put in the container, or
+    `None` when no install finished.
 
     The run files are read and the trajectory is built before the context is touched, so a log
     that cannot be read or converted leaves the context as it was found. Only writing the file can
@@ -47,7 +51,7 @@ def populate_trial_context(
     log = load_run_log(run_dir)
     trajectory = build_trajectory(log, agent=agent)
     _fill_usage(context, log)
-    context.metadata = _metadata(log, artifact_sha256)
+    context.metadata = _metadata(log, artifact_sha256, installed_executable)
     write_trajectory(trajectory_path, trajectory)
 
 
@@ -66,15 +70,18 @@ def _fill_usage(context: AgentContext, log: RunLog) -> None:
     context.n_cache_tokens = tokens.cached
 
 
-def _metadata(log: RunLog, artifact_sha256: Mapping[str, str]) -> dict[str, Any]:
+def _metadata(
+    log: RunLog, artifact_sha256: Mapping[str, str], installed_executable: str | None
+) -> dict[str, Any]:
     """What the trial result names about the run (ADR 0005 §6)."""
     metadata: dict[str, Any] = {
         "model_turns": log.model_turns,
         "tool_calls": log.tool_calls,
         "profile": log.record.profile,
-        # One hash per executable of the artifact. The run files do not say which architecture the
-        # container selected, so the trial records every build the manifest pins.
+        # One hash per executable of the artifact, so the trial records every build the manifest
+        # pins. The run files do not say which one ran: install() does, in installed_executable.
         "artifact_sha256": dict(artifact_sha256),
+        "installed_executable": installed_executable,
         "truncated": log.truncated,
     }
     result = log.agent_result
