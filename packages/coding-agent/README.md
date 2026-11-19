@@ -179,6 +179,15 @@ configuration error does.
 and the fixture repository it runs against. Both are fixed artifacts:
 [its README](tests/fixtures/named-task/README.md) says why and gives the rules for changing them.
 
+`tests/named-task.test.ts` is the end-to-end test of
+[ADR 0006](../../docs/adr/0006-implementation-order-and-mvp-completion-checklist.md) §6 item 5. It
+runs the executable on a copy of the fixture repository with `bun test` as the verification command,
+against the recorded responses of one live run, and needs no network and no credential. The run
+fails Verification once, gets the `[Verification Failed]` feedback, and passes the second time. It
+runs twice and asserts that both runs reach the same outcome and log the same events, times and
+identifiers. The Verification evidence differs between runs, because `bun test` prints its own
+timings and the Verification Runner measures durations with the real clock. The fixture README says [how to record the responses again](tests/fixtures/named-task/README.md#recording-the-responses-again).
+
 To run the task against Google on a copy of the fixture repository:
 
 ```sh
@@ -202,6 +211,10 @@ ADR 0005 §3 has no flag for that. The injection uses Bun, not Coding Agent:
   comma-separated list of paths below `tests/fixtures/`.
 - Nothing in `src/` knows about fixtures. The shipped executable has no test hook, no base URL
   setting and no variable that can redirect a credential.
+- The end-to-end test also preloads `tests/support/fixed-clock-and-ids.ts`. It replaces
+  `src/clock-and-ids.ts`, which supplies the session's clock and identifiers and the time in
+  `result.json`, with a clock that never moves and identifiers that count from 1. Two replays then
+  log the same times and identifiers.
 
 A `BUN_OPTIONS` variable would remove even the Bun flag. It was rejected, because its quoting is
 fragile. Bun 1.3.14 silently skips a quoted preload path that contains a space, and only a
