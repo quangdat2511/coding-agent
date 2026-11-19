@@ -7,6 +7,10 @@ node_modules/
 .venv/
 __pycache__/
 
+# Harbor job directories (`harbor run -o jobs`). Agent logs can hold credentials, and ADR 0005 §8
+# publishes a job directory only after its secret scan.
+/jobs/
+
 # Build output
 dist/
 *.tsbuildinfo
