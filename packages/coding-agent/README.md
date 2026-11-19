@@ -41,12 +41,6 @@ only argument. After `run`, it is an unknown flag.
 `bun run build:artifact` builds the evaluation executables and their manifest. The procedure is in
 [Evaluation artifact build](../../scripts/README.md#evaluation-artifact-build).
 
-This is the walking skeleton of
-[ADR 0006](../../docs/adr/0006-implementation-order-and-mvp-completion-checklist.md) (Join 2).
-These parts are still to come:
-
-- `read` is the only registered tool, and Verification is a stand-in. CDA-80 (D5) replaces both.
-
 ### Cancelling a run
 
 Once `src/cli.ts` listens for them, `SIGINT` and `SIGTERM` cancel the run and do not end the
@@ -165,14 +159,16 @@ These rules apply to all three files:
 
 `openSession` in `src/session-factory.ts` is the one place that builds an Agent Session.
 `runHeadless` uses it now, and the interactive entry point will use it too. It builds the Workspace
-Resolver, the tool registry, the system prompt and the `ModelPort`, and it supplies the clock and
-the identifiers. Two temporary parts are isolated in it:
+Resolver, the tool registry, the system prompt, the Verification Policy and the `ModelPort`, and it
+supplies the clock and the identifiers:
 
-- It registers `read` only. A run can therefore change no file and start no child process.
-- Its Verification Policy is a stand-in that returns a non-gating `succeeded` with
-  `no_command_configured` evidence. The stand-in runs no command. If
-  `CODING_AGENT_VERIFICATION_COMMAND` is set, the factory opens no Agent Session and the run exits
-  70, because skipping the command would report a check that never ran.
+- It registers `read`, `write`, `edit` and `bash` through `createDefaultTools`.
+- It builds the Verification Policy with `createVerificationPolicy`, from the configured command or
+  `null` when none is configured (see [Verification command](#verification-command)). The policy
+  runs the command through a Verification Runner bound to the session's Workspace Resolver.
+- The entry point passes in the child launcher. `src/cli.ts` creates it after
+  [process hardening](#process-hardening), with the credential names `@coding-agent/ai` declares, so
+  every `bash` and Verification child starts without a provider credential.
 
 When the factory opens no Agent Session, the run removes the output directory it created, as a
 configuration error does.
@@ -266,8 +262,14 @@ choice, never the repository's:
   ([ADR 0003 §3](../../docs/adr/0003-mvp-context-planning-verification-and-session-memory.md));
 - set but blank is a configuration error.
 
-No command runs yet. Until CDA-80 (D5) wires in the Verification Policy, a run with the variable set
-exits 70 before its first Model Turn (see [Session factory](#session-factory)).
+The command runs after each Candidate Completion, with the timeout of a `bash` Tool Call (30 s),
+and its output is bounded to 40 KiB:
+
+- exit code 0: the Agent Session succeeds;
+- any other exit code: the next Model Turn gets a `[Verification Failed]` message with the command,
+  the exit code and the output, and the model keeps working;
+- a timeout, or a command that could not run, for example on a shell syntax error or exit code 126
+  or 127: the Agent Session fails with `VERIFICATION_FAILED`.
 
 The interactive path and the end-to-end test configure a command this way. The headless evaluation
 path leaves it unset ([ADR 0005 §5](../../docs/adr/0005-terminalbench-evaluation-protocol.md)).

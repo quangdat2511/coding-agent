@@ -31,14 +31,17 @@ export function replayRejection(fixture: string, status: number): Respond {
 // Read by replay-provider.ts: the fixtures to replay, in order, separated by commas.
 export const REPLAY_FIXTURES_ENV_VAR = "CODING_AGENT_TEST_REPLAY_FIXTURES";
 
-export function replayInOrder(fixtures: readonly string[]): Respond {
-  const remaining = [...fixtures];
+export function inOrder(responses: readonly Respond[]): Respond {
+  const remaining = [...responses];
   return (request) => {
     const next = remaining.shift();
-    if (next === undefined) throw new Error("no recorded response is left for this request");
-    return replay(next)(request);
+    if (next === undefined) throw new Error("no response is left for this request");
+    return next(request);
   };
 }
+
+export const replayInOrder = (fixtures: readonly string[]): Respond =>
+  inOrder(fixtures.map(replay));
 
 // A timer clamps Infinity to 1 ms, so a request that never quiesces sets none.
 export const hangQuiescingAfter =

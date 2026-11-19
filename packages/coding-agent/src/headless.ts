@@ -1,4 +1,5 @@
 import type { AgentResult } from "@coding-agent/agent-core";
+import type { ChildProcessLauncher } from "@coding-agent/tools";
 import { BUILD_INFO } from "./build-info.ts";
 import type { RunArgs } from "./run-args.ts";
 import { type RunConfig, removeCreated, resolveRunConfig } from "./run-config.ts";
@@ -13,6 +14,8 @@ export interface HeadlessOptions {
   readonly env: Readonly<Record<string, string | undefined>>;
   readonly stdout: (text: string) => void;
   readonly stderr: (text: string) => void;
+  // Starts every bash and Verification child, so it must come from the hardened entry point.
+  readonly launcher: ChildProcessLauncher;
   // Aborting it dispatches `cancel`; a string abort reason becomes the cancellation reason.
   readonly signal: AbortSignal;
   // Called once the Agent Session can take `cancel`.
@@ -31,14 +34,8 @@ const EXIT_CODE_BY_OUTCOME = {
   cancelled: 130,
 } as const satisfies Record<AgentResult["outcome"], ExitCode>;
 
-// A setting that is valid but not built yet is not the caller's error, so it exits 70, not 2.
-const EXIT_CODE_BY_REFUSAL = {
-  INVALID_CONFIGURATION: 2,
-  NOT_IMPLEMENTED: 70,
-} as const satisfies Record<"INVALID_CONFIGURATION" | "NOT_IMPLEMENTED", ExitCode>;
-
 interface Refusal {
-  readonly code: keyof typeof EXIT_CODE_BY_REFUSAL;
+  readonly code: "INVALID_CONFIGURATION";
   readonly message: string;
 }
 
@@ -55,9 +52,9 @@ async function failureOf(task: Promise<void>): Promise<string | undefined> {
   );
 }
 
-function refuse({ code, message }: Refusal, stderr: (text: string) => void): HeadlessResult {
+function refuse({ message }: Refusal, stderr: (text: string) => void): HeadlessResult {
   stderr(diagnostic(message));
-  return { exitCode: EXIT_CODE_BY_REFUSAL[code] };
+  return { exitCode: 2 };
 }
 
 function finalText({ finalMessage }: AgentResult): string {
@@ -119,7 +116,7 @@ export async function runHeadless(options: HeadlessOptions): Promise<HeadlessRes
   let files: RunFiles | undefined;
   let stopListening = (): void => undefined;
   try {
-    const opened = await openSession(config);
+    const opened = await openSession(config, options.launcher);
     if (!opened.ok) {
       await removeCreated(createdDirectories);
       return refuse(opened, stderr);

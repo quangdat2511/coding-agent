@@ -1,0 +1,2 @@
+data: {"candidates": [{"content": {"parts": [{"functionCall": {"id": "call-1", "name": "bash", "args": {"command": "echo \"bash: GOOGLE_API_KEY=$(printenv GOOGLE_API_KEY || echo absent)\""}}}], "role": "model"}, "finishReason": "STOP", "index": 0}], "modelVersion": "gemini-3.5-flash-lite"}
+

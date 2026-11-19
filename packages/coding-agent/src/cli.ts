@@ -92,9 +92,6 @@ async function main(
     stderr.write(`coding-agent: ${children.message}\n`);
     return 2;
   }
-  // createDefaultTools(children.launcher) gives bash this launcher; CDA-80 (D5) registers it with
-  // the Agent Session, and CDA-74 gives it to the Verification Runner. Creating it validates
-  // configuration without spawning a process.
   // Bun reports a write to a closed pipe as an "error" event, which would end the run with exit 1.
   process.stdout.on("error", () => undefined);
   process.stderr.on("error", () => undefined);
@@ -114,6 +111,7 @@ async function main(
       env,
       stdout: stdout.write,
       stderr: stderr.write,
+      launcher: children.launcher,
       signal: cancellation.signal,
       onSessionOpened: cancellation.onSessionOpened,
     });

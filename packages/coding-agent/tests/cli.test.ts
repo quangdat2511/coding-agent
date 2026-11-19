@@ -3,6 +3,7 @@ import { existsSync, statSync } from "node:fs";
 import { cp, mkdir, readdir, rename } from "node:fs/promises";
 import { join } from "node:path";
 import { runnerChainIsClean } from "./support/ancestor-chain.ts";
+import { loggedEvents } from "./support/event-log.ts";
 import { NAMED_TASK_FILE, NAMED_TASK_REPO, READ_ONLY_RUN } from "./support/named-task.ts";
 import { noModeBits, noSignalHandlers, onWindows } from "./support/platform.ts";
 import {
@@ -116,12 +117,8 @@ const replayEnv = (fixtures: readonly string[]): Record<string, string> => ({
 
 const runFiles = ["events.jsonl", "result.json", "run.json"];
 
-// Only a line that ends in a newline is a whole event.
-async function eventTypes(outputDir: string): Promise<unknown[]> {
-  const log = Bun.file(join(outputDir, "events.jsonl"));
-  const lines = (await log.exists()) ? (await log.text()).split("\n").slice(0, -1) : [];
-  return lines.map((line) => JSON.parse(line).type);
-}
+const eventTypes = async (outputDir: string) =>
+  (await loggedEvents(outputDir)).map(({ type }) => type);
 
 const lastEventType = async (outputDir: string) => (await eventTypes(outputDir)).at(-1);
 
@@ -389,13 +386,40 @@ describe("the coding-agent executable", () => {
           schemaVersion: 1,
           codingAgent: { commit: null },
           profile: "default",
-          tools: ["read"],
+          tools: ["read", "write", "edit", "bash"],
         });
         expect(await lastEventType(outputDir)).toBe("session_settled");
         expect(await Bun.file(join(outputDir, "result.json")).json()).toMatchObject({
           schemaVersion: 1,
           exitCode: 0,
           result: { outcome: "succeeded" },
+        });
+      });
+    },
+  );
+
+  it.skipIf(!cleanChain)(
+    "starts bash and Verification children without the provider credential",
+    async () => {
+      await withTemporaryDirectory(async (directory) => {
+        await cp(NAMED_TASK_REPO, join(directory, "repo"), { recursive: true });
+        const { exitCode, stderr } = await runProcess(replayedNamedTask, {
+          cwd: directory,
+          env: {
+            ...replayEnv([1, 2].map((turn) => `google/credential-probe/turn-${turn}.txt`)),
+            CODING_AGENT_VERIFICATION_COMMAND:
+              'echo "verification: GOOGLE_API_KEY=$(printenv GOOGLE_API_KEY || echo absent)"',
+          },
+        });
+
+        expect(firstLine(stderr)).toStartWith("coding-agent: succeeded;");
+        expect(exitCode).toBe(0);
+        const events = await loggedEvents(join(directory, "out"));
+        expect(events.find(({ type }) => type === "tool_call_completed")).toMatchObject({
+          data: { result: { content: "bash: GOOGLE_API_KEY=absent\n[exit code: 0]" } },
+        });
+        expect(events.find(({ type }) => type === "verification_completed")).toMatchObject({
+          data: { evidence: [{ stdout: "verification: GOOGLE_API_KEY=absent\n" }] },
         });
       });
     },

@@ -3,14 +3,17 @@ import { existsSync } from "node:fs";
 import { chmod, cp, mkdir, readdir, realpath, symlink } from "node:fs/promises";
 import { join } from "node:path";
 import { BUILD_INFO } from "../src/build-info.ts";
+import { createConfiguredChildLauncher } from "../src/child-launcher.ts";
 import { type HeadlessResult, runHeadless } from "../src/headless.ts";
 import type { ProviderId } from "../src/run-args.ts";
+import { loggedEvents } from "./support/event-log.ts";
 import { NAMED_TASK_FILE, NAMED_TASK_REPO, READ_ONLY_RUN } from "./support/named-task.ts";
 import { noFullDevice } from "./support/platform.ts";
 import { withTemporaryDirectory } from "./support/process.ts";
 import {
   hang,
   hangQuiescingAfter,
+  inOrder,
   type Respond,
   replayInOrder,
   replayRejection,
@@ -21,6 +24,10 @@ import {
 const secret = "sk-test-credential-value";
 
 const readOnlyRun = READ_ONLY_RUN.fixtures;
+
+const children = createConfiguredChildLauncher();
+if (!children.ok) throw new Error(children.message);
+const { launcher } = children;
 
 const deep = { recursive: true } as const;
 
@@ -82,28 +89,11 @@ async function runNamedTask(
         stderr: (text) => {
           output.stderr += text;
         },
+        launcher,
       });
       await inspect({ result, ...output, sent, repoRoot, outputDir });
     });
   });
-}
-
-interface LoggedEvent {
-  readonly schemaVersion: number;
-  readonly sessionId: string;
-  readonly sequence: number;
-  readonly occurredAt: string;
-  readonly type: string;
-  readonly data: Record<string, unknown>;
-}
-
-// A line still being written has no newline yet, so only the lines before the last one count.
-async function loggedEvents(outputDir: string): Promise<LoggedEvent[]> {
-  const text = await Bun.file(join(outputDir, "events.jsonl")).text();
-  return text
-    .split("\n")
-    .slice(0, -1)
-    .map((line) => JSON.parse(line));
 }
 
 async function writtenText(outputDir: string): Promise<string> {
@@ -120,6 +110,19 @@ function toolResponses(request: SentRequest | undefined): unknown[] {
     parts.flatMap(({ functionResponse }) => (functionResponse ? [functionResponse.response] : [])),
   );
 }
+
+const googleTurn =
+  (part: object): Respond =>
+  () =>
+    new Response(
+      `data: ${JSON.stringify({
+        candidates: [{ content: { parts: [part], role: "model" }, finishReason: "STOP" }],
+      })}\n\n`,
+      { headers: { "content-type": "text/event-stream" } },
+    );
+
+const verificationsOf = async (outputDir: string) =>
+  (await loggedEvents(outputDir)).filter(({ type }) => type === "verification_completed");
 
 // ADR 0005 §7: a MODEL_FAILURE whose details record an HTTP 401, 403, 429 or 5xx from the provider
 // makes the trial rerun-eligible, so the status must reach the run files (CDA-83).
@@ -245,7 +248,7 @@ describe("a headless run of the named task on Google", () => {
     });
   });
 
-  it("offers the model read as its only tool, with the Project Instructions in the prompt", async () => {
+  it("offers the model read, write, edit and bash, with the Project Instructions in the prompt", async () => {
     await runNamedTask(replayInOrder(readOnlyRun), async ({ sent }) => {
       const body = sent[0]?.body as {
         tools: { function_declarations: { name: string }[] }[];
@@ -253,7 +256,7 @@ describe("a headless run of the named task on Google", () => {
       };
       expect(
         body.tools.flatMap((tool) => tool.function_declarations.map(({ name }) => name)),
-      ).toEqual(["read"]);
+      ).toEqual(["read", "write", "edit", "bash"]);
       const instructions = await Bun.file(join(NAMED_TASK_REPO, "AGENTS.md")).text();
       expect(body.system_instruction.parts[0]?.text).toContain(instructions);
     });
@@ -338,22 +341,17 @@ describe("a headless run of the named task on Google", () => {
     );
   });
 
-  // Temporary: CDA-80 (D5) runs the configured command through the Verification Policy.
-  it("exits 70 without a Model Turn rather than skip a configured verification command", async () => {
-    await runNamedTask(
-      replayInOrder(readOnlyRun),
-      ({ result, stdout, stderr, sent, outputDir }) => {
-        expect(result).toEqual({ exitCode: 70 });
-        expect(sent).toHaveLength(0);
-        expect(stdout).toBe("");
-        expect(stderr).toBe(
-          "coding-agent: CODING_AGENT_VERIFICATION_COMMAND is set, but no verification command " +
-            "runs yet; CDA-80 (D5) wires in the Verification Policy\n",
-        );
-        expect(existsSync(outputDir)).toBe(false);
-      },
-      { env: { CODING_AGENT_VERIFICATION_COMMAND: "bun test" } },
-    );
+  it("settles through the non-gating Verification when no command is configured", async () => {
+    await runNamedTask(replayInOrder(readOnlyRun), async ({ result, outputDir }) => {
+      expect(result.exitCode).toBe(0);
+      expect((await verificationsOf(outputDir)).map(({ data }) => data)).toEqual([
+        {
+          verificationId: expect.any(String),
+          outcome: "succeeded",
+          evidence: [{ type: "no_command_configured", workspaceChanged: false }],
+        },
+      ]);
+    });
   });
 
   it.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
@@ -372,8 +370,6 @@ describe("a headless run of the named task on Google", () => {
         },
         {
           prepare: (repoRoot) => chmod(join(repoRoot, "AGENTS.md"), 0o000),
-          // A configuration error wins over a setting that is not built yet.
-          env: { CODING_AGENT_VERIFICATION_COMMAND: "bun test" },
         },
       );
     },
@@ -406,7 +402,7 @@ describe("a headless run of the named task on Google", () => {
           },
           approvalPolicy: "auto-approve",
           verification: { command: null },
-          tools: ["read"],
+          tools: ["read", "write", "edit", "bash"],
           systemPrompt: systemInstruction.parts[0]?.text,
         });
       },
@@ -763,4 +759,89 @@ describe("a headless run of the named task on Google", () => {
       { signal: cancellation.signal, onRequest: () => cancellation.abort("SIGTERM") },
     );
   }, 15_000);
+});
+
+describe("a headless run with a verification command configured", () => {
+  const command = "test -f fixed.txt || { echo fixed.txt is missing; exit 1; }";
+  const env = { CODING_AGENT_VERIFICATION_COMMAND: command };
+  const answerThenFix = () =>
+    inOrder([
+      googleTurn({ text: "The fix is in place." }),
+      googleTurn({
+        functionCall: {
+          id: "call-1",
+          name: "write",
+          args: { path: "fixed.txt", content: "done\n" },
+        },
+      }),
+      googleTurn({ text: "I wrote fixed.txt." }),
+    ]);
+
+  it("sends the [Verification Failed] feedback in the next Model Turn and succeeds once the command passes", async () => {
+    await runNamedTask(
+      answerThenFix(),
+      async ({ result, sent, repoRoot, outputDir }) => {
+        expect(result.exitCode).toBe(0);
+        expect(result.result).toMatchObject({ outcome: "succeeded", workspaceChanged: true });
+        expect(await Bun.file(join(repoRoot, "fixed.txt")).text()).toBe("done\n");
+
+        expect(sent).toHaveLength(3);
+        const second = sent[1]?.body as { contents: unknown[] } | undefined;
+        expect(second?.contents.at(-1)).toEqual({
+          role: "user",
+          parts: [
+            {
+              text:
+                "[Verification Failed]\n" +
+                'Command: "test -f fixed.txt || { echo fixed.txt is missing; exit 1; }"\n' +
+                "Exit code: 1\n" +
+                "Output:\n" +
+                "fixed.txt is missing\n" +
+                "Please analyze the failure, adjust your changes, and verify again.",
+            },
+          ],
+        });
+
+        const verifications = await verificationsOf(outputDir);
+        expect(verifications.map(({ data }) => data.outcome)).toEqual(["continue", "succeeded"]);
+        expect(verifications.map(({ data }) => data.evidence)).toEqual([
+          [
+            {
+              type: "command_execution",
+              command,
+              exitCode: 1,
+              stdout: "fixed.txt is missing\n",
+              stderr: "",
+              durationMs: expect.any(Number),
+            },
+          ],
+          [
+            {
+              type: "command_execution",
+              command,
+              exitCode: 0,
+              stdout: "",
+              stderr: "",
+              durationMs: expect.any(Number),
+            },
+          ],
+        ]);
+      },
+      { env },
+    );
+  });
+
+  it("records the command in run.json", async () => {
+    await runNamedTask(
+      answerThenFix(),
+      async ({ outputDir }) => {
+        const written = await Bun.file(join(outputDir, "run.json")).json();
+        expect(written).toMatchObject({
+          verification: { command },
+          tools: ["read", "write", "edit", "bash"],
+        });
+      },
+      { env },
+    );
+  });
 });
