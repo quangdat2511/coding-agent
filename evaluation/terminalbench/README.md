@@ -228,3 +228,106 @@ trial before the verifier runs. The agent therefore reports the problem as a war
 log instead of raising. The run files are read and the trajectory is built before the context is
 touched, so a log that cannot be read or converted leaves the context as it was found; only
 writing `trajectory.json` can fail after the counts and the metadata are set.
+
+## Oracle job
+
+The oracle job is step 2 of ADR 0005 §7. It runs Harbor's built-in oracle agent on every task of
+the job's dataset. The oracle agent applies the reference solution of each task. It uses no
+provider key and no model. The job therefore proves the dataset pin, the Harbor pin, the locked
+dependencies, and Modal access before any job puts a credential in a task container.
+
+A task is harness-flaky when its oracle reward is below 1 or when its trial has no reward. A
+harness-flaky task fails without any agent, so the harness or the task causes the failure. It stays
+in the denominator of the recorded job, and the recorded job's report names it (ADR 0005 §8).
+
+The job needs a Modal account. It pays compute for one task environment per task, and for one GPU
+for each GPU task that the dataset declares. A person runs it.
+
+### Run the job
+
+Run these steps from the repository root, with uv 0.13.8 (see Commands).
+
+1. Sign in to Modal. This command writes a Modal token to `~/.modal.toml`. The Modal token is not
+   a provider key.
+
+   ```sh
+   uv run --project evaluation/terminalbench --frozen modal setup
+   ```
+
+2. Run the job. This example uses the default pin of ADR 0008 §2. For another dataset, use the
+   identifier of its committed dataset record.
+
+   ```sh
+   uv run --project evaluation/terminalbench --frozen harbor run \
+     -d terminal-bench/terminal-bench@4.1.0 \
+     -a oracle -e modal -k 1 -n <concurrency> -r 0 \
+     -o jobs --job-name <job name>
+   ```
+
+Do not add `--ae`, `-m`, `-i`, `-x`, `-l`, a timeout flag, or a resource override. The record
+command below refuses a job that passes a variable to the agent, names a model, filters the tasks,
+or changes the task conditions. `-n` changes only the wall-clock time.
+
+Harbor writes the job directory to `jobs/<job name>`. Git ignores `jobs/`, so a job directory is
+never committed by accident. Keep the directory after the job ends: the record names the job, and
+the record tooling of the recorded job can read it again.
+
+### Record the harness-flaky tasks
+
+Run this command from the repository root after the job ends:
+
+```sh
+uv run --project evaluation/terminalbench --frozen python -m coding_agent_terminalbench.oracle_job \
+  jobs/<job name> \
+  --dataset terminal-bench/terminal-bench@4.1.0 \
+  --source-repository https://github.com/harbor-framework/terminal-bench \
+  --release-tag v4.1.0 \
+  --release-commit 4070d6cef56a7d20cb5dc98d5e10ada88a6b9440 \
+  --output evaluation/terminalbench/runs/<job name>/oracle.json
+```
+
+The four dataset values come from the dataset record: ADR 0008 §4 for the default pin, or
+`evaluation/terminalbench/datasets/<org>/<name>@<version>.md` for any other dataset. The module
+`oracle_job.py` reads the job's `config.json`, `lock.json` and `result.json`, and the `result.json`
+and `lock.json` of each trial. It makes these checks:
+
+- The job ran one agent, Harbor's built-in `oracle`, with no model, on `modal`, with one attempt
+  per task and no retry.
+- The job ran exactly one dataset, its name is the record's name, and no task filter, timeout
+  multiplier, timeout override, resource override, or disabled verifier changed the tasks. Its
+  reference is the record's version or the content hash of a version (see below).
+- The Harbor version in `lock.json` is the version that `uv.lock` pins.
+- The job passes no variable to the agent, and no provider key variable anywhere.
+- The job finished, every trial that `lock.json` plans has a `result.json`, and every task has one
+  trial.
+- The release tag resolves to the record's release commit. The command runs
+  `git ls-remote --tags <repository> refs/tags/<tag>` for this check, so it needs `git` and the
+  network.
+
+Harbor writes `config.json` without the fields that keep their default value. The module therefore
+reads a missing field as its Harbor 0.23.0 default, for example one attempt per task.
+
+For a package dataset (a name with `/`), Harbor replaces the version in `config.json` with the
+content hash of the version that it resolved, for example `sha256:<hash>`. The command cannot map
+the hash back to a version, so it accepts any content hash. The record keeps the hash as
+`resolvedReference`, and the digest of each task names the content that ran.
+
+| Exit code | Meaning |
+| --- | --- |
+| 0 | Every check passed. The command wrote `oracle.json` and printed the harness-flaky tasks. |
+| 1 | The job breaks a check. The command lists each problem and writes nothing. |
+| 2 | A file of the job cannot be read, or the release tag cannot be resolved. |
+
+`oracle.json` holds these values. It holds no variable value.
+
+- The job name, id, start and end times, and wall-clock time.
+- The Harbor version and commit from `lock.json`, and the Modal SDK version from `uv.lock`.
+- The flags, and the names of the variables that the job passes.
+- The dataset identifier, the reference that Harbor resolved, the source repository, release tag,
+  release commit, the command that resolved the commit, and the task count.
+- Each task with its trial, digest, reward and exception type.
+- The harness-flaky tasks with their rewards.
+
+Commit `oracle.json`. Then add a comment to the Jira ticket of the job with the `harbor run`
+command, the wall-clock time that the record command printed, and the compute cost that Modal
+shows for the job. The later jobs use these values for planning.
