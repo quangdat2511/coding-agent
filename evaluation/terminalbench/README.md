@@ -166,16 +166,27 @@ The agent refuses the job in these cases:
 
 Harbor's preflight makes all of these checks except the last one before it queues a trial, because
 Harbor gives preflight no model. The agent's constructor makes all of them when Harbor creates a
-trial.
+trial. The provider list and the key names are in `launch.py`. They match ADR 0005 §3 and
+`packages/ai/src/credentials.ts`, and `tests/test_launch.py` fails if either one changes.
 
 The agent cannot tell a template from a literal. Harbor resolves the templates before it calls
 preflight or the constructor, so both receive the values only. A literal that equals the host
-variable with the same name therefore passes every check, and it stays in the shell history. Harbor
-never writes the key to the job's `config.json`: it stores that literal as the template
-`${OPENCODE_API_KEY}`, and it redacts any other value of a variable whose name contains `KEY`. To
+variable with the same name therefore passes every check, and it stays in the shell history. To
 refuse every literal, a check must read `--ae` before Harbor resolves it, and Harbor 0.23.0 gives an
-agent no such hook. The provider list and the key names are in `launch.py`. They match ADR 0005 §3 and
-`packages/ai/src/credentials.ts`, and `tests/test_launch.py` fails if either one changes.
+agent no such hook. The agent does not read the raw arguments from `sys.argv` either: a job
+configuration file (`harbor run -c`) can also set the agent's environment, and `sys.argv` does not
+show it, so that check would still miss a literal. CDA-89 accepts this limit.
+
+Harbor writes each `--ae` value to the job's `config.json` in one of these forms
+(`templatize_sensitive_env` in `harbor/utils/env.py`):
+
+- A template stays as it is written.
+- A literal of a sensitive variable becomes the template `${NAME}` if it equals the host variable
+  `NAME`. A variable is sensitive if its name contains `KEY`, `SECRET`, `TOKEN` (but not
+  `TOKENS`), `PASSWORD`, `CREDENTIAL` or `AUTH`, in any case.
+- Any other literal of a sensitive variable is masked. A value of more than 8 characters keeps its
+  first 4 and its last 3 characters, as in `sk-o****xyz`. A shorter value becomes `****`.
+- A literal of any other variable stays as it is written.
 
 ## Trial context and trajectory
 
