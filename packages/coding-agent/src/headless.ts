@@ -1,6 +1,7 @@
 import type { AgentResult } from "@coding-agent/agent-core";
 import type { ChildProcessLauncher } from "@coding-agent/tools";
 import { BUILD_INFO } from "./build-info.ts";
+import { systemClock } from "./clock-and-ids.ts";
 import type { RunArgs } from "./run-args.ts";
 import { type RunConfig, removeCreated, resolveRunConfig } from "./run-config.ts";
 import { openRunFiles, type RunFiles, type RunRecord } from "./run-files.ts";
@@ -156,7 +157,7 @@ export async function runHeadless(options: HeadlessOptions): Promise<HeadlessRes
     running = true;
 
     const result = await session.result();
-    const finishedAt = new Date().toISOString();
+    const finishedAt = systemClock.now();
     const logFailure = await logged;
     const exitCode: ExitCode = logFailure === undefined ? EXIT_CODE_BY_OUTCOME[result.outcome] : 70;
     const resultFailure = await failureOf(files.writeResult({ exitCode, result, finishedAt }));

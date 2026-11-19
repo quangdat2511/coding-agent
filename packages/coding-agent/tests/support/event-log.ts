@@ -15,3 +15,6 @@ export async function loggedEvents(outputDir: string): Promise<LoggedEvent[]> {
   const lines = (await log.exists()) ? (await log.text()).split("\n").slice(0, -1) : [];
   return lines.map((line) => JSON.parse(line));
 }
+
+export const verificationsOf = async (outputDir: string): Promise<LoggedEvent[]> =>
+  (await loggedEvents(outputDir)).filter(({ type }) => type === "verification_completed");

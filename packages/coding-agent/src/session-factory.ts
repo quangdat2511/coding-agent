@@ -1,8 +1,6 @@
 import {
   type AgentSession,
   type ApprovalPolicy,
-  type Clock,
-  type IdSource,
   type OpenSessionResult,
   openAgentSession,
 } from "@coding-agent/agent-core";
@@ -13,6 +11,7 @@ import {
   createVerificationRunner,
   createWorkspaceResolver,
 } from "@coding-agent/tools";
+import { randomIds, systemClock } from "./clock-and-ids.ts";
 import { createModelPort } from "./model-port.ts";
 import type { RunConfig } from "./run-config.ts";
 import { assembleSystemPrompt, type SkippedProjectInstructions } from "./system-prompt.ts";
@@ -37,17 +36,6 @@ export type SessionFactoryResult =
       readonly skippedInstructions: readonly SkippedProjectInstructions[];
     }
   | Extract<OpenSessionResult, { ok: false }>;
-
-const systemClock: Clock = {
-  now: () => new Date().toISOString(),
-  monotonicMs: () => Math.floor(performance.now()),
-  setTimer: (delayMs, callback) => {
-    const timer = setTimeout(callback, delayMs);
-    return () => clearTimeout(timer);
-  },
-};
-
-const randomIds: IdSource = { next: (kind) => `${kind}-${crypto.randomUUID()}` };
 
 export async function openSession(
   config: SessionConfig,

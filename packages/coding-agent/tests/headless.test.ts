@@ -6,7 +6,7 @@ import { BUILD_INFO } from "../src/build-info.ts";
 import { createConfiguredChildLauncher } from "../src/child-launcher.ts";
 import { type HeadlessResult, runHeadless } from "../src/headless.ts";
 import type { ProviderId } from "../src/run-args.ts";
-import { loggedEvents } from "./support/event-log.ts";
+import { loggedEvents, verificationsOf } from "./support/event-log.ts";
 import { NAMED_TASK_FILE, NAMED_TASK_REPO, READ_ONLY_RUN } from "./support/named-task.ts";
 import { noFullDevice } from "./support/platform.ts";
 import { withTemporaryDirectory } from "./support/process.ts";
@@ -120,9 +120,6 @@ const googleTurn =
       })}\n\n`,
       { headers: { "content-type": "text/event-stream" } },
     );
-
-const verificationsOf = async (outputDir: string) =>
-  (await loggedEvents(outputDir)).filter(({ type }) => type === "verification_completed");
 
 // ADR 0005 §7: a MODEL_FAILURE whose details record an HTTP 401, 403, 429 or 5xx from the provider
 // makes the trial rerun-eligible, so the status must reach the run files (CDA-83).
