@@ -2,13 +2,12 @@ import type { AgentResult } from "@coding-agent/agent-core";
 import type { ChildProcessLauncher } from "@coding-agent/tools";
 import { BUILD_INFO } from "./build-info.ts";
 import { systemClock } from "./clock-and-ids.ts";
-import { messageOf, redactorOf } from "./diagnostics.ts";
+import { diagnostic, messageOf, redactorOf } from "./diagnostics.ts";
+import type { ExitCode } from "./exit-codes.ts";
 import type { RunArgs } from "./run-args.ts";
 import { type RunConfig, removeCreated, resolveRunConfig } from "./run-config.ts";
 import { openRunFiles, type RunFiles, type RunRecord } from "./run-files.ts";
 import { openSession } from "./session-factory.ts";
-
-export type ExitCode = 0 | 1 | 2 | 70 | 130;
 
 export interface HeadlessOptions {
   readonly args: RunArgs;
@@ -41,7 +40,6 @@ interface Refusal {
   readonly message: string;
 }
 
-const diagnostic = (message: string): string => `coding-agent: ${message}\n`;
 const internalError = (message: string): string => diagnostic(`internal error: ${message}`);
 
 async function failureOf(task: Promise<void>): Promise<string | undefined> {

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import { join } from "node:path";
 import { READ_ONLY_RUN } from "./support/named-task.ts";
-import { onWindows } from "./support/platform.ts";
+import { noPseudoTerminal, onWindows } from "./support/platform.ts";
 import {
   bunLikeShebang,
   firstLine,
@@ -104,7 +104,7 @@ describe("the coding-agent executable on the interactive path", () => {
 
   // The one test that gives the TUI a real terminal, so it runs only where Bun can open one. It
   // needs no provider: the TUI has to take the screen, and two presses of the cancel key quit.
-  it.skipIf(onWindows)(
+  it.skipIf(noPseudoTerminal)(
     "takes the screen on a terminal and quits on two cancel keys",
     async () => {
       await withTemporaryDirectory(async (cwd) => {
@@ -121,17 +121,29 @@ describe("the coding-agent executable on the interactive path", () => {
             },
           },
         } as Parameters<typeof Bun.spawn>[1]);
-        const press = (key: string) =>
-          (child as unknown as { terminal: { write(k: string): void } }).terminal.write(key);
-        const started = Date.now();
+        // A press after the TUI has quit finds the terminal closed, which is no failure of the test.
+        const press = () => {
+          try {
+            (child as unknown as { terminal: { write(key: string): void } }).terminal.write(
+              "\u0003",
+            );
+          } catch {}
+        };
+        const noticeShown = () => output.includes("Press Esc or Ctrl+C again");
+        const sleepUntil = async (done: () => boolean, ms: number) => {
+          for (const end = Date.now() + ms; !done() && Date.now() < end; ) await Bun.sleep(20);
+        };
 
-        // The keyboard may not be listened to yet, so the first press repeats until its notice shows.
-        while (!output.includes("Press Esc or Ctrl+C again")) {
-          if (Date.now() - started > 15_000) throw new Error(`no notice on the screen:\n${output}`);
-          press("\u0003");
-          await Bun.sleep(250);
+        // The keyboard may not be listened to yet, so a first press that shows no notice is sent
+        // again. Waiting longer than the quit window before it keeps a repeat from being read as
+        // the second press of a Quit.
+        for (let attempt = 0; attempt < 10 && !noticeShown(); attempt++) {
+          press();
+          await sleepUntil(noticeShown, 1_500);
         }
-        press("\u0003");
+        expect(noticeShown()).toBe(true);
+        // The notice came right after the first press, so this one is within the quit window.
+        press();
 
         expect(await child.exited).toBe(0);
         expect(output).toContain("\u001b[?1049h");

@@ -1,5 +1,8 @@
 // Helpers for the text that Coding Agent prints and shows, shared by both entry points.
 
+// One line of Coding Agent's own diagnostics on standard error.
+export const diagnostic = (message: string): string => `coding-agent: ${message}\n`;
+
 export const messageOf = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
 

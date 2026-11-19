@@ -37,6 +37,7 @@ describe("choosing between the two entry points", () => {
       code: "USAGE_ERROR",
       flag: "--provider",
       message: "--provider is required",
+      usage: COMMAND_LINE_USAGE,
     });
   });
 
@@ -61,6 +62,18 @@ describe("choosing between the two entry points", () => {
     expect(
       parseCommandLine(["--provider", "google", "--model", "m", "--approval-policy", "ask"], cwd),
     ).toMatchObject({ ok: false, message: 'unknown flag "--approval-policy"' });
+  });
+});
+
+describe("the usage that goes with an error", () => {
+  it("is the usage of run for an error in a line that starts with run", () => {
+    expect(parseCommandLine(["run", "--nope"], cwd)).toMatchObject({ ok: false, usage: USAGE });
+  });
+
+  it("is the usage of both entry points for any other line", () => {
+    for (const argv of [["serve"], ["--nope"], []]) {
+      expect(parseCommandLine(argv, cwd)).toMatchObject({ ok: false, usage: COMMAND_LINE_USAGE });
+    }
   });
 });
 

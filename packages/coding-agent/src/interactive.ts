@@ -1,7 +1,8 @@
 import type { AgentSession, SessionEvent } from "@coding-agent/agent-core";
+import type { ChildProcessLauncher } from "@coding-agent/tools";
 import { renderTui, type TuiHandle, type TuiHandlers, type TuiModel } from "@coding-agent/tui";
-import { messageOf, redactorOf } from "./diagnostics.ts";
-import type { ExitCode } from "./headless.ts";
+import { diagnostic, messageOf, redactorOf } from "./diagnostics.ts";
+import type { ExitCode } from "./exit-codes.ts";
 import type { InteractiveArgs } from "./interactive-args.ts";
 import { projectSessionEvent } from "./projection.ts";
 import { resolveSessionSettings, SESSION_LIMITS_BY_PROFILE } from "./run-config.ts";
@@ -28,16 +29,25 @@ export interface InteractiveOptions {
   readonly signal: AbortSignal;
   // Whether standard input and output are both a terminal. The TUI cannot run on a pipe.
   readonly isTerminal: boolean;
+  // Starts every bash and Verification child, so it must come from the hardened entry point.
+  readonly launcher: ChildProcessLauncher;
   // Called once the TUI is up and a signal can cancel; before that, a signal ends the run at once.
   readonly onReady?: () => void;
   // Seams for tests: the TUI, the Agent Session factory and the clock of the quit window.
   readonly render?: (props: { model: TuiModel; handlers: TuiHandlers }) => TuiHandle;
-  readonly openSession?: (config: SessionConfig) => Promise<SessionFactoryResult>;
+  readonly openSession?: (
+    config: SessionConfig,
+    launcher: ChildProcessLauncher,
+  ) => Promise<SessionFactoryResult>;
   readonly now?: () => number;
   // How long a signal waits for a session that is still opening, which cannot be cancelled. A
   // session that is open settles within its own Cancellation Grace Period. Defaults to that period.
   readonly openGraceMs?: number;
 }
+
+// The `reason` field of a command, present only when there is one.
+const withReason = (reason: string | undefined): { reason?: string } =>
+  reason === undefined ? {} : { reason };
 
 // Resolves when `promise` does, or after `ms`, whichever comes first.
 async function within(promise: Promise<void>, ms: number): Promise<void> {
@@ -78,13 +88,15 @@ export async function runInteractive(options: InteractiveOptions): Promise<ExitC
   // plain error on the terminal and exits 2 without opening anything.
   const resolved = await resolveSessionSettings(options.args, options);
   if (!resolved.ok) {
-    stderr(`coding-agent: ${resolved.message}\n`);
+    stderr(diagnostic(resolved.message));
     return 2;
   }
   if (!options.isTerminal) {
     stderr(
-      "coding-agent: the interactive path needs a terminal on standard input and output; " +
-        "use `coding-agent run` for a task without one\n",
+      diagnostic(
+        "the interactive path needs a terminal on standard input and output; " +
+          "use `coding-agent run` for a task without one",
+      ),
     );
     return 2;
   }
@@ -96,15 +108,19 @@ export async function runInteractive(options: InteractiveOptions): Promise<ExitC
   let model: TuiModel = { transcript: [] };
   let notices = 0;
   let busy = false;
-  let closing = false;
+  // Set once the run is ending, by a Quit or by a signal. Only the first is the person's own Quit.
+  let stopping = false;
   let cancelRequested = false;
+  // Why the Coding Task was cancelled, kept for a cancel that comes while its session is opening.
+  let cancelReason: string | undefined;
   let quitPressedAt: number | undefined;
   let session: AgentSession | undefined;
   // Settles when the Coding Task that was submitted last has run to its end, or failed to start.
   let sessionLifecycle: Promise<void> = Promise.resolve();
   const { promise: exit, resolve: requestExit } = Promise.withResolvers<ExitCode>();
 
-  // `model` is the whole state, so a draw that failed is repaired by the next one.
+  // `model` is the whole state, so a draw that failed is repaired by the next one. It gets no
+  // notice of its own: a terminal that cannot draw the transcript cannot draw a notice either.
   function draw(): void {
     try {
       handle.update(model);
@@ -143,11 +159,10 @@ export async function runInteractive(options: InteractiveOptions): Promise<ExitC
 
   async function runTask(objective: string): Promise<void> {
     try {
-      const opened = await openSession({
-        ...settings,
-        approvalPolicy: "ask",
-        limits: SESSION_LIMITS_BY_PROFILE.default,
-      });
+      const opened = await openSession(
+        { ...settings, approvalPolicy: "ask", limits: SESSION_LIMITS_BY_PROFILE.default },
+        options.launcher,
+      );
       if (!opened.ok) {
         notify(`The Coding Task could not start: ${opened.message}`);
         return;
@@ -158,10 +173,15 @@ export async function runInteractive(options: InteractiveOptions): Promise<ExitC
       const active = opened.session;
       session = active;
       // The subscription opens before the first command, so no event can be missed.
-      const following = follow(active);
+      // The display failing to follow never ends the wait for the session below.
+      const following = follow(active).catch((error: unknown) =>
+        notify(
+          `The event stream failed (${messageOf(error)}); the display stops following this session.`,
+        ),
+      );
       // A cancel that came while the session was opening cancels it in place of starting it.
       const first = cancelRequested
-        ? ({ type: "cancel" } as const)
+        ? ({ type: "cancel", ...withReason(cancelReason) } as const)
         : ({ type: "start", task: { objective } } as const);
       const dispatched = await active.dispatch(first);
       if (!dispatched.accepted) {
@@ -177,7 +197,10 @@ export async function runInteractive(options: InteractiveOptions): Promise<ExitC
   // An Agent Session is scoped to one Coding Task and has no prompt queue (ADR 0004 §6), so a
   // submission opens a session only when none is active, including one still opening.
   function submit(text: string): void {
-    if (closing) return;
+    if (stopping) {
+      notify("Coding Agent is stopping; this Coding Task was not started.");
+      return;
+    }
     if (busy) {
       notify(
         "A Coding Task is already running; press Esc or Ctrl+C to cancel it before submitting another.",
@@ -186,6 +209,7 @@ export async function runInteractive(options: InteractiveOptions): Promise<ExitC
     }
     busy = true;
     cancelRequested = false;
+    cancelReason = undefined;
     sessionLifecycle = runTask(text).finally(() => {
       busy = false;
       session = undefined;
@@ -195,10 +219,11 @@ export async function runInteractive(options: InteractiveOptions): Promise<ExitC
   function cancelTask(reason?: string): void {
     if (!busy) return;
     cancelRequested = true;
+    cancelReason ??= reason;
     const active = session;
     if (active === undefined) return;
     active
-      .dispatch({ type: "cancel", ...(reason === undefined ? {} : { reason }) })
+      .dispatch({ type: "cancel", ...withReason(reason) })
       .catch((error: unknown) => notify(`Cancel was not dispatched: ${messageOf(error)}`));
   }
 
@@ -220,7 +245,7 @@ export async function runInteractive(options: InteractiveOptions): Promise<ExitC
         type: "resolve_approval",
         approvalId,
         decision,
-        ...(reason === undefined ? {} : { reason }),
+        ...withReason(reason),
       })
       .then(
         (result) => {
@@ -228,6 +253,12 @@ export async function runInteractive(options: InteractiveOptions): Promise<ExitC
         },
         (error: unknown) => refused(messageOf(error)),
       );
+  }
+
+  // Ends the run once any Agent Session has settled. A Quit passes 0; a signal passes 130.
+  function stop(code: ExitCode): void {
+    stopping = true;
+    requestExit(code);
   }
 
   // The TUI sends one signal for Esc and Ctrl+C. While a Coding Task runs it cancels; with none, a
@@ -240,8 +271,7 @@ export async function runInteractive(options: InteractiveOptions): Promise<ExitC
     }
     const at = now();
     if (quitPressedAt !== undefined && at - quitPressedAt <= QUIT_WINDOW_MS) {
-      closing = true;
-      requestExit(0);
+      stop(0);
       return;
     }
     quitPressedAt = at;
@@ -252,10 +282,10 @@ export async function runInteractive(options: InteractiveOptions): Promise<ExitC
     model,
     handlers: { onSubmit: submit, onCancel, onApproval: decide },
   });
+  // A signal is not a Quit: it cancels the Coding Task, if any, and ends the run with 130.
   const onAbort = () => {
-    closing = true;
     cancelTask(typeof signal.reason === "string" ? signal.reason : undefined);
-    requestExit(130);
+    stop(130);
   };
   signal.addEventListener("abort", onAbort, { once: true });
   options.onReady?.();

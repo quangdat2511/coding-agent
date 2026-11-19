@@ -2,11 +2,18 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { cp, mkdtemp, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { ChildProcessLauncher } from "@coding-agent/tools";
 import type { TuiModel } from "@coding-agent/tui";
+import { createConfiguredChildLauncher } from "../src/child-launcher.ts";
 import { type InteractiveOptions, runInteractive } from "../src/interactive.ts";
 import type { SessionConfig } from "../src/session-factory.ts";
 import { type FakeTui, fakeTui, waitFor } from "./support/fake-tui.ts";
-import { NAMED_TASK_FILE, NAMED_TASK_REPO, READ_ONLY_RUN } from "./support/named-task.ts";
+import {
+  NAMED_TASK_FILE,
+  NAMED_TASK_REPO,
+  NAMED_TASK_RUN,
+  READ_ONLY_RUN,
+} from "./support/named-task.ts";
 import { replayInOrder, withProvider } from "./support/recorded-provider.ts";
 import { scriptedAgent } from "./support/scripted-agent.ts";
 
@@ -42,6 +49,16 @@ interface Setup {
   readonly signal?: AbortSignal;
   readonly repoRoot?: string;
   readonly openGraceMs?: number;
+  readonly launcher?: ChildProcessLauncher;
+}
+
+// A scripted session starts no child, so it needs no launcher.
+const noLauncher = {} as ChildProcessLauncher;
+
+function realLauncher(): ChildProcessLauncher {
+  const created = createConfiguredChildLauncher();
+  if (!created.ok) throw new Error(created.message);
+  return created.launcher;
 }
 
 function start(setup: Setup = {}) {
@@ -59,6 +76,7 @@ function start(setup: Setup = {}) {
     stderr: (text) => stderr.push(text),
     signal: setup.signal ?? controller.signal,
     isTerminal: setup.isTerminal ?? true,
+    launcher: setup.launcher ?? noLauncher,
     render: tui.render,
     ...("openSession" in setup
       ? { openSession: setup.openSession }
@@ -291,7 +309,8 @@ describe("cancelling", () => {
     run.tui.handlers().onSubmit("Make the tests pass");
 
     expect(await run.exited).toBe(130);
-    expect(calls).toEqual(["events(0)", "dispatch:cancel"]);
+    // The reason of the signal reaches the cancel that stands in for the start.
+    expect(calls).toEqual(["events(0)", "dispatch:cancel:SIGINT"]);
     const atUnmount = run.tui.unmountedWith();
     expect(atUnmount && outcomes(atUnmount)).toEqual(["cancelled"]);
   });
@@ -315,6 +334,23 @@ describe("cancelling", () => {
     expect(await run.exited).toBe(130);
     const atUnmount = run.tui.unmountedWith();
     expect(atUnmount && outcomes(atUnmount)).toEqual([]);
+  });
+
+  it("refuses a submission while the run waits for the session to settle", async () => {
+    const run = start();
+    await waitFor(() => run.tui.mounted(), "the TUI");
+    run.tui.handlers().onSubmit("Make the tests pass");
+    await awaitApproval(run.tui);
+
+    run.controller.abort("SIGINT");
+    run.tui.handlers().onSubmit("another");
+
+    expect(await run.exited).toBe(130);
+    const atUnmount = run.tui.unmountedWith();
+    expect(atUnmount && notices(atUnmount)).toContain(
+      "Coding Agent is stopping; this Coding Task was not started.",
+    );
+    expect(atUnmount && tasks(atUnmount)).toEqual(["Make the tests pass"]);
   });
 
   it("ends the run without a TUI when the signal came before it started", async () => {
@@ -413,6 +449,44 @@ describe("a consumer error", () => {
     expect(outcomes(run.tui.latest())).toEqual(["succeeded"]);
     await finish(run);
   });
+
+  it("keeps the session counted as running when the display can no longer follow it", async () => {
+    const configs: SessionConfig[] = [];
+    const opening = scriptedAgent({ configs });
+    const run = start({
+      openSession: async (config) => {
+        const opened = await opening(config);
+        if (!opened.ok) return opened;
+        // An event stream that fails at once, which Agent Core itself never does.
+        const events = () => {
+          throw new Error("the stream broke");
+        };
+        return { ...opened, session: { ...opened.session, events } };
+      },
+    });
+    await waitFor(() => run.tui.mounted(), "the TUI");
+
+    run.tui.handlers().onSubmit("first");
+    await waitFor(
+      () => notices(run.tui.latest()).some((text) => text.includes("event stream failed")),
+      "the notice that the stream failed",
+    );
+    // The session was not settled by the failure, so a second Coding Task is still refused.
+    run.tui.handlers().onSubmit("second");
+    await waitFor(
+      () => notices(run.tui.latest()).some((text) => text.includes("already running")),
+      "the refusal of a second Coding Task",
+    );
+    expect(configs).toHaveLength(1);
+
+    // Once the session settles, the next Coding Task opens a session of its own.
+    run.tui.handlers().onCancel();
+    await waitFor(() => {
+      run.tui.handlers().onSubmit("third");
+      return configs.length === 2;
+    }, "the session to settle");
+    await finish(run);
+  });
 });
 
 describe("the credential", () => {
@@ -468,7 +542,7 @@ describe("with the real session factory and a recorded provider", () => {
     const objective = await Bun.file(NAMED_TASK_FILE).text();
 
     await withProvider(replayInOrder(READ_ONLY_RUN.fixtures), async () => {
-      const run = start({ openSession: undefined, repoRoot: repo });
+      const run = start({ openSession: undefined, repoRoot: repo, launcher: realLauncher() });
       await waitFor(() => run.tui.mounted(), "the TUI");
 
       run.tui.handlers().onSubmit(objective);
@@ -479,4 +553,51 @@ describe("with the real session factory and a recorded provider", () => {
       await finish(run);
     });
   });
+});
+
+describe("with the four tools and the Verification Policy of a real session", () => {
+  it("asks for an Approval before each change and finishes the named task once they are allowed", async () => {
+    const repo = join(repoRoot, "repo");
+    await cp(NAMED_TASK_REPO, repo, { recursive: true });
+    const objective = await Bun.file(NAMED_TASK_FILE).text();
+
+    await withProvider(replayInOrder(NAMED_TASK_RUN.fixtures), async () => {
+      const run = start({
+        openSession: undefined,
+        repoRoot: repo,
+        launcher: realLauncher(),
+        env: {
+          GOOGLE_API_KEY: secret,
+          CODING_AGENT_VERIFICATION_COMMAND: NAMED_TASK_RUN.verificationCommand,
+        },
+      });
+      await waitFor(() => run.tui.mounted(), "the TUI");
+      run.tui.handlers().onSubmit(objective);
+
+      // Each Approval is allowed once, as the person would from the overlay.
+      const allowed: string[] = [];
+      await waitFor(
+        () => {
+          const pending = run.tui.latest().pendingApproval;
+          if (pending !== undefined && !allowed.includes(pending.approvalId)) {
+            allowed.push(pending.approvalId);
+            run.tui.handlers().onApproval(pending.approvalId, "allow");
+          }
+          return outcomes(run.tui.latest()).length >= 1;
+        },
+        "the named task to settle",
+        45_000,
+      );
+
+      const model = run.tui.latest();
+      const tools = model.transcript.flatMap((entry) =>
+        entry.kind === "tool_call" ? [entry.toolName] : [],
+      );
+      expect(outcomes(model)).toEqual(["succeeded"]);
+      expect(allowed.length).toBeGreaterThan(0);
+      expect(tools.some((name) => name === "write" || name === "edit")).toBe(true);
+      expect(toolCalls(model)).not.toContain("denied");
+      await finish(run);
+    });
+  }, 60_000);
 });

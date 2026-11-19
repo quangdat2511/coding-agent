@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { fieldsOf, readFlags } from "../src/flags.ts";
+import { fieldsOf, flagTable, readFlags } from "../src/flags.ts";
 
 const flagOf = { provider: "--provider", repoRoot: "--repo-root" } as const;
 const fieldOf = fieldsOf(flagOf);
@@ -34,5 +34,16 @@ describe("readFlags", () => {
     expect(readFlags(tokens, fieldOf)).toEqual({
       problem: flag === undefined ? { message } : { flag, message },
     });
+  });
+});
+
+describe("flagTable", () => {
+  it("puts each flag on a line of its own and aligns the descriptions", () => {
+    expect(
+      flagTable([
+        ["--a <x>", "first"],
+        ["--longer-flag <y>", "second"],
+      ]),
+    ).toBe(["  --a <x>            first", "  --longer-flag <y>  second"].join("\n"));
   });
 });

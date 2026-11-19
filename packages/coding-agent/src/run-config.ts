@@ -10,7 +10,8 @@ import {
 } from "@coding-agent/ai";
 import { errnoOf, normalizeWindowsShellPath } from "@coding-agent/tools";
 import { readAtMost } from "./files.ts";
-import type { Profile, ProviderId, RunArgs } from "./run-args.ts";
+import type { ProviderId, SessionFlags } from "./flags.ts";
+import type { Profile, RunArgs } from "./run-args.ts";
 
 // The ADR 0003 §4 defaults. CDA-59 chose cancellationGraceMs: long enough for a tool or
 // Verification child to go from SIGTERM to SIGKILL, and short enough that a cancelled run still
@@ -338,23 +339,20 @@ async function prepareOutputDir(cwd: string, given: string): Promise<Checked<Out
 // The checks that need no file written, cheapest first, and the first problem wins. Both entry
 // points call it, so a refusal reads the same on either, and it creates nothing to remove.
 export async function resolveSessionSettings(
-  selection: Pick<RunArgs, "provider" | "model" | "repoRoot">,
+  flags: SessionFlags,
   { cwd, env }: ResolveRunConfigContext,
 ): Promise<Checked<SessionSettings>> {
-  const model = createProviderDirectory().getModel(selection.provider, selection.model);
+  const model = createProviderDirectory().getModel(flags.provider, flags.model);
   if (model === undefined) {
-    return refuse(
-      "--model",
-      `--model "${selection.model}" is not a known ${selection.provider} model`,
-    );
+    return refuse("--model", `--model "${flags.model}" is not a known ${flags.provider} model`);
   }
 
-  const variables = PROVIDER_CREDENTIAL_ENV_VARS_BY_PROVIDER[selection.provider];
+  const variables = PROVIDER_CREDENTIAL_ENV_VARS_BY_PROVIDER[flags.provider];
   const credential = readEnvCredential(variables, env);
   if (credential === undefined) {
     return refuse(
       variables[0],
-      `no credential for --provider ${selection.provider}: set ${variables.join(" or ")}`,
+      `no credential for --provider ${flags.provider}: set ${variables.join(" or ")}`,
     );
   }
 
@@ -366,14 +364,14 @@ export async function resolveSessionSettings(
     );
   }
 
-  const repoRoot = await resolveRepoRoot(cwd, selection.repoRoot);
+  const repoRoot = await resolveRepoRoot(cwd, flags.repoRoot);
   if (!repoRoot.ok) return repoRoot;
 
   const { variable, value } = credential;
   return pass({
     model,
     credential: { variable, reveal: () => value },
-    sampling: SAMPLING_BY_PROVIDER[selection.provider],
+    sampling: SAMPLING_BY_PROVIDER[flags.provider],
     transportRetryBound: TRANSPORT_RETRY_BOUND,
     repoRoot: repoRoot.value.canonical,
     givenRepoRoot: repoRoot.value.given,

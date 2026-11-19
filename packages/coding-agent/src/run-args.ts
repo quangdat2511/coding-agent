@@ -5,27 +5,25 @@
 import {
   fail,
   fieldsOf,
-  type ProviderId,
+  flagTable,
   problem,
   providers,
   readFlags,
   requireOneOf,
   requireValue,
+  type SessionFlags,
+  sessionFlagHelp,
+  sessionFlagOf,
   type UsageError,
 } from "./flags.ts";
 
-export type { ProviderId };
-
 export type Profile = "default" | "terminalbench";
 
-export interface RunArgs {
+export interface RunArgs extends SessionFlags {
   readonly taskFile: string;
-  readonly provider: ProviderId;
-  readonly model: string;
   readonly approvalPolicy: "auto-approve";
   readonly outputDir: string;
   readonly profile: Profile;
-  readonly repoRoot: string;
 }
 
 export type ParseRunArgsResult = { readonly ok: true; readonly args: RunArgs } | UsageError;
@@ -35,13 +33,11 @@ const profiles = { default: true, terminalbench: true } satisfies Record<Profile
 const approvalPolicies = { "auto-approve": true } satisfies Record<RunArgs["approvalPolicy"], true>;
 
 export const flagOf = {
+  ...sessionFlagOf,
   taskFile: "--task-file",
-  provider: "--provider",
-  model: "--model",
   approvalPolicy: "--approval-policy",
   outputDir: "--output-dir",
   profile: "--profile",
-  repoRoot: "--repo-root",
 } as const satisfies Record<keyof RunArgs, `--${string}`>;
 
 const fieldOf = fieldsOf(flagOf);
@@ -53,16 +49,19 @@ export const USAGE = `usage: coding-agent ${command} ${flagOf.taskFile} <path> $
                     ${flagOf.outputDir} <dir> [${flagOf.profile} <name>] [${flagOf.repoRoot} <dir>]
        coding-agent --version
 
-  ${flagOf.taskFile} <path>              required  file whose entire content is the Coding Task objective
-  ${flagOf.provider} <provider>           required  ${Object.keys(providers).join(" | ")}
-  ${flagOf.model} <model-id>              required  model identifier within that provider
-  ${flagOf.approvalPolicy} auto-approve  required  only "auto-approve" is accepted
-  ${flagOf.outputDir} <dir>              required  directory the run writes its files into
-  ${flagOf.profile} <name>                optional  ${Object.keys(profiles).join(" | ")} (default: default)
-  ${flagOf.repoRoot} <dir>               optional  defaults to the working directory`;
+${flagTable([
+  [`${flagOf.taskFile} <path>`, "required  file whose entire content is the Coding Task objective"],
+  sessionFlagHelp.provider,
+  sessionFlagHelp.model,
+  [`${flagOf.approvalPolicy} auto-approve`, 'required  only "auto-approve" is accepted'],
+  [`${flagOf.outputDir} <dir>`, "required  directory the run writes its files into"],
+  [`${flagOf.profile} <name>`, `optional  ${Object.keys(profiles).join(" | ")} (default: default)`],
+  sessionFlagHelp.repoRoot,
+])}`;
 
 export function parseRunArgs(argv: readonly string[], cwd: string): ParseRunArgsResult {
   const [given, ...tokens] = argv;
+  // The command line sends an empty argv to the interactive path, so only a direct call gets here.
   if (given === undefined) return fail(problem(undefined, "a command is required"));
   if (given !== command) return fail(problem(undefined, `unknown command "${given}"`));
 

@@ -14,6 +14,35 @@ export const providers = {
   opencode: true,
 } satisfies Record<ProviderId, true>;
 
+// The options that both command lines take: which model to talk to, and which repository.
+export interface SessionFlags {
+  readonly provider: ProviderId;
+  readonly model: string;
+  readonly repoRoot: string;
+}
+
+export const sessionFlagOf = {
+  provider: "--provider",
+  model: "--model",
+  repoRoot: "--repo-root",
+} as const satisfies Record<keyof SessionFlags, `--${string}`>;
+
+// What each of those flags means, so that both usages say it in the same words.
+export const sessionFlagHelp = {
+  provider: [
+    `${sessionFlagOf.provider} <provider>`,
+    `required  ${Object.keys(providers).join(" | ")}`,
+  ],
+  model: [`${sessionFlagOf.model} <model-id>`, "required  model identifier within that provider"],
+  repoRoot: [`${sessionFlagOf.repoRoot} <dir>`, "optional  defaults to the working directory"],
+} as const satisfies Record<keyof SessionFlags, readonly [string, string]>;
+
+// A usage's list of flags, each followed by its description, in aligned columns.
+export function flagTable(rows: readonly (readonly [flag: string, description: string])[]): string {
+  const width = Math.max(...rows.map(([flag]) => flag.length)) + 2;
+  return rows.map(([flag, text]) => `  ${flag.padEnd(width)}${text}`).join("\n");
+}
+
 export interface UsageError {
   readonly ok: false;
   readonly code: "USAGE_ERROR";

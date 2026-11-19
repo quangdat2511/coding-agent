@@ -6,8 +6,8 @@ import {
   type Model,
 } from "@coding-agent/ai";
 import { BUILD_INFO } from "../src/build-info.ts";
+import type { ProviderId } from "../src/flags.ts";
 import { createModelPort, type ModelPortConfig } from "../src/model-port.ts";
-import type { ProviderId } from "../src/run-args.ts";
 import { hang, replay, withProvider } from "./support/recorded-provider.ts";
 
 const secret = "sk-test-credential-value";

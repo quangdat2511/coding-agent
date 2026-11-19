@@ -78,19 +78,25 @@ transcript keeps the earlier ones.
 
 A signal that comes while a session is still opening does not wait for it past the Cancellation
 Grace Period, because an open cannot be cancelled: the run ends with 130, and a session that opens
-after that is cancelled in place of started.
+after that is cancelled in place of started. A submission while the run waits for a session to
+settle is refused with a notice, and the signal's name is the cancellation reason in the transcript.
 
 The TUI shows the outcome of every Agent Session, a failed one included, and none of them changes
 the exit code: it describes how the run ended, not what the Coding Task achieved.
 
 The host reads a snapshot of the Agent Session and follows its Session Events from the snapshot's
 last sequence, before it dispatches `start`, so no event is lost in between (ADR 0002 §7). A failure
-while showing one event, or a draw that fails, never reaches the Agent Session: the event is lost
-from the display with a notice, and the next draw shows the whole model again. The credential is
-replaced by `[redacted]` in everything the transcript shows.
+while showing one event never reaches the Agent Session: that event is lost from the display, with
+a notice. A draw that fails gets no notice, because a terminal that cannot draw the transcript
+cannot draw a notice either, and the next draw shows the whole model again. An event stream that
+fails ends the display's following of that session with a notice, but the session still counts as
+running until it settles. The credential is replaced by `[redacted]` in everything the transcript
+shows.
 
-`read` is the only registered tool until CDA-80 (D5), so no Approval can arise from a real model
-yet. The Approval path is tested against a scripted session with a mutating tool.
+The interactive path registers the same four tools and the same Verification Policy as
+`coding-agent run`. Under `ask`, every `write`, `edit` and `bash` Tool Call waits for an Approval in
+the overlay. The Verification command is the one of
+[Verification command](#verification-command): `CODING_AGENT_VERIFICATION_COMMAND`, or none.
 
 ## Version
 

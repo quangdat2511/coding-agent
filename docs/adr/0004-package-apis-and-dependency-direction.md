@@ -778,10 +778,15 @@ amended this record:
 - **Interactive entry point** (§6, §8): `runInteractive(opts: InteractiveOptions):
   Promise<ExitCode>`. `InteractiveOptions` replaces the name `CliOptions` that the record sketched,
   to pair with `HeadlessOptions`: it holds what the interactive path needs, not a parsed command
-  line. `ExitCode`, now exported, is the union of exit codes that ADR 0005 §3 defines, so the result is
-  still a number. The interactive path returns 0 when the person quits, 130 after a signal, 2 for a usage
-  or configuration error or when standard input or output is not a terminal, and 70 for an internal
-  error.
+  line. `ExitCode`, now exported, is the union of exit codes that ADR 0005 §3 defines, so the result
+  is still a number. `InteractiveOptions` takes the `launcher` that starts every `bash` and
+  Verification child, as `HeadlessOptions` does, so the hardened entry point stays the only place
+  that makes one. The interactive path returns 0 when the person quits, 130 after a signal, 2 for a
+  usage or configuration error or when standard input or output is not a terminal, and 70 for an
+  internal error.
+- **Interactive Verification** (§7): the interactive path registers the four tools and the
+  Verification Policy of the headless path, and reads the verification command from the same
+  `CODING_AGENT_VERIFICATION_COMMAND`; unset means the non-gating fallback.
 - **Interactive command line** (§6): `coding-agent` with flags and no command starts the
   interactive path with `--provider` and `--model`, both required, and `--repo-root`. It takes no
   `--approval-policy` (the path always asks), no `--task-file` or `--output-dir` (the Coding Task is

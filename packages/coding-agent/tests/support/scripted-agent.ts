@@ -105,7 +105,7 @@ const fakeBash: ExecutableTool<typeof BashParams> = {
 export interface ScriptedAgentOptions {
   // What the second model turn says.
   readonly answer?: string;
-  // Records "events(<after>)" and "dispatch:<type>" in the order the host makes them.
+  // Records "events(<after>)" and "dispatch:<type>" (plus ":<reason>" of a cancel) in order.
   readonly calls?: string[];
   // The approval policy and limits the host asked for, one entry per opened session.
   readonly configs?: SessionConfig[];
@@ -150,7 +150,8 @@ export function scriptedAgent({
     const { session } = opened;
     const observed: AgentSession = {
       dispatch: (command: SessionCommand) => {
-        calls?.push(`dispatch:${command.type}`);
+        const reason = command.type === "cancel" && command.reason ? `:${command.reason}` : "";
+        calls?.push(`dispatch:${command.type}${reason}`);
         return session.dispatch(command);
       },
       snapshot: () => session.snapshot(),

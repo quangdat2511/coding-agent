@@ -6,7 +6,8 @@
 import { checkAncestorCredentials } from "./ancestor-credentials.ts";
 import { BUILD_INFO, formatVersion } from "./build-info.ts";
 import { createConfiguredChildLauncher } from "./child-launcher.ts";
-import { COMMAND_LINE_USAGE, parseCommandLine } from "./command-line.ts";
+import { parseCommandLine } from "./command-line.ts";
+import { diagnostic } from "./diagnostics.ts";
 import { runHeadless } from "./headless.ts";
 import { markProcessNonDumpable } from "./non-dumpable.ts";
 
@@ -74,7 +75,7 @@ async function main(
   }
   const parsed = parseCommandLine(argv, cwd);
   if (!parsed.ok) {
-    stderr.write(`coding-agent: ${parsed.message}\n\n${COMMAND_LINE_USAGE}\n`);
+    stderr.write(`${diagnostic(parsed.message)}\n${parsed.usage}\n`);
     return 2;
   }
   // ADR 0001 §8 rule 2. Keep this right after argument parsing, so a usage error still exits 2
@@ -84,13 +85,15 @@ async function main(
   const hardened = markProcessNonDumpable();
   if (!hardened.ok) {
     stderr.write(
-      `coding-agent: cannot mark the process non-dumpable, so no child can be started safely: ${hardened.message}\n`,
+      diagnostic(
+        `cannot mark the process non-dumpable, so no child can be started safely: ${hardened.message}`,
+      ),
     );
     return 70;
   }
   const children = createConfiguredChildLauncher();
   if (!children.ok) {
-    stderr.write(`coding-agent: ${children.message}\n`);
+    stderr.write(diagnostic(children.message));
     return 2;
   }
   // Bun reports a write to a closed pipe as an "error" event, which would end the run with exit 1.
@@ -109,6 +112,7 @@ async function main(
         cwd,
         env,
         stderr: stderr.write,
+        launcher: children.launcher,
         signal: cancellation.signal,
         isTerminal: Boolean(process.stdin.isTTY && process.stdout.isTTY),
         onReady: cancellation.onSessionOpened,
@@ -119,7 +123,7 @@ async function main(
     // "auto-approve" and the platform is Linux.
     const ancestors = await checkAncestorCredentials(parsed.args.approvalPolicy);
     if (!ancestors.ok) {
-      stderr.write(`coding-agent: ${ancestors.message}\n`);
+      stderr.write(diagnostic(ancestors.message));
       return ancestors.code === "CREDENTIAL_IN_ANCESTOR" ? 2 : 70;
     }
     const { exitCode } = await runHeadless({
@@ -144,7 +148,7 @@ try {
   process.exitCode = await main(process.argv.slice(2), process.cwd(), process.env);
 } catch (error) {
   const reason = error instanceof Error ? error.message : String(error);
-  stderr.write(`coding-agent: internal error: ${reason}\n`);
+  stderr.write(diagnostic(`internal error: ${reason}`));
   process.exitCode = 70;
 }
 // Work that outlived the Agent Result would hold the process open, so it exits once its output is
