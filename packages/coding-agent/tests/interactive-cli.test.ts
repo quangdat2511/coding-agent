@@ -158,9 +158,9 @@ describe("the coding-agent executable on the interactive path", () => {
 
         // Until Ink puts the terminal in raw mode, the terminal turns Ctrl+C into SIGINT, which
         // ends the run with 130 before the TUI can read the key. So no key is pressed before the
-        // first frame, with the Prompt, is on the screen, and a moment after it.
+        // first frame, with the footer under the Prompt, is on the screen, and a moment after it.
         await waitUntil(
-          () => output.includes(altScreen) && screen().includes("> "),
+          () => output.includes(altScreen) && screen().includes("Esc/Ctrl+C cancel"),
           15_000,
           "first frame",
         );
