@@ -161,6 +161,8 @@ describe.skipIf(!cleanChain)("the named task, replayed end to end", () => {
     const { finishedAt } = await Bun.file(join(first.outputDir, "result.json")).json();
     expect(new Set(events.map(({ sessionId }) => sessionId))).toEqual(new Set(["session-1"]));
     expect(new Set(events.map(({ occurredAt }) => occurredAt))).toEqual(new Set([finishedAt]));
+    const uuid = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+    expect(await Bun.file(join(first.outputDir, "events.jsonl")).text()).not.toMatch(uuid);
   });
 
   it("reaches the same outcome when it runs again", async () => {

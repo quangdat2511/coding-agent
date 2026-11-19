@@ -5,12 +5,15 @@ const fixtures = join(import.meta.dir, "..", "fixtures");
 const namedTask = join(fixtures, "named-task");
 
 // Each turn-<n>.txt of a recording below tests/fixtures/, in turn order.
-const recordedTurns = (recording: string): string[] =>
-  readdirSync(join(fixtures, recording))
+function recordedTurns(recording: string): string[] {
+  const turns = readdirSync(join(fixtures, recording))
     .flatMap((name) => /^turn-(\d+)\.txt$/.exec(name)?.[1] ?? [])
     .map(Number)
     .sort((a, b) => a - b)
     .map((turn) => `${recording}/turn-${turn}.txt`);
+  if (turns.length === 0) throw new Error(`tests/fixtures/${recording} holds no turn-<n>.txt`);
+  return turns;
+}
 
 export const NAMED_TASK_FILE = join(namedTask, "task.md");
 
@@ -23,7 +26,10 @@ export const NAMED_TASK_RUN = {
   provider: "google",
   model: "gemini-3.5-flash-lite",
   verificationCommand: "bun test",
-  fixtures: recordedTurns("google/named-task"),
+  // Read on use, not on import: cli.test.ts and headless.test.ts import this file too.
+  get fixtures() {
+    return recordedTurns("google/named-task");
+  },
 } as const;
 
 // One live run with read as the only tool: the model reads src/slugify.ts, tries
