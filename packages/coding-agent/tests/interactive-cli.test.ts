@@ -121,6 +121,31 @@ describe("the coding-agent executable on the interactive path", () => {
             },
           },
         } as Parameters<typeof Bun.spawn>[1]);
+        let exitCode: number | null = null;
+        void child.exited.then((code) => {
+          exitCode = code;
+        });
+
+        const altScreen = "\u001b[?1049h";
+        // What the screen shows, without the escape sequences that move the cursor or style text.
+        const screen = () =>
+          output
+            .split("\u001b")
+            .map((part, index) =>
+              index === 0 ? part : part.replace(/^\[[0-9;?<>=]*[ -/]*[@-~]/, ""),
+            )
+            .join("");
+        const failure = (what: string) =>
+          new Error(
+            `${what} (exit code ${exitCode}); the screen showed:\n${screen().slice(-2_000)}`,
+          );
+        // Waits until `done`, and fails early if the TUI has ended by then.
+        const waitUntil = async (done: () => boolean, ms: number, what: string) => {
+          for (const end = Date.now() + ms; !done(); await Bun.sleep(20)) {
+            if (exitCode !== null) throw failure(`the TUI ended before ${what}`);
+            if (Date.now() > end) throw failure(`no ${what} within ${ms} ms`);
+          }
+        };
         // A press after the TUI has quit finds the terminal closed, which is no failure of the test.
         const press = () => {
           try {
@@ -129,24 +154,24 @@ describe("the coding-agent executable on the interactive path", () => {
             );
           } catch {}
         };
-        const noticeShown = () => output.includes("Press Esc or Ctrl+C again");
-        const sleepUntil = async (done: () => boolean, ms: number) => {
-          for (const end = Date.now() + ms; !done() && Date.now() < end; ) await Bun.sleep(20);
-        };
+        const noticeShown = () => screen().includes("Press Esc or Ctrl+C again");
 
-        // The keyboard may not be listened to yet, so a first press that shows no notice is sent
-        // again. Waiting longer than the quit window before it keeps a repeat from being read as
-        // the second press of a Quit.
-        for (let attempt = 0; attempt < 10 && !noticeShown(); attempt++) {
-          press();
-          await sleepUntil(noticeShown, 1_500);
-        }
-        expect(noticeShown()).toBe(true);
+        // Until Ink puts the terminal in raw mode, the terminal turns Ctrl+C into SIGINT, which
+        // ends the run with 130 before the TUI can read the key. So no key is pressed before the
+        // first frame, with the Prompt, is on the screen, and a moment after it.
+        await waitUntil(
+          () => output.includes(altScreen) && screen().includes("> "),
+          15_000,
+          "first frame",
+        );
+        await Bun.sleep(500);
+
+        press();
+        await waitUntil(noticeShown, 5_000, "notice after the first cancel key");
         // The notice came right after the first press, so this one is within the quit window.
         press();
 
         expect(await child.exited).toBe(0);
-        expect(output).toContain("\u001b[?1049h");
       });
     },
     30_000,
