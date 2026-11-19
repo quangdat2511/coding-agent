@@ -1,13 +1,15 @@
 #!/usr/bin/env -S bun --no-env-file --config=/dev/null
 // Exit 2 means no Agent Session was opened (ADR 0005 §3). Usage errors are decided before any file
 // or environment access, and configuration errors before any Agent Session opens; a run that opens
-// none removes the output directory it created.
+// none removes the output directory it created. `coding-agent run` is the headless path; a command
+// line of flags alone is the interactive path, which opens one Agent Session per Coding Task.
 import { checkAncestorCredentials } from "./ancestor-credentials.ts";
 import { BUILD_INFO, formatVersion } from "./build-info.ts";
 import { createConfiguredChildLauncher } from "./child-launcher.ts";
+import { parseCommandLine } from "./command-line.ts";
+import { diagnostic } from "./diagnostics.ts";
 import { runHeadless } from "./headless.ts";
 import { markProcessNonDumpable } from "./non-dumpable.ts";
-import { parseRunArgs, USAGE } from "./run-args.ts";
 
 // A stream calls back in order, so once its last write has called back, everything was written.
 function trackedWriter(stream: NodeJS.WriteStream) {
@@ -71,9 +73,9 @@ async function main(
     stdout.write(`${formatVersion(BUILD_INFO)}\n`);
     return 0;
   }
-  const parsed = parseRunArgs(argv, cwd);
+  const parsed = parseCommandLine(argv, cwd);
   if (!parsed.ok) {
-    stderr.write(`coding-agent: ${parsed.message}\n\n${USAGE}\n`);
+    stderr.write(`${diagnostic(parsed.message)}\n${parsed.usage}\n`);
     return 2;
   }
   // ADR 0001 §8 rule 2. Keep this right after argument parsing, so a usage error still exits 2
@@ -83,13 +85,15 @@ async function main(
   const hardened = markProcessNonDumpable();
   if (!hardened.ok) {
     stderr.write(
-      `coding-agent: cannot mark the process non-dumpable, so no child can be started safely: ${hardened.message}\n`,
+      diagnostic(
+        `cannot mark the process non-dumpable, so no child can be started safely: ${hardened.message}`,
+      ),
     );
     return 70;
   }
   const children = createConfiguredChildLauncher();
   if (!children.ok) {
-    stderr.write(`coding-agent: ${children.message}\n`);
+    stderr.write(diagnostic(children.message));
     return 2;
   }
   // Bun reports a write to a closed pipe as an "error" event, which would end the run with exit 1.
@@ -97,12 +101,29 @@ async function main(
   process.stderr.on("error", () => undefined);
   const cancellation = listenForCancellation();
   try {
+    // The interactive path runs under `ask`, which ADR 0001 §8 exempts from the ancestor check
+    // (ADR 0006, Join 3), so it goes straight on. The hardening above still applies to it.
+    if (parsed.command === "interactive") {
+      // Loaded here, not at the top, so a headless run never loads the TUI and its Yoga layout
+      // engine: they are startup cost and a failure surface that `coding-agent run` does not need.
+      const { runInteractive } = await import("./interactive.ts");
+      return await runInteractive({
+        args: parsed.args,
+        cwd,
+        env,
+        stderr: stderr.write,
+        launcher: children.launcher,
+        signal: cancellation.signal,
+        isTerminal: Boolean(process.stdin.isTTY && process.stdout.isTTY),
+        onReady: cancellation.onSessionOpened,
+      });
+    }
     // ADR 0001 §8, startup verification. Before configuration, so that a refused launch writes
     // nothing, and before any Agent Session opens. It does nothing unless the policy is
     // "auto-approve" and the platform is Linux.
     const ancestors = await checkAncestorCredentials(parsed.args.approvalPolicy);
     if (!ancestors.ok) {
-      stderr.write(`coding-agent: ${ancestors.message}\n`);
+      stderr.write(diagnostic(ancestors.message));
       return ancestors.code === "CREDENTIAL_IN_ANCESTOR" ? 2 : 70;
     }
     const { exitCode } = await runHeadless({
@@ -127,7 +148,7 @@ try {
   process.exitCode = await main(process.argv.slice(2), process.cwd(), process.env);
 } catch (error) {
   const reason = error instanceof Error ? error.message : String(error);
-  stderr.write(`coding-agent: internal error: ${reason}\n`);
+  stderr.write(diagnostic(`internal error: ${reason}`));
   process.exitCode = 70;
 }
 // Work that outlived the Agent Result would hold the process open, so it exits once its output is

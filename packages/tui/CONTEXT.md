@@ -23,3 +23,10 @@ reason and presses Enter. `y` and `n` count only after the keyboard has been qui
 and `y` only while the summary is in view. The transcript underneath keeps its content and scroll
 position.
 _Avoid_: Approval dialog, popup, modal, confirmation prompt
+
+**Quit**:
+The person's own ending of the Full-screen TUI, made while no Agent Session is active by pressing the
+cancel key twice in quick succession. A single press only asks the person to confirm, and while an
+Agent Session is active the same key starts Cancellation instead, so a Quit never discards a running
+Coding Task. A signal that ends the run from outside is not a Quit.
+_Avoid_: Exit, close, abort, cancel

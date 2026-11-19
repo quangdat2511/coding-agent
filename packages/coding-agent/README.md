@@ -29,6 +29,75 @@ for example because the reader of a pipe has gone, does not change the exit code
 file that the model read can carry the credential, so the run replaces the credential value with
 `[redacted]` in everything it prints.
 
+## Running interactively
+
+`coding-agent` with flags and no command opens the Full-screen TUI. The person types a Coding Task
+in the Prompt, watches the Agent Session stream, decides each Approval in the Approval overlay, and
+cancels with one key. `runInteractive` in `src/interactive.ts` implements this.
+
+```text
+coding-agent --provider <provider> --model <model-id> [--repo-root <dir>]
+```
+
+| Option | | |
+| --- | --- | --- |
+| `--provider <provider>` | required | `anthropic`, `openrouter`, `openai`, `google`, `xai` or `opencode` |
+| `--model <model-id>` | required | a model identifier of that provider |
+| `--repo-root <dir>` | optional | the Repository Root; defaults to the working directory |
+
+The provider credential is read from the environment, as for `coding-agent run`. The options are
+the three of `run` that make sense without a task file, and nothing else is accepted: the
+[ADR 0005 §3](../../docs/adr/0005-terminalbench-evaluation-protocol.md) command line of
+`coding-agent run` is unchanged.
+
+- **No `--approval-policy`.** The interactive path always runs under `ask`, because ADR 0004 §6
+  selects `auto-approve` only on the headless path. The ancestor check of ADR 0001 §8 applies to
+  `auto-approve` only, so this path does not run it. The process is still marked non-dumpable.
+- **No `--task-file` and no `--output-dir`.** The Coding Task is typed, and this path writes none of
+  `run.json`, `events.jsonl` or `result.json`.
+- **No `--profile`.** It runs the `default` Session Limits.
+- **A terminal is required.** Without one on both standard input and output it exits 2 and points to
+  `coding-agent run`.
+
+An Agent Session is scoped to one Coding Task and has no prompt queue, so a submission opens a
+session only when none is active. A submission while one runs, or opens, is refused with a notice
+in the transcript. When a session has settled, the next submission opens a new one, and the
+transcript keeps the earlier ones.
+
+| Key or signal | While a Coding Task runs | With none |
+| --- | --- | --- |
+| `Esc` or `Ctrl+C` | dispatches `cancel` | a first press shows a notice; a second within one second quits |
+| `SIGINT` or `SIGTERM` | dispatches `cancel`, waits for the session to settle, then unmounts | unmounts |
+
+| Exit code | Meaning |
+| --- | --- |
+| 0 | quit with two presses of the cancel key |
+| 130 | ended by `SIGINT` or `SIGTERM`; a running session settled first |
+| 2 | invalid invocation or configuration, or no terminal; nothing was opened |
+| 70 | internal Coding Agent error |
+
+A signal that comes while a session is still opening does not wait for it past the Cancellation
+Grace Period, because an open cannot be cancelled: the run ends with 130, and a session that opens
+after that is cancelled in place of started. A submission while the run waits for a session to
+settle is refused with a notice, and the signal's name is the cancellation reason in the transcript.
+
+The TUI shows the outcome of every Agent Session, a failed one included, and none of them changes
+the exit code: it describes how the run ended, not what the Coding Task achieved.
+
+The host reads a snapshot of the Agent Session and follows its Session Events from the snapshot's
+last sequence, before it dispatches `start`, so no event is lost in between (ADR 0002 §7). A failure
+while showing one event never reaches the Agent Session: that event is lost from the display, with
+a notice. A draw that fails gets no notice, because a terminal that cannot draw the transcript
+cannot draw a notice either, and the next draw shows the whole model again. An event stream that
+fails ends the display's following of that session with a notice, but the session still counts as
+running until it settles. The credential is replaced by `[redacted]` in everything the transcript
+shows.
+
+The interactive path registers the same four tools and the same Verification Policy as
+`coding-agent run`. Under `ask`, every `write`, `edit` and `bash` Tool Call waits for an Approval in
+the overlay. The Verification command is the one of
+[Verification command](#verification-command): `CODING_AGENT_VERIFICATION_COMMAND`, or none.
+
 ## Version
 
 `coding-agent --version` prints `coding-agent <version> <commit>` on standard output and exits 0.
