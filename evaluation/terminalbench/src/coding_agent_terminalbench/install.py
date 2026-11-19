@@ -9,7 +9,7 @@ from pathlib import Path
 
 from coding_agent_terminalbench.manifest import ArtifactExecutable, ArtifactManifest
 
-# The path in the task container where install() puts the executable. run() (CDA-89) starts it.
+# The path in the task container where install() puts the executable. run() starts it.
 INSTALLED_EXECUTABLE = "/installed-agent/coding-agent"
 
 # `uname -m` in a Linux container, mapped to the Bun target that scripts/build-artifact.ts builds

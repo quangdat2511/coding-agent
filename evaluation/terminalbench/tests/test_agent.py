@@ -1,9 +1,9 @@
-import asyncio
+import os
 import tempfile
 import unittest
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock
+from unittest.mock import patch
 
 from harbor.agents.capabilities import AgentCapabilities
 from harbor.agents.factory import AgentFactory
@@ -13,17 +13,20 @@ from harbor.models.trajectories import Trajectory
 from harbor.models.trial.config import AgentConfig
 
 from coding_agent_terminalbench.agent import CodingAgent
+from coding_agent_terminalbench.launch import LaunchError, ModelChoice
 from coding_agent_terminalbench.manifest import ArtifactManifestError
 from tests.support import (
     COMMIT,
     DEFAULT,
+    IMPORT_PATH,
+    PROVIDER_KEY,
     manifest_data,
     truncated_events,
     write_manifest,
     write_run_files,
 )
 
-IMPORT_PATH = "coding_agent_terminalbench.agent:CodingAgent"
+KEY_TEMPLATE = {"OPENCODE_API_KEY": "${OPENCODE_API_KEY}"}
 
 
 class CodingAgentTest(unittest.TestCase):
@@ -34,12 +37,21 @@ class CodingAgentTest(unittest.TestCase):
         self.logs_dir = self.root / "logs"
         self.artifact_dir = self.root / "artifact"
         write_manifest(self.artifact_dir, manifest_data())
+        host_env = patch.dict(os.environ, {"OPENCODE_API_KEY": PROVIDER_KEY})
+        host_env.start()
+        self.addCleanup(host_env.stop)
 
-    def create(self, **kwargs: object) -> CodingAgent:
+    def create(
+        self,
+        model_name: str | None = "opencode/some-model",
+        extra_env: dict[str, str] | None = None,
+        **kwargs: object,
+    ) -> CodingAgent:
         agent = AgentFactory.create_agent_from_import_path(
             IMPORT_PATH,
             logs_dir=self.logs_dir,
-            model_name="opencode/some-model",
+            model_name=model_name,
+            extra_env={"OPENCODE_API_KEY": PROVIDER_KEY} if extra_env is None else extra_env,
             **{"artifact_dir": str(self.artifact_dir), **kwargs},
         )
         self.assertIsInstance(agent, CodingAgent)
@@ -102,9 +114,80 @@ class CodingAgentTest(unittest.TestCase):
         with self.assertRaisesRegex(ArtifactManifestError, "does not exist"):
             self.create(artifact_dir=str(self.root / "missing"))
 
+    def test_the_model_string_gives_the_provider_and_the_model(self) -> None:
+        self.assertEqual(
+            self.create().model_choice, ModelChoice(provider="opencode", model="some-model")
+        )
+        with patch.dict(os.environ, {"OPENROUTER_API_KEY": PROVIDER_KEY}):
+            agent = self.create(
+                model_name="openrouter/deepseek/deepseek-v4.1-flash-1017",
+                extra_env={"OPENROUTER_API_KEY": PROVIDER_KEY},
+            )
+        self.assertEqual(
+            agent.model_choice,
+            ModelChoice(provider="openrouter", model="deepseek/deepseek-v4.1-flash-1017"),
+        )
+
+    def test_a_missing_or_unknown_model_fails_construction(self) -> None:
+        with self.assertRaisesRegex(LaunchError, "pass the model as -m"):
+            self.create(model_name=None)
+        with self.assertRaisesRegex(LaunchError, "is not <provider>/<model-id>"):
+            self.create(model_name="deepseek-v4.1-flash")
+        with self.assertRaisesRegex(LaunchError, "'mistral' of -m"):
+            self.create(model_name="mistral/large")
+
+    def test_the_agent_environment_holds_exactly_one_provider_key(self) -> None:
+        self.assertEqual(self.create().provider_key_variable, "OPENCODE_API_KEY")
+        with self.assertRaisesRegex(LaunchError, "pass the provider key as --ae"):
+            self.create(extra_env={})
+        with (
+            patch.dict(os.environ, {"OPENROUTER_API_KEY": PROVIDER_KEY}),
+            self.assertRaisesRegex(LaunchError, "OPENCODE_API_KEY, OPENROUTER_API_KEY"),
+        ):
+            self.create(
+                extra_env={"OPENCODE_API_KEY": PROVIDER_KEY, "OPENROUTER_API_KEY": PROVIDER_KEY}
+            )
+
+    def test_the_key_must_belong_to_the_model_provider(self) -> None:
+        with self.assertRaisesRegex(LaunchError, "'anthropic' reads ANTHROPIC_API_KEY"):
+            self.create(model_name="anthropic/claude")
+
+    def test_harbor_resolves_the_key_template_for_the_agent(self) -> None:
+        config = AgentConfig(
+            import_path=IMPORT_PATH,
+            model_name="opencode/some-model",
+            kwargs={"artifact_dir": str(self.artifact_dir)},
+            env=KEY_TEMPLATE,
+        )
+        agent = AgentFactory.create_agent_from_config(config, logs_dir=self.logs_dir)
+        self.assertEqual(agent.extra_env, {"OPENCODE_API_KEY": PROVIDER_KEY})
+        # A literal that differs from the host's key cannot be a resolved template of that key.
+        literal = config.model_copy(update={"env": {"OPENCODE_API_KEY": "another-key"}})
+        with self.assertRaisesRegex(LaunchError, "differs from the host's OPENCODE_API_KEY"):
+            AgentFactory.create_agent_from_config(literal, logs_dir=self.logs_dir)
+
+    def test_a_literal_equal_to_the_host_key_passes_and_harbor_stores_a_template(self) -> None:
+        # Harbor resolves templates before preflight and the constructor, so the agent sees the
+        # same value for `${OPENCODE_API_KEY}` and for the literal key. Only the shell history
+        # differs, which no agent hook can see.
+        config = AgentConfig(
+            import_path=IMPORT_PATH,
+            model_name="opencode/some-model",
+            kwargs={"artifact_dir": str(self.artifact_dir)},
+            env={"OPENCODE_API_KEY": PROVIDER_KEY},
+        )
+        AgentFactory.run_preflight(config)
+        agent = AgentFactory.create_agent_from_config(config, logs_dir=self.logs_dir)
+        self.assertEqual(agent.extra_env, {"OPENCODE_API_KEY": PROVIDER_KEY})
+        # The job's config.json holds the template, not the key.
+        self.assertEqual(config.model_dump(mode="json")["env"], KEY_TEMPLATE)
+        self.assertNotIn(PROVIDER_KEY, config.model_dump_json())
+
     def test_preflight_checks_the_manifest_before_trials_are_queued(self) -> None:
         config = AgentConfig(
-            import_path=IMPORT_PATH, kwargs={"artifact_dir": str(self.artifact_dir)}
+            import_path=IMPORT_PATH,
+            kwargs={"artifact_dir": str(self.artifact_dir)},
+            env=KEY_TEMPLATE,
         )
         AgentFactory.run_preflight(config)
         write_manifest(self.artifact_dir, manifest_data(schemaVersion=2))
@@ -191,10 +274,16 @@ class CodingAgentTest(unittest.TestCase):
         self.assertFalse((self.logs_dir / "trajectory.json").exists())
         self.assertIn("the trial context and trajectory are incomplete", captured.output[0])
 
-    def test_run_fails_until_its_ticket_lands(self) -> None:
-        agent = self.create()
-        with self.assertRaisesRegex(NotImplementedError, "CDA-89"):
-            asyncio.run(agent.run("instruction", MagicMock(), MagicMock()))
+    def test_preflight_checks_the_provider_key_before_trials_are_queued(self) -> None:
+        kwargs = {"artifact_dir": str(self.artifact_dir)}
+        without_key = AgentConfig(import_path=IMPORT_PATH, kwargs=kwargs)
+        with self.assertRaisesRegex(LaunchError, "pass the provider key as --ae"):
+            AgentFactory.run_preflight(without_key)
+        literal = AgentConfig(
+            import_path=IMPORT_PATH, kwargs=kwargs, env={"OPENCODE_API_KEY": "another-key"}
+        )
+        with self.assertRaisesRegex(LaunchError, "differs from the host's OPENCODE_API_KEY"):
+            AgentFactory.run_preflight(literal)
 
 
 if __name__ == "__main__":

@@ -394,7 +394,13 @@ omits the `assistant_content_delta` events that would carry it. The step therefo
 Every job runs from the repository root with `uv run --project evaluation/terminalbench --frozen`.
 Credentials are passed as `${VAR}` templates, which Harbor resolves from the host environment
 ([`agents/factory.py` L146](https://github.com/harbor-framework/harbor/blob/1e5c5c6/src/harbor/agents/factory.py#L146)),
-so their values appear neither in shell history nor in the job's `config.json`.
+so their values do not appear in shell history. The job's `config.json` holds no full credential
+in any case, because Harbor serializes the agent environment through `templatize_sensitive_env`
+([`utils/env.py`](https://github.com/harbor-framework/harbor/blob/1e5c5c6/src/harbor/utils/env.py)).
+It keeps a template as written and stores a literal that equals the host variable as `${VAR}`. It
+masks any other literal of a sensitive variable, and keeps the first 4 and the last 3 characters
+of a value longer than 8 characters. The adapter receives only resolved values, so it cannot refuse
+a literal that equals the host variable (see `evaluation/terminalbench/README.md`).
 
 The procedure relies on these Harbor 0.23.0 flag meanings. `-n` in particular is not a repetition
 count.

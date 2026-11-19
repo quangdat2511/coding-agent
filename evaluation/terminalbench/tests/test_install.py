@@ -1,10 +1,12 @@
 import asyncio
 import hashlib
+import os
 import tempfile
 import unittest
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 from harbor.agents.factory import AgentFactory
 from harbor.environments.base import ExecResult
@@ -18,13 +20,14 @@ from coding_agent_terminalbench.install import (
 from coding_agent_terminalbench.manifest import parse_manifest
 from tests.support import (
     COMMIT,
+    IMPORT_PATH,
+    PROVIDER_KEY,
     manifest_data,
     write_artifact,
     write_manifest,
     write_run_files,
 )
 
-IMPORT_PATH = "coding_agent_terminalbench.agent:CodingAgent"
 VERSION_LINE = f"coding-agent 0.0.1 {COMMIT}"
 
 
@@ -116,12 +119,16 @@ class InstallTest(unittest.TestCase):
         self.root = Path(temp.name)
         self.artifact_dir = self.root / "artifact"
         self.data = write_artifact(self.artifact_dir)
+        host_env = patch.dict(os.environ, {"OPENCODE_API_KEY": PROVIDER_KEY})
+        host_env.start()
+        self.addCleanup(host_env.stop)
 
     def create(self) -> CodingAgent:
         agent = AgentFactory.create_agent_from_import_path(
             IMPORT_PATH,
             logs_dir=self.root / "logs",
             model_name="opencode/some-model",
+            extra_env={"OPENCODE_API_KEY": PROVIDER_KEY},
             artifact_dir=str(self.artifact_dir),
         )
         assert isinstance(agent, CodingAgent)
