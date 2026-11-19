@@ -44,6 +44,9 @@ The fixtures of a run mirror `packages/coding-agent/src/run-files.ts` and
 `packages/agent-core/src/events.ts`. A change to either changes them in the same pull request: the
 adapter reads those files as the external contract of ADR 0005 §4.
 
+`tests/test_oracle_job.py` writes its own job directories, because only that module reads them.
+It writes most of them by hand and some with Harbor's own models (see Oracle job).
+
 To make sure that `uv.lock` matches `pyproject.toml`:
 
 ```sh
@@ -264,9 +267,10 @@ Run these steps from the repository root, with uv 0.13.8 (see Commands).
      -o jobs --job-name <job name>
    ```
 
-Do not add `--ae`, `-m`, `-i`, `-x`, `-l`, a timeout flag, or a resource override. The record
-command below refuses a job that passes a variable to the agent, names a model, filters the tasks,
-or changes the task conditions. `-n` changes only the wall-clock time.
+Do not add any other flag. The record command refuses a job whose `config.json` differs from the
+one that this command writes, so a variable, a model, a task filter, a timeout, a resource
+override, another verifier, or a retry makes the job unusable. `-n` changes only the wall-clock
+time.
 
 Harbor writes the job directory to `jobs/<job name>`. Git ignores `jobs/`, so a job directory is
 never committed by accident. Keep the directory after the job ends: the record names the job, and
@@ -277,57 +281,63 @@ the record tooling of the recorded job can read it again.
 Run this command from the repository root after the job ends:
 
 ```sh
-uv run --project evaluation/terminalbench --frozen python -m coding_agent_terminalbench.oracle_job \
-  jobs/<job name> \
-  --dataset terminal-bench/terminal-bench@4.1.0 \
-  --source-repository https://github.com/harbor-framework/terminal-bench \
-  --release-tag v4.1.0 \
-  --release-commit 4070d6cef56a7d20cb5dc98d5e10ada88a6b9440 \
-  --output evaluation/terminalbench/runs/<job name>/oracle.json
+uv run --project evaluation/terminalbench --frozen python -m coding_agent_terminalbench.oracle_job   jobs/<job name>   --dataset terminal-bench/terminal-bench@4.1.0   --source-repository https://github.com/harbor-framework/terminal-bench   --release-tag v4.1.0   --release-commit 4070d6cef56a7d20cb5dc98d5e10ada88a6b9440   --output evaluation/terminalbench/runs/<job name>/oracle.json
 ```
 
 The four dataset values come from the dataset record: ADR 0008 §4 for the default pin, or
-`evaluation/terminalbench/datasets/<org>/<name>@<version>.md` for any other dataset. The module
-`oracle_job.py` reads the job's `config.json`, `lock.json` and `result.json`, and the `result.json`
-and `lock.json` of each trial. It makes these checks:
+`evaluation/terminalbench/datasets/<org>/<name>@<version>.md` for any other dataset. The dataset
+must be a package dataset with a version, `org/name@version`. The module `oracle_job.py` reads the
+job's `config.json`, `lock.json` and `result.json`, and the `result.json` and `lock.json` of each
+trial. It makes these checks:
 
-- The job ran one agent, Harbor's built-in `oracle`, with no model, on `modal`, with one attempt
-  per task and no retry.
-- The job ran exactly one dataset, its name is the record's name, and no task filter, timeout
-  multiplier, timeout override, resource override, or disabled verifier changed the tasks. Its
-  reference is the record's version or the content hash of a version (see below).
+- `config.json` sets only the fields that the `harbor run` command above sets: the job name, the
+  jobs directory, the concurrency, the `oracle` agent, the `modal` environment, and one dataset
+  with its name and ref. The check refuses every other field, and names it.
+- The dataset name is the record's name. The ref is the content hash that Harbor's package
+  registry resolves the record's version to. The tasks that `lock.json` plans, by name and digest,
+  are the tasks that the registry lists for that version.
 - The Harbor version in `lock.json` is the version that `uv.lock` pins.
-- The job passes no variable to the agent, and no provider key variable anywhere.
-- The job finished, every trial that `lock.json` plans has a `result.json`, and every task has one
-  trial.
-- The release tag resolves to the record's release commit. The command runs
-  `git ls-remote --tags <repository> refs/tags/<tag>` for this check, so it needs `git` and the
-  network.
+- No `env` field anywhere in `config.json` names a provider key variable.
+- `result.json` has the job id, and start and end times with a time zone, in order.
+- Every trial directory has a `result.json` and a `lock.json`. The trials ran exactly the tasks
+  that `lock.json` plans, one trial per task.
+- The release tag resolves to the record's release commit.
 
-Harbor writes `config.json` without the fields that keep their default value. The module therefore
-reads a missing field as its Harbor 0.23.0 default, for example one attempt per task.
+Two checks need the network. The command runs
+`git ls-remote --tags <repository> refs/tags/<tag> refs/tags/<tag>^{}`, so it needs `git`. It asks
+Harbor's package registry what the dataset version holds, which is the lookup that `harbor run -d`
+makes and needs no Harbor login for a public dataset.
 
-For a package dataset (a name with `/`), Harbor replaces the version in `config.json` with the
-content hash of the version that it resolved, for example `sha256:<hash>`. The command cannot map
-the hash back to a version, so it accepts any content hash. The record keeps the hash as
-`resolvedReference`, and the digest of each task names the content that ran.
+Harbor writes `config.json` without the fields that keep their default value. A missing field
+therefore has its Harbor 0.23.0 default, for example one attempt per task. Harbor also replaces
+the version of a package dataset in `config.json` with the content hash of that version, for
+example `sha256:<hash>`. A test builds the config with Harbor's own CLI and checks it against both
+rules.
+
+The checks cover the Harbor version and the dataset of ADR 0005 §1. The record takes the Modal SDK
+version from `uv.lock`, because `uv run --frozen` installs it. The checks do not cover the Python
+version or the Harbor commit: Harbor from PyPI has no commit, and `lock.json` records it as null.
 
 | Exit code | Meaning |
 | --- | --- |
 | 0 | Every check passed. The command wrote `oracle.json` and printed the harness-flaky tasks. |
 | 1 | The job breaks a check. The command lists each problem and writes nothing. |
-| 2 | A file of the job cannot be read, or the release tag cannot be resolved. |
+| 2 | A file cannot be read or written, a release tag or a dataset version cannot be resolved, or an argument is wrong. |
 
-`oracle.json` holds these values. It holds no variable value.
+The command writes `oracle.json` through a temporary file, so a failed write leaves no partial
+record. `oracle.json` holds these values. It holds no variable value.
 
+- `schemaVersion`, which is 1.
 - The job name, id, start and end times, and wall-clock time.
+- `command`: the `harbor run` command that writes the job's `config.json`. The check makes sure
+  that the job ran this command.
 - The Harbor version and commit from `lock.json`, and the Modal SDK version from `uv.lock`.
-- The flags, and the names of the variables that the job passes.
-- The dataset identifier, the reference that Harbor resolved, the source repository, release tag,
-  release commit, the command that resolved the commit, and the task count.
+- The flags, and the names of the variables that the job passes, which is an empty list.
+- The dataset identifier, its content hash, the source repository, release tag, release commit,
+  how the hash and the commit were resolved, and the number of planned tasks.
 - Each task with its trial, digest, reward and exception type.
 - The harness-flaky tasks with their rewards.
 
 Commit `oracle.json`. Then add a comment to the Jira ticket of the job with the `harbor run`
-command, the wall-clock time that the record command printed, and the compute cost that Modal
+command and the wall-clock time that the record command printed, and the compute cost that Modal
 shows for the job. The later jobs use these values for planning.

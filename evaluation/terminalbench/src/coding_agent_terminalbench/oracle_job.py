@@ -14,18 +14,23 @@ This module reads the files that Harbor 0.23.0 writes into a job directory:
 - `<trial>/result.json` and `<trial>/lock.json`: the `TrialResult` and `TrialLock` of each trial
   (`harbor/models/trial/result.py`).
 
-It imports nothing from Harbor, like `manifest.py`, so its tests need no Harbor job. The dataset
-record (ADR 0008 §1 and §4) is given on the command line, because no rule here may assume a
-dataset name, version or task count.
+It reads these files as JSON, like `manifest.py`, so its tests can write a job directory by hand.
+It imports Harbor only in `resolve_registry_dataset`, which asks Harbor's package registry what a
+dataset version holds. The dataset record (ADR 0008 §1 and §4) is given on the command line,
+because no rule here may assume a dataset name, version or task count.
 """
 
 import argparse
+import asyncio
 import json
+import math
+import os
 import subprocess
 import sys
+import tempfile
 import tomllib
 from collections import Counter
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -39,34 +44,34 @@ ORACLE_AGENT = "oracle"
 ORACLE_ENVIRONMENT = "modal"
 
 DEFAULT_UV_LOCK = Path("evaluation/terminalbench/uv.lock")
-
-# The prefix of the content hash that Harbor writes as a package dataset's resolved ref.
-CONTENT_HASH_PREFIX = "sha256:"
+DEFAULT_JOBS_DIR = "jobs"
 
 # Harbor writes config.json with `exclude_defaults=True` (`Job.run` in harbor/job.py), so a field
-# that keeps its `JobConfig` default is absent. These are the defaults of the fields read here.
-JOB_CONFIG_DEFAULTS: Mapping[str, Any] = {
-    "n_attempts": 1,
-    "n_concurrent_trials": 4,
-    "timeout_multiplier": 1.0,
-}
+# that keeps its `JobConfig` default is absent. These are the defaults of the fields recorded here.
+JOB_CONFIG_DEFAULTS: Mapping[str, Any] = {"n_attempts": 1, "n_concurrent_trials": 4}
 RETRY_DEFAULT_MAX_RETRIES = 0
 
-# Fields that change a task's resources or timeouts. The oracle job runs every task under its own
-# conditions, so a reward below 1 means the harness, not an override, failed the task.
-AGENT_OVERRIDE_FIELDS = ("override_timeout_sec", "override_setup_timeout_sec", "max_timeout_sec")
-ENVIRONMENT_OVERRIDE_FIELDS = (
-    "override_cpus",
-    "override_memory_mb",
-    "override_storage_mb",
-    "override_gpus",
-    "override_tpu",
+# The fields that `harbor run -d <dataset> -a oracle -e modal -k 1 -n <n> -r 0 -o <dir>
+# --job-name <name>` writes to config.json, and the fields of their sections. A test builds the
+# config with Harbor's own CLI to keep this list true. Every other field changes the job away from
+# the oracle job of ADR 0005 §7 step 2 (another verifier, an override, a filter, a retry), so the
+# check refuses it instead of naming the fields that it knows to be harmful.
+ALLOWED_JOB_FIELDS = frozenset(
+    {"job_name", "jobs_dir", "n_concurrent_trials", "agents", "environment", "datasets"}
 )
-VERIFIER_OVERRIDE_FIELDS = ("override_timeout_sec", "max_timeout_sec")
+ALLOWED_AGENT_FIELDS = frozenset({"name"})
+ALLOWED_ENVIRONMENT_FIELDS = frozenset({"type"})
+ALLOWED_DATASET_FIELDS = frozenset({"name", "ref"})
+
+# The flag that restores a refused field, for the fields that a flag of the command sets.
+FIELD_HINTS: Mapping[str, str] = {"n_attempts": "run with -k 1", "retry": "run with -r 0"}
+
+# How the record's content hash and task list were resolved.
+REGISTRY_LOOKUP = "Harbor's package registry, the lookup that `harbor run -d` makes"
 
 
 class OracleJobError(ValueError):
-    """A file of the job directory is missing, unreadable, or does not have Harbor's shape."""
+    """A file of the job is missing or unreadable, or a record cannot be resolved or written."""
 
 
 @dataclass(frozen=True)
@@ -85,6 +90,25 @@ class LockedPins:
 
     harbor: str
     modal: str
+
+
+@dataclass(frozen=True)
+class RegistryDataset:
+    """What Harbor's package registry holds for the record's dataset version."""
+
+    content_hash: str
+    # (`org/name`, digest) of each task, sorted.
+    tasks: tuple[tuple[str, str], ...]
+
+
+@dataclass(frozen=True)
+class Evidence:
+    """What the job is checked against: its records, and what they resolve to now."""
+
+    dataset: DatasetRecord
+    pins: LockedPins
+    release_commit: str
+    registry: RegistryDataset
 
 
 @dataclass(frozen=True)
@@ -118,47 +142,9 @@ class OracleJob:
     def name(self) -> str:
         return str(self.config.get("job_name"))
 
-    def setting(self, field: str) -> Any:
+    def field_or_default(self, field: str) -> Any:
         """A config.json field, or its `JobConfig` default when Harbor left it out."""
         return self.config.get(field, JOB_CONFIG_DEFAULTS.get(field))
-
-    @property
-    def agents(self) -> list[dict[str, Any]]:
-        """The job's agents. Harbor leaves the field out when it is `[AgentConfig()]`."""
-        agents = self.config.get("agents", [{}])
-        if not isinstance(agents, list):
-            return []
-        return [agent if isinstance(agent, dict) else {"name": agent} for agent in agents]
-
-    @staticmethod
-    def agent_name(agent: Mapping[str, Any]) -> Any:
-        """The agent's name, or None for an agent that Harbor imports from a path."""
-        if agent.get("import_path") is not None:
-            return None
-        # `AgentConfig.set_default_name`: an agent with no name and no import path is the oracle.
-        return agent.get("name") or ORACLE_AGENT
-
-    @property
-    def max_retries(self) -> Any:
-        retry = self.config.get("retry")
-        if not isinstance(retry, dict):
-            return RETRY_DEFAULT_MAX_RETRIES
-        return retry.get("max_retries", RETRY_DEFAULT_MAX_RETRIES)
-
-    @property
-    def harbor_version(self) -> str | None:
-        harbor = self.lock.get("harbor")
-        return harbor.get("version") if isinstance(harbor, dict) else None
-
-    @property
-    def harbor_git_commit(self) -> str | None:
-        harbor = self.lock.get("harbor")
-        return harbor.get("git_commit_hash") if isinstance(harbor, dict) else None
-
-    @property
-    def planned_trials(self) -> list[Any]:
-        trials = self.lock.get("trials")
-        return trials if isinstance(trials, list) else []
 
     @property
     def dataset(self) -> Mapping[str, Any]:
@@ -166,39 +152,51 @@ class OracleJob:
         datasets = self.config.get("datasets")
         if not isinstance(datasets, list) or len(datasets) != 1:
             return {}
-        return datasets[0] if isinstance(datasets[0], dict) else {}
+        return config_section(datasets[0])
 
     @property
     def dataset_reference(self) -> Any:
-        """The version reference of the dataset, as Harbor left it in config.json.
+        """The ref of the package dataset, as Harbor left it in config.json.
 
-        A registry dataset keeps `-d name@version` in `version`. A package dataset (`org/name`)
-        keeps it in `ref`, and `Job.create` replaces that ref with the content hash of the
-        resolved dataset version (`DatasetConfig._get_package_task_configs`) before it writes
-        config.json, so a package dataset's ref is `sha256:<content hash>`.
+        `Job.create` replaces the ref of `-d org/name@version` with the content hash of the
+        dataset version that the registry resolves (`DatasetConfig._get_package_task_configs`)
+        before it writes config.json, so the ref is `sha256:<content hash>`.
         """
-        return self.dataset.get("ref") or self.dataset.get("version")
+        return self.dataset.get("ref")
 
     @property
-    def dataset_identifier(self) -> str:
-        """`name@reference` of the dataset in config.json, for messages."""
-        return f"{self.dataset.get('name')}@{self.dataset_reference}"
+    def harbor_version(self) -> str | None:
+        return config_section(self.lock.get("harbor")).get("version")
+
+    @property
+    def harbor_git_commit(self) -> str | None:
+        return config_section(self.lock.get("harbor")).get("git_commit_hash")
+
+    @property
+    def planned_trials(self) -> list[Any]:
+        trials = self.lock.get("trials")
+        return trials if isinstance(trials, list) else []
+
+    def planned_tasks(self) -> Counter[tuple[Any, Any]]:
+        """(`org/name`, digest) of the task of each trial that lock.json plans."""
+        tasks = (config_section(config_section(trial).get("task")) for trial in self.planned_trials)
+        return Counter((task.get("name"), task.get("digest")) for task in tasks)
+
+    def started_at(self) -> datetime | None:
+        return parse_time(self.result.get("started_at"))
+
+    def finished_at(self) -> datetime | None:
+        return parse_time(self.result.get("finished_at"))
 
     def wall_clock_seconds(self) -> float | None:
-        started = parse_time(self.result.get("started_at"))
-        finished = parse_time(self.result.get("finished_at"))
+        started, finished = self.started_at(), self.finished_at()
         if started is None or finished is None:
             return None
-        return (finished - started).total_seconds()
-
-    def environment_variable_names(self) -> dict[str, list[str]]:
-        """The names, never the values, of the variables that the job passes, by section."""
-        names: dict[str, list[str]] = {"agent": [], "environment": [], "verifier": []}
-        for agent in self.agents:
-            names["agent"].extend(env_names(agent))
-        names["environment"].extend(env_names(self.config.get("environment")))
-        names["verifier"].extend(env_names(self.config.get("verifier")))
-        return {where: sorted(set(found)) for where, found in names.items()}
+        try:
+            return (finished - started).total_seconds()
+        except TypeError:
+            # One time has a time zone and the other has none.
+            return None
 
 
 def parse_time(value: Any) -> datetime | None:
@@ -210,20 +208,27 @@ def parse_time(value: Any) -> datetime | None:
         return None
 
 
-def section(config: Mapping[str, Any], field: str) -> Mapping[str, Any]:
-    value = config.get(field)
+def config_section(value: Any) -> Mapping[str, Any]:
+    """A JSON object of the job files, or an empty mapping when the value is not one."""
     return value if isinstance(value, dict) else {}
 
 
-def is_content_hash(reference: Any) -> bool:
-    return isinstance(reference, str) and reference.startswith(CONTENT_HASH_PREFIX)
+def variable_names(value: Any) -> Iterator[str]:
+    """The name of every variable that an `env` object anywhere in the config passes.
 
-
-def env_names(part: Any) -> list[str]:
-    if not isinstance(part, dict):
-        return []
-    env = part.get("env")
-    return [str(name) for name in env] if isinstance(env, dict) else []
+    `config_problems` refuses every `env` field already. This scan also reads sections that the
+    check refuses as a whole, such as `user_agent`, so the message names a provider key wherever
+    it is.
+    """
+    if isinstance(value, dict):
+        for key, child in value.items():
+            if key == "env" and isinstance(child, dict):
+                yield from (str(name) for name in child)
+            else:
+                yield from variable_names(child)
+    elif isinstance(value, list):
+        for child in value:
+            yield from variable_names(child)
 
 
 def read_json(path: Path) -> Any:
@@ -231,7 +236,7 @@ def read_json(path: Path) -> Any:
         text = path.read_text(encoding="utf-8")
     except FileNotFoundError:
         raise OracleJobError(f"{path} does not exist") from None
-    except OSError as exc:
+    except (OSError, UnicodeDecodeError) as exc:
         raise OracleJobError(f"cannot read {path}: {exc}") from exc
     try:
         return json.loads(text)
@@ -261,8 +266,11 @@ def read_reward(rewards: Any, source: Path) -> float | int | None:
             "this record reads a single reward"
         )
     reward = next(iter(rewards.values()))
-    if isinstance(reward, bool) or not isinstance(reward, int | float):
-        raise OracleJobError(f"{source}: the reward must be a number, found {json.dumps(reward)}")
+    # NaN is not below 1, and json.dumps would write it as `NaN`, which is not JSON.
+    if isinstance(reward, bool) or not isinstance(reward, int | float) or not math.isfinite(reward):
+        raise OracleJobError(
+            f"{source}: the reward must be a finite number, found {json.dumps(reward)}"
+        )
     return reward
 
 
@@ -272,25 +280,23 @@ def read_trial(trial_dir: Path) -> TaskOutcome:
     task_name = result.get("task_name")
     if not isinstance(task_name, str) or task_name == "":
         raise OracleJobError(f"{result_path}: task_name must be a non-empty string")
-    verifier_result = result.get("verifier_result")
-    rewards = verifier_result.get("rewards") if isinstance(verifier_result, dict) else None
-    exception_info = result.get("exception_info")
-    exception_type = (
-        exception_info.get("exception_type") if isinstance(exception_info, dict) else None
-    )
-    # Harbor writes the trial's lock.json when the trial starts. The digest names the task content
-    # that ran, so the record identifies it even when two pins share task names.
-    digest = None
+    verifier_result = config_section(result.get("verifier_result"))
+    exception_type = config_section(result.get("exception_info")).get("exception_type")
+    # Harbor writes the trial's lock.json when it creates the trial, before the trial runs. Its
+    # task names the content that ran, by the same `org/name` and digest as the job's lock.json.
+    name, digest = task_name, None
     lock_path = trial_dir / "lock.json"
     if lock_path.exists():
-        task = read_object(lock_path).get("task")
-        if isinstance(task, dict) and isinstance(task.get("digest"), str):
+        task = config_section(read_object(lock_path).get("task"))
+        if isinstance(task.get("name"), str):
+            name = task["name"]
+        if isinstance(task.get("digest"), str):
             digest = task["digest"]
     return TaskOutcome(
-        name=task_name,
+        name=name,
         trial_name=str(result.get("trial_name", trial_dir.name)),
         digest=digest,
-        reward=read_reward(rewards, result_path),
+        reward=read_reward(verifier_result.get("rewards"), result_path),
         exception_type=exception_type if isinstance(exception_type, str) else None,
     )
 
@@ -329,7 +335,7 @@ def read_locked_pins(uv_lock: Path) -> LockedPins:
         raise OracleJobError(
             f"{uv_lock} does not exist; run the command from the repository root"
         ) from None
-    except (OSError, tomllib.TOMLDecodeError) as exc:
+    except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
         raise OracleJobError(f"cannot read {uv_lock}: {exc}") from exc
     packages = {
         package.get("name"): package.get("version")
@@ -343,6 +349,7 @@ def read_locked_pins(uv_lock: Path) -> LockedPins:
 
 
 Runner = Callable[[Sequence[str]], str]
+DatasetResolver = Callable[[str], RegistryDataset]
 
 
 def run_git(args: Sequence[str]) -> str:
@@ -357,10 +364,13 @@ def run_git(args: Sequence[str]) -> str:
         # FileNotFoundError when git is not on PATH.
         raise OracleJobError(f"cannot run {command}: {exc}") from exc
     if completed.returncode != 0:
-        raise OracleJobError(
-            f"{command} exited {completed.returncode}: {completed.stderr.strip()}"
-        )
+        raise OracleJobError(f"{command} exited {completed.returncode}: {completed.stderr.strip()}")
     return completed.stdout
+
+
+def ls_remote_args(repository: str, tag: str) -> list[str]:
+    ref = f"refs/tags/{tag}"
+    return ["ls-remote", "--tags", repository, ref, f"{ref}^{{}}"]
 
 
 def resolve_release_commit(repository: str, tag: str, run: Runner = run_git) -> str:
@@ -370,7 +380,7 @@ def resolve_release_commit(repository: str, tag: str, run: Runner = run_git) -> 
     `refs/tags/<tag>^{}`, which names the commit, so that line wins.
     """
     ref = f"refs/tags/{tag}"
-    output = run(["ls-remote", "--tags", repository, ref, f"{ref}^{{}}"])
+    output = run(ls_remote_args(repository, tag))
     found: dict[str, str] = {}
     for line in output.splitlines():
         sha, _, name = line.partition("\t")
@@ -382,113 +392,149 @@ def resolve_release_commit(repository: str, tag: str, run: Runner = run_git) -> 
     return commit
 
 
-def check_oracle_job(
-    job: OracleJob, *, dataset: DatasetRecord, pins: LockedPins, release_commit: str
-) -> list[str]:
-    """Returns every way the job breaks ADR 0005 §7 step 2 or differs from its records."""
-    problems: list[str] = []
-    config = job.config
+def resolve_registry_dataset(identifier: str) -> RegistryDataset:
+    """Asks Harbor's package registry what `org/name@version` holds.
 
-    agents = job.agents
-    if len(agents) != 1 or job.agent_name(agents[0]) != ORACLE_AGENT:
+    This is the lookup that `harbor run -d` makes before the job starts. A public dataset needs no
+    Harbor login. The registry can still differ from what the job ran if a maintainer moves the
+    version's tag, and the check then reports the difference.
+    """
+    from harbor.models.task.id import PackageTaskId
+    from harbor.registry.client.package import PackageDatasetClient
+
+    try:
+        metadata = asyncio.run(PackageDatasetClient().get_dataset_metadata(identifier))
+    except Exception as exc:  # The network, the registry service, or an unknown version.
+        raise OracleJobError(f"Harbor's registry cannot resolve {identifier}: {exc}") from exc
+    tasks = tuple(
+        sorted(
+            (task.get_name(), str(task.ref))
+            for task in metadata.task_ids
+            if isinstance(task, PackageTaskId)
+        )
+    )
+    return RegistryDataset(content_hash=str(metadata.version), tasks=tasks)
+
+
+def unexpected_fields(
+    section_name: str, value: Mapping[str, Any], allowed: frozenset[str]
+) -> list[str]:
+    problems = []
+    for field in sorted(set(value) - allowed):
+        path = f"{section_name}.{field}" if section_name else field
+        hint = FIELD_HINTS.get(path, "remove it")
+        problems.append(
+            f"config.json sets `{path}`, which the oracle command leaves at its default ({hint})"
+        )
+    return problems
+
+
+def config_problems(job: OracleJob) -> list[str]:
+    """Compares config.json with the config that the oracle command of the README writes."""
+    config = job.config
+    problems = unexpected_fields("", config, ALLOWED_JOB_FIELDS)
+
+    # Harbor leaves `agents` out when it is `[AgentConfig()]`, which is the oracle agent.
+    agents = config.get("agents", [{}])
+    if not isinstance(agents, list) or len(agents) != 1 or not isinstance(agents[0], dict):
         problems.append(f"the job must run exactly one agent, Harbor's built-in `{ORACLE_AGENT}`")
     else:
         agent = agents[0]
-        if agent.get("model_name") is not None:
-            problems.append("the oracle agent takes no model, but the job names one with -m")
-        problems.extend(
-            f"the job must not change the task conditions (agent {field} is set)"
-            for field in AGENT_OVERRIDE_FIELDS
-            if agent.get(field) is not None
-        )
+        problems.extend(unexpected_fields("agents[0]", agent, ALLOWED_AGENT_FIELDS))
+        # `AgentConfig.set_default_name`: an agent with no name and no import path is the oracle.
+        if agent.get("name", ORACLE_AGENT) != ORACLE_AGENT:
+            problems.append(
+                f"the job must run Harbor's built-in `{ORACLE_AGENT}` agent, "
+                f"found {json.dumps(agent.get('name'))}"
+            )
 
-    environment = section(config, "environment")
-    environment_type = environment.get("type")
-    if environment_type != ORACLE_ENVIRONMENT:
+    environment = config_section(config.get("environment"))
+    problems.extend(unexpected_fields("environment", environment, ALLOWED_ENVIRONMENT_FIELDS))
+    if environment.get("type") != ORACLE_ENVIRONMENT:
         problems.append(
             f"the job must run on `{ORACLE_ENVIRONMENT}` (-e {ORACLE_ENVIRONMENT}), "
-            f"found {json.dumps(environment_type)}"
+            f"found {json.dumps(environment.get('type'))}"
         )
-    problems.extend(
-        f"the job must not change the task conditions (environment {field} is set)"
-        for field in ENVIRONMENT_OVERRIDE_FIELDS
-        if environment.get(field) is not None
-    )
-    verifier = section(config, "verifier")
-    if verifier.get("disable"):
-        problems.append(
-            "the job must run the verifier, which gives the reward (verifier disable is set)"
-        )
-    problems.extend(
-        f"the job must not change the task conditions (verifier {field} is set)"
-        for field in VERIFIER_OVERRIDE_FIELDS
-        if verifier.get(field) is not None
-    )
-
-    n_attempts = job.setting("n_attempts")
-    if n_attempts != 1:
-        problems.append(f"the job must make one attempt per task (-k 1), found {n_attempts}")
-    max_retries = job.max_retries
-    if max_retries != 0:
-        # Harbor deletes a trial's directory before it retries the trial, so a retry hides the
-        # failure that makes the task harness-flaky.
-        problems.append(f"the job must not retry trials (-r 0), found max_retries {max_retries}")
-    if job.setting("timeout_multiplier") != 1.0:
-        problems.append("the job must not change the task timeouts (timeout_multiplier is not 1)")
-    for field in (
-        "agent_timeout_multiplier",
-        "verifier_timeout_multiplier",
-        "agent_setup_timeout_multiplier",
-        "environment_build_timeout_multiplier",
-    ):
-        if config.get(field) not in (None, 1.0):
-            problems.append(f"the job must not change the task timeouts ({field} is set)")
 
     datasets = config.get("datasets")
-    if not isinstance(datasets, list) or len(datasets) != 1 or config.get("tasks"):
-        problems.append("the job must run exactly one dataset (one -d) and no separate task")
+    if not isinstance(datasets, list) or len(datasets) != 1:
+        problems.append("the job must run exactly one dataset (one -d)")
     else:
-        record_name, _, record_version = dataset.identifier.rpartition("@")
-        reference = job.dataset_reference
-        # A content hash is what Harbor resolved the record's version to; this command cannot
-        # map it back to the version, so it accepts it and the record keeps it.
-        if job.dataset.get("name") != record_name or not (
-            reference == record_version or is_content_hash(reference)
-        ):
-            problems.append(
-                f"the job ran dataset {job.dataset_identifier}, but the dataset record is "
-                f"{dataset.identifier}"
-            )
-        for field in ("task_names", "exclude_task_names", "n_tasks"):
-            if job.dataset.get(field):
-                problems.append(f"the job must run every task of the dataset ({field} is set)")
+        problems.extend(unexpected_fields("datasets[0]", job.dataset, ALLOWED_DATASET_FIELDS))
+    return problems
 
-    if release_commit != dataset.release_commit:
+
+def dataset_problems(job: OracleJob, evidence: Evidence) -> list[str]:
+    dataset = evidence.dataset
+    problems = []
+    name = dataset.identifier.rpartition("@")[0]
+    if job.dataset and job.dataset.get("name") != name:
+        problems.append(
+            f"the job ran dataset {json.dumps(job.dataset.get('name'))}, but the dataset record "
+            f"is {dataset.identifier}"
+        )
+    elif job.dataset and job.dataset_reference != evidence.registry.content_hash:
+        problems.append(
+            f"the job ran dataset content {json.dumps(job.dataset_reference)}, but Harbor's "
+            f"registry resolves {dataset.identifier} to {evidence.registry.content_hash}"
+        )
+    planned = job.planned_tasks()
+    registry = Counter(evidence.registry.tasks)
+    if planned != registry:
+        problems.append(
+            f"lock.json plans {sum(planned.values())} tasks, and "
+            f"{sum((planned - registry).values())} of them are not in {dataset.identifier}; "
+            f"the registry lists {len(evidence.registry.tasks)} tasks, and "
+            f"{sum((registry - planned).values())} of them are not planned"
+        )
+    if evidence.release_commit != dataset.release_commit:
         problems.append(
             f"tag {dataset.release_tag} of {dataset.source_repository} resolves to "
-            f"{release_commit}, but the dataset record names {dataset.release_commit}"
+            f"{evidence.release_commit}, but the dataset record names {dataset.release_commit}"
         )
+    return problems
 
-    if job.harbor_version != pins.harbor:
-        problems.append(
-            f"the job ran Harbor {job.harbor_version}, but uv.lock pins {pins.harbor}; run it "
-            "through `uv run --project evaluation/terminalbench --frozen`"
-        )
 
-    names = job.environment_variable_names()
-    if names["agent"]:
-        problems.append(
-            "the oracle agent needs no environment variable, but the job passes "
-            + ", ".join(names["agent"])
-        )
-    keys = sorted({name for found in names.values() for name in found} & KEY_VARIABLES)
-    if keys:
-        problems.append(f"the job passes the provider credential variable {', '.join(keys)}")
+def pin_problems(job: OracleJob, evidence: Evidence) -> list[str]:
+    if job.harbor_version == evidence.pins.harbor:
+        return []
+    return [
+        f"the job ran Harbor {job.harbor_version}, but uv.lock pins {evidence.pins.harbor}; run it "
+        "through `uv run --project evaluation/terminalbench --frozen`"
+    ]
 
-    if job.result.get("finished_at") is None:
+
+def variable_problems(job: OracleJob) -> list[str]:
+    keys = sorted(set(variable_names(job.config)) & KEY_VARIABLES)
+    if not keys:
+        return []
+    return [f"the job passes the provider credential variable {', '.join(keys)}"]
+
+
+def result_problems(job: OracleJob) -> list[str]:
+    result = job.result
+    problems = []
+    if not isinstance(result.get("id"), str) or result.get("id") == "":
+        problems.append("result.json has no job id")
+    if job.started_at() is None:
+        problems.append("result.json has no started_at time that can be read")
+    if result.get("finished_at") is None:
         problems.append("the job did not finish: result.json has no finished_at")
-    for trial in job.unfinished_trials:
-        problems.append(f"trial {trial} did not finish: it has no result.json")
+    elif job.finished_at() is None:
+        problems.append("result.json has a finished_at time that cannot be read")
+    if job.started_at() is not None and job.finished_at() is not None:
+        seconds = job.wall_clock_seconds()
+        if seconds is None:
+            problems.append("started_at and finished_at in result.json must both have a time zone")
+        elif seconds < 0:
+            problems.append("result.json has a finished_at time before its started_at time")
+    return problems
+
+
+def trial_problems(job: OracleJob) -> list[str]:
+    problems = [
+        f"trial {trial} did not finish: it has no result.json" for trial in job.unfinished_trials
+    ]
     planned = len(job.planned_trials)
     if planned == 0:
         problems.append("lock.json plans no trial")
@@ -501,28 +547,41 @@ def check_oracle_job(
         problems.append(
             f"the job directory has {len(job.tasks)} finished trials, lock.json plans {planned}"
         )
-    counts = Counter(task.name for task in job.tasks)
-    repeated = sorted(name for name, count in counts.items() if count > 1)
-    if repeated:
-        problems.append(f"these tasks have more than one trial: {', '.join(repeated)}")
-    planned_digests = Counter(
-        section(trial, "task").get("digest")
-        for trial in job.planned_trials
-        if isinstance(trial, dict)
+    problems.extend(
+        f"trial {task.trial_name} has no task digest in its lock.json"
+        for task in job.tasks
+        if task.digest is None
     )
-    # A trial that failed before Harbor wrote its lock.json has no digest to compare. Every other
-    # digest must be planned; with the trial count checked above, this makes the two sets equal.
-    trial_digests = Counter(task.digest for task in job.tasks if task.digest is not None)
-    if trial_digests - planned_digests:
-        problems.append("the task digests of the trials differ from the ones that lock.json plans")
+    ran = Counter((task.name, task.digest) for task in job.tasks if task.digest is not None)
+    if ran - job.planned_tasks():
+        problems.append("the trials ran tasks that lock.json does not plan")
     return problems
 
 
-def oracle_record(
-    job: OracleJob, *, dataset: DatasetRecord, pins: LockedPins, release_commit: str
-) -> dict[str, Any]:
+def check_oracle_job(job: OracleJob, evidence: Evidence) -> list[str]:
+    """Returns every way the job breaks ADR 0005 §7 step 2 or differs from its records."""
+    return [
+        *config_problems(job),
+        *dataset_problems(job, evidence),
+        *pin_problems(job, evidence),
+        *variable_problems(job),
+        *result_problems(job),
+        *trial_problems(job),
+    ]
+
+
+def harbor_run_command(job: OracleJob, evidence: Evidence) -> str:
+    """The command that writes the job's config.json, which `config_problems` makes sure of."""
+    return (
+        f"harbor run -d {evidence.dataset.identifier} -a {ORACLE_AGENT} -e {ORACLE_ENVIRONMENT} "
+        f"-k 1 -n {job.field_or_default('n_concurrent_trials')} -r 0 "
+        f"-o {job.config.get('jobs_dir', DEFAULT_JOBS_DIR)} --job-name {job.name}"
+    )
+
+
+def oracle_record(job: OracleJob, evidence: Evidence) -> dict[str, Any]:
     """The committed record of the oracle job. It holds no variable's value, only names."""
-    environment = job.config.get("environment")
+    dataset = evidence.dataset
     return {
         "schemaVersion": RECORD_SCHEMA_VERSION,
         "job": {
@@ -532,26 +591,27 @@ def oracle_record(
             "finishedAt": job.result.get("finished_at"),
             "wallClockSeconds": job.wall_clock_seconds(),
         },
+        "command": harbor_run_command(job, evidence),
         "harbor": {"version": job.harbor_version, "gitCommitHash": job.harbor_git_commit},
-        "modalSdk": {"version": pins.modal, "source": "uv.lock"},
+        "modalSdk": {"version": evidence.pins.modal, "source": "uv.lock"},
         "flags": {
             "agent": ORACLE_AGENT,
-            "environment": environment.get("type") if isinstance(environment, dict) else None,
-            "nAttempts": job.setting("n_attempts"),
-            "nConcurrentTrials": job.setting("n_concurrent_trials"),
-            "maxRetries": job.max_retries,
+            "environment": config_section(job.config.get("environment")).get("type"),
+            "nAttempts": job.field_or_default("n_attempts"),
+            "nConcurrentTrials": job.field_or_default("n_concurrent_trials"),
+            "maxRetries": RETRY_DEFAULT_MAX_RETRIES,
         },
-        "environmentVariableNames": job.environment_variable_names(),
+        "environmentVariableNames": sorted(set(variable_names(job.config))),
         "dataset": {
             "identifier": dataset.identifier,
-            "resolvedReference": job.dataset_reference,
+            "contentHash": job.dataset_reference,
+            "contentHashResolvedBy": REGISTRY_LOOKUP,
             "sourceRepository": dataset.source_repository,
             "releaseTag": dataset.release_tag,
-            "releaseCommit": release_commit,
-            "releaseCommitResolvedBy": (
-                f"git ls-remote --tags {dataset.source_repository} refs/tags/{dataset.release_tag}"
-            ),
-            "taskCount": len(job.tasks),
+            "releaseCommit": evidence.release_commit,
+            "releaseCommitResolvedBy": "git "
+            + " ".join(ls_remote_args(dataset.source_repository, dataset.release_tag)),
+            "taskCount": len(job.planned_trials),
         },
         "tasks": [
             {
@@ -581,6 +641,7 @@ def summary(record: Mapping[str, Any]) -> str:
         f"Harbor {record['harbor']['version']}, Modal SDK {record['modalSdk']['version']}",
         f"Tasks: {dataset['taskCount']}, harness-flaky: {len(flaky)}",
         f"Wall clock: {job['wallClockSeconds']} s",
+        f"Command: {record['command']}",
     ]
     for task in flaky:
         reward = "no reward" if task["reward"] is None else f"reward {task['reward']}"
@@ -589,7 +650,30 @@ def summary(record: Mapping[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def main(argv: Sequence[str] | None = None, *, run: Runner = run_git) -> int:
+def write_record(path: Path, record: Mapping[str, Any]) -> None:
+    """Writes the record through a temporary file, so a failed write leaves no partial record."""
+    text = json.dumps(record, indent=2, allow_nan=False) + "\n"
+    temporary: str | None = None
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(
+            "w", encoding="utf-8", dir=path.parent, prefix=f".{path.name}.", delete=False
+        ) as file:
+            temporary = file.name
+            file.write(text)
+        os.replace(temporary, path)
+    except OSError as exc:
+        if temporary is not None:
+            Path(temporary).unlink(missing_ok=True)
+        raise OracleJobError(f"cannot write {path}: {exc}") from exc
+
+
+def main(
+    argv: Sequence[str] | None = None,
+    *,
+    run: Runner = run_git,
+    resolve_dataset: DatasetResolver = resolve_registry_dataset,
+) -> int:
     parser = argparse.ArgumentParser(
         prog="python -m coding_agent_terminalbench.oracle_job",
         description=(
@@ -597,13 +681,18 @@ def main(argv: Sequence[str] | None = None, *, run: Runner = run_git) -> int:
         ),
     )
     parser.add_argument("job_dir", type=Path, help="the Harbor job directory")
-    parser.add_argument("--dataset", required=True, help="the record's name@version")
+    parser.add_argument("--dataset", required=True, help="the record's org/name@version")
     parser.add_argument("--source-repository", required=True, help="the record's source repository")
     parser.add_argument("--release-tag", required=True, help="the record's release tag")
     parser.add_argument("--release-commit", required=True, help="the record's release commit")
     parser.add_argument("--output", type=Path, required=True, help="the oracle.json file to write")
     parser.add_argument("--uv-lock", type=Path, default=DEFAULT_UV_LOCK, help="the uv.lock file")
     args = parser.parse_args(argv)
+    name, _, version = args.dataset.rpartition("@")
+    if "/" not in name or version == "":
+        # Harbor resolves `org/name@version` through its package registry; ADR 0008 §1 requires
+        # an explicit version.
+        parser.error("--dataset must be a package dataset with a version, org/name@version")
 
     dataset = DatasetRecord(
         identifier=args.dataset,
@@ -614,11 +703,18 @@ def main(argv: Sequence[str] | None = None, *, run: Runner = run_git) -> int:
     try:
         pins = read_locked_pins(args.uv_lock)
         job = read_oracle_job(args.job_dir)
-        release_commit = resolve_release_commit(dataset.source_repository, dataset.release_tag, run)
+        evidence = Evidence(
+            dataset=dataset,
+            pins=pins,
+            release_commit=resolve_release_commit(
+                dataset.source_repository, dataset.release_tag, run
+            ),
+            registry=resolve_dataset(dataset.identifier),
+        )
     except OracleJobError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
-    problems = check_oracle_job(job, dataset=dataset, pins=pins, release_commit=release_commit)
+    problems = check_oracle_job(job, evidence)
     if problems:
         print(
             "The oracle job does not meet ADR 0005 §7 step 2. Nothing is written.", file=sys.stderr
@@ -626,9 +722,12 @@ def main(argv: Sequence[str] | None = None, *, run: Runner = run_git) -> int:
         for problem in problems:
             print(f"- {problem}", file=sys.stderr)
         return 1
-    record = oracle_record(job, dataset=dataset, pins=pins, release_commit=release_commit)
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
+    record = oracle_record(job, evidence)
+    try:
+        write_record(args.output, record)
+    except OracleJobError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
     print(summary(record))
     print(f"Wrote {args.output}")
     return 0

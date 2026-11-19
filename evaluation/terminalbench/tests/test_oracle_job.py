@@ -1,7 +1,9 @@
 """The oracle job record of ADR 0005 §7 step 2.
 
-The job directories here are written by hand in the shape that Harbor 0.23.0 writes. ADR 0008 §5
-forbids a test to hardcode a dataset name, version or task count, so the dataset is made up.
+Most job directories here are written by hand in the shape that Harbor 0.23.0 writes, so a test can
+write a shape that Harbor's models refuse. `HarborShapeTest` writes them with Harbor's own models
+and builds the config with Harbor's own CLI. ADR 0008 §5 forbids a test to hardcode a dataset name,
+version or task count, so the dataset is made up and the counts come from the fixtures.
 """
 
 import contextlib
@@ -13,21 +15,24 @@ import subprocess
 import tempfile
 import unittest
 from collections.abc import Sequence
-from unittest import mock
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
+from unittest import mock
 from uuid import uuid4
 
-from harbor.models.environment_type import EnvironmentType
-from harbor.models.job.config import DatasetConfig, JobConfig, RetryConfig
+from harbor.models.bridge import BridgeConfig
+from harbor.models.job.config import JobConfig
 from harbor.models.job.lock import HarborLockInfo, JobLock, TaskLock, TrialLock, VerifierLock
 from harbor.models.job.result import JobResult, JobStats
+from harbor.models.registry import DatasetMetadata
+from harbor.models.task.id import PackageTaskId
 from harbor.models.trial.config import (
     AgentConfig,
     EnvironmentConfig,
     TaskConfig,
     TrialConfig,
+    UserAgentConfig,
     VerifierConfig,
 )
 from harbor.models.trial.result import AgentInfo, TrialResult
@@ -35,13 +40,16 @@ from harbor.models.verifier.result import VerifierResult
 
 from coding_agent_terminalbench.oracle_job import (
     DatasetRecord,
+    Evidence,
     LockedPins,
     OracleJobError,
+    RegistryDataset,
     check_oracle_job,
     main,
     oracle_record,
     read_locked_pins,
     read_oracle_job,
+    resolve_registry_dataset,
     resolve_release_commit,
     run_git,
 )
@@ -54,39 +62,41 @@ DATASET = DatasetRecord(
 )
 PINS = LockedPins(harbor="0.23.0", modal="1.6.4")
 TAG_OBJECT = "d" * 40
-# The content hash that Harbor resolves the dataset version to.
+# The content hash that Harbor's registry resolves the dataset version to.
 CONTENT_HASH = "sha256:" + "a" * 64
+UV_LOCK = Path(__file__).resolve().parent.parent / "uv.lock"
 
 
 def digest(task: str) -> str:
     return "sha256:" + hashlib.sha256(task.encode()).hexdigest()
 
 
+TRIALS: dict[str, dict[str, Any] | None] = {
+    "example-org/alpha": {"reward": 1.0},
+    "example-org/bravo": {"reward": 0.0},
+    "example-org/charlie": {"reward": 1},
+    "example-org/delta": None,
+}
+
+
+def registry_of(tasks: Sequence[str]) -> RegistryDataset:
+    return RegistryDataset(
+        content_hash=CONTENT_HASH, tasks=tuple(sorted((task, digest(task)) for task in tasks))
+    )
+
+
+EVIDENCE = Evidence(
+    dataset=DATASET, pins=PINS, release_commit=DATASET.release_commit, registry=registry_of(TRIALS)
+)
+
+
 def job_config(**overrides: Any) -> dict[str, Any]:
+    """The config.json that the oracle command of the README writes (see `HarborShapeTest`)."""
     config: dict[str, Any] = {
         "job_name": "oracle-example",
-        "jobs_dir": "jobs",
-        "n_attempts": 1,
-        "timeout_multiplier": 1.0,
-        "agent_timeout_multiplier": None,
-        "verifier_timeout_multiplier": None,
-        "agent_setup_timeout_multiplier": None,
-        "environment_build_timeout_multiplier": None,
-        "n_concurrent_trials": 4,
-        "retry": {"max_retries": 0},
-        "environment": {"type": "modal", "kwargs": {}},
-        "verifier": {"disable": False},
-        "agents": [{"name": "oracle", "kwargs": {}}],
-        "datasets": [
-            {
-                "name": "example-org/example-tasks",
-                "ref": "1.2.0",
-                "task_names": None,
-                "exclude_task_names": None,
-                "n_tasks": None,
-            }
-        ],
-        "tasks": [],
+        "n_concurrent_trials": 16,
+        "environment": {"type": "modal"},
+        "datasets": [{"name": "example-org/example-tasks", "ref": CONTENT_HASH}],
     }
     config.update(overrides)
     return config
@@ -98,7 +108,7 @@ def write_job(
     *,
     config: dict[str, Any] | None = None,
     harbor_version: str = "0.23.0",
-    finished: bool = True,
+    result: dict[str, Any] | None = None,
 ) -> None:
     """Writes a job directory. `trials` maps a task name to its verifier rewards, or to None."""
     job_dir.mkdir(parents=True)
@@ -108,7 +118,7 @@ def write_job(
             {
                 "schema_version": 3,
                 "harbor": {"version": harbor_version, "git_commit_hash": None},
-                "n_concurrent_trials": 4,
+                "n_concurrent_trials": 16,
                 "retry": {"max_retries": 0},
                 "trials": [
                     {"task": {"name": task, "type": "package", "digest": digest(task)}}
@@ -117,29 +127,27 @@ def write_job(
             }
         )
     )
-    (job_dir / "result.json").write_text(
-        json.dumps(
-            {
-                "id": "6f1c2a52-6b8e-4b5e-9a35-0c64d1f3f0aa",
-                "started_at": "2026-11-20T01:00:00Z",
-                "finished_at": "2026-11-20T03:30:00.500000Z" if finished else None,
-                "n_total_trials": len(trials),
-                "stats": {},
-            }
-        )
-    )
+    job_result: dict[str, Any] = {
+        "id": "6f1c2a52-6b8e-4b5e-9a35-0c64d1f3f0aa",
+        "started_at": "2026-11-20T01:00:00Z",
+        "finished_at": "2026-11-20T03:30:00.500000Z",
+        "n_total_trials": len(trials),
+        "stats": {},
+    }
+    job_result.update(result or {})
+    (job_dir / "result.json").write_text(json.dumps(job_result))
     for index, (task, rewards) in enumerate(trials.items()):
         trial_dir = job_dir / f"{task.split('/')[-1]}__trial{index}"
         trial_dir.mkdir()
-        result: dict[str, Any] = {
-            "task_name": task,
+        trial_result: dict[str, Any] = {
+            "task_name": task.split("/")[-1],
             "trial_name": trial_dir.name,
             "verifier_result": None if rewards is None else {"rewards": rewards},
             "exception_info": None,
         }
         if rewards is None:
-            result["exception_info"] = {"exception_type": "EnvironmentStartTimeoutError"}
-        (trial_dir / "result.json").write_text(json.dumps(result))
+            trial_result["exception_info"] = {"exception_type": "EnvironmentStartTimeoutError"}
+        (trial_dir / "result.json").write_text(json.dumps(trial_result))
         (trial_dir / "lock.json").write_text(
             json.dumps({"task": {"name": task, "type": "package", "digest": digest(task)}})
         )
@@ -156,14 +164,6 @@ def annotated_tag(args: Sequence[str]) -> str:
     )
 
 
-TRIALS: dict[str, dict[str, Any] | None] = {
-    "example-org/alpha": {"reward": 1.0},
-    "example-org/bravo": {"reward": 0.0},
-    "example-org/charlie": {"reward": 1},
-    "example-org/delta": None,
-}
-
-
 class OracleJobTestCase(unittest.TestCase):
     def setUp(self) -> None:
         temp = tempfile.TemporaryDirectory()
@@ -176,24 +176,25 @@ class OracleJobTestCase(unittest.TestCase):
         if self.job_dir.exists():
             shutil.rmtree(self.job_dir)
 
-    def problems(self, **job: Any) -> list[str]:
-        trials = job.pop("trials", TRIALS)
-        write_job(self.job_dir, trials, **job)
-        return check_oracle_job(
-            read_oracle_job(self.job_dir),
-            dataset=DATASET,
-            pins=PINS,
-            release_commit=DATASET.release_commit,
-        )
+    def check(self, evidence: Evidence = EVIDENCE) -> list[str]:
+        return check_oracle_job(read_oracle_job(self.job_dir), evidence)
+
+    def record(self) -> dict[str, Any]:
+        return oracle_record(read_oracle_job(self.job_dir), EVIDENCE)
+
+    def problems(self, **job: Any) -> str:
+        """Writes a job directory and returns its problems as one string."""
+        write_job(self.job_dir, job.pop("trials", TRIALS), **job)
+        return " ".join(self.check())
+
+    def trial_dir(self, task: str) -> Path:
+        return next(self.job_dir.glob(f"{task}__*"))
 
 
 class HarnessFlakyTasksTest(OracleJobTestCase):
     def test_lists_every_task_below_reward_1_with_its_reward(self) -> None:
         write_job(self.job_dir, TRIALS)
-        job = read_oracle_job(self.job_dir)
-        record = oracle_record(
-            job, dataset=DATASET, pins=PINS, release_commit=DATASET.release_commit
-        )
+        record = self.record()
         self.assertEqual(
             record["harnessFlakyTasks"],
             [
@@ -205,13 +206,12 @@ class HarnessFlakyTasksTest(OracleJobTestCase):
                 },
             ],
         )
-        self.assertEqual(len(record["tasks"]), 4)
+        self.assertEqual(len(record["tasks"]), len(TRIALS))
         self.assertEqual(record["tasks"][0]["digest"], digest("example-org/alpha"))
 
     def test_a_partial_reward_is_harness_flaky(self) -> None:
         write_job(self.job_dir, {"example-org/alpha": {"reward": 0.99}})
-        job = read_oracle_job(self.job_dir)
-        self.assertTrue(job.tasks[0].harness_flaky)
+        self.assertTrue(read_oracle_job(self.job_dir).tasks[0].harness_flaky)
 
     def test_an_empty_reward_dict_counts_as_no_reward(self) -> None:
         write_job(self.job_dir, {"example-org/alpha": {}})
@@ -222,36 +222,37 @@ class HarnessFlakyTasksTest(OracleJobTestCase):
         with self.assertRaisesRegex(OracleJobError, "several keys"):
             read_oracle_job(self.job_dir)
 
-    def test_a_reward_that_is_not_a_number_is_refused(self) -> None:
-        write_job(self.job_dir, {"example-org/alpha": {"reward": True}})
-        with self.assertRaisesRegex(OracleJobError, "must be a number"):
-            read_oracle_job(self.job_dir)
+    def test_a_reward_that_is_not_a_finite_number_is_refused(self) -> None:
+        for reward in (True, float("nan"), float("inf")):
+            with self.subTest(reward=reward):
+                self.remove_job()
+                write_job(self.job_dir, {"example-org/alpha": {"reward": reward}})
+                with self.assertRaisesRegex(OracleJobError, "must be a finite number"):
+                    read_oracle_job(self.job_dir)
 
 
 class RecordTest(OracleJobTestCase):
-    def test_records_the_pins_dataset_flags_and_wall_clock(self) -> None:
+    def test_records_the_pins_dataset_flags_command_and_wall_clock(self) -> None:
         write_job(self.job_dir, TRIALS)
-        record = oracle_record(
-            read_oracle_job(self.job_dir),
-            dataset=DATASET,
-            pins=PINS,
-            release_commit=DATASET.release_commit,
-        )
+        record = self.record()
         self.assertEqual(record["harbor"], {"version": "0.23.0", "gitCommitHash": None})
         self.assertEqual(record["modalSdk"], {"version": "1.6.4", "source": "uv.lock"})
         self.assertEqual(
             record["dataset"],
             {
                 "identifier": DATASET.identifier,
-                "resolvedReference": "1.2.0",
+                "contentHash": CONTENT_HASH,
+                "contentHashResolvedBy": (
+                    "Harbor's package registry, the lookup that `harbor run -d` makes"
+                ),
                 "sourceRepository": DATASET.source_repository,
                 "releaseTag": DATASET.release_tag,
                 "releaseCommit": DATASET.release_commit,
                 "releaseCommitResolvedBy": (
                     f"git ls-remote --tags {DATASET.source_repository} "
-                    f"refs/tags/{DATASET.release_tag}"
+                    f"refs/tags/{DATASET.release_tag} refs/tags/{DATASET.release_tag}^{{}}"
                 ),
-                "taskCount": 4,
+                "taskCount": len(TRIALS),
             },
         )
         self.assertEqual(
@@ -260,172 +261,179 @@ class RecordTest(OracleJobTestCase):
                 "agent": "oracle",
                 "environment": "modal",
                 "nAttempts": 1,
-                "nConcurrentTrials": 4,
+                "nConcurrentTrials": 16,
                 "maxRetries": 0,
             },
         )
+        self.assertEqual(
+            record["command"],
+            f"harbor run -d {DATASET.identifier} -a oracle -e modal -k 1 -n 16 -r 0 "
+            "-o jobs --job-name oracle-example",
+        )
         self.assertEqual(record["job"]["name"], "oracle-example")
         self.assertEqual(record["job"]["wallClockSeconds"], 9000.5)
-        self.assertEqual(
-            record["environmentVariableNames"], {"agent": [], "environment": [], "verifier": []}
-        )
+        self.assertEqual(record["environmentVariableNames"], [])
+
+    def test_the_task_count_comes_from_the_planned_trials(self) -> None:
+        write_job(self.job_dir, TRIALS)
+        shutil.rmtree(self.trial_dir("alpha"))
+        self.assertEqual(self.record()["dataset"]["taskCount"], len(TRIALS))
 
 
-class CheckTest(OracleJobTestCase):
-    def test_a_job_that_follows_the_procedure_has_no_problem(self) -> None:
-        self.assertEqual(self.problems(), [])
+class ConfigCheckTest(OracleJobTestCase):
+    def test_the_config_of_the_oracle_command_has_no_problem(self) -> None:
+        self.assertEqual(self.problems(), "")
 
     def test_another_agent_is_refused(self) -> None:
-        config = job_config(agents=[{"name": "nop"}])
-        self.assertIn("built-in `oracle`", " ".join(self.problems(config=config)))
-
-    def test_a_model_is_refused(self) -> None:
-        config = job_config(agents=[{"name": "oracle", "model_name": "opencode/some-model"}])
-        self.assertIn("takes no model", " ".join(self.problems(config=config)))
+        for agents in ([{"name": "nop"}], [{"name": "oracle"}, {"name": "oracle"}], ["oracle"]):
+            with self.subTest(agents=agents):
+                self.remove_job()
+                self.assertIn("built-in `oracle`", self.problems(config=job_config(agents=agents)))
 
     def test_another_environment_is_refused(self) -> None:
-        config = job_config(environment={"type": "docker"})
-        self.assertIn("-e modal", " ".join(self.problems(config=config)))
+        problems = self.problems(config=job_config(environment={"type": "docker"}))
+        self.assertIn("-e modal", problems)
 
-    def test_more_than_one_attempt_is_refused(self) -> None:
-        self.assertIn("-k 1", " ".join(self.problems(config=job_config(n_attempts=3))))
-
-    def test_retries_are_refused(self) -> None:
-        config = job_config(retry={"max_retries": 2})
-        self.assertIn("-r 0", " ".join(self.problems(config=config)))
-
-    def test_a_timeout_multiplier_is_refused(self) -> None:
-        for field, value in (("timeout_multiplier", 2.0), ("agent_timeout_multiplier", 0.5)):
-            with self.subTest(field=field):
+    def test_every_field_that_the_oracle_command_does_not_set_is_refused(self) -> None:
+        dataset = job_config()["datasets"][0]
+        cases: dict[str, dict[str, Any]] = {
+            "`n_attempts`, which the oracle command leaves at its default (run with -k 1)": {
+                "n_attempts": 3
+            },
+            "`retry`, which the oracle command leaves at its default (run with -r 0)": {
+                "retry": {"max_retries": 2}
+            },
+            "`timeout_multiplier`": {"timeout_multiplier": 2.0},
+            "`agent_timeout_multiplier`": {"agent_timeout_multiplier": 0.5},
+            "`install_only`": {"install_only": True},
+            "`extra_instructions`": {"extra_instructions": ["Always pass."]},
+            "`user_agent`": {"user_agent": {"name": "simulated"}},
+            "`tasks`": {"tasks": [{"name": "example-org/alpha"}]},
+            "`verifier`": {"verifier": {"import_path": "example:AlwaysOne"}},
+            "`agents[0].model_name`": {
+                "agents": [{"name": "oracle", "model_name": "opencode/some-model"}]
+            },
+            "`agents[0].override_timeout_sec`": {
+                "agents": [{"name": "oracle", "override_timeout_sec": 60}]
+            },
+            "`environment.import_path`": {
+                "environment": {"type": "modal", "import_path": "example:Environment"}
+            },
+            "`environment.mounts`": {"environment": {"type": "modal", "mounts": []}},
+            "`environment.kwargs`": {"environment": {"type": "modal", "kwargs": {"a": 1}}},
+            "`environment.override_gpus`": {"environment": {"type": "modal", "override_gpus": 0}},
+            "`datasets[0].task_names`": {
+                "datasets": [dict(dataset, task_names=["example-org/alpha"])]
+            },
+            "`datasets[0].n_tasks`": {"datasets": [dict(dataset, n_tasks=2)]},
+        }
+        for expected, overrides in cases.items():
+            with self.subTest(field=expected):
                 self.remove_job()
-                problems = self.problems(config=job_config(**{field: value}))
-                self.assertIn("task timeouts", " ".join(problems))
-
-    def test_task_filtering_is_refused(self) -> None:
-        for field, value in (
-            ("task_names", ["example-org/alpha"]),
-            ("exclude_task_names", ["example-org/bravo"]),
-            ("n_tasks", 2),
-        ):
-            with self.subTest(field=field):
-                self.remove_job()
-                dataset = dict(job_config()["datasets"][0], **{field: value})
-                problems = self.problems(config=job_config(datasets=[dataset]))
-                self.assertIn(f"({field} is set)", " ".join(problems))
-
-    def test_another_dataset_is_refused(self) -> None:
-        dataset = dict(job_config()["datasets"][0], ref="1.1.0")
-        problems = self.problems(config=job_config(datasets=[dataset]))
-        self.assertIn("example-org/example-tasks@1.1.0", " ".join(problems))
-
-    def test_the_content_hash_that_harbor_resolved_is_accepted_and_recorded(self) -> None:
-        dataset = dict(job_config()["datasets"][0], ref=CONTENT_HASH)
-        config = job_config(datasets=[dataset])
-        self.assertEqual(self.problems(config=config), [])
-        record = oracle_record(
-            read_oracle_job(self.job_dir),
-            dataset=DATASET,
-            pins=PINS,
-            release_commit=DATASET.release_commit,
-        )
-        self.assertEqual(record["dataset"]["identifier"], DATASET.identifier)
-        self.assertEqual(record["dataset"]["resolvedReference"], CONTENT_HASH)
-
-    def test_another_dataset_name_is_refused(self) -> None:
-        for ref in ("1.2.0", CONTENT_HASH):
-            with self.subTest(ref=ref):
-                self.remove_job()
-                dataset = dict(job_config()["datasets"][0], name="example-org/other", ref=ref)
-                problems = self.problems(config=job_config(datasets=[dataset]))
-                self.assertIn(f"example-org/other@{ref}", " ".join(problems))
-
-    def test_a_registry_dataset_reads_its_version(self) -> None:
-        dataset = {"name": "example-org/example-tasks", "version": "1.2.0"}
-        self.assertEqual(self.problems(config=job_config(datasets=[dataset])), [])
+                self.assertIn(expected, self.problems(config=job_config(**overrides)))
 
     def test_two_datasets_are_refused(self) -> None:
         dataset = job_config()["datasets"][0]
         problems = self.problems(config=job_config(datasets=[dataset, dataset]))
-        self.assertIn("exactly one dataset", " ".join(problems))
+        self.assertIn("exactly one dataset", problems)
+
+    def test_a_provider_key_anywhere_is_named(self) -> None:
+        key = {"env": {"OPENCODE_API_KEY": "${OPENCODE_API_KEY}"}}
+        for overrides in (
+            {"agents": [dict({"name": "oracle"}, **key)]},
+            {"environment": dict({"type": "modal"}, **key)},
+            {"verifier": key},
+            {"user_agent": dict({"name": "simulated"}, **key)},
+        ):
+            with self.subTest(section=next(iter(overrides))):
+                self.remove_job()
+                problems = self.problems(config=job_config(**overrides))
+                self.assertIn("credential variable OPENCODE_API_KEY", problems)
+
+
+class DatasetCheckTest(OracleJobTestCase):
+    def test_another_dataset_name_is_refused(self) -> None:
+        dataset = dict(job_config()["datasets"][0], name="example-org/other")
+        problems = self.problems(config=job_config(datasets=[dataset]))
+        self.assertIn('"example-org/other", but the dataset record is', problems)
+
+    def test_content_that_the_registry_does_not_resolve_is_refused(self) -> None:
+        # A job of another version of the same dataset has another content hash.
+        other = "sha256:" + "b" * 64
+        dataset = dict(job_config()["datasets"][0], ref=other)
+        problems = self.problems(config=job_config(datasets=[dataset]))
+        self.assertIn(f'content "{other}", but Harbor\'s registry resolves', problems)
+
+    def test_planned_tasks_that_differ_from_the_registry_are_refused(self) -> None:
+        write_job(self.job_dir, TRIALS)
+        registry = registry_of([*list(TRIALS)[1:], "example-org/echo"])
+        evidence = Evidence(DATASET, PINS, DATASET.release_commit, registry)
+        problems = " ".join(self.check(evidence))
+        self.assertIn(
+            f"lock.json plans {len(TRIALS)} tasks, and 1 of them are not in", problems
+        )
 
     def test_another_harbor_version_is_refused(self) -> None:
-        problems = self.problems(harbor_version="0.24.0")
-        self.assertIn("uv.lock pins 0.23.0", " ".join(problems))
+        self.assertIn("uv.lock pins 0.23.0", self.problems(harbor_version="0.24.0"))
 
     def test_a_release_commit_that_differs_from_the_record_is_refused(self) -> None:
         write_job(self.job_dir, TRIALS)
-        problems = check_oracle_job(
-            read_oracle_job(self.job_dir), dataset=DATASET, pins=PINS, release_commit="e" * 40
-        )
-        self.assertIn("but the dataset record names", " ".join(problems))
+        evidence = Evidence(DATASET, PINS, "e" * 40, EVIDENCE.registry)
+        self.assertIn("but the dataset record names", " ".join(self.check(evidence)))
 
-    def test_an_agent_variable_is_refused(self) -> None:
-        config = job_config(agents=[{"name": "oracle", "env": {"DEBUG": "1"}}])
-        self.assertIn("passes DEBUG", " ".join(self.problems(config=config)))
 
-    def test_a_provider_key_anywhere_is_refused(self) -> None:
-        for section in ("environment", "verifier"):
-            with self.subTest(section=section):
-                self.remove_job()
-                base = job_config()[section]
-                config = job_config(**{section: dict(base, env={"OPENCODE_API_KEY": "${X}"})})
-                problems = self.problems(config=config)
-                self.assertIn("credential variable OPENCODE_API_KEY", " ".join(problems))
-
+class ResultCheckTest(OracleJobTestCase):
     def test_an_unfinished_job_is_refused(self) -> None:
-        self.assertIn("no finished_at", " ".join(self.problems(finished=False)))
+        self.assertIn("no finished_at", self.problems(result={"finished_at": None}))
 
+    def test_a_job_without_id_or_start_is_refused(self) -> None:
+        for field, expected in (("id", "no job id"), ("started_at", "no started_at")):
+            with self.subTest(field=field):
+                self.remove_job()
+                self.assertIn(expected, self.problems(result={field: None}))
+
+    def test_times_that_cannot_be_compared_are_refused(self) -> None:
+        cases = {
+            "both have a time zone": {"finished_at": "2026-11-20T03:30:00"},
+            "finished_at time before its started_at": {"finished_at": "2026-11-20T00:30:00Z"},
+            "finished_at time that cannot be read": {"finished_at": "later"},
+        }
+        for expected, result in cases.items():
+            with self.subTest(case=expected):
+                self.remove_job()
+                self.assertIn(expected, self.problems(result=result))
+
+
+class TrialCheckTest(OracleJobTestCase):
     def test_a_trial_without_result_is_refused(self) -> None:
         write_job(self.job_dir, TRIALS)
         (self.job_dir / "echo__trial9").mkdir()
-        problems = check_oracle_job(
-            read_oracle_job(self.job_dir),
-            dataset=DATASET,
-            pins=PINS,
-            release_commit=DATASET.release_commit,
-        )
-        self.assertIn("trial echo__trial9 did not finish", " ".join(problems))
+        self.assertIn("trial echo__trial9 did not finish", " ".join(self.check()))
 
     def test_hidden_directories_are_not_trials(self) -> None:
         write_job(self.job_dir, TRIALS)
         (self.job_dir / ".sources").mkdir()
-        self.assertEqual(len(read_oracle_job(self.job_dir).tasks), 4)
+        self.assertEqual(len(read_oracle_job(self.job_dir).tasks), len(TRIALS))
 
     def test_a_missing_trial_is_refused(self) -> None:
         write_job(self.job_dir, TRIALS)
-        trial = next(self.job_dir.glob("alpha__*"))
-        for file in trial.iterdir():
-            file.unlink()
-        trial.rmdir()
-        problems = check_oracle_job(
-            read_oracle_job(self.job_dir),
-            dataset=DATASET,
-            pins=PINS,
-            release_commit=DATASET.release_commit,
-        )
-        self.assertIn("3 finished trials, lock.json plans 4", " ".join(problems))
+        shutil.rmtree(self.trial_dir("alpha"))
+        expected = f"{len(TRIALS) - 1} finished trials, lock.json plans {len(TRIALS)}"
+        self.assertIn(expected, " ".join(self.check()))
 
-    def test_a_trial_without_lock_still_checks_the_other_digests(self) -> None:
+    def test_a_trial_without_lock_is_refused(self) -> None:
         write_job(self.job_dir, TRIALS)
-        (next(self.job_dir.glob("alpha__*")) / "lock.json").unlink()
-        self.assertEqual(
-            check_oracle_job(
-                read_oracle_job(self.job_dir),
-                dataset=DATASET,
-                pins=PINS,
-                release_commit=DATASET.release_commit,
-            ),
-            [],
+        trial = self.trial_dir("alpha")
+        (trial / "lock.json").unlink()
+        self.assertIn(f"trial {trial.name} has no task digest", " ".join(self.check()))
+
+    def test_an_unplanned_trial_in_place_of_a_planned_one_is_refused(self) -> None:
+        write_job(self.job_dir, TRIALS)
+        bravo = self.trial_dir("bravo")
+        (bravo / "lock.json").write_text(
+            json.dumps({"task": {"name": "example-org/unplanned", "digest": digest("unplanned")}})
         )
-        bravo_lock = next(self.job_dir.glob("bravo__*")) / "lock.json"
-        bravo_lock.write_text(json.dumps({"task": {"digest": digest("example-org/unplanned")}}))
-        problems = check_oracle_job(
-            read_oracle_job(self.job_dir),
-            dataset=DATASET,
-            pins=PINS,
-            release_commit=DATASET.release_commit,
-        )
-        self.assertIn("task digests of the trials differ", " ".join(problems))
+        self.assertIn("tasks that lock.json does not plan", " ".join(self.check()))
 
 
 class ReadTest(OracleJobTestCase):
@@ -445,9 +453,18 @@ class ReadTest(OracleJobTestCase):
         with self.assertRaisesRegex(OracleJobError, "not valid JSON"):
             read_oracle_job(self.job_dir)
 
+    def test_a_file_that_is_not_utf8_is_refused(self) -> None:
+        write_job(self.job_dir, TRIALS)
+        (self.job_dir / "config.json").write_bytes(b"\xff\xfe")
+        with self.assertRaisesRegex(OracleJobError, "cannot read .*config.json"):
+            read_oracle_job(self.job_dir)
+        uv_lock = self.root / "uv.lock"
+        uv_lock.write_bytes(b"\xff\xfe")
+        with self.assertRaisesRegex(OracleJobError, "cannot read .*uv.lock"):
+            read_locked_pins(uv_lock)
+
     def test_reads_the_locked_pins_of_the_adapter(self) -> None:
-        uv_lock = Path(__file__).resolve().parent.parent / "uv.lock"
-        pins = read_locked_pins(uv_lock)
+        pins = read_locked_pins(UV_LOCK)
         self.assertEqual(pins.harbor, "0.23.0")
         self.assertRegex(pins.modal, r"^\d+\.\d+\.\d+$")
 
@@ -517,8 +534,53 @@ class RunGitTest(unittest.TestCase):
             run_git(["ls-remote"])
 
 
+class ResolveRegistryDatasetTest(unittest.TestCase):
+    CLIENT = "harbor.registry.client.package.PackageDatasetClient.get_dataset_metadata"
+
+    def test_reads_the_content_hash_and_the_tasks_of_the_version(self) -> None:
+        metadata = DatasetMetadata(
+            name="example-org/example-tasks",
+            version=CONTENT_HASH,
+            task_ids=[
+                PackageTaskId(org="example-org", name=task.split("/")[1], ref=digest(task))
+                for task in reversed(list(TRIALS))
+            ],
+        )
+        with mock.patch(self.CLIENT, new=mock.AsyncMock(return_value=metadata)) as lookup:
+            registry = resolve_registry_dataset(DATASET.identifier)
+        lookup.assert_awaited_once_with(DATASET.identifier)
+        self.assertEqual(registry, registry_of(TRIALS))
+
+    def test_a_registry_failure_is_an_oracle_job_error(self) -> None:
+        failure = mock.AsyncMock(side_effect=ValueError("Tag '1.2.0' not found"))
+        with (
+            mock.patch(self.CLIENT, new=failure),
+            self.assertRaisesRegex(OracleJobError, "registry cannot resolve .*not found"),
+        ):
+            resolve_registry_dataset(DATASET.identifier)
+
+
 class HarborShapeTest(OracleJobTestCase):
-    """Harbor's own models write the job directory, the way `Job` and `Trial` serialize them."""
+    """Harbor's own CLI builds the config and its models write the files, as `Job` does."""
+
+    def oracle_command_config(self) -> JobConfig:
+        """The JobConfig of the README's command, as Harbor's CLI builds it."""
+        from harbor.cli.main import app
+        from typer.testing import CliRunner
+
+        built: list[JobConfig] = []
+        argv = [
+            "run",
+            *("-d", DATASET.identifier, "-a", "oracle", "-e", "modal", "-k", "1"),
+            *("-n", "16", "-r", "0", "-o", "jobs", "--job-name", "oracle-example"),
+        ]
+        execute = mock.patch(
+            "harbor.cli.jobs._execute_job", side_effect=lambda config, **_: built.append(config)
+        )
+        with execute:
+            outcome = CliRunner().invoke(app, argv)
+        self.assertEqual(outcome.exit_code, 0, outcome.output)
+        return built[0]
 
     def write_harbor_job(self, config: JobConfig) -> None:
         tasks = {"example-org/alpha": 1.0, "example-org/bravo": 0.0}
@@ -526,8 +588,7 @@ class HarborShapeTest(OracleJobTestCase):
         # `Job.create` resolves each package dataset before `Job.run` writes config.json, and the
         # resolution replaces the dataset's ref with the version's content hash.
         for dataset in config.datasets:
-            if dataset.name is not None and "/" in dataset.name:
-                dataset.ref = CONTENT_HASH
+            dataset.ref = CONTENT_HASH
         # harbor/job.py writes config.json with exclude_defaults, lock.json with exclude_none.
         (self.job_dir / "config.json").write_text(
             config.model_dump_json(indent=4, exclude_defaults=True)
@@ -544,7 +605,7 @@ class HarborShapeTest(OracleJobTestCase):
             locks.append(lock)
             trial_name = f"{task.split('/')[-1]}__trial{index}"
             result = TrialResult(
-                task_name=task,
+                task_name=task.split("/")[-1],
                 trial_name=trial_name,
                 trial_uri=f"file:///jobs/{trial_name}",
                 task_id=task_config.get_task_id(),
@@ -577,126 +638,86 @@ class HarborShapeTest(OracleJobTestCase):
         (self.job_dir / "result.json").write_text(
             job_result.model_dump_json(indent=4, exclude={"trial_results"})
         )
+        self.evidence = Evidence(DATASET, PINS, DATASET.release_commit, registry_of(tasks))
 
-    def oracle_config(self, **overrides: Any) -> JobConfig:
-        # What `harbor run -d example-org/example-tasks@1.2.0 -a oracle -e modal -k 1` builds.
-        values: dict[str, Any] = {
-            "job_name": "oracle-example",
-            "agents": [AgentConfig(name="oracle")],
-            "environment": EnvironmentConfig(type=EnvironmentType.MODAL),
-            "datasets": [DatasetConfig(name="example-org/example-tasks", ref="1.2.0")],
-        }
-        values.update(overrides)
-        return JobConfig(**values)
+    def harbor_check(self, config: JobConfig) -> str:
+        self.write_harbor_job(config)
+        return " ".join(self.check(self.evidence))
 
-    def check(self) -> list[str]:
-        return check_oracle_job(
-            read_oracle_job(self.job_dir),
-            dataset=DATASET,
-            pins=PINS,
-            release_commit=DATASET.release_commit,
-        )
-
-    def test_the_oracle_command_has_no_problem_and_its_defaults_are_recorded(self) -> None:
-        self.write_harbor_job(self.oracle_config())
-        self.assertEqual(self.check(), [])
-        record = oracle_record(
-            read_oracle_job(self.job_dir),
-            dataset=DATASET,
-            pins=PINS,
-            release_commit=DATASET.release_commit,
-        )
+    def test_the_readme_command_has_no_problem_and_is_recorded(self) -> None:
+        config = self.oracle_command_config()
+        self.assertEqual(self.harbor_check(config), "")
+        record = oracle_record(read_oracle_job(self.job_dir), self.evidence)
         self.assertEqual(
-            record["flags"],
-            {
-                "agent": "oracle",
-                "environment": "modal",
-                "nAttempts": 1,
-                "nConcurrentTrials": 4,
-                "maxRetries": 0,
-            },
+            record["command"],
+            f"harbor run -d {DATASET.identifier} -a oracle -e modal -k 1 -n 16 -r 0 "
+            "-o jobs --job-name oracle-example",
         )
+        self.assertEqual(record["flags"]["nConcurrentTrials"], 16)
+        self.assertEqual(record["dataset"]["contentHash"], CONTENT_HASH)
         self.assertEqual(record["job"]["wallClockSeconds"], 5400.0)
-        self.assertEqual(record["dataset"]["identifier"], DATASET.identifier)
-        self.assertEqual(record["dataset"]["resolvedReference"], CONTENT_HASH)
         self.assertEqual(
             record["harnessFlakyTasks"],
             [{"name": "example-org/bravo", "reward": 0.0, "exceptionType": None}],
         )
-        self.assertEqual(record["tasks"][0]["digest"], digest("example-org/alpha"))
 
-    def test_flags_that_harbor_writes_are_read(self) -> None:
-        self.write_harbor_job(
-            self.oracle_config(
-                n_attempts=2, retry=RetryConfig(max_retries=1), n_concurrent_trials=8
-            )
-        )
-        problems = " ".join(self.check())
-        self.assertIn("-k 1", problems)
-        self.assertIn("-r 0", problems)
-
-    def test_a_custom_agent_is_refused(self) -> None:
-        agent = AgentConfig(import_path="coding_agent_terminalbench.agent:CodingAgent")
-        self.write_harbor_job(self.oracle_config(agents=[agent]))
-        self.assertIn("built-in `oracle`", " ".join(self.check()))
-
-    def test_overrides_of_the_task_conditions_are_refused(self) -> None:
-        cases = {
-            "agent override_timeout_sec": {
+    def test_fields_that_change_the_job_are_refused(self) -> None:
+        cases: dict[str, dict[str, Any]] = {
+            "`verifier`": {"verifier": VerifierConfig(import_path="example:AlwaysOne")},
+            "`environment.override_gpus`": {
+                "environment": EnvironmentConfig(type="modal", override_gpus=0)
+            },
+            "`agents[0].override_timeout_sec`": {
                 "agents": [AgentConfig(name="oracle", override_timeout_sec=60)]
             },
-            "environment override_gpus": {
-                "environment": EnvironmentConfig(type=EnvironmentType.MODAL, override_gpus=0)
+            "`agents[0].import_path`": {
+                "agents": [AgentConfig(import_path="coding_agent_terminalbench.agent:CodingAgent")]
             },
-            "verifier max_timeout_sec": {"verifier": VerifierConfig(max_timeout_sec=60)},
+            "`install_only`": {"install_only": True},
+            "`n_attempts`": {"n_attempts": 2},
         }
-        for expected, overrides in cases.items():
-            with self.subTest(override=expected):
+        for expected, update in cases.items():
+            with self.subTest(field=expected):
                 self.remove_job()
-                self.write_harbor_job(self.oracle_config(**overrides))
-                self.assertIn(f"({expected} is set)", " ".join(self.check()))
+                config = self.oracle_command_config().model_copy(update=update)
+                self.assertIn(expected, self.harbor_check(config))
 
-    def test_a_disabled_verifier_is_refused(self) -> None:
-        self.write_harbor_job(self.oracle_config(verifier=VerifierConfig(disable=True)))
-        self.assertIn("must run the verifier", " ".join(self.check()))
-
-    def test_an_agent_environment_variable_is_read(self) -> None:
-        agent = AgentConfig(name="oracle", env={"OPENCODE_API_KEY": "${OPENCODE_API_KEY}"})
-        self.write_harbor_job(self.oracle_config(agents=[agent]))
-        self.assertIn("credential variable OPENCODE_API_KEY", " ".join(self.check()))
+    def test_a_provider_key_of_the_user_agent_is_named(self) -> None:
+        user_agent = UserAgentConfig(
+            env={"OPENCODE_API_KEY": "${OPENCODE_API_KEY}"}, bridge=BridgeConfig(kind="acp")
+        )
+        config = self.oracle_command_config().model_copy(update={"user_agent": user_agent})
+        problems = self.harbor_check(config)
+        self.assertIn("`user_agent`", problems)
+        self.assertIn("credential variable OPENCODE_API_KEY", problems)
 
 
 class MainTest(OracleJobTestCase):
-    def run_main(self) -> tuple[int, str, str]:
-        output = self.root / "runs" / "oracle-example" / "oracle.json"
-        uv_lock = Path(__file__).resolve().parent.parent / "uv.lock"
-        argv = [
-            str(self.job_dir),
-            "--dataset",
-            DATASET.identifier,
-            "--source-repository",
-            DATASET.source_repository,
-            "--release-tag",
-            DATASET.release_tag,
-            "--release-commit",
-            DATASET.release_commit,
-            "--output",
-            str(output),
-            "--uv-lock",
-            str(uv_lock),
-        ]
+    def run_main(self, output: Path | None = None, **arguments: str) -> tuple[int, str, str]:
+        output = output or self.root / "runs" / "oracle-example" / "oracle.json"
+        values = {
+            "--dataset": DATASET.identifier,
+            "--source-repository": DATASET.source_repository,
+            "--release-tag": DATASET.release_tag,
+            "--release-commit": DATASET.release_commit,
+            "--output": str(output),
+            "--uv-lock": str(UV_LOCK),
+            **arguments,
+        }
+        argv = [str(self.job_dir), *(item for pair in values.items() for item in pair)]
         stdout, stderr = io.StringIO(), io.StringIO()
         with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
-            code = main(argv, run=annotated_tag)
+            code = main(argv, run=annotated_tag, resolve_dataset=lambda _: EVIDENCE.registry)
         return code, stdout.getvalue(), stderr.getvalue()
 
     def test_writes_the_record_and_prints_the_flaky_tasks(self) -> None:
         write_job(self.job_dir, TRIALS)
         code, stdout, _ = self.run_main()
         self.assertEqual(code, 0)
-        self.assertIn("Tasks: 4, harness-flaky: 2", stdout)
+        self.assertIn(f"Tasks: {len(TRIALS)}, harness-flaky: 2", stdout)
         self.assertIn("example-org/bravo: reward 0.0", stdout)
         self.assertIn("example-org/delta: no reward, EnvironmentStartTimeoutError", stdout)
+        self.assertIn("Command: harbor run -d", stdout)
         record = json.loads((self.root / "runs" / "oracle-example" / "oracle.json").read_text())
         self.assertEqual(record["schemaVersion"], 1)
         self.assertEqual(len(record["harnessFlakyTasks"]), 2)
@@ -712,6 +733,26 @@ class MainTest(OracleJobTestCase):
         code, _, stderr = self.run_main()
         self.assertEqual(code, 2)
         self.assertIn("not a directory", stderr)
+
+    def test_an_output_that_cannot_be_written_exits_2_and_leaves_no_file(self) -> None:
+        write_job(self.job_dir, TRIALS)
+        output = self.root / "runs" / "oracle.json"
+        output.mkdir(parents=True)
+        code, _, stderr = self.run_main(output)
+        self.assertEqual(code, 2)
+        self.assertIn("cannot write", stderr)
+        self.assertEqual([path.name for path in output.parent.iterdir()], ["oracle.json"])
+
+    def test_a_dataset_without_org_or_version_is_a_usage_error(self) -> None:
+        for identifier in ("example-tasks@1.2.0", "example-org/example-tasks"):
+            with self.subTest(identifier=identifier):
+                argv = [str(self.job_dir), "--dataset", identifier, "--source-repository", "r"]
+                argv += ["--release-tag", "t", "--release-commit", "c", "--output", "o.json"]
+                stderr = io.StringIO()
+                with contextlib.redirect_stderr(stderr), self.assertRaises(SystemExit) as exit:
+                    main(argv, run=annotated_tag, resolve_dataset=lambda _: EVIDENCE.registry)
+                self.assertEqual(exit.exception.code, 2)
+                self.assertIn("org/name@version", stderr.getvalue())
 
 
 if __name__ == "__main__":
