@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Records the demo of the interactive path with asciinema, and refuses to keep a recording that
-# holds the provider credential. Run it from a Linux or macOS terminal (WSL on Windows) that is at
+# holds the provider credential. Run it from a Linux or macOS terminal (WSL2 on Windows) that is at
 # least 100x32, with the provider credential exported and nothing else to type in the shell.
 #
 # usage: bash packages/coding-agent/demo/record.sh [<provider> <model-id>]

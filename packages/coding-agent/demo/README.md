@@ -31,9 +31,9 @@ CI has them.
   This differs from [ADR 0006 §5](../../../docs/adr/0006-implementation-order-and-mvp-completion-checklist.md),
   which makes Google the daily driver and the provider "the demo" runs on, for cost. §6 item 6 asks
   only for "a live provider", and CDA-87 for "the provider and model used" to be recorded, so
-  neither is broken. The choice follows the key that the person running the demo had, and ADR 0007
-  says nothing about demos: it is not a reason, only the reason this provider is already
-  conformant. Run it again on Google if its free tier matters, the script is the same.
+  neither is broken. ADR 0007 chose this provider for the evaluation, not for demos. The demo uses
+  it only because the person who ran it had its key. To spend nothing, run the demo again on Google
+  with the same script.
 - This repository's dependencies: `bun install` at the repository root.
 
 ## The run
@@ -45,7 +45,7 @@ run.
 | --- | --- |
 | Provider and model | `opencode`, `deepseek-v4.1-flash` (the defaults of `record.sh`) |
 | Approval Policy | `ask`. The interactive path takes no other |
-| Session Limits | `default`: 30 Model Turns, 100 Tool Calls, 600,000 ms, 5,000 ms cancellation grace |
+| Session Limits | `default`: 30 Model Turns, 100 Tool Calls, 600,000 ms, 5,000 ms Cancellation Grace Period |
 | Verification command | `bun test`, set by `record.sh` through `CODING_AGENT_VERIFICATION_COMMAND` |
 | Repository state | the named task's repository, as a git repository with one commit, made by `prepare-repo.sh` |
 | Coding Task | the whole of [`task.md`](../tests/fixtures/named-task/task.md), unchanged |
@@ -161,23 +161,26 @@ The run and the checks around it exposed two defects of the Full-screen TUI. Bot
 than fixed here, because they change `packages/tui` and not the demo, and neither touches an
 Approval or a Cancellation:
 
-- [CDA-119](https://datn-fit-hcmus.atlassian.net/browse/CDA-119): before the first frame, the
-  terminal's answer to the TUI's kitty keyboard protocol query is echoed as the text `^[[?0u`,
-  because Ink asks before it puts the terminal in raw mode. It shows about 2 s into the recording
-  and the first frame draws over it.
+- [CDA-119](https://datn-fit-hcmus.atlassian.net/browse/CDA-119): the terminal's answer to the
+  TUI's kitty keyboard protocol query is echoed as the text `^[[?0u`, because Ink asks before it
+  puts the terminal in raw mode. The first frame does not erase it: it only writes line breaks for
+  the empty rows. The text stays on the first row of the screen until the Coding Task is drawn
+  there, which is from 2.04 s to 32.63 s in the recording, about 30 s. Replaying the recording
+  through `@xterm/headless` shows it.
 - [CDA-120](https://datn-fit-hcmus.atlassian.net/browse/CDA-120): on Windows Terminal with WSL2
   the mouse wheel moves the Prompt cursor instead of scrolling the transcript, because the terminal
   sends each wheel step as an arrow key. PgUp and PgDn scroll. Selecting text and copying it works.
   This is the check that PR #65 left to the demo, together with copying and Shift+Enter, which
-  both worked.
+  both worked on that terminal. Shift+Enter is not shown to work elsewhere: a pseudo-terminal run
+  on macOS suggests that when the terminal answers the query at once, Ink never turns the protocol
+  on and Shift+Enter submits the Prompt. That is a lead for CDA-119, not a finding of this demo.
 
 ## When the run shows a defect
 
 The ticket asks for each defect that the run exposes to be fixed here, or filed with a link from
-CDA-87. `tests/demo-recording.test.ts` rejects a recording whose transcript shows `Internal error:`,
-`could not be shown`, `The decision was not applied`, `The event stream failed`,
-`Cancel was not dispatched` or `CANCELLATION_TIMEOUT`, which are the Coding Agent saying that
-something went wrong. Fix the defect or file it, then record again. A recording of a run that
+CDA-87. `tests/demo-recording.test.ts` rejects a recording whose transcript shows one of the
+messages in `DEFECT_SIGNS` of `tests/support/demo-recording.ts`, which are the Coding Agent saying
+that something went wrong. Fix the defect or file it, then record again. A recording of a run that
 hid a defect is worse than none.
 
 Two things to look at on the first rehearsal, because the unit tests cannot reach them: whether the

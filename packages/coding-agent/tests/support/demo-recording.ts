@@ -36,7 +36,8 @@ const CREDENTIAL_SHAPES: readonly { readonly name: string; readonly pattern: Reg
   { name: "an `sk-` API key", pattern: /\bsk-[0-9A-Za-z_-]{20,}/ },
   { name: "an `xai-` API key", pattern: /\bxai-[0-9A-Za-z_-]{20,}/ },
   { name: "a bearer token", pattern: /\bBearer\s+[0-9A-Za-z._~+/-]{20,}/i },
-  { name: "an API key header", pattern: /x-goog-api-key\s*:\s*\S{8,}/i },
+  { name: "an API key header", pattern: /\bx-(?:goog-)?api-key\s*:\s*\S{8,}/i },
+  { name: "an Authorization header", pattern: /\bAuthorization\s*:\s*(?!Bearer\b)\S{16,}/i },
   ...PROVIDER_CREDENTIAL_ENV_VARS.map((variable) => ({
     name: `a value for ${variable}`,
     pattern: new RegExp(`${variable}\\s*[=:]\\s*(?!\\[redacted\\])\\S{8,}`),
@@ -123,8 +124,13 @@ export function checkRecording(recording: string): string[] {
   }
 
   const screen = visibleText(output);
+  // The TUI breaks a long line at the width of the terminal, which can cut a key in two, so the
+  // shapes are also tried on the text with its line breaks taken out. That glues the last word of
+  // the row before onto the key, so the word boundaries of the shapes are dropped for that try.
+  const unwrapped = screen.replaceAll("\n", "");
   for (const { name, pattern } of CREDENTIAL_SHAPES) {
-    if (pattern.test(recording) || pattern.test(screen)) {
+    const unbounded = new RegExp(pattern.source.replaceAll(String.raw`\b`, ""), pattern.flags);
+    if (pattern.test(recording) || pattern.test(screen) || unbounded.test(unwrapped)) {
       problems.push(`the recording holds ${name}`);
     }
   }

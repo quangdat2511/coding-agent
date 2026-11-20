@@ -125,6 +125,20 @@ describe("checking a recording of the interactive path", () => {
     expect(checkRecording(recordingOf(run))).toContain(`the recording holds ${name}`);
   });
 
+  it.each([
+    ["an API key header", `x-api-key: ${"a".repeat(30)}`],
+    ["an Authorization header", `Authorization: ${"a".repeat(30)}`],
+  ])("rejects a recording that holds %s", (name, secret) => {
+    const run = [...GOOD_RUN, `${secret}\r\n`];
+    expect(checkRecording(recordingOf(run))).toContain(`the recording holds ${name}`);
+  });
+
+  it("rejects a key that the TUI broke across two rows", () => {
+    const key = `sk-${"a".repeat(30)}`;
+    const run = [...GOOD_RUN, `${key.slice(0, 16)}\r\n${key.slice(16)}\r\n`];
+    expect(checkRecording(recordingOf(run))).toContain("the recording holds an `sk-` API key");
+  });
+
   it("accepts the redacted form of a credential", () => {
     const run = [...GOOD_RUN, "GOOGLE_API_KEY=[redacted]\r\n"];
     expect(checkRecording(recordingOf(run))).toEqual([]);
