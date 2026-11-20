@@ -1,7 +1,7 @@
 import { PROVIDER_CREDENTIAL_ENV_VARS } from "@coding-agent/ai";
 
 // What the committed recording of the interactive path has to show (ADR 0006 §6 item 6): the
-// output streaming, one Approval decided in the overlay, and one cancellation that settles the
+// output streaming, one Approval decided in the overlay, and one Cancellation that settles the
 // session with its workspace report, with no credential anywhere in the file. The recording is a
 // terminal capture in the asciicast format of asciinema, version 2 or 3. Both put one JSON header
 // on the first line and one `[time, code, data]` event on each line after it.
@@ -13,8 +13,9 @@ import { PROVIDER_CREDENTIAL_ENV_VARS } from "@coding-agent/ai";
 // default. Anything else could carry a credential.
 const RECORDED_ENVIRONMENT = new Set(["SHELL", "TERM"]);
 
-const MIN_COLUMNS = 80;
-const MIN_ROWS = 24;
+// The size that demo/README.md and demo/record.sh ask for, so that CI refuses what the docs forbid.
+const MIN_COLUMNS = 100;
+const MIN_ROWS = 32;
 
 // Escape sequences that move the cursor or style text, which the screen redraws are made of: CSI,
 // OSC (ended by BEL or ST), and the two-character forms such as character set selection.
@@ -33,6 +34,7 @@ const ESCAPE_SEQUENCES = new RegExp(
 const CREDENTIAL_SHAPES: readonly { readonly name: string; readonly pattern: RegExp }[] = [
   { name: "a Google API key", pattern: /AIza[0-9A-Za-z_-]{30,}/ },
   { name: "an `sk-` API key", pattern: /\bsk-[0-9A-Za-z_-]{20,}/ },
+  { name: "an `xai-` API key", pattern: /\bxai-[0-9A-Za-z_-]{20,}/ },
   { name: "a bearer token", pattern: /\bBearer\s+[0-9A-Za-z._~+/-]{20,}/i },
   { name: "an API key header", pattern: /x-goog-api-key\s*:\s*\S{8,}/i },
   ...PROVIDER_CREDENTIAL_ENV_VARS.map((variable) => ({
@@ -120,15 +122,20 @@ export function checkRecording(recording: string): string[] {
     if (event[1] === "o") output += event[2];
   }
 
+  const screen = visibleText(output);
   for (const { name, pattern } of CREDENTIAL_SHAPES) {
-    if (pattern.test(recording) || pattern.test(visibleText(output))) {
+    if (pattern.test(recording) || pattern.test(screen)) {
       problems.push(`the recording holds ${name}`);
     }
   }
 
-  const screen = visibleText(output);
   for (const sign of DEFECT_SIGNS) {
     if (screen.includes(sign)) problems.push(`the transcript shows "${sign}"`);
+  }
+  // The demo allows one Approval and cancels at the next. A denial means the person pressed the
+  // wrong key, and the run is not the one the demo script describes.
+  if (/\[denied\b|APPROVAL_DENIED/.test(screen)) {
+    problems.push("the transcript shows a denied Approval; the demo allows one and cancels");
   }
 
   // Each step has to come after the one before it, so a recording that only cuts together the
@@ -142,10 +149,12 @@ export function checkRecording(recording: string): string[] {
     }
     position += found.index + found[0].length;
   };
-  step(/assistant \[streaming\]/, "the assistant streaming");
+  // `assistant [streaming]` is the row the TUI draws for the model's answer while it arrives.
+  step(/assistant \[streaming\]/, "the model's answer streaming");
   step(/\by allow\b/, "the Approval overlay with its allow key");
-  step(/\[(?:executing|succeeded)\]/, "the allowed Tool Call running");
-  step(/cancellation requested/, "the cancellation being requested");
+  // Any Tool Call after the overlay: a wrapped row could hide the tool's name, so it is not named.
+  step(/\[(?:executing|succeeded)\]/, "a Tool Call running after the overlay");
+  step(/cancellation requested/, "the Cancellation being requested");
   step(/session \[cancelled\]/, "the cancelled session settling");
   // The demo allows a mutating Tool Call before it cancels, so the session must say so.
   step(

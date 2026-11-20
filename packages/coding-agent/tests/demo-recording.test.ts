@@ -36,7 +36,7 @@ const GOOD_RUN = [
 ];
 
 describe("checking a recording of the interactive path", () => {
-  it("accepts a run with an allowed Approval and a cancellation that settles", () => {
+  it("accepts a run with an allowed Approval and a Cancellation that settles", () => {
     expect(checkRecording(recordingOf(GOOD_RUN))).toEqual([]);
   });
 
@@ -56,10 +56,10 @@ describe("checking a recording of the interactive path", () => {
   });
 
   it.each([
-    ["the assistant streaming", "assistant [streaming]", /assistant streaming/],
+    ["the answer streaming", "assistant [streaming]", /answer streaming/],
     ["the overlay", "y allow", /Approval overlay/],
-    ["the allowed call", "[executing]", /allowed Tool Call/],
-    ["the cancellation request", "cancellation requested", /cancellation being requested/],
+    ["a Tool Call after the overlay", "[executing]", /Tool Call running/],
+    ["the cancellation request", "cancellation requested", /Cancellation being requested/],
     ["the cancelled session", "session [cancelled]", /cancelled session settling/],
     ["the workspace report", "workspace changed, partial changes possible", /workspace changed/],
   ])("rejects a run without %s", (_name, text, problem) => {
@@ -100,14 +100,24 @@ describe("checking a recording of the interactive path", () => {
     );
   });
 
-  it("rejects a terminal too small to show the overlay", () => {
-    const problems = checkRecording(recordingOf(GOOD_RUN, header({ width: 60, height: 20 })));
-    expect(problems.some((message) => message.startsWith("the terminal was 60x20"))).toBe(true);
+  it("rejects a terminal smaller than the 100x32 the demo script asks for", () => {
+    const problems = checkRecording(recordingOf(GOOD_RUN, header({ width: 80, height: 24 })));
+    expect(problems.some((message) => message.startsWith("the terminal was 80x24"))).toBe(true);
+    expect(checkRecording(recordingOf(GOOD_RUN, header({ width: 100, height: 32 })))).toEqual([]);
+  });
+
+  it("rejects a run in which an Approval was denied", () => {
+    const run = [...GOOD_RUN, "bash git log [denied, APPROVAL_DENIED]\r\n"];
+    expect(checkRecording(recordingOf(run))).toContain(
+      "the transcript shows a denied Approval; the demo allows one and cancels",
+    );
   });
 
   it.each([
     ["a Google API key", `AIza${"a".repeat(35)}`],
     ["an `sk-` API key", `sk-${"a".repeat(30)}`],
+    ["an `xai-` API key", `xai-${"a".repeat(30)}`],
+    ["a value for OPENCODE_API_KEY", "OPENCODE_API_KEY=abcdefgh1234"],
     ["a bearer token", `Authorization: Bearer ${"a".repeat(30)}`],
     ["a value for GOOGLE_API_KEY", "GOOGLE_API_KEY=abcdefgh1234"],
   ])("rejects a recording that holds %s", (name, secret) => {
@@ -129,7 +139,7 @@ describe("checking a recording of the interactive path", () => {
 });
 
 describe("the committed recording of the interactive path", () => {
-  it("shows streaming, an Approval decided in the overlay and a cancellation that settles", async () => {
+  it("shows streaming, an Approval decided in the overlay and a Cancellation that settles", async () => {
     const file = Bun.file(RECORDING);
     if (!(await file.exists())) {
       throw new Error(

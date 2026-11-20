@@ -1,4 +1,4 @@
-# Demo: the interactive path with an Approval and a cancellation
+# Demo: the interactive path with an Approval and a Cancellation
 
 This is the demo of [ADR 0006](../../../docs/adr/0006-implementation-order-and-mvp-completion-checklist.md)
 §6 item 6 (Join 3, CDA-87): the named fixture task runs through the Full-screen TUI against a live
@@ -8,7 +8,7 @@ overlay and then cancels, and the cancelled session reports what it left in the 
 `interactive-path.cast` is the recording of one such run. "The demo works" is not a checkable
 statement, so [`tests/demo-recording.test.ts`](../tests/demo-recording.test.ts) checks the
 recording instead: it shows the output streaming, an Approval decided in the overlay, the
-cancellation requested and the session settling `cancelled` with its workspace report, and it holds
+Cancellation requested and the session settling `cancelled` with its workspace report, and it holds
 no credential.
 
 A person runs this demo. It needs a live provider key and a real terminal, and neither a test nor
@@ -20,12 +20,20 @@ CI has them.
   Windows, and asciinema has no Windows build.
 - A terminal of at least 100x32 that supports bracketed paste, which most do. The Prompt takes a
   pasted Coding Task as one piece, new lines included.
-- [Bun](https://bun.sh) 1.3 or later, `git` and [asciinema](https://asciinema.org) 2 or 3.
+- [Bun](https://bun.sh) 1.3 or later, `git` 2.28 or later (`prepare-repo.sh` uses `git init -b`) and
+  [asciinema](https://asciinema.org) 2 or 3.
 - A key for the provider, in the environment of the shell that runs the demo. The committed
   recording uses `opencode` with `deepseek-v4.1-flash`, the evaluation provider and model of
   [ADR 0007](../../../docs/adr/0007-evaluation-provider-and-model.md), so it needs
   `OPENCODE_API_KEY`. Another provider works too: pass it and its model to `record.sh`, and report
   them on the ticket.
+
+  This differs from [ADR 0006 §5](../../../docs/adr/0006-implementation-order-and-mvp-completion-checklist.md),
+  which makes Google the daily driver and the provider "the demo" runs on, for cost. §6 item 6 asks
+  only for "a live provider", and CDA-87 for "the provider and model used" to be recorded, so
+  neither is broken. The choice follows the key that the person running the demo had, and ADR 0007
+  says nothing about demos: it is not a reason, only the reason this provider is already
+  conformant. Run it again on Google if its free tier matters, the script is the same.
 - This repository's dependencies: `bun install` at the repository root.
 
 ## The run
@@ -89,7 +97,7 @@ recording:
 | # | You do | You should see |
 | --- | --- | --- |
 | 1 | Paste the content of `packages/coding-agent/tests/fixtures/named-task/task.md` into the Prompt, then press Enter. Open the file in another terminal to copy it, never in the one being recorded | The task appears in the transcript after `> `, and the session starts |
-| 2 | Wait | `assistant [streaming]`: the answer streams in. The model first asks for a `bash` call that looks around the repository: `ls -la && cat package.json …; cat AGENTS.md` in the committed run, `bun test` in the recorded Google run of the named task |
+| 2 | Wait | `assistant [streaming]`: the answer streams in. The model first asks for a `bash` call that looks around the repository: `ls -la && cat package.json …; cat AGENTS.md` in the committed run, and `bun test` in the Google responses that the named-task test replays ([fixture README](../tests/fixtures/named-task/README.md#recorded-responses)) |
 | 3 | Wait until the Approval overlay is drawn over the bottom of the transcript, and the footer reads `Esc/Ctrl+C cancel · y allow · n deny`. **Allow it:** press `y` | The overlay closes and the call goes from `[awaiting_approval]` to `[executing]` and `[succeeded]`, with its output under it. A quick command passes `[executing]` too fast to see |
 | 4 | Wait | The model reads `src/slugify.ts` (a `read` needs no Approval), states its plan, then asks to `write` `src/slugify.test.ts`: the **second overlay** |
 | 5 | **Cancel it:** press `Esc` while the second overlay is open | The overlay closes, the write never runs (`write src/slugify.test.ts [skipped, CANCELLED]`), `cancellation requested` appears, and the transcript ends with `session [cancelled]` and, under it, `workspace changed, partial changes possible` |
@@ -149,11 +157,19 @@ expected outcome: the report promises no more than a possible change.
 | Outcome | `session [cancelled]`, `workspace changed, partial changes possible` |
 | Demo repository afterwards | `git status --short` empty: the cancelled write never ran |
 
-The run exposed one defect, which is filed rather than fixed here because it changes only what the
-first frame shows: before the first frame, the terminal's answer to the TUI's kitty keyboard
-protocol query is echoed as the text `^[[?0u`, because Ink asks before it puts the terminal in raw
-mode. It shows about 2 s into the recording and the first frame draws over it.
-<!-- TODO(CDA-87): link the ticket of this defect once it is filed. -->
+The run and the checks around it exposed two defects of the Full-screen TUI. Both are filed rather
+than fixed here, because they change `packages/tui` and not the demo, and neither touches an
+Approval or a Cancellation:
+
+- [CDA-119](https://datn-fit-hcmus.atlassian.net/browse/CDA-119): before the first frame, the
+  terminal's answer to the TUI's kitty keyboard protocol query is echoed as the text `^[[?0u`,
+  because Ink asks before it puts the terminal in raw mode. It shows about 2 s into the recording
+  and the first frame draws over it.
+- [CDA-120](https://datn-fit-hcmus.atlassian.net/browse/CDA-120): on Windows Terminal with WSL2
+  the mouse wheel moves the Prompt cursor instead of scrolling the transcript, because the terminal
+  sends each wheel step as an arrow key. PgUp and PgDn scroll. Selecting text and copying it works.
+  This is the check that PR #65 left to the demo, together with copying and Shift+Enter, which
+  both worked.
 
 ## When the run shows a defect
 

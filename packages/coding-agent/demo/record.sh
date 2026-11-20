@@ -18,20 +18,26 @@ provider=${1:-opencode}
 model=${2:-deepseek-v4.1-flash}
 recording="$here/interactive-path.cast"
 
-# The variables of PROVIDER_CREDENTIAL_ENV_VARS_BY_PROVIDER in packages/ai/src/credentials.ts, in
-# lookup order.
-case "$provider" in
-  anthropic) variables=(ANTHROPIC_API_KEY) ;;
-  google) variables=(GOOGLE_API_KEY GEMINI_API_KEY) ;;
-  openai) variables=(OPENAI_API_KEY) ;;
-  opencode) variables=(OPENCODE_API_KEY) ;;
-  openrouter) variables=(OPENROUTER_API_KEY) ;;
-  xai) variables=(XAI_API_KEY) ;;
-  *)
-    echo "record: unknown provider \"$provider\"" >&2
+for tool in asciinema bun git; do
+  if ! command -v "$tool" >/dev/null 2>&1; then
+    echo "record: $tool is not installed" >&2
     exit 2
-    ;;
-esac
+  fi
+done
+
+# The variables the provider's credential is read from, in lookup order, taken from
+# PROVIDER_CREDENTIAL_ENV_VARS_BY_PROVIDER in packages/ai/src/credentials.ts so that a new provider
+# needs no change here. The provider name goes in through the environment, not into the program.
+if ! names=$(cd "$root" && PROVIDER="$provider" bun -e '
+  import { PROVIDER_CREDENTIAL_ENV_VARS_BY_PROVIDER as byProvider } from "./packages/ai/src/credentials.ts";
+  const names = (byProvider as Record<string, readonly string[]>)[process.env.PROVIDER ?? ""];
+  if (names === undefined) process.exit(3);
+  console.log(names.join(" "));
+'); then
+  echo "record: unknown provider \"$provider\"; the ones with a credential are in packages/ai/src/credentials.ts" >&2
+  exit 2
+fi
+read -ra variables <<<"$names"
 
 # The first variable that is set and not blank, as the Coding Agent reads it. Its value is never
 # printed.
@@ -49,13 +55,6 @@ if [ -z "$credential" ]; then
   echo "record: export ${variables[*]} before recording (the live provider is part of the demo)" >&2
   exit 2
 fi
-
-for tool in asciinema bun git; do
-  if ! command -v "$tool" >/dev/null 2>&1; then
-    echo "record: $tool is not installed" >&2
-    exit 2
-  fi
-done
 
 if [ "$(tput cols)" -lt 100 ] || [ "$(tput lines)" -lt 32 ]; then
   echo "record: resize the terminal to at least 100x32 (it is $(tput cols)x$(tput lines))" >&2
@@ -75,13 +74,19 @@ export CODING_AGENT_VERIFICATION_COMMAND="bun test"
 
 # Recorded to a file that is not the final one, so a recording that holds the credential is never
 # left where `git add` would take it.
-draft=$(mktemp "${TMPDIR:-/tmp}/interactive-path.XXXXXX.cast")
+# The X's are the end of the template, the only place BSD mktemp (macOS) replaces them.
+draft=$(mktemp "${TMPDIR:-/tmp}/interactive-path.XXXXXX")
 trap 'rm -f "$draft"' EXIT
+
+# asciinema runs --command through the shell, so each word is quoted for it: a path with a space
+# stays one word.
+command=$(printf '%q ' bun --no-env-file --config=/dev/null "$root/packages/coding-agent/src/cli.ts" \
+  --provider "$provider" --model "$model" --repo-root "$repo")
 
 echo "record: recording; follow packages/coding-agent/demo/README.md from step 3." >&2
 asciinema rec --overwrite \
-  --title "Coding Agent: the interactive path with an Approval and a cancellation" \
-  --command "bun --no-env-file --config=/dev/null $root/packages/coding-agent/src/cli.ts --provider $provider --model $model --repo-root $repo" \
+  --title "Coding Agent: the interactive path with an Approval and a Cancellation" \
+  --command "$command" \
   "$draft"
 
 # The exact value of the key, which the shapes in tests/support/demo-recording.ts cannot know.
