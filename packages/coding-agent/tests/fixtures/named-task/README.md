@@ -15,6 +15,9 @@ responses answer this exact task and these exact files. A change to either one c
 checks assert, and it makes the recordings stale. Change them only on purpose, in a change of their
 own, and record the provider responses again.
 
+The TUI demo has its own script, [`demo/README.md`](../../../demo/README.md), and it starts from
+this repository the same way: `demo/prepare-repo.sh` copies `repo/` into a new git repository.
+
 ## Rules
 
 - A test copies `repo/` into a temporary directory and runs the Coding Agent on the copy. Nothing
