@@ -14,6 +14,7 @@ module imports nothing from Harbor, so its tests need no Docker.
 """
 
 import re
+import shlex
 import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -50,6 +51,7 @@ LOGS_DIR = PurePosixPath("/tmp/isolation-logs")
 REFUSAL = re.compile(rf"ancestor process \d+ \(sh\) holds {KEY_VARIABLE}")
 
 AGENT_TIMEOUT_SECONDS = 300
+REACH_TIMEOUT_SECONDS = 30
 
 
 class IsolationRunError(RuntimeError):
@@ -192,6 +194,31 @@ async def _run_launcher_that_keeps_its_shell(
     )
 
 
+async def _check_server_reachable(
+    container: Container, setup: IsolationSetup, server: FakeModelServer
+) -> None:
+    """Fails with IsolationRunError unless the container can open a connection to the server.
+
+    Without this, a container that cannot reach the host would look like an artifact that ignores
+    ANTHROPIC_BASE_URL: the server gets no Tool Result either way. The connection sends no request,
+    so the server does not count it. It uses bash, which install_artifact already requires.
+    """
+    target = f"/dev/tcp/{setup.container_host}/{server.port}"
+    try:
+        reach = await container.exec(
+            "bash -c " + shlex.quote(f"exec 3<>{target}"), timeout_sec=REACH_TIMEOUT_SECONDS
+        )
+        reached = reach.return_code == 0
+    except RuntimeError:  # Harbor raises RuntimeError when timeout_sec runs out
+        reached = False
+    if not reached:
+        raise IsolationRunError(
+            f"the task container cannot reach the fake model server at "
+            f"{setup.container_host}:{server.port}; on a Linux host, set --container-host and "
+            "--server-host"
+        )
+
+
 async def _run_agent(
     container: Container, setup: IsolationSetup, log: Callable[[str], None]
 ) -> tuple[list[Probe], ServerObservations]:
@@ -199,6 +226,7 @@ async def _run_agent(
     server = FakeModelServer(turns=turns, expected_key=setup.key, host=setup.server_host)
     server.start()
     try:
+        await _check_server_reachable(container, setup, server)
         result = await container.exec(
             _agent_command(setup),
             env=_agent_environment(setup, server),

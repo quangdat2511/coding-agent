@@ -5,6 +5,7 @@ ANTHROPIC_BASE_URL and takes its Tool Calls from the scripted turns (ADR 0001 §
 """
 
 import json
+import socket
 import unittest
 import urllib.error
 import urllib.request
@@ -100,6 +101,14 @@ class ObservationsTest(unittest.TestCase):
         post(self.server)
 
         self.assertEqual(self.server.request_count, 1)
+
+    def test_a_connection_that_sends_no_request_is_not_counted(self) -> None:
+        # The test opens one connection from the container to check that the server is
+        # reachable, before the agent runs. That must not count as a request of the agent.
+        with socket.create_connection(("127.0.0.1", self.server.port)):
+            pass
+
+        self.assertEqual(self.server.request_count, 0)
 
     def test_the_key_matches_only_when_every_request_carried_it(self) -> None:
         post(self.server)

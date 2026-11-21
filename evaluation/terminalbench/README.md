@@ -427,7 +427,9 @@ line goes to standard error. `--output` writes the same JSON to a file.
 - The container reaches the host as `host.docker.internal`, which Docker Desktop provides. On a
   Linux host that name does not resolve unless the container is given it. This has not been run
   there. `--container-host` and `--server-host` set the name that the container uses and the
-  address that the server binds.
+  address that the server binds. Before the agent runs, the container opens one connection to
+  the server. If it cannot, the test stops with exit 2 and says so, because a server that gets no
+  Tool Result would otherwise look like an artifact that ignores `ANTHROPIC_BASE_URL`.
 - If `ptrace_scope` is 1 or more, the test fails with `MEM_NOT_DEMONSTRABLE`. Docker Desktop's
   kernel does not load Yama, so the test can pass there.
 - It installs nothing in the task container. A container without `bash`, `sha256sum` or GNU `dd`

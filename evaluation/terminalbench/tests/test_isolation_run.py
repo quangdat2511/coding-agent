@@ -78,6 +78,9 @@ class ScriptedContainer:
     )
     # False: the agent never contacts the server, as an artifact that ignores ANTHROPIC_BASE_URL.
     plays_agent: bool = True
+    # False: the container cannot open a connection to the server on the host. "timeout":
+    # Harbor's exec raises RuntimeError when timeout_sec runs out.
+    server_reachable: bool | str = True
     control_output: str = CONTROL_OUTPUT
     calls: list[Call] = field(default_factory=list)
     uploads: dict[str, bytes] = field(default_factory=dict)
@@ -104,6 +107,10 @@ class ScriptedContainer:
             return ExecOutcome(stdout="agent\n")
         if command.startswith("cat /proc/sys/kernel/yama/ptrace_scope"):
             return ExecOutcome(return_code=1)  # Yama is not loaded, as in Docker Desktop's kernel
+        if "/dev/tcp/" in command:
+            if self.server_reachable == "timeout":
+                raise RuntimeError(f"Command timed out after {timeout_sec} seconds")
+            return ExecOutcome(return_code=0 if self.server_reachable else 1)
         if command.startswith(f"exec {INSTALLED_EXECUTABLE} run"):
             if self.plays_agent:
                 await asyncio.to_thread(self._play_the_agent, env or {})
@@ -220,6 +227,23 @@ class RunTest(unittest.TestCase):
         self.assertIn("--model is not known", lines[0])
         self.assertIn("[redacted]", lines[0])
         self.assertNotIn(KEY, lines[0])
+
+    def test_a_container_that_cannot_reach_the_server_stops_the_run(self) -> None:
+        # Then nothing is known about the artifact: the test could not run, which is exit 2,
+        # not a failed artifact. Docker Engine on Linux has no host.docker.internal by default.
+        for reachable in (False, "timeout"):
+            with self.subTest(reachable=reachable):
+                container = ScriptedContainer(server_reachable=reachable)
+
+                with self.assertRaisesRegex(IsolationRunError, "cannot reach") as raised:
+                    run(container)
+
+                self.assertIn("127.0.0.1", str(raised.exception))
+                self.assertIn("--container-host", str(raised.exception))
+                self.assertFalse(
+                    [c for c in container.calls if c.command.startswith("exec ")],
+                    "the agent must not run when the server cannot be reached",
+                )
 
     def test_an_agent_that_never_reaches_the_server_fails_and_names_the_base_url(self) -> None:
         result = run(ScriptedContainer(plays_agent=False))
