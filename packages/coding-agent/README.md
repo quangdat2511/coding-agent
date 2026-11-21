@@ -283,8 +283,12 @@ ADR 0005 §3 has no flag for that. The injection uses Bun, not Coding Agent:
 - The preloaded module replaces `globalThis.fetch`, which every provider adapter sends through. It
   answers each request with the next file named in `CODING_AGENT_TEST_REPLAY_FIXTURES`, a
   comma-separated list of paths below `tests/fixtures/`.
-- Nothing in `src/` knows about fixtures. The shipped executable has no test hook, no base URL
-  setting and no variable that can redirect a credential.
+- Nothing in `src/` knows about fixtures. The shipped executable has no test hook and no base URL
+  setting. One variable can still redirect a credential: the `anthropic` provider sets no base
+  URL, so its SDK sends the key to the server that `ANTHROPIC_BASE_URL` names when the variable is
+  set. The other providers set their base URL and ignore such a variable. Only the process that
+  starts Coding Agent sets its environment, so a Tool Call cannot redirect the key. The credential
+  isolation test in `evaluation/terminalbench` uses this variable to reach its fake model server.
 - The end-to-end test also preloads `tests/support/fixed-clock-and-ids.ts`. It replaces
   `src/clock-and-ids.ts`, which supplies the session's clock and identifiers and the time in
   `result.json`, with a clock that never moves and identifiers that count from 1. Two replays then
