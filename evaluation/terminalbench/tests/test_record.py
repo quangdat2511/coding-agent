@@ -636,7 +636,7 @@ class DefaultRecordTest(RecordTestCase):
                 "nConcurrentTrials": 8,
                 "maxRetries": 0,
                 "taskFilter": [],
-                "jobsDir": self.jobs.as_posix(),
+                "jobsDir": str(self.jobs),
                 "jobName": "recorded-job",
             },
         )
