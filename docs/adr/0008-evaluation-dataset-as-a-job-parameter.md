@@ -151,6 +151,8 @@ own file (§1) without changing §1 to §3, and only a new default pin changes �
 | Per-task agent timeout | 28,800 s |
 | GPU tasks | `fp8-rmsnorm-gemm`, `jax-speedrun-gpu`, `math-eval-grader`, one H100 each |
 | Smoke tasks | `bun-sourcemap-leak`, `music-harmony`, `photonic-waveguide-routing` |
+| Tasks with declared MCP servers | `medical-claims-processing`, one MCP server |
+| Tasks with a declared skills directory | `cumulative-layout-shift` |
 | Tasks with whole `/app` verifier artifacts | `coq-block-bound`, `jax-speedrun-gpu`, `ks-solver-cpp`, `risk-scorer-replay`, `vf2-speedup-networkx`, `wal-recovery-ordering` |
 
 The three smoke tasks are CPU-only, single-container, small-resource tasks (2 CPUs, 4 GiB of memory,
@@ -161,6 +163,12 @@ live in this table, not in ADR 0005 §7.
 
 The dataset at 4.0.0 remains identifiable by its own release commit, `452bf30`, which ADR 0005's
 Context records. Its task list is the same as 4.1.0's; its verifiers are the ones 4.1.0 replaced.
+
+On 2026-11-21, [CDA-93](https://datn-fit-hcmus.atlassian.net/browse/CDA-93) added the MCP-server and
+skills-directory rows to this table. They name the tasks whose declared MCP servers or skills
+directory the adapter ignores, which the recorded job's report must name (ADR 0005 §5 and §8); the
+rows change no other data. The record tooling reads these rows, so a dataset whose record has no
+such row reports that no task declared one.
 
 ### 5. What changes in the records
 
@@ -197,6 +205,7 @@ the `v4.1.0` tag, which resolves to `4070d6cef56a7d20cb5dc98d5e10ada88a6b9440`.
 | At the default pin every task is single-step, declares a separate verifier environment and a 28,800 s agent timeout, and has a Dockerfile; eleven tasks also have a Compose file | every `task.toml` and `environment/` under [`tasks/`](https://github.com/harbor-framework/terminal-bench/tree/v4.1.0/tasks), parsed by script |
 | The GPU tasks are `fp8-rmsnorm-gemm`, `jax-speedrun-gpu` and `math-eval-grader`, at one H100 each | their `task.toml` under the same tag |
 | The three smoke tasks exist, are CPU-only, single-container, and use the standard verifier and timeout | their `task.toml` under the same tag |
+| The tasks that declare an MCP server or a skills directory are `medical-claims-processing` (one MCP server) and `cumulative-layout-shift` (a skills directory); no other task declares either | every `task.toml` under [`tasks/`](https://github.com/harbor-framework/terminal-bench/tree/v4.1.0/tasks), parsed by script |
 | The tasks with whole `/app` verifier artifacts are the same at 4.1.0 as at 4.0.0 | their `task.toml` `artifacts` under [`tasks/`](https://github.com/harbor-framework/terminal-bench/tree/v4.1.0/tasks), parsed by script |
 
 **Not executed.** No Harbor job has run, so the registry resolution, the job configuration and the

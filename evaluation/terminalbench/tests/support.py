@@ -8,6 +8,7 @@ to one of those writers changes the fixture in the same pull request.
 
 import hashlib
 import json
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -46,6 +47,17 @@ FINISH_REASONS = {
     "tool_call": "STOP",
     "error": "MODEL_FAILURE",
 }
+
+
+def dataset_record_markdown(rows: Mapping[str, str]) -> str:
+    """A committed dataset record in the two-column table shape of ADR 0008 §4.
+
+    ADR 0008 §1 records each dataset's data in a Markdown file with the rows of §4's table, so the
+    tests write one by hand. The tests build their own row values; this writes the table.
+    """
+    lines = ["# Example dataset record", "", "| Item | Value |", "| --- | --- |"]
+    lines.extend(f"| {label} | {value} |" for label, value in rows.items())
+    return "\n".join(lines) + "\n"
 
 
 def manifest_data(**overrides: Any) -> dict[str, Any]:
