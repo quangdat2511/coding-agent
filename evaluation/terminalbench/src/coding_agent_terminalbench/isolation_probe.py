@@ -1,8 +1,9 @@
 """The probe that Tool Calls run in a task container (ADR 0001 §8, ADR 0005 §7 item 2).
 
 The test uploads the probe as a file and a Tool Call runs `sh <file>`, so the disposable key never
-appears in the text of a Tool Call, in the command line of a process, or in the model's script. The
-probe is POSIX `sh` and coreutils only: a task image has no Python or Bun that the test could rely
+appears in the text of a Tool Call or in the model's script. Only the probe's own short-lived `grep`
+processes hold it in their command line, and the probe reads the command lines of its ancestors
+only, never of its children. The probe is POSIX `sh` and coreutils only: a task image has no Python or Bun that the test could rely
 on. It prints one JSON line per path with the outcome and whether it found the key, and never the
 key itself. It imports nothing from Harbor.
 """

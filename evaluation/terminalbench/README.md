@@ -384,11 +384,12 @@ the container, so no process in the container holds the key that arrives in its 
 The test depends on this variable. If the artifact stops honouring it, the server gets no request
 and the test fails with `TOOL_RESULTS_MISSING` and a message that names the variable.
 
-The probe is POSIX `sh` and coreutils, uploaded as a file, so the key is in no Tool Call and in no
-command line. It needs GNU `dd` for the memory path, which glibc images have, and it prints one JSON
-line per path with the outcome and whether it found the key, never the key. The test reads these
-lines from the Tool Results that the server received, not from `events.jsonl`, because the agent
-replaces the key with `[redacted]` in its files and a leak would not show there.
+The probe is POSIX `sh` and coreutils, uploaded as a file, so the key is in no Tool Call. Only the
+probe's own short-lived `grep` processes hold it in their command line, and the probe reads the
+command lines of its ancestors only. It needs GNU `dd` for the memory path, which glibc images have,
+and it prints one JSON line per path with the outcome and whether it found the key, never the key.
+The test reads these lines from the Tool Results that the server received, not from `events.jsonl`,
+because the agent replaces the key with `[redacted]` in its files and a leak would not show there.
 
 Each path has a control. The test runs the same probe against a process that holds the key and is
 not hardened, as a child of it, in the same container as the same user. The probe must find the key
@@ -438,8 +439,8 @@ line goes to standard error. `--output` writes the same JSON to a file.
 ### Tests
 
 The unit tests run with the rest of the adapter's tests and need no Docker. The tests of the probe
-run `sh` against `/proc`, so they run only on Linux and are skipped elsewhere. To run them on another
-host, use a Linux container:
+run `sh` against `/proc`, so they run only on Linux and are skipped elsewhere. To run them on
+another host, use a Linux container:
 
 ```sh
 cd evaluation/terminalbench
