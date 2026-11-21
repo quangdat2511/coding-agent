@@ -124,6 +124,29 @@ class ObservationsTest(unittest.TestCase):
         self.assertEqual(observed.tool_results_received, 1)
         self.assertEqual(observed.expected_tool_results, 1)
 
+    def test_the_tool_results_of_earlier_turns_in_the_history_are_counted_too(self) -> None:
+        # The Agent sends the whole history each time, so with two Tool Calls the last request
+        # holds the first Tool Result in an earlier user message and the second in the last one.
+        task = {"role": "user", "content": "task"}
+
+        def asked(tool_use_id: str) -> dict[str, Any]:
+            block = {"type": "tool_use", "id": tool_use_id, "name": "bash", "input": {}}
+            return {"role": "assistant", "content": [block]}
+
+        history = [
+            task,
+            asked("toolu_1"),
+            tool_result("toolu_1", "first"),
+            asked("toolu_2"),
+            tool_result("toolu_2", "second"),
+        ]
+        post(self.server)
+
+        post(self.server, history)
+
+        self.assertEqual(self.server.tool_result_texts(), ["first", "second"])
+        self.assertEqual(self.server.observations(expected_tool_results=2).tool_results_received, 2)
+
     def test_a_request_after_the_last_turn_gets_an_error_and_is_still_counted(self) -> None:
         post(self.server)
         post(self.server, [tool_result("toolu_1", "hi")])

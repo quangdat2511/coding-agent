@@ -88,18 +88,22 @@ def _stream(turn: Turn, number: int) -> str:
 
 
 def _tool_result_texts(request: dict[str, Any]) -> list[str]:
-    """The text of each `tool_result` block in the last user message of a Messages request."""
+    """The text of each `tool_result` block in the user messages of a Messages request, in order.
+
+    Coding Agent sends the whole history with each request, so the last request holds the Tool
+    Result of every turn, each in its own user message.
+    """
     texts: list[str] = []
-    messages = request.get("messages") or []
-    if not messages or not isinstance(messages[-1].get("content"), list):
-        return texts
-    for block in messages[-1]["content"]:
-        if block.get("type") != "tool_result":
+    for message in request.get("messages") or []:
+        if message.get("role") != "user" or not isinstance(message.get("content"), list):
             continue
-        content = block.get("content", "")
-        if isinstance(content, list):
-            content = "".join(part.get("text", "") for part in content)
-        texts.append(content)
+        for block in message["content"]:
+            if block.get("type") != "tool_result":
+                continue
+            content = block.get("content", "")
+            if isinstance(content, list):
+                content = "".join(part.get("text", "") for part in content)
+            texts.append(content)
     return texts
 
 
@@ -115,22 +119,22 @@ class FakeModelServer:
         self._requests = 0
         self._keys_matched: list[bool] = []
         self._last_tool_results: list[str] = []
-        outer = self
+        server = self
 
         class Handler(BaseHTTPRequestHandler):
             def do_POST(self) -> None:  # noqa: N802 - the name http.server calls
                 length = int(self.headers.get("content-length", "0"))
                 request = json.loads(self.rfile.read(length) or b"{}")
-                with outer._lock:
-                    number = outer._requests
-                    outer._requests += 1
-                    outer._keys_matched.append(self.headers.get("x-api-key") == outer._expected_key)
-                    outer._last_tool_results = _tool_result_texts(request)
-                if number >= len(outer._turns):
-                    # The Agent asked for more than the script holds. Answer with an error, not a
+                with server._lock:
+                    number = server._requests
+                    server._requests += 1
+                    server._keys_matched.append(self.headers.get("x-api-key") == server._expected_key)
+                    server._last_tool_results = _tool_result_texts(request)
+                if number >= len(server._turns):
+                    # Coding Agent asked for more than the script holds. Answer with an error, not a
                     # stream, so the run ends in a failure that names the cause.
                     message = (
-                        f"the script has {len(outer._turns)} turns and this is request {number + 1}"
+                        f"the script has {len(server._turns)} turns and this is request {number + 1}"
                     )
                     failure = json.dumps(
                         {"type": "error", "error": {"type": "api_error", "message": message}}
@@ -141,7 +145,7 @@ class FakeModelServer:
                     self.end_headers()
                     self.wfile.write(failure)
                     return
-                turn = outer._turns[number]
+                turn = server._turns[number]
                 body = _stream(turn, number + 1).encode()
                 self.send_response(200)
                 self.send_header("content-type", "text/event-stream")
@@ -165,8 +169,7 @@ class FakeModelServer:
             return self._requests
 
     def tool_result_texts(self) -> list[str]:
-        """The Tool Results in the last request. The Agent sends the whole history each time, so
-        the last request holds all of them."""
+        """The Tool Results in the last request, which holds the whole history."""
         with self._lock:
             return list(self._last_tool_results)
 
