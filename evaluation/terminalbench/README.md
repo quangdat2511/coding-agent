@@ -345,6 +345,106 @@ Commit `oracle.json`. Then add a comment to the Jira ticket of the job with the 
 command and the wall-clock time that the record command printed, and the compute cost that Modal
 shows for the job. The later jobs use these values for planning.
 
+## Credential isolation test
+
+ADR 0005 §7 allows no smoke, recorded or rerun job to start until an automated test shows that no
+Tool Call can get the provider key from the artifact (ADR 0001 §8). This command is that test. It
+runs the artifact in the container of one task of the job's dataset, as the user that Harbor runs
+the agent as, and has Tool Calls try the four paths of ADR 0005 §7 item 2: the inherited
+environment, `/proc/<pid>/environ` of the Coding Agent process, its `/proc/<pid>/mem`, and every
+ancestor. It also checks that a launcher which does not `exec` the agent is refused by the startup
+check. It uses a disposable key that it makes for each run, so it never reads the environment of the
+host and never sends a real key to a container.
+
+It needs `uv`, a running Docker daemon, and a build of the artifact (`bun run build:artifact`). Run
+it from the repository root. The dataset and the task are required and have no default, because
+no test fixes a dataset (ADR 0008 §5). The command below names the default pin and one of its smoke
+tasks only as an example:
+
+```sh
+uv run --project evaluation/terminalbench --frozen python -m \
+  coding_agent_terminalbench.isolation_test \
+  --dataset terminal-bench/terminal-bench@4.1.0 --task music-harmony \
+  --artifact-dir dist/artifact --output isolation-result.json
+```
+
+`--dataset` is `<org>/<name>@<version>`. The command refuses `latest`, a name without a version and
+a local path, as a job does (ADR 0008 §1). There is no `--user`: the agent user comes from the
+task, so a task whose agent runs as root and one whose agent runs as another user are two runs of
+this command with two tasks. The result records the user. `--model` is any model that the
+artifact's `anthropic` catalog holds; it only has to be one that the artifact accepts.
+
+### How it works
+
+The compiled artifact has no test hook, so the test cannot give it a model. The `anthropic`
+provider sets no base URL, so the SDK reads `ANTHROPIC_BASE_URL`, and the test points the artifact
+at a fake Anthropic Messages server on the host. The server answers the first request with one
+`bash` Tool Call that runs a probe, and the second with a text answer. It runs on the host, outside
+the container, so no process in the container holds the key that arrives in its `x-api-key` header.
+The test depends on this variable. If the artifact stops honouring it, the server gets no request
+and the test fails with `TOOL_RESULTS_MISSING` and a message that names the variable.
+
+The probe is POSIX `sh` and coreutils, uploaded as a file, so the key is in no Tool Call and in no
+command line. It needs GNU `dd` for the memory path, which glibc images have, and it prints one JSON
+line per path with the outcome and whether it found the key, never the key. The test reads these
+lines from the Tool Results that the server received, not from `events.jsonl`, because the agent
+replaces the key with `[redacted]` in its files and a leak would not show there.
+
+Each path has a control. The test runs the same probe against a process that holds the key and is
+not hardened, as a child of it, in the same container as the same user. The probe must find the key
+there. A probe that finds nothing on a process that holds the key proves nothing, so the test fails.
+
+### Result
+
+The command prints one JSON on standard output, with the keys of the artifact manifest in camelCase.
+A person can attach it to the manifest. It holds the artifact's version, commit and SHA-256, the
+dataset, the task, the backend, the user, the value of Yama's `ptrace_scope`, each probe and
+control, and the launcher check. It holds no timestamp, so equal runs give equal results. A summary
+line goes to standard error. `--output` writes the same JSON to a file.
+
+| Exit code | Meaning |
+| --- | --- |
+| 0 | The test ran and the artifact passed. |
+| 1 | The test ran and the artifact failed. `failures` says why. |
+| 2 | The test could not run: a wrong argument, no Docker, a container that does not build, or an artifact that does not install. |
+
+| `failures[].code` | The test fails because |
+| --- | --- |
+| `KEY_FOUND` | A Tool Call found the key on a path. |
+| `CONTROL_FAILED` | The probe did not find the key on a process that holds it. |
+| `PATH_NOT_TESTED` | A path has no probe result, or the probe could not find the agent or finish the walk. |
+| `MEM_NOT_DEMONSTRABLE` | Yama denies `/proc/<pid>/mem` of an ancestor whatever its dumpability, so a denied read shows nothing about the artifact. The compiled artifact cannot lift this. |
+| `LAUNCHER_NOT_REJECTED` | The launcher that keeps its shell was not refused with exit 2, the message that names the ancestor and the variable, and no request to the server. Exit 2 alone is not enough, because every configuration error exits with 2. |
+| `TOOL_RESULTS_MISSING` | The server got fewer Tool Results than the script has. |
+| `KEY_NOT_DELIVERED` | A request did not carry the disposable key in `x-api-key`. |
+
+### Limits
+
+- It runs on Docker. Harbor's Docker environment sends standard error into standard output, so the
+  test reads the refusal from both. A run on Modal is the next ticket: Modal cannot reach a server
+  on the host, so it needs another route to the server. The code takes any object with `exec` and
+  `upload_file`, which is Harbor's `BaseEnvironment`.
+- The container reaches the host as `host.docker.internal`, which Docker Desktop provides. On a
+  Linux host that name does not resolve unless the container is given it. This has not been run
+  there. `--container-host` and `--server-host` set the name that the container uses and the
+  address that the server binds.
+- If `ptrace_scope` is 1 or more, the test fails with `MEM_NOT_DEMONSTRABLE`. Docker Desktop's
+  kernel does not load Yama, so the test can pass there.
+- It installs nothing in the task container. A container without `bash`, `sha256sum` or GNU `dd`
+  fails the test or stops it.
+
+### Tests
+
+The unit tests run with the rest of the adapter's tests and need no Docker. The tests of the probe
+run `sh` against `/proc`, so they run only on Linux and are skipped elsewhere. To run them on another
+host, use a Linux container:
+
+```sh
+cd evaluation/terminalbench
+docker run --rm -v "$PWD":/work:ro -w /work -e PYTHONPATH=src:. -e PYTHONDONTWRITEBYTECODE=1 \
+  python:3.12-slim python -m unittest tests.test_isolation_probe
+```
+
 ## Record tooling
 
 The record tooling is ADR 0005 §8. A recorded job leaves a Harbor job directory under `jobs/`,
