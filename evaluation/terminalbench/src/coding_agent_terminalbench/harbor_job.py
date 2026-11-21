@@ -28,6 +28,7 @@ from typing import Any
 
 from coding_agent_terminalbench.launch import split_model
 from coding_agent_terminalbench.oracle_job import (
+    DEFAULT_JOBS_DIR,
     OracleJobError,
     config_section,
     parse_time,
@@ -57,6 +58,11 @@ RERUN_PROVIDER_STATUSES = frozenset({401, 403, 429, *range(500, 600)})
 # its JobConfig default is absent. These are the defaults of the fields this module reads.
 JOB_CONFIG_DEFAULTS: Mapping[str, Any] = {"n_attempts": 1, "n_concurrent_trials": 4}
 RETRY_DEFAULT_MAX_RETRIES = 0
+
+# JobConfig and EnvironmentConfig defaults (harbor/models/job/config.py and
+# harbor/models/trial/config.py). Job.run writes config.json with exclude_defaults, so a job that
+# keeps one of these defaults has no such field in config.json.
+DEFAULT_ENVIRONMENT_TYPE = "docker"
 
 
 class RecordError(ValueError):
@@ -177,6 +183,23 @@ class HarborJob:
         return config_section(datasets[0])
 
     @property
+    def dataset_pin(self) -> Mapping[str, Any]:
+        """The dataset without its -i filter, so jobs on the same pin can be compared."""
+        return {key: value for key, value in self.dataset.items() if key != "task_names"}
+
+    @property
+    def jobs_dir(self) -> Any:
+        """The jobs directory that the command wrote, or Harbor's default of jobs."""
+        return self.config.get("jobs_dir", DEFAULT_JOBS_DIR)
+
+    @property
+    def environment_type(self) -> Any:
+        """The environment type that the command selected, or Harbor's default of docker."""
+        return config_section(self.config.get("environment")).get(
+            "type", DEFAULT_ENVIRONMENT_TYPE
+        )
+
+    @property
     def agents(self) -> list[Any]:
         agents = self.config.get("agents")
         return agents if isinstance(agents, list) else []
@@ -281,17 +304,11 @@ class HarborJob:
         return tuple(sorted(tasks))
 
     def task_filter(self) -> tuple[str, ...]:
-        """The task names of the -i filter, or nothing when the job has no filter."""
-        tasks = self.config.get("tasks")
-        if not isinstance(tasks, list):
+        """The -i task names, which Harbor records as datasets[0].task_names."""
+        names = self.dataset.get("task_names")
+        if not isinstance(names, list):
             return ()
-        names: list[str] = []
-        for entry in tasks:
-            name = config_section(entry).get("name")
-            if not isinstance(name, str) or name == "":
-                raise RecordError(f"{self.directory}/config.json has a task filter without a name")
-            names.append(name)
-        return tuple(names)
+        return tuple(name for name in names if isinstance(name, str))
 
     def started_at(self) -> datetime | None:
         return parse_time(self.result.get("started_at"))

@@ -205,6 +205,7 @@ the `v4.1.0` tag, which resolves to `4070d6cef56a7d20cb5dc98d5e10ada88a6b9440`.
 | At the default pin every task is single-step, declares a separate verifier environment and a 28,800 s agent timeout, and has a Dockerfile; eleven tasks also have a Compose file | every `task.toml` and `environment/` under [`tasks/`](https://github.com/harbor-framework/terminal-bench/tree/v4.1.0/tasks), parsed by script |
 | The GPU tasks are `fp8-rmsnorm-gemm`, `jax-speedrun-gpu` and `math-eval-grader`, at one H100 each | their `task.toml` under the same tag |
 | The three smoke tasks exist, are CPU-only, single-container, and use the standard verifier and timeout | their `task.toml` under the same tag |
+| The tasks that declare an MCP server or a skills directory are `medical-claims-processing` (one MCP server) and `cumulative-layout-shift` (a skills directory); no other task declares either | every `task.toml` under [`tasks/`](https://github.com/harbor-framework/terminal-bench/tree/v4.1.0/tasks), parsed by script |
 | The tasks with whole `/app` verifier artifacts are the same at 4.1.0 as at 4.0.0 | their `task.toml` `artifacts` under [`tasks/`](https://github.com/harbor-framework/terminal-bench/tree/v4.1.0/tasks), parsed by script |
 
 **Not executed.** No Harbor job has run, so the registry resolution, the job configuration and the

@@ -140,7 +140,9 @@ class MatchTest(SecretScanTestCase):
         self.assertEqual(report.matches[0].kind, "redacted")
 
     def test_the_redacted_marker_is_found_in_utf_16(self) -> None:
-        for encoding in ("utf-16-le", "utf-16-be"):
+        # A UTF-16-BE file also holds the little endian bytes one byte later, so the scan keeps
+        # that match (offset 1) and drops the big endian duplicate, as the docstring explains.
+        for encoding, offset in (("utf-16-le", 0), ("utf-16-be", 0)):
             with self.subTest(encoding=encoding):
                 directory = self.temp / f"redacted-{encoding}"
                 directory.mkdir()
@@ -151,11 +153,11 @@ class MatchTest(SecretScanTestCase):
 
                 self.assertEqual(
                     report.matches,
-                    (SecretMatch(log.as_posix(), 0, "redacted", REDACTED_MARKER),),
+                    (SecretMatch(log.as_posix(), offset, "redacted", REDACTED_MARKER),),
                 )
 
     def test_a_key_prefix_is_found_in_utf_16(self) -> None:
-        for encoding in ("utf-16-le", "utf-16-be"):
+        for encoding, offset in (("utf-16-le", 0), ("utf-16-be", 0)):
             with self.subTest(encoding=encoding):
                 directory = self.temp / f"prefix-{encoding}"
                 directory.mkdir()
@@ -166,12 +168,12 @@ class MatchTest(SecretScanTestCase):
 
                 self.assertEqual(
                     report.matches,
-                    (SecretMatch(log.as_posix(), 0, "key-prefix", "oc_sk_"),),
+                    (SecretMatch(log.as_posix(), offset, "key-prefix", "oc_sk_"),),
                 )
 
     def test_a_credential_is_found_in_utf_16(self) -> None:
         value = "s3cr3t-v4lue"
-        for encoding in ("utf-16-le", "utf-16-be"):
+        for encoding, offset in (("utf-16-le", 0), ("utf-16-be", 0)):
             with self.subTest(encoding=encoding):
                 directory = self.temp / f"utf16-{encoding}"
                 directory.mkdir()
@@ -182,7 +184,25 @@ class MatchTest(SecretScanTestCase):
 
                 self.assertEqual(
                     report.matches,
-                    (SecretMatch(log.as_posix(), 0, "credential", "OPENAI_API_KEY"),),
+                    (SecretMatch(log.as_posix(), offset, "credential", "OPENAI_API_KEY"),),
+                )
+
+    def test_a_shifted_view_of_utf_16_text_is_reported_once(self) -> None:
+        # Around a UTF-16 text, the high byte of an ASCII character and the bytes of the next
+        # UTF-16 unit form a view of the same text one byte away from its own encoding. The scan
+        # reports that one occurrence once, not the duplicate view of it.
+        for encoding, offset in (("utf-16-le", 2), ("utf-16-be", 3)):
+            with self.subTest(encoding=encoding):
+                directory = self.temp / f"shifted-{encoding}"
+                directory.mkdir()
+                log = directory / "log.bin"
+                log.write_bytes(("x" + REDACTED_MARKER + "y").encode(encoding))
+
+                report = scan_roots([directory], {})
+
+                self.assertEqual(
+                    report.matches,
+                    (SecretMatch(log.as_posix(), offset, "redacted", REDACTED_MARKER),),
                 )
 
     def test_matches_that_span_a_chunk_boundary_are_reported_once(self) -> None:

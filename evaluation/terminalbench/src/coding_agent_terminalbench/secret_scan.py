@@ -337,9 +337,9 @@ def main(
     return 0 if report.passed else 1
 
 
-def _patterns(credentials: Mapping[str, str]) -> tuple[tuple[str, str, bytes], ...]:
-    """The `(kind, detail, bytes)` patterns to search for, in a deterministic order."""
-    patterns: list[tuple[str, str, bytes]] = []
+def _patterns(credentials: Mapping[str, str]) -> tuple[tuple[str, str, bytes, str], ...]:
+    """The `(kind, detail, bytes, encoding)` patterns to search for, in a deterministic order."""
+    patterns: list[tuple[str, str, bytes, str]] = []
     for variable in sorted(credentials):
         patterns.extend(_encoded_patterns(CREDENTIAL_KIND, variable, credentials[variable]))
     patterns.extend(_encoded_patterns(REDACTED_KIND, REDACTED_MARKER, REDACTED_MARKER))
@@ -348,28 +348,35 @@ def _patterns(credentials: Mapping[str, str]) -> tuple[tuple[str, str, bytes], .
     return tuple(patterns)
 
 
-def _encoded_patterns(kind: str, detail: str, text: str) -> Iterator[tuple[str, str, bytes]]:
-    """One pattern per distinct encoding of a text, so one occurrence is reported once."""
+def _encoded_patterns(
+    kind: str, detail: str, text: str
+) -> Iterator[tuple[str, str, bytes, str]]:
+    """One pattern per distinct encoding of a text, with the encoding it was written in."""
     seen: set[bytes] = set()
     for encoding in CREDENTIAL_ENCODINGS:
         encoded = text.encode(encoding)
         if encoded in seen:
             continue
         seen.add(encoded)
-        yield (kind, detail, encoded)
+        yield (kind, detail, encoded, encoding)
 
 
 def _search_file(
-    path: Path, display: str, patterns: Sequence[tuple[str, str, bytes]]
+    path: Path, display: str, patterns: Sequence[tuple[str, str, bytes, str]]
 ) -> list[SecretMatch]:
     """Finds every pattern in a file in `CHUNK_SIZE` reads, each occurrence reported once.
 
     The read keeps an overlap of one byte less than the longest pattern, so a pattern that spans
     two chunks is still found. A match that lies entirely in the overlap was reported by the
     previous read, so it is skipped here.
+
+    A UTF-16-LE text that follows an ASCII character also holds the UTF-16-BE bytes of the same
+    text one byte earlier, because the high byte of an ASCII character and the low byte of the
+    next UTF-16 unit form a big endian view of it. That second view lies inside the character
+    boundaries of the first, so it would be a duplicate match and it is dropped.
     """
-    overlap = max((len(pattern) for _, _, pattern in patterns), default=1) - 1
-    matches: list[SecretMatch] = []
+    overlap = max((len(pattern) for _, _, pattern, _ in patterns), default=1) - 1
+    found: list[tuple[SecretMatch, str]] = []
     try:
         with path.open("rb") as file:
             position = 0
@@ -379,7 +386,7 @@ def _search_file(
                 if not chunk:
                     break
                 buffer = tail + chunk
-                for kind, detail, pattern in patterns:
+                for kind, detail, pattern, encoding in patterns:
                     start = 0
                     while True:
                         index = buffer.find(pattern, start)
@@ -389,19 +396,34 @@ def _search_file(
                         if index + len(pattern) <= len(tail):
                             # The whole match was in the previous read's overlap.
                             continue
-                        matches.append(
-                            SecretMatch(
-                                path=display,
-                                offset=position - len(tail) + index,
-                                kind=kind,
-                                detail=detail,
+                        found.append(
+                            (
+                                SecretMatch(
+                                    path=display,
+                                    offset=position - len(tail) + index,
+                                    kind=kind,
+                                    detail=detail,
+                                ),
+                                encoding,
                             )
                         )
                 position += len(chunk)
                 tail = buffer[-overlap:] if overlap else b""
     except OSError as exc:
         raise SecretScanError(f"cannot read {display}: {exc}") from exc
-    return matches
+    little_endian = {
+        (match.kind, match.detail, match.offset)
+        for match, encoding in found
+        if encoding == "utf-16-le"
+    }
+    return [
+        match
+        for match, encoding in found
+        if not (
+            encoding == "utf-16-be"
+            and (match.kind, match.detail, match.offset + 1) in little_endian
+        )
+    ]
 
 
 def _files_under(root: Path, display_root: str) -> list[tuple[str, Path]]:

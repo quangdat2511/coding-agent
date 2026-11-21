@@ -14,12 +14,15 @@ import json
 import shutil
 import tempfile
 import tomllib
-from datetime import datetime
 import unittest
+from datetime import datetime
 from pathlib import Path
 from typing import Any
+from unittest import mock
 
 from harbor.metrics.mean import Mean
+from harbor.models.job.config import DatasetConfig, JobConfig
+from harbor.models.trial.config import AgentConfig, EnvironmentConfig
 
 from coding_agent_terminalbench import record as record_module
 from coding_agent_terminalbench.record import (
@@ -155,9 +158,9 @@ def dataset_record_text(**overrides: str | None) -> str:
         "Single step": "every task",
         "Verifier environment": "separate, every task",
         "Per-task agent timeout": "28,800 s",
-        "Smoke tasks": ", ".join("\x60" + task + "\x60" for task in SMOKE_TASKS),
-        "Tasks with declared MCP servers": "\x60" + TASKS[0] + "\x60",
-        "Tasks with a declared skills directory": "\x60" + TASKS[1] + "\x60",
+        "Smoke tasks": ", ".join("\x60" + short_name(task) + "\x60" for task in SMOKE_TASKS),
+        "Tasks with declared MCP servers": "\x60" + short_name(TASKS[0]) + "\x60",
+        "Tasks with a declared skills directory": "\x60" + short_name(TASKS[1]) + "\x60",
     }
     for label, value in overrides.items():
         if value is None:
@@ -236,6 +239,7 @@ class RecordTestCase(unittest.TestCase):
         extra_config: dict[str, Any] | None = None,
         model_name: str = MODEL_NAME,
         env_value: str | None = None,
+        jobs_dir: str | None = None,
         artifact_hashes: dict[str, str] | None = None,
         n_attempts: int | None = None,
         retry: int | None = None,
@@ -249,35 +253,56 @@ class RecordTestCase(unittest.TestCase):
         job_dir.mkdir(parents=True)
         specs = specs if specs is not None else HEALTHY_SPECS
         hashes = artifact_hashes if artifact_hashes is not None else self.artifact_hashes
-        if agents is None:
-            agents = [
-                {
-                    "import_path": ADAPTER_IMPORT_PATH,
-                    "model_name": model_name,
-                    "env": {
-                        KEY_VARIABLE: env_value
-                        or record_module.provider_env_template(KEY_VARIABLE)
-                    },
-                    "kwargs": {"artifact_dir": "dist/artifact"},
-                }
-            ]
-        if datasets is None:
-            datasets = [{"name": DATASET_NAME, "ref": CONTENT_HASH}]
-        config: dict[str, Any] = {
-            "job_name": name,
-            "jobs_dir": self.jobs.as_posix(),
-            "n_concurrent_trials": 8,
-            "environment": environment_config or {"type": environment},
-            "agents": agents,
-            "datasets": datasets,
-        }
-        if filtered is not None:
-            config["tasks"] = [{"name": task, "ref": digest(task)} for task in filtered]
-        if n_attempts is not None:
-            config["n_attempts"] = n_attempts
-        if retry is not None:
-            config["retry"] = {"max_retries": retry}
-        config.update(extra_config or {})
+        customized = (
+            agents is not None
+            or datasets is not None
+            or environment_config is not None
+            or extra_config is not None
+            or n_attempts is not None
+            or retry is not None
+            or env_value is not None
+        )
+        if customized:
+            # A shape Harbor's models refuse, for the checks that must refuse it.
+            if agents is None:
+                agents = [
+                    {
+                        "import_path": ADAPTER_IMPORT_PATH,
+                        "model_name": model_name,
+                        "env": {
+                            KEY_VARIABLE: env_value
+                            or record_module.provider_env_template(KEY_VARIABLE)
+                        },
+                        "kwargs": {"artifact_dir": "dist/artifact"},
+                    }
+                ]
+            if datasets is None:
+                datasets = [{"name": DATASET_NAME, "ref": CONTENT_HASH}]
+            if filtered is not None:
+                datasets = [dict(dataset, task_names=list(filtered)) for dataset in datasets]
+            config: dict[str, Any] = {
+                "job_name": name,
+                "jobs_dir": jobs_dir if jobs_dir is not None else self.jobs.as_posix(),
+                "n_concurrent_trials": 8,
+                "environment": environment_config or {"type": environment},
+                "agents": agents,
+                "datasets": datasets,
+            }
+            if n_attempts is not None:
+                config["n_attempts"] = n_attempts
+            if retry is not None:
+                config["retry"] = {"max_retries": retry}
+            config.update(extra_config or {})
+        else:
+            # The shape Harbor 0.23.0 writes, through Harbor's own JobConfig and
+            # exclude_defaults, so the fixture keeps the fields Harbor omits at their defaults.
+            config = self.harbor_config(
+                name=name,
+                environment=environment,
+                filtered=filtered,
+                jobs_dir=jobs_dir,
+                model_name=model_name,
+            )
         (job_dir / "config.json").write_text(json.dumps(config), encoding="utf-8")
         (job_dir / "lock.json").write_text(
             json.dumps(
@@ -305,6 +330,37 @@ class RecordTestCase(unittest.TestCase):
         (job_dir / "result.json").write_text(json.dumps(result), encoding="utf-8")
         for index, task in enumerate(tasks):
             self.write_trial(job_dir, index, task, specs.get(task, trial_spec()), hashes)
+
+    def harbor_config(
+        self,
+        *,
+        name: str,
+        environment: str,
+        filtered: tuple[str, ...] | None,
+        jobs_dir: str | None,
+        model_name: str,
+    ) -> dict[str, Any]:
+        """The config.json that Harbor 0.23.0 writes for the command, through JobConfig."""
+        agent = AgentConfig(
+            import_path=ADAPTER_IMPORT_PATH,
+            model_name=model_name,
+            env={KEY_VARIABLE: record_module.provider_env_template(KEY_VARIABLE)},
+            kwargs={"artifact_dir": "dist/artifact"},
+        )
+        dataset = DatasetConfig(
+            name=DATASET_NAME,
+            ref=CONTENT_HASH,
+            task_names=list(filtered) if filtered is not None else None,
+        )
+        config = JobConfig(
+            job_name=name,
+            jobs_dir=Path(jobs_dir if jobs_dir is not None else self.jobs.as_posix()),
+            n_concurrent_trials=8,
+            environment=EnvironmentConfig(type=environment),
+            agents=[agent],
+            datasets=[dataset],
+        )
+        return json.loads(config.model_dump_json(exclude_defaults=True))
 
     def write_trial(
         self,
@@ -550,10 +606,13 @@ class DefaultRecordTest(RecordTestCase):
             dataset["taskList"],
             [{"name": task, "digest": digest(task)} for task in sorted(TASKS)],
         )
-        self.assertEqual(dataset["smokeTasks"], list(SMOKE_TASKS))
+        self.assertEqual(dataset["smokeTasks"], [short_name(task) for task in SMOKE_TASKS])
         self.assertEqual(
             dataset["ignoredDeclarations"],
-            {"mcpServers": [TASKS[0]], "skillsDirectories": [TASKS[1]]},
+            {
+                "mcpServers": [short_name(TASKS[0])],
+                "skillsDirectories": [short_name(TASKS[1])],
+            },
         )
         self.assertEqual(len(dataset["properties"]), 4)
         for entry in dataset["properties"]:
@@ -687,10 +746,44 @@ class DefaultRecordTest(RecordTestCase):
         flaky_section = report.split("## Harness-flaky tasks", 1)[1].split("## ", 1)[0]
         self.assertIn("example-org/bravo", flaky_section)
         ignored_section = report.split("## Ignored MCP servers and skills", 1)[1]
-        self.assertIn(TASKS[0], ignored_section)
+        self.assertIn(short_name(TASKS[0]), ignored_section)
         self.assertIn("MCP", ignored_section)
-        self.assertIn(TASKS[1], ignored_section)
+        self.assertIn(short_name(TASKS[1]), ignored_section)
         self.assertIn("skills", ignored_section)
+
+    def test_a_config_with_harbors_default_jobs_dir_is_read(self) -> None:
+        # Harbor writes config.json with exclude_defaults, so -o jobs leaves the field out.
+        self.write_recorded(jobs_dir="jobs")
+        self.write_smoke()
+        self.write_rerun()
+        code, _, stderr = self.run_main()
+        self.assertEqual(code, 0, stderr)
+        manifest = self.manifest()
+        self.assertEqual(manifest["flags"]["jobsDir"], "jobs")
+        self.assertIn("-o jobs", manifest["command"])
+        self.assertNotIn("jobs_dir", json.loads((self.recorded / "config.json").read_text()))
+
+    def test_a_smoke_job_may_keep_harbors_default_environment(self) -> None:
+        self.write_recorded()
+        self.write_smoke(environment="docker")
+        self.write_rerun()
+        smoke_config = json.loads((self.smoke / "config.json").read_text(encoding="utf-8"))
+        self.assertNotIn("environment", smoke_config)
+        recorded_config = json.loads((self.recorded / "config.json").read_text())
+        self.assertEqual(recorded_config["environment"], {"type": "modal"})
+        code, _, stderr = self.run_main()
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(self.manifest()["flags"]["environment"], "modal")
+
+    def test_the_smoke_job_filter_is_read_from_the_dataset(self) -> None:
+        self.write_standard_jobs()
+        smoke_config = json.loads((self.smoke / "config.json").read_text(encoding="utf-8"))
+        self.assertNotIn("tasks", smoke_config)
+        self.assertEqual(
+            smoke_config["datasets"][0]["task_names"], list(SMOKE_TASKS)
+        )
+        self.assertEqual(read_job(self.smoke).task_filter(), SMOKE_TASKS)
+        self.assertNotIn("task_names", read_job(self.recorded).dataset)
 
     def test_the_task_name_and_count_come_from_the_job_not_a_literal(self) -> None:
         manifest, report, _ = self.record_ok()
@@ -1252,6 +1345,50 @@ class ConfigCheckTest(RecordTestCase):
         self.write_smoke()
         self.write_rerun()
         self.refused("did not finish")
+
+    def test_a_task_names_filter_that_is_not_a_list_is_refused(self) -> None:
+        self.write_recorded(
+            datasets=[
+                {
+                    "name": DATASET_NAME,
+                    "ref": CONTENT_HASH,
+                    "task_names": "example-org/alpha",
+                }
+            ]
+        )
+        self.write_smoke()
+        self.write_rerun()
+        self.refused("task_names")
+
+    def test_a_rerun_run_with_other_session_limits_is_refused(self) -> None:
+        self.write_recorded()
+        self.write_smoke()
+        self.write_rerun(
+            specs={
+                "example-org/delta": trial_spec(
+                    limits={**PROFILE_LIMITS, "maxModelTurns": 10}
+                )
+            }
+        )
+        code, _, stderr = self.run_main()
+        self.assertEqual(code, 1)
+        self.assertIn("SessionLimits", stderr)
+        self.assertFalse(self.output.exists())
+
+    def test_a_failed_write_keeps_a_record_that_was_already_there(self) -> None:
+        self.write_standard_jobs()
+        self.output.mkdir(parents=True)
+        manifest_path = self.output / "manifest.json"
+        report_path = self.output / "report.md"
+        manifest_path.write_text("previous manifest", encoding="utf-8")
+        report_path.write_text("previous report", encoding="utf-8")
+        failure = RecordError("cannot write the record")
+        with mock.patch.object(record_module, "write_text_file", side_effect=failure):
+            code, _, stderr = self.run_main()
+        self.assertEqual(code, 2)
+        self.assertIn("cannot write the record", stderr)
+        self.assertEqual(manifest_path.read_text(encoding="utf-8"), "previous manifest")
+        self.assertEqual(report_path.read_text(encoding="utf-8"), "previous report")
 
     def test_a_missing_trial_directory_is_refused(self) -> None:
         self.write_recorded()

@@ -110,23 +110,23 @@ GITHUB_RELEASE_MAX_ASSETS = 1000
 MINIMUM_PYTHON = "3.12"
 
 # The fields that ADR 0005 §7's recorded-job command writes to config.json. Every other field is a
-# verifier, an override, a filter, a retry or a user agent that the command does not set, so the
-# check refuses it instead of guessing. The smoke job and the rerun job add a -i task filter.
+# verifier, an override, a retry or a user agent that the command does not set, so the check refuses
+# it instead of guessing. Harbor records the -i task filter of the smoke and rerun jobs in
+# datasets[0].task_names, not in a top level field (harbor/cli/jobs.py), so only those two jobs
+# accept that field.
 ALLOWED_JOB_FIELDS = frozenset(
     {"job_name", "jobs_dir", "n_concurrent_trials", "environment", "agents", "datasets"}
 )
-ALLOWED_RUN_JOB_FIELDS = ALLOWED_JOB_FIELDS | {"tasks"}
 ALLOWED_AGENT_FIELDS = frozenset({"import_path", "model_name", "env", "kwargs"})
 ALLOWED_ENVIRONMENT_FIELDS = frozenset({"type"})
 ALLOWED_DATASET_FIELDS = frozenset({"name", "ref"})
-ALLOWED_TASK_FILTER_FIELDS = frozenset({"name", "ref"})
+ALLOWED_RUN_DATASET_FIELDS = ALLOWED_DATASET_FIELDS | {"task_names"}
 ALLOWED_AGENT_KWARG_NAMES = frozenset({"artifact_dir"})
 FIELD_HINTS: Mapping[str, str] = {
     "n_attempts": "run with -k 1",
     "retry": "run with -r 0",
     "timeout_multiplier": "remove the timeout override",
     "agent_timeout_multiplier": "remove the agent timeout override",
-    "tasks": "remove the task filter",
 }
 
 
@@ -214,13 +214,13 @@ def agent_problems(job: HarborJob) -> list[str]:
     return problems
 
 
-def dataset_config_problems(job: HarborJob) -> list[str]:
+def dataset_config_problems(job: HarborJob, *, allowed: frozenset[str]) -> list[str]:
     """The problems of a job's datasets section, which ADR 0005 §7 passes as one -d."""
     datasets = job.config.get("datasets")
     if not isinstance(datasets, list) or len(datasets) != 1:
         return ["the job must run exactly one dataset (one -d)"]
     dataset = config_section(datasets[0])
-    problems = unexpected_fields("datasets[0]", dataset, ALLOWED_DATASET_FIELDS)
+    problems = unexpected_fields("datasets[0]", dataset, allowed)
     name = dataset.get("name")
     if not isinstance(name, str) or name == "":
         problems.append("config.json has no dataset name")
@@ -237,29 +237,25 @@ def dataset_config_problems(job: HarborJob) -> list[str]:
 
 
 def task_filter_problems(job: HarborJob) -> list[str]:
-    """The problems of a -i task filter, which the smoke and rerun jobs use."""
-    tasks = job.config.get("tasks")
-    if tasks is None:
+    """The problems of a -i task filter, which Harbor records in datasets[0].task_names."""
+    names = job.dataset.get("task_names")
+    if names is None:
         return []
-    if not isinstance(tasks, list):
-        return ["config.json has a tasks filter that is not an array"]
-    problems = []
-    names: list[str] = []
-    for index, entry in enumerate(tasks):
-        section = config_section(entry)
-        problems.extend(unexpected_fields(f"tasks[{index}]", section, ALLOWED_TASK_FILTER_FIELDS))
-        name = section.get("name")
-        if not isinstance(name, str) or name == "":
-            problems.append(f"config.json tasks[{index}] has no task name")
-        else:
-            names.append(name)
+    if not isinstance(names, list) or not all(
+        isinstance(name, str) and name != "" for name in names
+    ):
+        return ["config.json has a datasets[0].task_names filter that is not a list of names"]
     if len(names) != len(set(names)):
-        problems.append("config.json names a task more than once in its -i filter")
-    return problems
+        return ["config.json names a task more than once in its -i filter"]
+    return []
 
 
 def job_config_problems(
-    job: HarborJob, *, allowed: frozenset[str], environment_types: set[str]
+    job: HarborJob,
+    *,
+    allowed: frozenset[str],
+    environment_types: set[str],
+    dataset_fields: frozenset[str],
 ) -> list[str]:
     """Compares a job's config.json with the command of ADR 0005 §7 that writes it."""
     config = job.config
@@ -267,7 +263,7 @@ def job_config_problems(
     name = config.get("job_name")
     if not isinstance(name, str) or name == "":
         problems.append("config.json has no job name (--job-name)")
-    if not isinstance(config.get("jobs_dir"), str):
+    if not isinstance(job.jobs_dir, str):
         problems.append("config.json has no jobs directory (-o)")
     concurrent = job.n_concurrent_trials
     if type(concurrent) is not int or concurrent < 1:
@@ -278,14 +274,14 @@ def job_config_problems(
         problems.append("the job must not retry a trial with Harbor; config.json sets retry (-r 0)")
     environment = config_section(config.get("environment"))
     problems.extend(unexpected_fields("environment", environment, ALLOWED_ENVIRONMENT_FIELDS))
-    environment_type = environment.get("type")
-    if environment_type not in environment_types:
+    expected_environment = job.environment_type
+    if expected_environment not in environment_types:
         proposals = " or ".join(sorted(environment_types))
         problems.append(
-            f"the job must run on {proposals} (-e), found {environment_type!r}"
+            f"the job must run on {proposals} (-e), found {expected_environment!r}"
         )
     problems.extend(agent_problems(job))
-    problems.extend(dataset_config_problems(job))
+    problems.extend(dataset_config_problems(job, allowed=dataset_fields))
     problems.extend(task_filter_problems(job))
     return problems
 
@@ -293,7 +289,10 @@ def job_config_problems(
 def recorded_job_problems(job: HarborJob) -> list[str]:
     """The problems of the recorded job's config.json (ADR 0005 §7 step 4)."""
     problems = job_config_problems(
-        job, allowed=ALLOWED_JOB_FIELDS, environment_types={"modal"}
+        job,
+        allowed=ALLOWED_JOB_FIELDS,
+        environment_types={"modal"},
+        dataset_fields=ALLOWED_DATASET_FIELDS,
     )
     if job.task_filter():
         problems.append("the recorded job must run every task; config.json has a -i task filter")
@@ -303,7 +302,10 @@ def recorded_job_problems(job: HarborJob) -> list[str]:
 def rerun_job_problems(recorded: HarborJob, rerun: HarborJob) -> list[str]:
     """The problems of the rerun job's config.json (ADR 0005 §7 step 5)."""
     problems = job_config_problems(
-        rerun, allowed=ALLOWED_RUN_JOB_FIELDS, environment_types={"modal"}
+        rerun,
+        allowed=ALLOWED_JOB_FIELDS,
+        environment_types={"modal"},
+        dataset_fields=ALLOWED_RUN_DATASET_FIELDS,
     )
     expected_name = recorded.name + "-rerun"
     if rerun.name != expected_name:
@@ -318,7 +320,10 @@ def rerun_job_problems(recorded: HarborJob, rerun: HarborJob) -> list[str]:
 def smoke_job_problems(recorded: HarborJob, smoke: HarborJob) -> list[str]:
     """The problems of the smoke job's config.json (ADR 0005 §7 step 3)."""
     problems = job_config_problems(
-        smoke, allowed=ALLOWED_RUN_JOB_FIELDS, environment_types={"modal", "docker"}
+        smoke,
+        allowed=ALLOWED_JOB_FIELDS,
+        environment_types={"modal", "docker"},
+        dataset_fields=ALLOWED_RUN_DATASET_FIELDS,
     )
     problems.extend(related_job_problems(recorded, smoke, "the smoke job"))
     return problems
@@ -327,7 +332,7 @@ def smoke_job_problems(recorded: HarborJob, smoke: HarborJob) -> list[str]:
 def related_job_problems(recorded: HarborJob, job: HarborJob, label: str) -> list[str]:
     """The ways a smoke or rerun job does not repeat the recorded job's conditions."""
     problems = []
-    if job.dataset != recorded.dataset:
+    if job.dataset_pin != recorded.dataset_pin:
         problems.append(f"{label} must run the same dataset as the recorded job")
     for field, value in (
         ("import_path", recorded.agent.get("import_path")),
@@ -337,9 +342,7 @@ def related_job_problems(recorded: HarborJob, job: HarborJob, label: str) -> lis
     ):
         if job.agent.get(field) != value:
             problems.append(f"{label} must use the recorded job's agents[0].{field}")
-    if config_section(job.config.get("environment")).get("type") != config_section(
-        recorded.config.get("environment")
-    ).get("type") and label == "the rerun job":
+    if label == "the rerun job" and job.environment_type != recorded.environment_type:
         problems.append(f"{label} must use the recorded job's environment")
     return problems
 
@@ -447,19 +450,16 @@ def artifact_problems(
     return problems
 
 
-def run_problems(
-    jobs: Sequence[tuple[HarborJob, str]], *, require_any: bool = True
-) -> list[str]:
+def run_problems(jobs: Sequence[tuple[HarborJob, str]]) -> list[str]:
     """The Coding Agent runs of the job's trials: one profile, provider, model and sampling.
 
-    A rerun trial can fail setup before Coding Agent starts, and it then has no run.json; that
-    trial is reported as an incomplete rerun rather than as a protocol problem.
+    The recorded, smoke and rerun jobs must repeat the same profile, provider and model, because a
+    rerun outcome replaces a recorded one. A rerun trial can fail setup before Coding Agent starts,
+    and it then has no run.json, so only the runs that exist are compared.
     """
     problems: list[str] = []
     runs = [(trial.run, label, trial) for job, label in jobs for trial in job.trials if trial.run]
     if not runs:
-        if not require_any:
-            return []
         return [
             "the job's trials carry no Coding Agent run.json, so the profile, provider, model and "
             "sampling settings cannot be recorded"
@@ -527,6 +527,11 @@ def model_problems(job: HarborJob) -> list[str]:
     return problems
 
 
+def short_name(task: str) -> str:
+    """A task name without its org: lock.json writes org/name, ADR 0008 §4 writes name."""
+    return task.rpartition("/")[2]
+
+
 def dataset_problems(
     dataset: DatasetRecord,
     oracle: OracleRecord,
@@ -534,7 +539,11 @@ def dataset_problems(
     smoke: HarborJob,
     rerun: HarborJob | None,
 ) -> list[str]:
-    """The job's dataset against its committed record (ADR 0008 §1 and §4)."""
+    """The job's dataset against its committed record (ADR 0008 §1 and §4).
+
+    ADR 0008 §4 records a task by its name, while Harbor's lock.json writes org/name, so the
+    comparison is on short names. That assumes no two tasks of one dataset share a short name.
+    """
     problems = []
     name = recorded.dataset.get("name")
     if name != dataset.package_name:
@@ -554,10 +563,11 @@ def dataset_problems(
             "oracle job"
         )
     for job, label in ((smoke, "the smoke job"), (rerun, "the rerun job")):
-        if job is not None and job.dataset != recorded.dataset:
+        if job is not None and job.dataset_pin != recorded.dataset_pin:
             problems.append(f"{label} ran another dataset than the recorded job")
-    tasks = {task for task, _ in recorded.planned_tasks()}
-    missing_smoke = sorted(set(dataset.smoke_tasks) - tasks)
+    tasks = {short_name(task) for task, _ in recorded.planned_tasks()}
+    smoke_set = {short_name(task) for task in dataset.smoke_tasks}
+    missing_smoke = sorted(smoke_set - tasks)
     if missing_smoke:
         problems.append(
             f"the record's smoke tasks are not in the job's resolved task list: "
@@ -567,14 +577,14 @@ def dataset_problems(
         ("MCP servers", dataset.mcp_server_tasks),
         ("skills directories", dataset.skills_tasks),
     ):
-        missing = sorted(set(entries) - tasks)
+        missing = sorted({short_name(task) for task in entries} - tasks)
         if missing:
             problems.append(
                 f"the record names tasks with {label} that the job did not run: "
                 + ", ".join(missing)
             )
-    smoke_tasks = {task for task, _ in smoke.planned_tasks()}
-    if smoke_tasks != set(dataset.smoke_tasks):
+    smoke_tasks = {short_name(task) for task, _ in smoke.planned_tasks()}
+    if smoke_tasks != smoke_set:
         problems.append(
             "the smoke job must run the smoke set that the dataset record names; it ran "
             + (", ".join(sorted(smoke_tasks)) or "no task")
@@ -679,7 +689,13 @@ def protocol_problems(inputs: RecordInputs) -> list[str]:
         *artifact_problems(
             inputs.artifact, [(recorded, "the recorded job"), (smoke, "the smoke job")]
         ),
-        *run_problems([(recorded, "the recorded job"), (smoke, "the smoke job")]),
+        *run_problems(
+            [
+                (recorded, "the recorded job"),
+                (smoke, "the smoke job"),
+                *([(rerun, "the rerun job")] if rerun is not None else []),
+            ]
+        ),
         *archive_problems(inputs.archive_parts),
     ]
     if rerun is not None:
@@ -690,7 +706,6 @@ def protocol_problems(inputs: RecordInputs) -> list[str]:
                 *job_result_problems(rerun, "the rerun job"),
                 *job_trial_problems(rerun, "the rerun job"),
                 *artifact_problems(inputs.artifact, [(rerun, "the rerun job")]),
-                *run_problems([(rerun, "the rerun job")], require_any=False),
             ]
         )
     return problems
@@ -955,14 +970,14 @@ def run_command(job: HarborJob, dataset: DatasetRecord) -> str:
     for variable in sorted(job.agent_environment):
         parts.append("--ae " + variable + "=" + repr(provider_env_template(variable)))
     parts += [
-        f"-e {config_section(job.config.get('environment')).get('type')}",
+        f"-e {job.environment_type}",
         f"-k {job.n_attempts}",
         f"-n {job.n_concurrent_trials}",
         f"-r {job.max_retries}",
     ]
     for task in job.task_filter():
         parts.append(f"-i {task}")
-    parts += [f"-o {job.config.get('jobs_dir')}", f"--job-name {job.name}"]
+    parts += [f"-o {job.jobs_dir}", f"--job-name {job.name}"]
     return " ".join(parts)
 
 
@@ -972,12 +987,12 @@ def job_flags(job: HarborJob) -> Mapping[str, Any]:
         "agent": job.agent.get("import_path"),
         "agentKwargs": dict(job.agent_kwargs),
         "model": job.model_name,
-        "environment": config_section(job.config.get("environment")).get("type"),
+        "environment": job.environment_type,
         "nAttempts": job.n_attempts,
         "nConcurrentTrials": job.n_concurrent_trials,
         "maxRetries": job.max_retries,
         "taskFilter": list(job.task_filter()),
-        "jobsDir": job.config.get("jobs_dir"),
+        "jobsDir": job.jobs_dir,
         "jobName": job.name,
     }
 
@@ -1103,11 +1118,13 @@ def write_record_files(output_dir: Path, manifest: Mapping[str, Any], report: st
     manifest_path = output_dir / MANIFEST_FILE
     report_path = output_dir / REPORT_FILE
     manifest_text = json.dumps(manifest, indent=2, allow_nan=False) + "\n"
+    written: list[Path] = []
     try:
         write_text_file(manifest_path, manifest_text)
+        written.append(manifest_path)
         write_text_file(report_path, report)
     except RecordError:
-        for path in (manifest_path, report_path):
+        for path in written:
             try:
                 path.unlink(missing_ok=True)
             except OSError:
