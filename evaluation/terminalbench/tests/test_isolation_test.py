@@ -104,6 +104,29 @@ class MainTest(unittest.TestCase):
         self.assertEqual(stdout, "")
         self.assertIn("Docker is not running", stderr)
 
+    def test_any_other_error_during_the_run_exits_with_2_not_as_a_failed_artifact(self) -> None:
+        # Exit 1 means the artifact failed. A broken download, a container that answers oddly or a
+        # bug in the test says nothing about the artifact, so it must not exit 1.
+        code, stdout, stderr = run_main(REQUIRED, RuntimeError("the task download failed"))
+
+        self.assertEqual(code, 2)
+        self.assertEqual(stdout, "")
+        self.assertIn("RuntimeError", stderr)
+        self.assertIn("the task download failed", stderr)
+        self.assertNotIn("Traceback", stderr)
+
+    def test_an_error_message_never_prints_the_disposable_key(self) -> None:
+        stdout, stderr = io.StringIO(), io.StringIO()
+
+        async def leaks(arguments: Arguments, key: str) -> dict[str, Any]:
+            raise RuntimeError(f"the container echoed {key}")
+
+        code = main(REQUIRED, run=leaks, stdout=stdout, stderr=stderr)
+
+        self.assertEqual(code, 2)
+        self.assertNotRegex(stderr.getvalue(), r"sk-ant-isolation-test-[0-9a-f]{32}")
+        self.assertIn("[redacted]", stderr.getvalue())
+
     def test_a_usage_error_exits_with_2_and_prints_no_result(self) -> None:
         code, stdout, stderr = run_main(["--task", "t"], passing())
 

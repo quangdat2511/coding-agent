@@ -188,7 +188,14 @@ def main(
         document = asyncio.run(run(arguments, key))
         text = render_result(document, secret=key)
     except (IsolationRunError, SecretInResultError) as error:
-        print(f"{PROG}: {error}", file=err)
+        print(f"{PROG}: {str(error).replace(key, '[redacted]')}", file=err)
+        return 2
+    except Exception as error:
+        # Exit 1 means the artifact failed. Any other error, such as a task download that broke
+        # or a container that answered in a way the test did not expect, says nothing about the
+        # artifact, so the test reports that it could not run.
+        message = f"{type(error).__name__}: {error}".replace(key, "[redacted]")
+        print(f"{PROG}: the test could not run: {message}", file=err)
         return 2
     out.write(text)
     if arguments.output is not None:
