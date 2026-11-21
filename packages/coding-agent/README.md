@@ -98,6 +98,11 @@ The interactive path registers the same four tools and the same Verification Pol
 the overlay. The Verification command is the one of
 [Verification command](#verification-command): `CODING_AGENT_VERIFICATION_COMMAND`, or none.
 
+The [demo](demo/README.md) runs the named task through this path against a live provider, with one
+Approval allowed in the overlay and one cancellation, and `demo/interactive-path.cast` is the
+terminal recording of that run (ADR 0006 §6 item 6). The recording is checked by
+`tests/demo-recording.test.ts`, and it is made again only by a person with a provider key.
+
 ## Version
 
 `coding-agent --version` prints `coding-agent <version> <commit>` on standard output and exits 0.
