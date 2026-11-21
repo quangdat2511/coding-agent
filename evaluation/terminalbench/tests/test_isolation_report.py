@@ -94,6 +94,25 @@ class VerdictTest(unittest.TestCase):
                 self.assertEqual(codes(report), ["CONTROL_FAILED"])
                 self.assertIn(broken, report.failures[0].message)
 
+    def test_a_path_without_a_control_result_fails_the_test_and_is_named(self) -> None:
+        # A control run that printed nothing, or broke halfway, proves no probe works. Without
+        # this, a broken control run would leave every denied probe unchecked.
+        for missing in PATHS:
+            with self.subTest(path=missing):
+                controls = [control for control in readable() if control.path != missing]
+
+                report = run(controls=controls)
+
+                self.assertFalse(report.passed)
+                self.assertEqual(codes(report), ["CONTROL_FAILED"])
+                self.assertIn(missing, report.failures[0].message)
+
+    def test_no_control_result_at_all_fails_every_path(self) -> None:
+        report = run(controls=[])
+
+        self.assertFalse(report.passed)
+        self.assertEqual(codes(report), ["CONTROL_FAILED"] * len(PATHS))
+
     def test_a_path_without_a_probe_result_fails_the_test_and_is_named(self) -> None:
         for missing in PATHS:
             with self.subTest(path=missing):

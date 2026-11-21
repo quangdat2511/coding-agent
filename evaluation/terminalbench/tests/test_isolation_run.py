@@ -81,6 +81,7 @@ class ScriptedContainer:
     launcher_result: Result = field(default_factory=lambda: Result(return_code=2, stderr=REFUSAL))
     # False: the agent never contacts the server, as an artifact that ignores ANTHROPIC_BASE_URL.
     plays_agent: bool = True
+    control_output: str = CONTROL_OUTPUT
     calls: list[Call] = field(default_factory=list)
     uploads: dict[str, bytes] = field(default_factory=dict)
 
@@ -113,7 +114,7 @@ class ScriptedContainer:
         if command.startswith("sh -c '\"$@\"; exit $?' sh"):
             return self.launcher_result
         if command.startswith("sh -c 'sh /tmp/isolation-probe.sh"):
-            return Result(stdout=CONTROL_OUTPUT)
+            return Result(stdout=self.control_output)
         return Result()
 
     def _play_the_agent(self, env: dict[str, str]) -> None:
@@ -184,6 +185,12 @@ class RunTest(unittest.TestCase):
         self.assertFalse(result["passed"])
         self.assertEqual([f["code"] for f in result["failures"]], ["KEY_FOUND"])
         self.assertIn("proc-environ", result["failures"][0]["message"])
+
+    def test_a_control_run_that_prints_nothing_fails_every_path(self) -> None:
+        result = run(ScriptedContainer(control_output=""))
+
+        self.assertFalse(result["passed"])
+        self.assertEqual([f["code"] for f in result["failures"]], ["CONTROL_FAILED"] * 4)
 
     def test_a_launcher_that_keeps_its_shell_and_is_not_refused_fails_the_test(self) -> None:
         container = ScriptedContainer(launcher_result=Result(return_code=0))

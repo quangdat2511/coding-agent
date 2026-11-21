@@ -42,8 +42,10 @@ class Control:
 class LauncherResult:
     """The run in which a launcher keeps its shell alive instead of replacing it (ADR 0001 §8).
 
-    `message_matched` says that the first line of standard error names an ancestor that holds the
-    key. `server_requests` is how many requests the fake server got from that run.
+    `message_matched` says that the first line of the output names an ancestor that holds the key.
+    The output is standard error and then standard output, because Harbor's Docker environment
+    sends one into the other. `server_requests` is how many requests the fake server got from that
+    run.
     """
 
     exit_code: int
@@ -105,7 +107,14 @@ def evaluate(
         if probe.found
     ]
     yama_denies = yama_ptrace_scope is not None and yama_ptrace_scope >= 1
-    for control in controls:
+    # Every path needs a control result, as it needs a probe result. A control run that printed
+    # nothing would otherwise leave every denied probe unchecked.
+    controls_by_path = {control.path: control for control in controls}
+    for path in PATHS:
+        control = controls_by_path.get(path)
+        if control is None:
+            failures.append(Failure(code="CONTROL_FAILED", message=f"no control result for {path}"))
+            continue
         if control.found:
             continue
         if control.path == PROC_MEM and yama_denies:
