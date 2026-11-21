@@ -9,6 +9,7 @@ import asyncio
 import json
 import unittest
 import urllib.request
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -145,8 +146,8 @@ SETUP = IsolationSetup(
 )
 
 
-def run(container: ScriptedContainer) -> dict[str, Any]:
-    return asyncio.run(run_isolation_test(container, SETUP))
+def run(container: ScriptedContainer, log: Callable[[str], None] = lambda _: None) -> dict[str, Any]:
+    return asyncio.run(run_isolation_test(container, SETUP, log))
 
 
 class RunTest(unittest.TestCase):
@@ -186,6 +187,28 @@ class RunTest(unittest.TestCase):
 
         self.assertFalse(result["passed"])
         self.assertEqual([f["code"] for f in result["failures"]], ["LAUNCHER_NOT_REJECTED"])
+
+    def test_the_refusal_is_found_when_the_backend_merges_standard_error_into_output(self) -> None:
+        # Harbor's Docker environment runs `docker compose exec` with stderr sent to stdout, so
+        # the refusal arrives in `stdout` and `stderr` is empty.
+        merged = Result(return_code=2, stdout=REFUSAL, stderr=None)
+
+        result = run(ScriptedContainer(launcher_result=merged))
+
+        self.assertEqual(result["failures"], [])
+        self.assertTrue(result["launcherRejected"]["messageMatched"])
+
+    def test_a_refusal_that_does_not_match_is_logged_without_the_key(self) -> None:
+        other = Result(return_code=2, stderr=f"coding-agent: --model is not known; key {KEY}\n")
+        lines: list[str] = []
+
+        result = run(ScriptedContainer(launcher_result=other), log=lines.append)
+
+        self.assertFalse(result["launcherRejected"]["messageMatched"])
+        self.assertEqual(len(lines), 1)
+        self.assertIn("--model is not known", lines[0])
+        self.assertIn("[redacted]", lines[0])
+        self.assertNotIn(KEY, lines[0])
 
     def test_an_agent_that_never_reaches_the_server_fails_and_names_the_base_url(self) -> None:
         result = run(ScriptedContainer(plays_agent=False))

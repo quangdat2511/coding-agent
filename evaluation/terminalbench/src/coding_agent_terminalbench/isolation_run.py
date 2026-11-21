@@ -171,10 +171,19 @@ async def _run_launcher_that_keeps_its_shell(
         )
     finally:
         server.stop()
-    first_line = next((line for line in (result.stderr or "").splitlines() if line.strip()), "")
+    # Harbor's Docker environment sends standard error into standard output, so the refusal can
+    # arrive in either stream. The agent prints nothing before it refuses.
+    output = f"{result.stderr or ''}\n{result.stdout or ''}"
+    first_line = next((line for line in output.splitlines() if line.strip()), "")
+    matched = REFUSAL.search(first_line) is not None
+    if not matched:
+        log(
+            f"the launcher that keeps its shell ended with exit {result.return_code} and "
+            f"printed: {first_line.replace(setup.key, '[redacted]')[:400]}"
+        )
     return LauncherResult(
         exit_code=result.return_code,
-        message_matched=REFUSAL.search(first_line) is not None,
+        message_matched=matched,
         server_requests=server.request_count,
     )
 
@@ -194,7 +203,8 @@ async def _run_agent(
     finally:
         server.stop()
     if result.return_code != 0:
-        tail = (result.stderr or "").replace(setup.key, "[redacted]").strip()[-400:]
+        output = f"{result.stderr or ''}{result.stdout or ''}"
+        tail = output.replace(setup.key, "[redacted]").strip()[-400:]
         log(f"the agent exited {result.return_code}: {tail}")
     probes = parse_probe_output("\n".join(server.tool_result_texts()))
     return probes, server.observations(expected_tool_results=1)
