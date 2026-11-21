@@ -46,6 +46,9 @@ adapter reads those files as the external contract of ADR 0005 §4.
 
 `tests/test_oracle_job.py` writes its own job directories, because only that module reads them.
 It writes most of them by hand and some with Harbor's own models (see Oracle job).
+`tests/test_record.py` and `tests/test_secret_scan.py` write their own too: a synthetic recorded
+job, its smoke job and its rerun job, and the files of the secret scan. `tests/test_dataset_record.py`
+reads ADR 0008 §4 for the default pin and writes a small record for another dataset.
 
 To make sure that `uv.lock` matches `pyproject.toml`:
 
@@ -341,3 +344,172 @@ record. `oracle.json` holds these values. It holds no variable value.
 Commit `oracle.json`. Then add a comment to the Jira ticket of the job with the `harbor run`
 command and the wall-clock time that the record command printed, and the compute cost that Modal
 shows for the job. The later jobs use these values for planning.
+
+## Record tooling
+
+The record tooling is ADR 0005 §8. A recorded job leaves a Harbor job directory under `jobs/`,
+which Git ignores, and the record tooling turns the finished job into the two committed files of
+`evaluation/terminalbench/runs/<job name>/`:
+
+- `manifest.json` records the ADR 0005 §1 pins, the Coding Agent artifact, the `terminalbench` profile
+  values, the provider, model and sampling settings, every Harbor flag, the names but never the
+  values of the variables passed, the job times, the oracle, smoke and rerun job names, the dataset
+  record of ADR 0008 with the evidence for the dataset properties, the secret scan's patterns, file
+  count and result, and the SHA-256 of every archive part.
+- `report.md` records validity, the dataset pin, the mean reward over the job's `N` recorded
+  outcomes, the reward distribution, the per-task table, the cross-tabulation of Agent Result
+  outcome against reward, every rerun-eligible trial with its reason and its rerun's outcome, the
+  harness-flaky tasks and the tasks whose declared MCP servers or skills directory the adapter
+  ignores. It has no Pi column and no pass or fail threshold.
+
+`record.py` computes both files from the job directories, so no number in the report is
+transcribed. It also checks the job: it refuses a job whose `config.json` is not the recorded-job
+command of ADR 0005 §7, and it writes nothing when it refuses, like `oracle_job.py`.
+
+Five modules do this. `harbor_job.py` reads the files that Harbor and Coding Agent write;
+`record.py` checks the jobs against ADR 0005 §7, computes the recorded outcomes, the validity and
+the mean, and writes `manifest.json`; `report.py` renders `report.md`; `dataset_record.py` reads the
+committed dataset record of ADR 0008; and `secret_scan.py` is the scan of ADR 0005 §8. The tests
+write small synthetic Harbor job directories, because the record can then test a shape that
+Harbor's own models refuse, including one job with a planted credential and one with a missing
+reward.
+
+### The dataset record
+
+The dataset is a job parameter, not a pin of the protocol (ADR 0008 §1), so the tooling reads the
+dataset's own data from the dataset's committed record rather than from a constant:
+
+- ADR 0008 §4 for the default pin, `terminal-bench/terminal-bench@4.1.0`.
+- `evaluation/terminalbench/datasets/<org>/<name>@<version>.md` for another admissible dataset,
+  committed before the first job that names it (ADR 0008 §1).
+
+A record is Markdown with a two-column table. The tooling needs the rows that ADR 0008 §4 shows:
+`Dataset identifier`, `Source repository`, `Release tag`, `Release commit`, `Smoke tasks`,
+`Environment`, `Single step`, `Verifier environment` and `Per-task agent timeout`. It reads
+the optional `Tasks with declared MCP servers` and `Tasks with a declared skills directory` rows
+when they are present, and it reads the `Smoke tasks` and task-list rows as Markdown code spans, or
+as `none`. A missing identity row is an error. A missing evidence row does not stop the tooling: it
+makes the job invalid under ADR 0005 §7, and the report says which property the record cannot show,
+because ADR 0005 §8 records the evidence rather than assuming it. No dataset name, version or task
+count is hardcoded in the tooling, its tests or its report.
+
+### Secret scan
+
+ADR 0005 §8 makes the scan mandatory before the archive is published, and it is also a command of
+its own, so a person can review the matches before the record is generated:
+
+```sh
+uv run --project evaluation/terminalbench --frozen python -m coding_agent_terminalbench.secret_scan \
+  jobs/<job name> jobs/<job name>-rerun \
+  --credential OPENCODE_API_KEY \
+  --review jobs/<job name>-scan-review.json \
+  --json jobs/<job name>-scan.json
+```
+
+It searches every file under each root, binary files included, for:
+
+- the exact value of every named credential variable, read from the environment and never given on
+  the command line, in UTF-8, UTF-16-LE and UTF-16-BE, because a log or a binary can encode it in
+  any of them;
+- `[REDACTED]`, Harbor's replacement for a value that it scrubbed;
+- the provider key prefixes `sk-ant-`, `sk-or-`, `sk-proj-`, `xai-`, `AIza` and
+  `oc_sk_`, which a truncated key still carries.
+
+Each match is printed with its file and byte offset, so it can be reviewed:
+
+```text
+jobs/recorded-job/alpha__x/agent/coding-agent/events.jsonl:4127: key-prefix sk-ant- (unexplained)
+```
+
+A credential match can never be explained: the key reached the logs, so the archive is not published
+and the credential is revoked, whether or not it would have been published (ADR 0005 §8 steps 1 and
+4). A `[REDACTED]` or key-prefix match is explained by a review file, because a person has to show
+that it is not a credential or that the file is removed:
+
+```json
+{
+  "reviewed": [
+    {
+      "file": "jobs/<job name>/<trial>/agent/coding-agent/events.jsonl",
+      "offset": 4127,
+      "reason": "the task's own example text, not a credential"
+    }
+  ]
+}
+```
+
+The file and offset are the two that the scan printed, and the reason must be non-empty. A review
+entry that names a credential match, and a review entry that names no match, are problems; a stale
+review cannot quietly explain nothing. The command exits 0 when every match is explained or none was
+found, 1 while an unexplained match or a review problem remains, and 2 when the command line, a
+credential variable, a root, a file or the review file cannot be used. It never prints or stores a
+credential value.
+
+`record.py` runs the same scan over the recorded and rerun job directories before it writes
+anything, taking the credential variable names from the jobs' `--ae` flags. It does not scan the
+archive parts: the scan covers the uncompressed directories that they pack, and it uses the same
+review file as the command above (`--scan-review`).
+
+### Run the record command
+
+Run this from the repository root after the recorded job, the smoke job and any rerun job finished.
+The archive parts are created before the record is written, because the manifest holds their
+SHA-256 values (CDA-97 attaches them to the GitHub Release):
+
+```sh
+uv run --project evaluation/terminalbench --frozen python -m coding_agent_terminalbench.record \
+  jobs/<recorded job> \
+  --rerun-job jobs/<recorded job>-rerun \
+  --smoke-job jobs/<smoke job> \
+  --oracle-record evaluation/terminalbench/runs/<recorded job>/oracle.json \
+  --dataset-record docs/adr/0008-evaluation-dataset-as-a-job-parameter.md \
+  --artifact-dir dist/artifact \
+  --archive-part jobs/<recorded job>.tar.zst.part-aa \
+  --scan-review jobs/<recorded job>-scan-review.json \
+  --output-dir evaluation/terminalbench/runs/<recorded job>
+```
+
+`--rerun-job` is omitted when no trial was rerun-eligible. Repeat `--archive-part` for every part;
+each part must be under the 2 GiB that GitHub allows a release asset, and there may be at most 1,000
+parts (ADR 0005 §8). `--credential NAME` adds a variable to the scan when the job passed one that
+the record cannot derive from its configuration. Commit `manifest.json` and `report.md` under the
+job's directory; CDA-97 publishes the archive parts and commits that record for the MVP's job.
+
+The command refuses, and writes nothing, when:
+
+- `config.json` is not the recorded-job command of ADR 0005 §7: another agent or import path,
+  another model, more or fewer than one dataset, an environment other than `modal` for the recorded
+  and rerun jobs, `-k` other than 1, `-r` other than 0, a task filter on the recorded job, a
+  timeout override, another agent kwarg, or a credential that is not the template
+  `NAME='${NAME}'` of the `-m` provider;
+- the recorded job did not finish, did not run every task that its `lock.json` plans, ran a task
+  more than once, or ran a task at another digest than its `lock.json` records;
+- the trials did not run the artifact that `artifact-manifest.json` describes, by version, commit
+  and every SHA-256 value, or they did not all use one profile, provider, model, sampling setting
+  and `SessionLimits`;
+- the smoke job did not run the smoke set that the dataset record names, or the rerun job is not
+  named `<job name>-rerun` or does not repeat the recorded job's dataset, agent, model and
+  artifact;
+- the oracle record describes another dataset pin, or names a harness-flaky task that the job did
+  not run;
+- the dataset record's release tag does not resolve to the commit it names, or its smoke set and
+  its declared MCP-server and skills tasks are not in the job's resolved task list;
+- there is no archive part, two parts share a file name, any part is 2 GiB or larger, or there
+  are more than 1,000 parts;
+- the secret scan does not pass.
+
+A job that passes those checks can still be **invalid** under ADR 0005 §7: a task may lack a
+completed trial in the recorded job or the rerun job, the dataset record may lack the evidence for
+one of its properties, or a trial's shape may contradict a recorded property. The command writes
+the record then, because ADR 0005 §8 archives and reports an invalid job too; the report states the
+invalidity, publishes no headline reward, and still shows the mean it computed for diagnosis, with a
+trial without a reward counting as 0 as Harbor's mean counts it.
+
+| Exit code | Meaning |
+| --- | --- |
+| 0 | Every check passed. The command wrote `manifest.json` and `report.md` into `--output-dir`. |
+| 1 | A job breaks a check, or the secret scan did not pass. The command lists each problem and writes nothing. |
+| 2 | A file cannot be read or written, the release tag cannot be resolved, or an argument is wrong. The command writes nothing. |
+
+The command writes both files through temporary files, so a failed write leaves no partial record.
+
