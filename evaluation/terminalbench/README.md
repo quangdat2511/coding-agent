@@ -381,8 +381,9 @@ provider sets no base URL, so the SDK reads `ANTHROPIC_BASE_URL`, and the test p
 at a fake Anthropic Messages server on the host. The server answers the first request with one
 `bash` Tool Call that runs a probe, and the second with a text answer. It runs on the host, outside
 the container, so no process in the container holds the key that arrives in its `x-api-key` header.
-The test depends on this variable. If the artifact stops honouring it, the server gets no request
-and the test fails with `TOOL_RESULTS_MISSING` and a message that names the variable.
+The test depends on this variable. If the artifact stops honouring it, the server gets no request,
+the result has `TOOL_RESULTS_MISSING` with a message that names the variable, and the test exits 2,
+because it could not drive the agent and so shows nothing about a leak.
 
 The probe is POSIX `sh` and coreutils, uploaded as a file, so the key is in no Tool Call. Only the
 probe's own short-lived `grep` processes hold it in their command line, and the probe reads the
@@ -407,7 +408,7 @@ line goes to standard error. `--output` writes the same JSON to a file.
 | --- | --- |
 | 0 | The test ran and the artifact passed. |
 | 1 | The test ran and the artifact failed: a Tool Call found the key, or the launcher that keeps its shell was not refused. `failures` says why. |
-| 2 | The test showed nothing about the artifact. Either it could not run (a wrong argument, no Docker, a container that does not build or cannot reach the server, an artifact that does not install), or every failure is one that says only that this host or image could not show the result: `MEM_NOT_DEMONSTRABLE`, `CONTROL_FAILED`, `PATH_NOT_TESTED`, `TOOL_RESULTS_MISSING` or `KEY_NOT_DELIVERED`. In the second case the JSON is still printed, and the summary line starts with `INCONCLUSIVE`. |
+| 2 | The test showed nothing about the artifact. Either it could not run (a wrong argument, no Docker, a container that does not build or cannot reach the server, an artifact that does not install), or every failure is one that shows nothing about a leak: `MEM_NOT_DEMONSTRABLE`, `CONTROL_FAILED` and `PATH_NOT_TESTED` come from the host or image, and `TOOL_RESULTS_MISSING` and `KEY_NOT_DELIVERED` mean that the test could not drive the agent, which can come from the artifact, for example one that ignores `ANTHROPIC_BASE_URL`. In the second case the JSON is still printed, and the summary line starts with `INCONCLUSIVE`. |
 
 | `failures[].code` | The test fails because |
 | --- | --- |

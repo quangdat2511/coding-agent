@@ -7,8 +7,8 @@
 It builds the task's container with Harbor, installs the artifact in it, and runs the test as the
 user that Harbor runs the agent as. It prints one JSON result on standard output and a summary line
 on standard error. Exit code 0 means the artifact passed, 1 means the artifact failed, and 2 means
-the test showed nothing about the artifact: it could not run, or every failure says only that this
-host or image could not show the result (see INCONCLUSIVE).
+the test showed nothing about a leak: it could not run, or every failure is one that shows nothing
+about a leak (see INCONCLUSIVE).
 
 The module imports Harbor only inside `run_in_docker`, so the rest of it is tested without Harbor.
 """
@@ -97,10 +97,12 @@ def new_disposable_key() -> str:
     return f"sk-ant-isolation-test-{secrets.token_hex(16)}"
 
 
-# The failures that say only that the test proved nothing on this host or image: no Tool Result,
-# no key to hide, a probe or control that could not show anything, or Yama hiding the mem read.
+# The failures that show nothing about a leak. MEM_NOT_DEMONSTRABLE, CONTROL_FAILED and
+# PATH_NOT_TESTED come from the host or image: Yama hides the mem read, or a probe or control could
+# not show anything. TOOL_RESULTS_MISSING and KEY_NOT_DELIVERED mean that the test could not drive
+# the agent, which can come from the artifact, for example one that ignores ANTHROPIC_BASE_URL.
 # A run whose every failure is one of these exits 2, like a run that could not start, because
-# exit 1 means that the artifact failed.
+# exit 1 means that a Tool Call found the key or the launcher was not refused.
 INCONCLUSIVE = frozenset(
     {
         FailureCode.MEM_NOT_DEMONSTRABLE,
