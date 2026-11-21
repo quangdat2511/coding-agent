@@ -10,6 +10,7 @@ from coding_agent_terminalbench.isolation_report import (
     PROC_MEM,
     Control,
     LauncherResult,
+    Observations,
     Probe,
     Report,
     RunContext,
@@ -51,7 +52,7 @@ def run(**changes: Any) -> Report:
         "server": served(),
     }
     inputs.update(changes)
-    return evaluate(**inputs)
+    return evaluate(Observations(**inputs))
 
 
 def codes(report: Report) -> list[str]:
@@ -233,7 +234,8 @@ def document(**changes: Any) -> dict[str, Any]:
         "server": served(),
     }
     inputs.update(changes)
-    return result_document(**inputs)
+    context = inputs.pop("context")
+    return result_document(context, Observations(**inputs))
 
 
 class ResultDocumentTest(unittest.TestCase):

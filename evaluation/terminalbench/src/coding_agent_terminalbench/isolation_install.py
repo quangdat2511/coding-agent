@@ -8,7 +8,6 @@ test never reads the environment of the host. It imports nothing from Harbor.
 
 import asyncio
 from pathlib import Path
-from typing import Any, Protocol
 
 from coding_agent_terminalbench.install import (
     INSTALLED_EXECUTABLE,
@@ -18,13 +17,8 @@ from coding_agent_terminalbench.install import (
     check_version_output,
     select_executable,
 )
+from coding_agent_terminalbench.isolation_run import Container
 from coding_agent_terminalbench.manifest import load_manifest
-
-
-class Container(Protocol):
-    async def exec(self, command: str, user: str | int | None = None, **kwargs: Any) -> Any: ...
-
-    async def upload_file(self, source_path: Path | str, target_path: str) -> None: ...
 
 
 async def install_artifact(container: Container, artifact_dir: Path) -> None:

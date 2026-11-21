@@ -21,6 +21,8 @@ from coding_agent_terminalbench.isolation_run import (
     run_isolation_test,
 )
 
+from tests.support import ExecOutcome
+
 COMMIT = "64128afd1c0f27db530cf167b015d206ef67c707"
 SHA256 = "b" * 64
 KEY = "sk-ant-isolation-test-0123456789abcdef0123456789abcdef"
@@ -60,13 +62,6 @@ CONTROL_OUTPUT = probe_lines(
 
 
 @dataclass
-class Result:
-    stdout: str | None = ""
-    stderr: str | None = ""
-    return_code: int = 0
-
-
-@dataclass
 class Call:
     command: str
     env: dict[str, str]
@@ -78,7 +73,9 @@ class ScriptedContainer:
     """A task container with the artifact installed. `probe_output` is what the Tool Call prints."""
 
     probe_output: str = HARDENED_OUTPUT
-    launcher_result: Result = field(default_factory=lambda: Result(return_code=2, stderr=REFUSAL))
+    launcher_result: ExecOutcome = field(
+        default_factory=lambda: ExecOutcome(return_code=2, stderr=REFUSAL)
+    )
     # False: the agent never contacts the server, as an artifact that ignores ANTHROPIC_BASE_URL.
     plays_agent: bool = True
     control_output: str = CONTROL_OUTPUT
@@ -95,27 +92,27 @@ class ScriptedContainer:
         env: dict[str, str] | None = None,
         timeout_sec: int | None = None,
         user: str | int | None = None,
-    ) -> Result:
+    ) -> ExecOutcome:
         self.calls.append(Call(command, dict(env or {}), user))
         if command == f"{INSTALLED_EXECUTABLE} --version":
-            return Result(stdout=f"coding-agent 0.0.1 {COMMIT}\n")
+            return ExecOutcome(stdout=f"coding-agent 0.0.1 {COMMIT}\n")
         if command == f"sha256sum {INSTALLED_EXECUTABLE}":
-            return Result(stdout=f"{SHA256}  {INSTALLED_EXECUTABLE}\n")
+            return ExecOutcome(stdout=f"{SHA256}  {INSTALLED_EXECUTABLE}\n")
         if command == "id -u":
-            return Result(stdout="1000\n")
+            return ExecOutcome(stdout="1000\n")
         if command == "id -un":
-            return Result(stdout="agent\n")
+            return ExecOutcome(stdout="agent\n")
         if command.startswith("cat /proc/sys/kernel/yama/ptrace_scope"):
-            return Result(return_code=1)  # Yama is not loaded, as in Docker Desktop's kernel
+            return ExecOutcome(return_code=1)  # Yama is not loaded, as in Docker Desktop's kernel
         if command.startswith(f"exec {INSTALLED_EXECUTABLE} run"):
             if self.plays_agent:
                 await asyncio.to_thread(self._play_the_agent, env or {})
-            return Result()
+            return ExecOutcome()
         if command.startswith("sh -c '\"$@\"; exit $?' sh"):
             return self.launcher_result
         if command.startswith("sh -c 'sh /tmp/isolation-probe.sh"):
-            return Result(stdout=self.control_output)
-        return Result()
+            return ExecOutcome(stdout=self.control_output)
+        return ExecOutcome()
 
     def _play_the_agent(self, env: dict[str, str]) -> None:
         """Two requests, as the agent sends: the task, then the history with the Tool Result."""
@@ -193,7 +190,7 @@ class RunTest(unittest.TestCase):
         self.assertEqual([f["code"] for f in result["failures"]], ["CONTROL_FAILED"] * 4)
 
     def test_a_launcher_that_keeps_its_shell_and_is_not_refused_fails_the_test(self) -> None:
-        container = ScriptedContainer(launcher_result=Result(return_code=0))
+        container = ScriptedContainer(launcher_result=ExecOutcome(return_code=0))
 
         result = run(container)
 
@@ -203,7 +200,7 @@ class RunTest(unittest.TestCase):
     def test_the_refusal_is_found_when_the_backend_merges_standard_error_into_output(self) -> None:
         # Harbor's Docker environment runs `docker compose exec` with stderr sent to stdout, so
         # the refusal arrives in `stdout` and `stderr` is empty.
-        merged = Result(return_code=2, stdout=REFUSAL, stderr=None)
+        merged = ExecOutcome(return_code=2, stdout=REFUSAL, stderr=None)
 
         result = run(ScriptedContainer(launcher_result=merged))
 
@@ -211,7 +208,9 @@ class RunTest(unittest.TestCase):
         self.assertTrue(result["launcherRejected"]["messageMatched"])
 
     def test_a_refusal_that_does_not_match_is_logged_without_the_key(self) -> None:
-        other = Result(return_code=2, stderr=f"coding-agent: --model is not known; key {KEY}\n")
+        other = ExecOutcome(
+            return_code=2, stderr=f"coding-agent: --model is not known; key {KEY}\n"
+        )
         lines: list[str] = []
 
         result = run(ScriptedContainer(launcher_result=other), log=lines.append)
@@ -276,9 +275,9 @@ class RunTest(unittest.TestCase):
 
     def test_a_version_line_that_is_not_the_agents_stops_the_run(self) -> None:
         class WrongVersion(ScriptedContainer):
-            async def exec(self, command: str, *args: Any, **kwargs: Any) -> Result:
+            async def exec(self, command: str, *args: Any, **kwargs: Any) -> ExecOutcome:
                 if command.endswith("--version"):
-                    return Result(stdout="something else\n")
+                    return ExecOutcome(stdout="something else\n")
                 return await super().exec(command, *args, **kwargs)
 
         with self.assertRaises(IsolationRunError):

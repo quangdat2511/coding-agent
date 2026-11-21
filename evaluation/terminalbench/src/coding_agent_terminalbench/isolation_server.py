@@ -128,14 +128,15 @@ class FakeModelServer:
                 with server._lock:
                     number = server._requests
                     server._requests += 1
-                    server._keys_matched.append(self.headers.get("x-api-key") == server._expected_key)
+                    server._keys_matched.append(
+                        self.headers.get("x-api-key") == server._expected_key
+                    )
                     server._last_tool_results = _tool_result_texts(request)
                 if number >= len(server._turns):
                     # Coding Agent asked for more than the script holds. Answer with an error, not a
                     # stream, so the run ends in a failure that names the cause.
-                    message = (
-                        f"the script has {len(server._turns)} turns and this is request {number + 1}"
-                    )
+                    turns = len(server._turns)
+                    message = f"the script has {turns} turns and this is request {number + 1}"
                     failure = json.dumps(
                         {"type": "error", "error": {"type": "api_error", "message": message}}
                     ).encode()

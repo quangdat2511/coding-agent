@@ -91,7 +91,7 @@ def new_disposable_key() -> str:
     return f"sk-ant-isolation-test-{secrets.token_hex(16)}"
 
 
-def summary(document: dict[str, Any]) -> str:
+def summary_line(document: dict[str, Any]) -> str:
     if document["passed"]:
         return (
             f"PASS: no Tool Call found the key on {len(document['probes'])} paths, and the "
@@ -200,7 +200,7 @@ def main(
     out.write(text)
     if arguments.output is not None:
         arguments.output.write_text(text)
-    print(summary(document), file=err)
+    print(summary_line(document), file=err)
     return 0 if document["passed"] else 1
 
 

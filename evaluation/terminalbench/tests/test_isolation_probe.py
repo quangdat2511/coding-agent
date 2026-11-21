@@ -3,8 +3,8 @@
 The probe reads /proc, which only Linux has, so these tests run on Linux and are skipped elsewhere.
 On another host, run them in a Linux container:
 
-    docker run --rm -v "$PWD":/work:ro -w /work -e PYTHONPATH=src:. python:3.12-slim \
-        python -m unittest tests.test_isolation_probe
+    docker run --rm -v "$PWD":/work:ro -w /work -e PYTHONPATH=src:. -e PYTHONDONTWRITEBYTECODE=1 \
+        python:3.12-slim python -m unittest tests.test_isolation_probe
 """
 
 import os
@@ -46,7 +46,7 @@ def run_under_holder(env: dict[str, str]) -> list[Probe]:
     """Runs the probe as a child of a shell that stands in for an agent that is not hardened.
 
     The shell has `env`, which holds the key, and its command line holds the agent's marker. It
-    runs the probe as a child, as the Agent holds a Tool Call's shell, so the key is in its
+    runs the probe as a child, as Coding Agent holds a Tool Call's shell, so the key is in its
     /proc/<pid>/environ and in its memory, and the probe is its descendant.
     """
     with tempfile.TemporaryDirectory() as directory:

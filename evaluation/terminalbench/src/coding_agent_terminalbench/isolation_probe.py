@@ -8,6 +8,7 @@ key itself. It imports nothing from Harbor.
 """
 
 import json
+import re
 
 from coding_agent_terminalbench.isolation_report import (
     ANCESTORS,
@@ -19,10 +20,17 @@ from coding_agent_terminalbench.isolation_report import (
 from coding_agent_terminalbench.launch import KEY_VARIABLES
 
 
+# The key goes into single quotes and into an extended regular expression, so it may hold only
+# characters that are literal in both. The disposable key is letters, digits and hyphens.
+KEY_CHARACTERS = re.compile(r"[A-Za-z0-9-]+")
+
+
 def build_probe_script(key: str, agent_marker: str) -> str:
-    """The text of the probe. `agent_marker` is a string in the command line of the agent."""
-    if "'" in key or "'" in agent_marker:
-        raise ValueError("the key and the marker go into single quotes, so they hold no quote")
+    """The text of the probe. `agent_marker` is a string in the command line of Coding Agent."""
+    if KEY_CHARACTERS.fullmatch(key) is None:
+        raise ValueError("the key may hold only letters, digits and hyphens")
+    if "'" in agent_marker:
+        raise ValueError("the marker goes into single quotes, so it holds no quote")
     names = "|".join(sorted(KEY_VARIABLES))
     return f"""\
 KEY='{key}'
@@ -43,6 +51,11 @@ errno_of() {{
   esac
 }}
 
+# Whether the lines on standard input set a credential variable to a value, or hold the key.
+holds_key() {{
+  grep -q -E -e "^($NAMES)=." -e "$KEY"
+}}
+
 # The parent of a process, from field 4 of /proc/<pid>/stat. The name in field 2 may hold spaces
 # and parentheses, so this reads what follows its last closing parenthesis.
 ppid_of() {{
@@ -54,11 +67,10 @@ ppid_of() {{
 
 # Path 1: the environment that a Tool Call inherits.
 found=false
-if env | grep -q -E "^($NAMES)=."; then found=true; fi
-if env | grep -q -F -- "$KEY"; then found=true; fi
+if env | holds_key; then found=true; fi
 emit {INHERITED_ENVIRONMENT} read "$found"
 
-# The Agent is the nearest ancestor whose command line holds the marker. The probe finds it by
+# Coding Agent is the nearest ancestor whose command line holds the marker. The probe finds it by
 # its command line, not by /proc/<pid>/exe, which a process that is not dumpable denies.
 agent=''
 pid=$$
@@ -69,7 +81,7 @@ while [ "$pid" -gt 1 ] 2>/dev/null; do
   esac
 done
 
-# Path 2: the environment of the Agent process.
+# Path 2: the environment of the Coding Agent process.
 if [ -z "$agent" ]; then
   emit {PROC_ENVIRON} AGENT_NOT_FOUND false
 else
@@ -78,17 +90,12 @@ else
     emit {PROC_ENVIRON} "$(errno_of "$error")" false
   else
     found=false
-    if tr '\\0' '\\n' < "/proc/$agent/environ" 2>/dev/null | grep -q -E "^($NAMES)=."; then
-      found=true
-    fi
-    if tr '\\0' '\\n' < "/proc/$agent/environ" 2>/dev/null | grep -q -F -- "$KEY"; then
-      found=true
-    fi
+    if tr '\\0' '\\n' < "/proc/$agent/environ" 2>/dev/null | holds_key; then found=true; fi
     emit {PROC_ENVIRON} read "$found"
   fi
 fi
 
-# Path 3: the memory of the Agent process. Opening /proc/<pid>/mem is the access check. If it
+# Path 3: the memory of the Coding Agent process. Opening /proc/<pid>/mem is the access check. If it
 # opens, the probe reads each writable region, where the environment block and the heap are, and
 # looks for the key. `dd` here is GNU dd: skip_bytes and count_bytes read a range of bytes.
 if [ -z "$agent" ]; then
@@ -124,10 +131,7 @@ pid=$$
 while :; do
   pid=$(ppid_of "$pid") || {{ outcome=INCOMPLETE; break; }}
   [ "$pid" -ge 1 ] 2>/dev/null || break
-  if tr '\\0' '\\n' < "/proc/$pid/environ" 2>/dev/null | grep -q -E "^($NAMES)=."; then
-    found=true
-  fi
-  if tr '\\0' '\\n' < "/proc/$pid/environ" 2>/dev/null | grep -q -F -- "$KEY"; then found=true; fi
+  if tr '\\0' '\\n' < "/proc/$pid/environ" 2>/dev/null | holds_key; then found=true; fi
   command_line=$(tr '\\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null)
   case "$command_line" in
     *"$KEY"*) found=true ;;

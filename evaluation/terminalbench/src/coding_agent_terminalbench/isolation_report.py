@@ -7,6 +7,7 @@ imports nothing from Harbor and nothing that needs Docker, so its tests run anyw
 
 import json
 from dataclasses import dataclass, field
+from enum import StrEnum
 from typing import Any
 
 # The four paths of ADR 0005 §7 item 2. The names are the `path` values in the result.
@@ -17,7 +18,7 @@ ANCESTORS = "ancestors"
 PATHS = (INHERITED_ENVIRONMENT, PROC_ENVIRON, PROC_MEM, ANCESTORS)
 
 # The outcomes that show a read that Linux allowed ("read") or denied (EACCES, EPERM). Any other,
-# such as the probe not finding the Agent, leaves the path untested.
+# such as the probe not finding Coding Agent, leaves the path untested.
 CONCLUSIVE_OUTCOMES = frozenset({"read", "EACCES", "EPERM"})
 
 
@@ -62,10 +63,36 @@ class ServerObservations:
     key_matched: bool
 
 
+class FailureCode(StrEnum):
+    """Why the test failed. Each value is the `code` of a failure in the result."""
+
+    KEY_FOUND = "KEY_FOUND"
+    CONTROL_FAILED = "CONTROL_FAILED"
+    PATH_NOT_TESTED = "PATH_NOT_TESTED"
+    MEM_NOT_DEMONSTRABLE = "MEM_NOT_DEMONSTRABLE"
+    LAUNCHER_NOT_REJECTED = "LAUNCHER_NOT_REJECTED"
+    TOOL_RESULTS_MISSING = "TOOL_RESULTS_MISSING"
+    KEY_NOT_DELIVERED = "KEY_NOT_DELIVERED"
+
+
 @dataclass(frozen=True)
 class Failure:
-    code: str
+    code: FailureCode
     message: str
+
+
+@dataclass(frozen=True)
+class Observations:
+    """Everything the run saw, which the decision reads.
+
+    `yama_ptrace_scope` is the value in the container, or None when Yama is not loaded.
+    """
+
+    probes: list[Probe]
+    controls: list[Control]
+    yama_ptrace_scope: int | None
+    launcher: LauncherResult
+    server: ServerObservations
 
 
 @dataclass(frozen=True)
@@ -74,14 +101,10 @@ class Report:
     failures: list[Failure] = field(default_factory=list)
 
 
-def evaluate(
-    probes: list[Probe],
-    controls: list[Control],
-    yama_ptrace_scope: int | None,
-    launcher: LauncherResult,
-    server: ServerObservations,
-) -> Report:
-    """`yama_ptrace_scope` is the value in the container, or None when Yama is not loaded."""
+def evaluate(observed: Observations) -> Report:
+    probes, controls = observed.probes, observed.controls
+    yama_ptrace_scope = observed.yama_ptrace_scope
+    launcher, server = observed.launcher, observed.server
     # A path that no probe reported on shows nothing, so it cannot count as denied. The same holds
     # for a probe that ended in a way that Linux does not give for a read that was allowed or
     # denied.
@@ -90,11 +113,13 @@ def evaluate(
     for path in PATHS:
         probe = by_path.get(path)
         if probe is None:
-            failures.append(Failure(code="PATH_NOT_TESTED", message=f"no probe result for {path}"))
+            failures.append(
+                Failure(code=FailureCode.PATH_NOT_TESTED, message=f"no probe result for {path}")
+            )
         elif not probe.found and probe.outcome not in CONCLUSIVE_OUTCOMES:
             failures.append(
                 Failure(
-                    code="PATH_NOT_TESTED",
+                    code=FailureCode.PATH_NOT_TESTED,
                     message=(
                         f"the probe on {path} ended with {probe.outcome}, "
                         "which does not show that the read was denied"
@@ -102,7 +127,9 @@ def evaluate(
                 )
             )
     failures += [
-        Failure(code="KEY_FOUND", message=f"a Tool Call found the key through {probe.path}")
+        Failure(
+            code=FailureCode.KEY_FOUND, message=f"a Tool Call found the key through {probe.path}"
+        )
         for probe in probes
         if probe.found
     ]
@@ -113,7 +140,9 @@ def evaluate(
     for path in PATHS:
         control = controls_by_path.get(path)
         if control is None:
-            failures.append(Failure(code="CONTROL_FAILED", message=f"no control result for {path}"))
+            failures.append(
+                Failure(code=FailureCode.CONTROL_FAILED, message=f"no control result for {path}")
+            )
             continue
         if control.found:
             continue
@@ -122,7 +151,7 @@ def evaluate(
             # probe there would show nothing about the artifact.
             failures.append(
                 Failure(
-                    code="MEM_NOT_DEMONSTRABLE",
+                    code=FailureCode.MEM_NOT_DEMONSTRABLE,
                     message=(
                         f"{PROC_MEM} cannot be shown: ptrace_scope is {yama_ptrace_scope}, which "
                         "denies the read even on a process that is not hardened"
@@ -133,7 +162,7 @@ def evaluate(
             # A probe that cannot read a key that is there proves nothing when it then finds none.
             failures.append(
                 Failure(
-                    code="CONTROL_FAILED",
+                    code=FailureCode.CONTROL_FAILED,
                     message=(
                         f"the probe did not find the key on a process that holds it, on "
                         f"{control.path}"
@@ -149,14 +178,14 @@ def evaluate(
         )
         failures.append(
             Failure(
-                code="TOOL_RESULTS_MISSING",
+                code=FailureCode.TOOL_RESULTS_MISSING,
                 message=f"the model server got {count} Tool Results{hint}",
             )
         )
     if not server.key_matched:
         failures.append(
             Failure(
-                code="KEY_NOT_DELIVERED",
+                code=FailureCode.KEY_NOT_DELIVERED,
                 message=(
                     "a request to the model server did not carry the disposable key in x-api-key"
                 ),
@@ -196,16 +225,11 @@ class RunContext:
 SCHEMA_VERSION = 1
 
 
-def result_document(
-    context: RunContext,
-    probes: list[Probe],
-    controls: list[Control],
-    yama_ptrace_scope: int | None,
-    launcher: LauncherResult,
-    server: ServerObservations,
-) -> dict[str, Any]:
+def result_document(context: RunContext, observed: Observations) -> dict[str, Any]:
     """The JSON that the test prints. Its keys follow the artifact manifest's camelCase."""
-    report = evaluate(probes, controls, yama_ptrace_scope, launcher, server)
+    report = evaluate(observed)
+    probes, controls = observed.probes, observed.controls
+    launcher, server = observed.launcher, observed.server
     return {
         "schemaVersion": SCHEMA_VERSION,
         "passed": report.passed,
@@ -219,7 +243,7 @@ def result_document(
         "task": context.task,
         "backend": context.backend,
         "user": {"uid": context.uid, "name": context.user_name},
-        "yamaPtraceScope": yama_ptrace_scope,
+        "yamaPtraceScope": observed.yama_ptrace_scope,
         "probes": [{"path": p.path, "outcome": p.outcome, "found": p.found} for p in probes],
         "controls": [{"path": c.path, "found": c.found} for c in controls],
         "launcherRejected": {
@@ -249,7 +273,7 @@ def render_result(document: dict[str, Any], secret: str) -> str:
 
 def _launcher_failure(reason: str) -> Failure:
     return Failure(
-        code="LAUNCHER_NOT_REJECTED",
+        code=FailureCode.LAUNCHER_NOT_REJECTED,
         message=(
             "the launcher that keeps its shell was not rejected by the startup check: " + reason
         ),

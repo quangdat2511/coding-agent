@@ -125,7 +125,7 @@ class ObservationsTest(unittest.TestCase):
         self.assertEqual(observed.expected_tool_results, 1)
 
     def test_the_tool_results_of_earlier_turns_in_the_history_are_counted_too(self) -> None:
-        # The Agent sends the whole history each time, so with two Tool Calls the last request
+        # Coding Agent sends the whole history each time, so with two Tool Calls the last request
         # holds the first Tool Result in an earlier user message and the second in the last one.
         task = {"role": "user", "content": "task"}
 

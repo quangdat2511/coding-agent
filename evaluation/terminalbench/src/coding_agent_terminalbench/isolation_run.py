@@ -13,7 +13,6 @@ The container is anything with `exec` and `upload_file`, which is Harbor's `Base
 module imports nothing from Harbor, so its tests need no Docker.
 """
 
-import asyncio
 import re
 import tempfile
 from collections.abc import Callable
@@ -26,6 +25,7 @@ from coding_agent_terminalbench.isolation_probe import build_probe_script, parse
 from coding_agent_terminalbench.isolation_report import (
     Control,
     LauncherResult,
+    Observations,
     Probe,
     RunContext,
     ServerObservations,
@@ -97,7 +97,8 @@ async def run_isolation_test(
     launcher = await _run_launcher_that_keeps_its_shell(container, setup, log)
     probes, server = await _run_agent(container, setup, log)
     controls = await _run_control(container, setup)
-    return result_document(context, probes, controls, yama_ptrace_scope, launcher, server)
+    observed = Observations(probes, controls, yama_ptrace_scope, launcher, server)
+    return result_document(context, observed)
 
 
 async def _read_identity(

@@ -9,16 +9,9 @@ from pathlib import Path
 
 from coding_agent_terminalbench.install import INSTALLED_EXECUTABLE, ArtifactInstallError
 from coding_agent_terminalbench.isolation_install import install_artifact
-from tests.support import COMMIT, write_artifact
+from tests.support import COMMIT, ExecOutcome, write_artifact
 
 VERSION_LINE = f"coding-agent 0.0.1 {COMMIT}\n"
-
-
-@dataclass
-class Result:
-    stdout: str | None = ""
-    stderr: str | None = ""
-    return_code: int = 0
 
 
 @dataclass
@@ -34,18 +27,18 @@ class Container:
         content = Path(source_path).read_bytes()
         self.uploaded[target_path] = content + b"x" if self.damage_upload else content
 
-    async def exec(self, command: str, user: str | int | None = None, **_: object) -> Result:
+    async def exec(self, command: str, user: str | int | None = None, **_: object) -> ExecOutcome:
         self.commands.append((command, user))
         if command == "uname -m":
-            return Result(stdout=f"{self.machine}\n")
+            return ExecOutcome(stdout=f"{self.machine}\n")
         if command.startswith("sha256sum"):
             digest = hashlib.sha256(self.uploaded[INSTALLED_EXECUTABLE]).hexdigest()
-            return Result(stdout=f"{digest}  {INSTALLED_EXECUTABLE}\n")
+            return ExecOutcome(stdout=f"{digest}  {INSTALLED_EXECUTABLE}\n")
         if command.startswith("command -v bash"):
-            return Result(return_code=0 if self.has_bash else 1)
+            return ExecOutcome(return_code=0 if self.has_bash else 1)
         if command == f"{INSTALLED_EXECUTABLE} --version":
-            return Result(stdout=self.version_stdout)
-        return Result()
+            return ExecOutcome(stdout=self.version_stdout)
+        return ExecOutcome()
 
 
 def install(container: Container) -> None:
