@@ -9,6 +9,7 @@ to one of those writers changes the fixture in the same pull request.
 import hashlib
 import json
 from collections.abc import Mapping
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -585,3 +586,14 @@ def write_run_files(
         (directory / "result.json").write_text(
             f"{json.dumps(result, indent=2, ensure_ascii=False)}\n", encoding="utf-8"
         )
+
+
+# A stand-in for Harbor's ExecResult, for the tests that script a task container without importing
+# Harbor. It has the three fields that the code under test reads.
+
+
+@dataclass
+class ExecOutcome:
+    stdout: str | None = ""
+    stderr: str | None = ""
+    return_code: int = 0
