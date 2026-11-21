@@ -4,6 +4,7 @@ import asyncio
 import io
 import json
 import re
+import tempfile
 import unittest
 from pathlib import Path
 from typing import Any
@@ -168,9 +169,20 @@ class MainTest(unittest.TestCase):
         self.assertEqual(stdout, "")
         self.assertIn("--dataset", stderr)
 
-    def test_the_output_option_writes_the_same_json_to_a_file(self) -> None:
-        import tempfile
+    def test_an_output_file_that_cannot_be_written_exits_with_2_and_prints_no_result(self) -> None:
+        # The artifact may have passed, so this must not exit 1, and a result printed on stdout
+        # next to exit 2 would be read as a record of the run.
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "missing" / "result.json"
 
+            code, stdout, stderr = run_main([*REQUIRED, "--output", str(target)], passing())
+
+        self.assertEqual(code, 2)
+        self.assertEqual(stdout, "")
+        self.assertIn(f"cannot write {target}", stderr)
+        self.assertNotIn("Traceback", stderr)
+
+    def test_the_output_option_writes_the_same_json_to_a_file(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             target = Path(directory) / "result.json"
 

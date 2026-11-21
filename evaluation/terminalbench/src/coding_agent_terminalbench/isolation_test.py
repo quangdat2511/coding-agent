@@ -252,9 +252,15 @@ def main(
         message = f"{type(error).__name__}: {error}".replace(key, "[redacted]")
         print(f"{PROG}: the test could not run: {message}", file=err)
         return 2
-    out.write(text)
+    # The file comes first, so a run that cannot record its result prints none either: exit 2
+    # with a result on stdout would read as a record of the run.
     if arguments.output is not None:
-        arguments.output.write_text(text)
+        try:
+            arguments.output.write_text(text)
+        except OSError as error:
+            print(f"{PROG}: cannot write {arguments.output}: {error}", file=err)
+            return 2
+    out.write(text)
     print(summary_line(document), file=err)
     return exit_code(document)
 
