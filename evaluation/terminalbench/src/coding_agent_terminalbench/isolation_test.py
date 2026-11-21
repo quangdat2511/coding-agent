@@ -6,8 +6,9 @@
 
 It builds the task's container with Harbor, installs the artifact in it, and runs the test as the
 user that Harbor runs the agent as. It prints one JSON result on standard output and a summary line
-on standard error. Exit code 0 means the artifact passed, 1 means the run finished and the artifact
-failed, and 2 means the test could not run.
+on standard error. Exit code 0 means the artifact passed, 1 means the artifact failed, and 2 means
+the test showed nothing about the artifact: it could not run, or every failure says only that this
+host or image could not show the result (see INCONCLUSIVE).
 
 The module imports Harbor only inside `run_in_docker`, so the rest of it is tested without Harbor.
 """
@@ -25,7 +26,11 @@ from typing import Any, NoReturn, TextIO
 
 from coding_agent_terminalbench.install import ArtifactInstallError
 from coding_agent_terminalbench.isolation_install import install_artifact
-from coding_agent_terminalbench.isolation_report import SecretInResultError, render_result
+from coding_agent_terminalbench.isolation_report import (
+    FailureCode,
+    SecretInResultError,
+    render_result,
+)
 from coding_agent_terminalbench.isolation_run import (
     IsolationRunError,
     IsolationSetup,
@@ -91,6 +96,32 @@ def new_disposable_key() -> str:
     return f"sk-ant-isolation-test-{secrets.token_hex(16)}"
 
 
+# The failures that say only that the test proved nothing on this host or image: no Tool Result,
+# no key to hide, a probe or control that could not show anything, or Yama hiding the mem read.
+# A run whose every failure is one of these exits 2, like a run that could not start, because
+# exit 1 means that the artifact failed.
+INCONCLUSIVE = frozenset(
+    {
+        FailureCode.MEM_NOT_DEMONSTRABLE,
+        FailureCode.CONTROL_FAILED,
+        FailureCode.PATH_NOT_TESTED,
+        FailureCode.TOOL_RESULTS_MISSING,
+        FailureCode.KEY_NOT_DELIVERED,
+    }
+)
+
+
+def inconclusive(document: dict[str, Any]) -> bool:
+    codes = {failure["code"] for failure in document["failures"]}
+    return not document["passed"] and codes <= INCONCLUSIVE
+
+
+def exit_code(document: dict[str, Any]) -> int:
+    if document["passed"]:
+        return 0
+    return 2 if inconclusive(document) else 1
+
+
 def summary_line(document: dict[str, Any]) -> str:
     if document["passed"]:
         return (
@@ -98,7 +129,8 @@ def summary_line(document: dict[str, Any]) -> str:
             "launcher that keeps its shell was refused; the agent ran as uid "
             f"{document['user']['uid']}"
         )
-    return "FAIL: " + ", ".join(failure["code"] for failure in document["failures"])
+    codes = ", ".join(failure["code"] for failure in document["failures"])
+    return f"INCONCLUSIVE: {codes}" if inconclusive(document) else f"FAIL: {codes}"
 
 
 Runner = Callable[[Arguments, str], Awaitable[dict[str, Any]]]
@@ -201,7 +233,7 @@ def main(
     if arguments.output is not None:
         arguments.output.write_text(text)
     print(summary_line(document), file=err)
-    return 0 if document["passed"] else 1
+    return exit_code(document)
 
 
 if __name__ == "__main__":

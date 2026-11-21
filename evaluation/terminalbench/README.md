@@ -405,8 +405,8 @@ line goes to standard error. `--output` writes the same JSON to a file.
 | Exit code | Meaning |
 | --- | --- |
 | 0 | The test ran and the artifact passed. |
-| 1 | The test ran and the artifact failed. `failures` says why. |
-| 2 | The test could not run: a wrong argument, no Docker, a container that does not build, or an artifact that does not install. |
+| 1 | The test ran and the artifact failed: a Tool Call found the key, or the launcher that keeps its shell was not refused. `failures` says why. |
+| 2 | The test showed nothing about the artifact. Either it could not run (a wrong argument, no Docker, a container that does not build or cannot reach the server, an artifact that does not install), or every failure is one that says only that this host or image could not show the result: `MEM_NOT_DEMONSTRABLE`, `CONTROL_FAILED`, `PATH_NOT_TESTED`, `TOOL_RESULTS_MISSING` or `KEY_NOT_DELIVERED`. In the second case the JSON is still printed, and the summary line starts with `INCONCLUSIVE`. |
 
 | `failures[].code` | The test fails because |
 | --- | --- |
@@ -430,8 +430,8 @@ line goes to standard error. `--output` writes the same JSON to a file.
   address that the server binds. Before the agent runs, the container opens one connection to
   the server. If it cannot, the test stops with exit 2 and says so, because a server that gets no
   Tool Result would otherwise look like an artifact that ignores `ANTHROPIC_BASE_URL`.
-- If `ptrace_scope` is 1 or more, the test fails with `MEM_NOT_DEMONSTRABLE`. Docker Desktop's
-  kernel does not load Yama, so the test can pass there.
+- If `ptrace_scope` is 1 or more, the result has `MEM_NOT_DEMONSTRABLE` and the test exits 2.
+  Docker Desktop's kernel does not load Yama, so the test can pass there.
 - It installs nothing in the task container. A container without `bash`, `sha256sum` or GNU `dd`
   fails the test or stops it.
 

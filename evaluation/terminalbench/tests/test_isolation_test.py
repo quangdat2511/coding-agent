@@ -97,6 +97,38 @@ class MainTest(unittest.TestCase):
         self.assertIn("KEY_FOUND", stderr)
         self.assertIn("LAUNCHER_NOT_REJECTED", stderr)
 
+    def test_a_run_that_shows_nothing_about_the_artifact_exits_with_2_not_1(self) -> None:
+        # Exit 1 means the artifact failed. A run whose every failure says only that the test
+        # proved nothing on this host or image, such as Yama denying the mem control, must not
+        # look like a leak to whoever reads the exit code.
+        for code in (
+            "MEM_NOT_DEMONSTRABLE",
+            "CONTROL_FAILED",
+            "PATH_NOT_TESTED",
+            "TOOL_RESULTS_MISSING",
+            "KEY_NOT_DELIVERED",
+        ):
+            with self.subTest(code=code):
+                document = {**failing(), "failures": [{"code": code, "message": "m"}]}
+
+                exit_code, stdout, stderr = run_main(REQUIRED, document)
+
+                self.assertEqual(exit_code, 2)
+                self.assertEqual(json.loads(stdout)["passed"], False)
+                self.assertTrue(stderr.startswith("INCONCLUSIVE"))
+                self.assertIn(code, stderr)
+
+    def test_a_leak_next_to_an_inconclusive_path_still_exits_with_1(self) -> None:
+        failures = [
+            {"code": "KEY_FOUND", "message": "a Tool Call found the key through proc-environ"},
+            {"code": "MEM_NOT_DEMONSTRABLE", "message": "m"},
+        ]
+
+        exit_code, _, stderr = run_main(REQUIRED, {**failing(), "failures": failures})
+
+        self.assertEqual(exit_code, 1)
+        self.assertTrue(stderr.startswith("FAIL"))
+
     def test_a_run_that_cannot_start_exits_with_2_and_prints_no_result(self) -> None:
         code, stdout, stderr = run_main(REQUIRED, IsolationRunError("Docker is not running"))
 
