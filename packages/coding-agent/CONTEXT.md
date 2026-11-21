@@ -19,3 +19,10 @@ _Avoid_: Pi comparison, benchmark competition
 A named, source-controlled set of Agent Session limits selected for a run; it changes no prompt,
 tool, or model setting.
 _Avoid_: Benchmark mode, eval config, limit flags
+
+**Isolation Record**:
+The dated list, kept with the repository, of the passing runs of the credential isolation test
+for one artifact. Each run names a backend and an agent user. It is distinct from the artifact
+manifest, which the build writes before any test runs, and from the job manifest, which the record
+tooling writes after a job.
+_Avoid_: Isolation manifest, isolation report

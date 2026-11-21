@@ -356,15 +356,17 @@ ancestor. It also checks that a launcher which does not `exec` the agent is refu
 check. It uses a disposable key that it makes for each run, so it never reads the environment of the
 host and never sends a real key to a container.
 
-It needs `uv`, a running Docker daemon, and a build of the artifact (`bun run build:artifact`). Run
-it from the repository root. The dataset and the task are required and have no default, because
-no test fixes a dataset (ADR 0008 §5). The command below names the default pin and one of its smoke
-tasks only as an example:
+It needs `uv` and a build of the artifact (`bun run build:artifact`). `--backend docker`, the
+default, needs a running Docker daemon. `--backend modal` needs a Modal token (`modal setup`, see
+the oracle job) and pays for the task sandbox and for a small second sandbox, and for one H100 when
+the task asks for a GPU. Run it from the repository root. The dataset and the task are required and
+have no default, because no test fixes a dataset (ADR 0008 §5). The command below names the default
+pin and one of its smoke tasks only as an example:
 
 ```sh
 uv run --project evaluation/terminalbench --frozen python -m \
   coding_agent_terminalbench.isolation_test \
-  --dataset terminal-bench/terminal-bench@4.1.0 --task music-harmony \
+  --dataset terminal-bench/terminal-bench@4.1.0 --task music-harmony --backend modal \
   --artifact-dir dist/artifact --output isolation-result.json
 ```
 
@@ -384,6 +386,12 @@ the container, so no process in the container holds the key that arrives in its 
 The test depends on this variable. If the artifact stops honouring it, the server gets no request,
 the result has `TOOL_RESULTS_MISSING` with a message that names the variable, and the test exits 2,
 because it could not drive the agent and so shows nothing about a leak.
+
+On Modal the task container runs in the cloud and cannot reach the host, so the same server runs in
+a second Modal sandbox with a public port (`encrypted_ports`). The host reads what it saw through
+`GET /observations/<secret>`, where the secret is random for each run, and reads it before it stops
+the sandbox. The server holds only the disposable key, and the test terminates the sandbox when it
+ends. The container reaches it over `https` on port 443.
 
 The probe is POSIX `sh` and coreutils, uploaded as a file, so the key is in no Tool Call. Only the
 probe's own short-lived `grep` processes hold it in their command line, and the probe reads the
@@ -422,10 +430,19 @@ line goes to standard error. `--output` writes the same JSON to a file.
 
 ### Limits
 
-- It runs on Docker. Harbor's Docker environment sends standard error into standard output, so the
-  test reads the refusal from both. A run on Modal is the next ticket: Modal cannot reach a server
-  on the host, so it needs another route to the server. The code takes any object with `exec` and
+- Harbor's Docker environment sends standard error into standard output, so the test reads the
+  refusal from both streams. Modal keeps them apart. The code takes any object with `exec` and
   `upload_file`, which is Harbor's `BaseEnvironment`.
+- The agent's user comes from the task (`[agent] user` in `task.toml`), and a backend may not give
+  the task's own `USER` to the agent. Modal ignores the `USER` of a Dockerfile, so on Modal a task
+  without `[agent] user` runs the agent as root, whatever its Dockerfile says. The result records
+  the uid that `id` printed, which is the truth for that backend. At the default pin only
+  `fp8-rmsnorm-gemm` sets `[agent] user`, so it is the only task that runs a non-root agent on
+  Modal, and it asks for one H100.
+- With an explicit user, Harbor's Modal environment wraps the command in `su <user> -s /bin/bash
+  -c`. That `su` is a root-owned ancestor that holds the key. A non-root agent gets
+  `Permission denied` on its environment, and the artifact's startup check passes over ancestors
+  whose environment it cannot read.
 - The container reaches the host as `host.docker.internal`, which Docker Desktop provides. On a
   Linux host that name does not resolve unless the container is given it. This has not been run
   there. `--container-host` and `--server-host` set the name that the container uses and the
@@ -448,6 +465,42 @@ cd evaluation/terminalbench
 docker run --rm -v "$PWD":/work:ro -w /work -e PYTHONPATH=src:. -e PYTHONDONTWRITEBYTECODE=1 \
   python:3.12-slim python -m unittest tests.test_isolation_probe
 ```
+
+### Isolation Record
+
+ADR 0005 §7 item 3 wants the artifact's passing runs recorded with their dates. The artifact
+manifest cannot hold them: the build writes it before any test runs, and `dist/` is not committed.
+The Isolation Record is a committed file, `evaluation/terminalbench/isolation/<artifact commit>.json`,
+that holds each passing run with the day it was added (UTC). The test's own result has no timestamp,
+so the date lives in the record, not in the result.
+
+```sh
+uv run --project evaluation/terminalbench --frozen python -m \
+  coding_agent_terminalbench.isolation_record add \
+  --record evaluation/terminalbench/isolation/<artifact commit>.json --result isolation-result.json
+```
+
+`add` refuses a run that did not pass and a run of another commit, and changes nothing then. A
+failed run is not recorded here: write its cause in the Jira ticket of the run, and start no job
+that carries a credential (ADR 0005 §7). Run the test once for each backend of the jobs, as a root
+agent user and as a non-root one, on the dataset of the jobs.
+
+`check` asks whether a job may start. It exits 0 when, for every `--backend`, the record holds a
+passing run as root and one as a non-root user, of an executable that the artifact's
+`artifact-manifest.json` holds, for the job's dataset and the artifact's commit. It exits 1 and says
+what is missing otherwise. It exits 2 when its arguments, the record or the artifact manifest cannot be
+read. A script that starts a job must treat any exit code other than 0 as a stop. The smoke job runs
+it first, and the record command runs the same check:
+
+```sh
+uv run --project evaluation/terminalbench --frozen python -m \
+  coding_agent_terminalbench.isolation_record check \
+  --record evaluation/terminalbench/isolation/<artifact commit>.json \
+  --artifact-dir dist/artifact --dataset terminal-bench/terminal-bench@4.1.0 --backend modal
+```
+
+A rebuild of the artifact changes its commit or its SHA-256 values, so the record no longer
+matches and the test runs again.
 
 ## Record tooling
 
@@ -568,6 +621,7 @@ uv run --project evaluation/terminalbench --frozen python -m coding_agent_termin
   --oracle-record evaluation/terminalbench/runs/<recorded job>/oracle.json \
   --dataset-record docs/adr/0008-evaluation-dataset-as-a-job-parameter.md \
   --artifact-dir dist/artifact \
+  --isolation-record evaluation/terminalbench/isolation/<artifact commit>.json \
   --archive-part jobs/<recorded job>.tar.zst.part-aa \
   --scan-review jobs/<recorded job>-scan-review.json \
   --output-dir evaluation/terminalbench/runs/<recorded job>
@@ -596,6 +650,8 @@ The command refuses, and writes nothing, when:
   artifact;
 - the oracle record describes another dataset pin, or names a harness-flaky task that the job did
   not run;
+- the Isolation Record does not clear every backend that the jobs ran on (see Isolation Record), and
+  the manifest then holds the record as `credentialIsolation`;
 - the dataset record's release tag does not resolve to the commit it names, or its smoke set and
   its declared MCP-server and skills tasks are not in the job's resolved task list;
 - there is no archive part, two parts share a file name, any part is 2 GiB or larger, or there

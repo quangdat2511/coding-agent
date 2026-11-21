@@ -9,10 +9,13 @@ container holds the disposable key that arrives in the `x-api-key` header.
 It imports nothing from Harbor.
 """
 
+import argparse
+import hmac
 import json
 import threading
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from collections.abc import Sequence
 from typing import Any
 
 from coding_agent_terminalbench.isolation_report import ServerObservations
@@ -33,6 +36,30 @@ class TextTurn:
 
 
 Turn = ToolCallTurn | TextTurn
+
+
+def turns_to_json(turns: list[Turn]) -> str:
+    """The script as JSON, for a server that runs in another sandbox."""
+    return json.dumps(
+        [
+            {"type": "tool_call", "command": turn.command}
+            if isinstance(turn, ToolCallTurn)
+            else {"type": "text", "text": turn.text}
+            for turn in turns
+        ]
+    )
+
+
+def turns_from_json(text: str) -> list[Turn]:
+    turns: list[Turn] = []
+    for entry in json.loads(text):
+        if entry.get("type") == "tool_call":
+            turns.append(ToolCallTurn(command=entry["command"]))
+        elif entry.get("type") == "text":
+            turns.append(TextTurn(text=entry["text"]))
+        else:
+            raise ValueError(f"unknown turn type {entry.get('type')!r}")
+    return turns
 
 MODEL = "claude-isolation-test"
 
@@ -111,10 +138,18 @@ class FakeModelServer:
     """Plays the model provider for one run. It answers `POST /v1/messages` and nothing else."""
 
     def __init__(
-        self, turns: list[Turn], expected_key: str, host: str = "127.0.0.1", port: int = 0
+        self,
+        turns: list[Turn],
+        expected_key: str,
+        host: str = "127.0.0.1",
+        port: int = 0,
+        observations_secret: str | None = None,
+        container_host: str = "127.0.0.1",
     ) -> None:
         self._turns = turns
         self._expected_key = expected_key
+        self._container_host = container_host
+        self._observations_secret = observations_secret
         self._lock = threading.Lock()
         self._requests = 0
         self._keys_matched: list[bool] = []
@@ -122,6 +157,19 @@ class FakeModelServer:
         server = self
 
         class Handler(BaseHTTPRequestHandler):
+            def do_GET(self) -> None:  # noqa: N802 - the name http.server calls
+                if not server._is_observations_path(self.path):
+                    self.send_response(404)
+                    self.send_header("content-length", "0")
+                    self.end_headers()
+                    return
+                body = json.dumps(server._observed()).encode()
+                self.send_response(200)
+                self.send_header("content-type", "application/json")
+                self.send_header("content-length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
             def do_POST(self) -> None:  # noqa: N802 - the name http.server calls
                 length = int(self.headers.get("content-length", "0"))
                 request = json.loads(self.rfile.read(length) or b"{}")
@@ -160,9 +208,35 @@ class FakeModelServer:
         self._httpd = ThreadingHTTPServer((host, port), Handler)
         self._thread = threading.Thread(target=self._httpd.serve_forever, daemon=True)
 
+    def _is_observations_path(self, path: str) -> bool:
+        """True only for `/observations/<secret>`. The secret is random for each run and is the
+        only thing that tells this public URL from any other request."""
+        if self._observations_secret is None:
+            return False
+        expected = f"/observations/{self._observations_secret}"
+        return hmac.compare_digest(path.encode("utf-8"), expected.encode("utf-8"))
+
+    def _observed(self) -> dict[str, Any]:
+        with self._lock:
+            return {
+                "requestCount": self._requests,
+                "toolResultTexts": list(self._last_tool_results),
+                "keysMatched": list(self._keys_matched),
+            }
+
     @property
     def port(self) -> int:
         return int(self._httpd.server_address[1])
+
+    @property
+    def base_url(self) -> str:
+        """The URL that the task container puts in ANTHROPIC_BASE_URL."""
+        return f"http://{self._container_host}:{self.port}"
+
+    @property
+    def reach_target(self) -> tuple[str, int]:
+        """The host and port that the container opens a connection to before the agent runs."""
+        return self._container_host, self.port
 
     @property
     def request_count(self) -> int:
@@ -189,3 +263,27 @@ class FakeModelServer:
         self._httpd.shutdown()
         self._httpd.server_close()
         self._thread.join()
+
+
+def main(argv: Sequence[str] | None = None) -> None:
+    """Runs one server until the sandbox is terminated. The isolation test starts this in a second
+    Modal sandbox (CDA-94): `python -m coding_agent_terminalbench.isolation_server ...`."""
+    parser = argparse.ArgumentParser(prog="isolation-server")
+    parser.add_argument("--expected-key", required=True)
+    parser.add_argument("--observations-secret", required=True)
+    parser.add_argument("--turns", required=True, help="the script, as JSON")
+    parser.add_argument("--port", type=int, default=8000)
+    arguments = parser.parse_args(argv)
+    server = FakeModelServer(
+        turns=turns_from_json(arguments.turns),
+        expected_key=arguments.expected_key,
+        host="0.0.0.0",  # noqa: S104 - the sandbox is the whole machine, reached through a tunnel
+        port=arguments.port,
+        observations_secret=arguments.observations_secret,
+    )
+    server.start()
+    threading.Event().wait()
+
+
+if __name__ == "__main__":
+    main()

@@ -10,7 +10,7 @@ on standard error. Exit code 0 means the artifact passed, 1 means the artifact f
 the test showed nothing about a leak: it could not run, or every failure is one that shows nothing
 about a leak (see INCONCLUSIVE).
 
-The module imports Harbor only inside `run_in_docker`, so the rest of it is tested without Harbor.
+The module imports Harbor only inside `run_in_backend`, so the rest of it is tested without Harbor.
 """
 
 import argparse
@@ -19,7 +19,7 @@ import re
 import secrets
 import sys
 import tempfile
-from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -35,11 +35,16 @@ from coding_agent_terminalbench.isolation_report import (
 from coding_agent_terminalbench.isolation_run import (
     IsolationRunError,
     IsolationSetup,
+    ServerFactory,
     run_isolation_test,
 )
 from coding_agent_terminalbench.manifest import ArtifactManifestError
 
 PROG = "isolation-test"
+
+# The backends that a job can use (ADR 0005 §7): the smoke job may use Docker, the recorded job
+# uses Modal.
+BACKENDS = ("docker", "modal")
 
 # A registry dataset with an explicit version (ADR 0008 §1). `latest`, an unversioned name and a
 # local path are refused, because none of them fixes the task list.
@@ -54,6 +59,7 @@ class UsageError(ValueError):
 class Arguments:
     dataset: str
     task: str
+    backend: str
     artifact_dir: Path
     model: str
     output: Path | None
@@ -70,6 +76,7 @@ def parse_arguments(argv: Sequence[str]) -> Arguments:
     parser = _Parser(prog=PROG, add_help=False)
     parser.add_argument("--dataset", required=True)
     parser.add_argument("--task", required=True)
+    parser.add_argument("--backend", default="docker", choices=BACKENDS)
     parser.add_argument("--artifact-dir", required=True, type=Path)
     parser.add_argument("--model", default=IsolationSetup.model)
     parser.add_argument("--output", type=Path, default=None)
@@ -84,6 +91,7 @@ def parse_arguments(argv: Sequence[str]) -> Arguments:
     return Arguments(
         dataset=parsed.dataset,
         task=parsed.task,
+        backend=parsed.backend,
         artifact_dir=parsed.artifact_dir,
         model=parsed.model,
         output=parsed.output,
@@ -169,7 +177,16 @@ async def started(
 
 
 async def run_in_docker(arguments: Arguments, key: str) -> dict[str, Any]:
-    """Builds the task's container with Harbor and runs the test in it."""
+    return await run_in_backend("docker", arguments, key)
+
+
+async def run_in_backend(
+    backend: str, arguments: Arguments, key: str, serve: ServerFactory | None = None
+) -> dict[str, Any]:
+    """Builds the task's container with Harbor on `backend` and runs the test in it.
+
+    `serve` makes the model server. The default is a server on this host, which only Docker's
+    containers can reach."""
     from harbor.environments.factory import EnvironmentFactory
     from harbor.models.environment_type import EnvironmentType
     from harbor.models.task.id import PackageTaskId
@@ -200,7 +217,7 @@ async def run_in_docker(arguments: Arguments, key: str) -> dict[str, Any]:
     setup = IsolationSetup(
         dataset=arguments.dataset,
         task=task.name,
-        backend="docker",
+        backend=backend,
         key=key,
         container_host=arguments.container_host,
         model=arguments.model,
@@ -210,7 +227,7 @@ async def run_in_docker(arguments: Arguments, key: str) -> dict[str, Any]:
         trial_paths = TrialPaths(trial_dir=Path(trial_dir))
         trial_paths.mkdir()
         environment = EnvironmentFactory.create_environment(
-            type=EnvironmentType.DOCKER,
+            type=EnvironmentType[backend.upper()],
             environment_dir=task.paths.environment_dir,
             environment_name=task.name,
             session_id=f"isolation-{secrets.token_hex(4)}__env",
@@ -224,14 +241,22 @@ async def run_in_docker(arguments: Arguments, key: str) -> dict[str, Any]:
                     await install_artifact(environment, arguments.artifact_dir)
                 except (ArtifactInstallError, ArtifactManifestError) as error:
                     raise IsolationRunError(f"cannot install the artifact: {error}") from error
-                return await run_isolation_test(environment, setup, log=log)
+                return await run_isolation_test(environment, setup, log=log, serve=serve)
+
+
+def default_runners() -> Mapping[str, Runner]:
+    # Imported here, so that a test of the command line needs neither Harbor nor Modal.
+    from coding_agent_terminalbench.isolation_modal import run_in_modal
+
+    return {"docker": run_in_docker, "modal": run_in_modal}
 
 
 def main(
     argv: Sequence[str],
-    run: Runner = run_in_docker,
+    run: Runner | None = None,
     stdout: TextIO | None = None,
     stderr: TextIO | None = None,
+    runners: Mapping[str, Runner] | None = None,
 ) -> int:
     out = stdout if stdout is not None else sys.stdout
     err = stderr if stderr is not None else sys.stderr
@@ -242,7 +267,8 @@ def main(
         return 2
     key = new_disposable_key()
     try:
-        document = asyncio.run(run(arguments, key))
+        runner = run or (runners or default_runners())[arguments.backend]
+        document = asyncio.run(runner(arguments, key))
         text = render_result(document, secret=key)
     except (IsolationRunError, SecretInResultError) as error:
         print(f"{PROG}: {str(error).replace(key, '[redacted]')}", file=err)

@@ -40,11 +40,19 @@ def failing() -> dict[str, Any]:
     }
 
 
-def run_main(argv: list[str], document: dict[str, Any] | Exception) -> tuple[int, str, str]:
-    """Runs `main` with a stand-in for the container run, and returns the code and both streams."""
+def run_main(
+    argv: list[str],
+    document: dict[str, Any] | Exception,
+    seen: list[Arguments] | None = None,
+) -> tuple[int, str, str]:
+    """Runs `main` with a stand-in for the container run, and returns the code and both streams.
+
+    `seen` collects the arguments that the run receives."""
     stdout, stderr = io.StringIO(), io.StringIO()
 
     async def stand_in(arguments: Arguments, key: str) -> dict[str, Any]:
+        if seen is not None:
+            seen.append(arguments)
         if isinstance(document, Exception):
             raise document
         return document
@@ -83,6 +91,44 @@ class ArgumentsTest(unittest.TestCase):
 
 
 class MainTest(unittest.TestCase):
+    def test_the_backend_flag_reaches_the_run(self) -> None:
+        seen: list[Arguments] = []
+
+        code, _, _ = run_main([*REQUIRED, "--backend", "modal"], passing(), seen)
+
+        self.assertEqual(code, 0)
+        self.assertEqual([arguments.backend for arguments in seen], ["modal"])
+
+    def test_each_backend_runs_with_its_own_runner(self) -> None:
+        called: list[str] = []
+
+        def runner(name: str):
+            async def run(arguments: Arguments, key: str) -> dict[str, Any]:
+                called.append(name)
+                return passing()
+
+            return run
+
+        for backend in ("docker", "modal"):
+            main(
+                [*REQUIRED, "--backend", backend],
+                runners={"docker": runner("docker"), "modal": runner("modal")},
+                stdout=io.StringIO(),
+                stderr=io.StringIO(),
+            )
+
+        self.assertEqual(called, ["docker", "modal"])
+
+    def test_a_backend_other_than_docker_or_modal_is_refused_before_anything_runs(self) -> None:
+        seen: list[Arguments] = []
+
+        code, stdout, stderr = run_main([*REQUIRED, "--backend", "daytona"], passing(), seen)
+
+        self.assertEqual(code, 2)
+        self.assertEqual(stdout, "")
+        self.assertIn("--backend", stderr)
+        self.assertEqual(seen, [])
+
     def test_a_passing_run_prints_only_the_json_on_stdout_and_exits_with_0(self) -> None:
         code, stdout, stderr = run_main(REQUIRED, passing())
 

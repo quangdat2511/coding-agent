@@ -11,7 +11,13 @@ import urllib.error
 import urllib.request
 from typing import Any
 
-from coding_agent_terminalbench.isolation_server import FakeModelServer, TextTurn, ToolCallTurn
+from coding_agent_terminalbench.isolation_server import (
+    FakeModelServer,
+    TextTurn,
+    ToolCallTurn,
+    turns_from_json,
+    turns_to_json,
+)
 
 KEY = "sk-ant-isolation-test-0123456789abcdef0123456789abcdef"
 
@@ -32,6 +38,15 @@ def post(
             return response.status, response.headers["content-type"], response.read().decode()
     except urllib.error.HTTPError as error:
         return error.code, error.headers["content-type"], error.read().decode()
+
+
+def get(server: FakeModelServer, path: str) -> tuple[int, str]:
+    """GET `path`. Returns the status and the body."""
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{server.port}{path}") as response:
+            return response.status, response.read().decode()
+    except urllib.error.HTTPError as error:
+        return error.code, error.read().decode()
 
 
 def events(body: str) -> list[dict[str, Any]]:
@@ -178,3 +193,87 @@ class ObservationsTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class NoObservationsPathByDefaultTest(unittest.TestCase):
+    # A guard, not a red-green step: it passed when it was written, because the code was already
+    # right. A server that has no secret must not publish what it saw, whatever the path.
+    def test_a_server_without_a_secret_answers_no_path_with_what_it_saw(self) -> None:
+        server = FakeModelServer(turns=[ToolCallTurn(command="echo hi")], expected_key=KEY)
+        server.start()
+        self.addCleanup(server.stop)
+        post(server)
+
+        for path in ("/observations/None", "/observations/", "/observations", "/"):
+            with self.subTest(path=path):
+                status, _ = get(server, path)
+
+                self.assertEqual(status, 404)
+
+
+class ObservationsPathTest(unittest.TestCase):
+    """The path that lets the host read what a server in another sandbox saw (CDA-94)."""
+
+    SECRET = "run-secret-0123456789"
+
+    def setUp(self) -> None:
+        self.server = FakeModelServer(
+            turns=[ToolCallTurn(command="echo hi"), TextTurn(text="all done")],
+            expected_key=KEY,
+            observations_secret=self.SECRET,
+        )
+        self.server.start()
+        self.addCleanup(self.server.stop)
+
+    def test_the_secret_path_reports_what_the_server_saw(self) -> None:
+        post(self.server)
+        post(self.server, [tool_result("toolu_1", "hi")], key="sk-ant-some-other-key")
+
+        status, body = get(self.server, f"/observations/{self.SECRET}")
+
+        self.assertEqual(status, 200)
+        self.assertEqual(
+            json.loads(body),
+            {"requestCount": 2, "toolResultTexts": ["hi"], "keysMatched": [True, False]},
+        )
+
+    def test_a_path_with_bytes_outside_ascii_is_answered_with_404(self) -> None:
+        with socket.create_connection(("127.0.0.1", self.server.port), timeout=10) as connection:
+            connection.sendall(b"GET /observations/\xc3\xa9 HTTP/1.0\r\n\r\n")
+            reply = connection.recv(1024)
+
+        self.assertTrue(reply.startswith(b"HTTP/1.0 404"), reply)
+
+    def test_a_wrong_secret_or_another_path_gets_nothing_that_the_server_saw(self) -> None:
+        post(self.server)
+        post(self.server, [tool_result("toolu_1", "the-tool-result-text")])
+
+        for path in ("/observations/wrong-secret", "/observations/", "/observations", "/"):
+            with self.subTest(path=path):
+                status, body = get(self.server, path)
+
+                self.assertEqual(status, 404)
+                self.assertNotIn("the-tool-result-text", body)
+
+
+class TurnsAsJsonTest(unittest.TestCase):
+    """The script travels to a server in another sandbox as JSON on its command line."""
+
+    SCRIPT = (
+        '[{"type": "tool_call", "command": "sh /tmp/probe.sh"}, {"type": "text", "text": "Done."}]'
+    )
+
+    def test_a_script_is_written_as_json(self) -> None:
+        turns = [ToolCallTurn(command="sh /tmp/probe.sh"), TextTurn(text="Done.")]
+
+        self.assertEqual(json.loads(turns_to_json(turns)), json.loads(self.SCRIPT))
+
+    def test_a_script_is_read_from_json(self) -> None:
+        self.assertEqual(
+            turns_from_json(self.SCRIPT),
+            [ToolCallTurn(command="sh /tmp/probe.sh"), TextTurn(text="Done.")],
+        )
+
+    def test_a_turn_of_an_unknown_type_is_refused(self) -> None:
+        with self.assertRaisesRegex(ValueError, "turn type"):
+            turns_from_json('[{"type": "sleep"}]')
