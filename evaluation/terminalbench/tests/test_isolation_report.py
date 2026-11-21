@@ -154,7 +154,9 @@ class VerdictTest(unittest.TestCase):
                 self.assertIn(fragment, report.failures[0].message)
 
     def test_a_server_that_missed_a_tool_result_fails_the_test(self) -> None:
-        server = ServerObservations(tool_results_received=3, expected_tool_results=4, key_matched=True)
+        server = ServerObservations(
+            tool_results_received=3, expected_tool_results=4, key_matched=True
+        )
 
         report = run(server=server)
 
@@ -166,7 +168,9 @@ class VerdictTest(unittest.TestCase):
     def test_a_request_without_the_disposable_key_fails_the_test(self) -> None:
         # With no key in the agent's environment there would be nothing to hide, and every probe
         # would come back empty.
-        server = ServerObservations(tool_results_received=4, expected_tool_results=4, key_matched=False)
+        server = ServerObservations(
+            tool_results_received=4, expected_tool_results=4, key_matched=False
+        )
 
         report = run(server=server)
 
@@ -177,7 +181,9 @@ class VerdictTest(unittest.TestCase):
     def test_a_server_that_got_nothing_says_the_artifact_may_not_follow_the_base_url(self) -> None:
         # The seam of the test is ANTHROPIC_BASE_URL. If the artifact ignores it, the Tool Calls
         # never ran, so every probe would stay silent and the test could not pass by showing that.
-        server = ServerObservations(tool_results_received=0, expected_tool_results=4, key_matched=True)
+        server = ServerObservations(
+            tool_results_received=0, expected_tool_results=4, key_matched=True
+        )
 
         report = run(server=server)
 
@@ -247,7 +253,9 @@ class ResultDocumentTest(unittest.TestCase):
         )
 
     def test_a_failing_run_lists_each_failure_with_its_code_and_message(self) -> None:
-        probes = [Probe(path="proc-environ", outcome="read", found=True)] + denied()[:1] + denied()[2:]
+        probes = (
+            [Probe(path="proc-environ", outcome="read", found=True)] + denied()[:1] + denied()[2:]
+        )
 
         result = document(probes=probes)
 

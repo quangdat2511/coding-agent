@@ -1,4 +1,4 @@
-"""The install step of the credential isolation test (ADR 0005 §6), against a scripted container."""
+"""The install step of the credential isolation test (ADR 0005 §6), on a scripted container."""
 
 import asyncio
 import hashlib
@@ -61,7 +61,9 @@ class InstallArtifactTest(unittest.TestCase):
 
         install(container)
 
-        self.assertEqual(container.uploaded[INSTALLED_EXECUTABLE], b"fake bun-linux-x64-baseline executable\n")
+        self.assertEqual(
+            container.uploaded[INSTALLED_EXECUTABLE], b"fake bun-linux-x64-baseline executable\n"
+        )
         self.assertIn((f"chmod 0755 {INSTALLED_EXECUTABLE}", "root"), container.commands)
 
     def test_the_version_check_runs_as_the_default_user_not_as_root(self) -> None:

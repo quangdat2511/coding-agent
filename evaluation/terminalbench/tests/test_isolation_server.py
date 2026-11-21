@@ -35,11 +35,16 @@ def post(
 
 def events(body: str) -> list[dict[str, Any]]:
     """The JSON payload of each `data:` line of a server-sent event stream."""
-    return [json.loads(line[len("data: ") :]) for line in body.splitlines() if line.startswith("data: ")]
+    return [
+        json.loads(line[len("data: ") :]) for line in body.splitlines() if line.startswith("data: ")
+    ]
 
 
 def tool_result(tool_use_id: str, content: str | list[dict[str, str]]) -> dict[str, Any]:
-    return {"role": "user", "content": [{"type": "tool_result", "tool_use_id": tool_use_id, "content": content}]}
+    return {
+        "role": "user",
+        "content": [{"type": "tool_result", "tool_use_id": tool_use_id, "content": content}],
+    }
 
 
 class FakeModelServerTest(unittest.TestCase):

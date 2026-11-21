@@ -100,7 +100,9 @@ async def run_isolation_test(
     return result_document(context, probes, controls, yama_ptrace_scope, launcher, server)
 
 
-async def _read_identity(container: Container, setup: IsolationSetup) -> tuple[RunContext, int | None]:
+async def _read_identity(
+    container: Container, setup: IsolationSetup
+) -> tuple[RunContext, int | None]:
     version = await container.exec(f"{INSTALLED_EXECUTABLE} --version")
     parts = (version.stdout or "").split()
     if version.return_code != 0 or len(parts) != 3 or parts[0] != "coding-agent":
@@ -138,7 +140,8 @@ async def _prepare(container: Container, setup: IsolationSetup) -> None:
         await container.upload_file(probe, PROBE_PATH)
         await container.upload_file(instruction, INSTRUCTION_PATH)
     await container.exec(
-        f"chmod 0644 {PROBE_PATH} {INSTRUCTION_PATH} && mkdir -p {LOGS_DIR} && chmod 0777 {LOGS_DIR}",
+        f"chmod 0644 {PROBE_PATH} {INSTRUCTION_PATH} "
+        f"&& mkdir -p {LOGS_DIR} && chmod 0777 {LOGS_DIR}",
         user="root",
     )
 

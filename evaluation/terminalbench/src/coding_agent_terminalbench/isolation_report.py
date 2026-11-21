@@ -81,7 +81,8 @@ def evaluate(
 ) -> Report:
     """`yama_ptrace_scope` is the value in the container, or None when Yama is not loaded."""
     # A path that no probe reported on shows nothing, so it cannot count as denied. The same holds
-    # for a probe that ended in a way that Linux does not give for a read that was allowed or denied.
+    # for a probe that ended in a way that Linux does not give for a read that was allowed or
+    # denied.
     by_path = {probe.path: probe for probe in probes}
     failures: list[Failure] = []
     for path in PATHS:
@@ -147,7 +148,9 @@ def evaluate(
         failures.append(
             Failure(
                 code="KEY_NOT_DELIVERED",
-                message="a request to the model server did not carry the disposable key in x-api-key",
+                message=(
+                    "a request to the model server did not carry the disposable key in x-api-key"
+                ),
             )
         )
     # Exit 2 alone does not show that the startup check refused the launcher: every configuration
@@ -238,5 +241,7 @@ def render_result(document: dict[str, Any], secret: str) -> str:
 def _launcher_failure(reason: str) -> Failure:
     return Failure(
         code="LAUNCHER_NOT_REJECTED",
-        message=f"the launcher that keeps its shell was not rejected by the startup check: {reason}",
+        message=(
+            "the launcher that keeps its shell was not rejected by the startup check: " + reason
+        ),
     )

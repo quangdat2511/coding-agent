@@ -57,7 +57,9 @@ async def install_artifact(container: Container, artifact_dir: Path) -> None:
     # The agent's bash tool needs bash, and this test installs nothing to provide it.
     bash = await container.exec("command -v bash >/dev/null 2>&1", user="root")
     if bash.return_code != 0:
-        raise ArtifactInstallError("the task container has no bash, which the agent's bash tool needs")
+        raise ArtifactInstallError(
+            "the task container has no bash, which the agent's bash tool needs"
+        )
 
     # It runs as the container's default user, so this also proves that this user can run it.
     printed = await container.exec(f"{INSTALLED_EXECUTABLE} --version")

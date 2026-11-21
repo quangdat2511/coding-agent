@@ -40,12 +40,15 @@ def probe_lines(*rows: tuple[str, str, bool]) -> str:
 
 
 # What the probe prints when the artifact keeps the key from a Tool Call.
-HARDENED_OUTPUT = probe_lines(
-    ("inherited-environment", "read", False),
-    ("proc-environ", "EACCES", False),
-    ("proc-mem", "EACCES", False),
-    ("ancestors", "read", False),
-) + "[exit code: 0]"
+HARDENED_OUTPUT = (
+    probe_lines(
+        ("inherited-environment", "read", False),
+        ("proc-environ", "EACCES", False),
+        ("proc-mem", "EACCES", False),
+        ("ancestors", "read", False),
+    )
+    + "[exit code: 0]"
+)
 
 # What the same probe prints against a process that holds the key and is not hardened.
 CONTROL_OUTPUT = probe_lines(
@@ -146,7 +149,9 @@ SETUP = IsolationSetup(
 )
 
 
-def run(container: ScriptedContainer, log: Callable[[str], None] = lambda _: None) -> dict[str, Any]:
+def run(
+    container: ScriptedContainer, log: Callable[[str], None] = lambda _: None
+) -> dict[str, Any]:
     return asyncio.run(run_isolation_test(container, SETUP, log))
 
 
@@ -238,13 +243,15 @@ class RunTest(unittest.TestCase):
         self.assertIn("--provider anthropic", job_command)
         self.assertNotIn("|", job_command)
 
-    def test_the_launcher_that_keeps_its_shell_runs_the_command_of_the_job_without_exec(self) -> None:
+    def test_the_launcher_that_keeps_its_shell_runs_the_command_of_the_job_without_exec(
+        self,
+    ) -> None:
         container = ScriptedContainer()
 
         run(container)
 
         job = next(c.command for c in container.calls if c.command.startswith("exec "))
-        kept = next(c.command for c in container.calls if c.command.startswith("sh -c '\"$@\""))
+        kept = next(c.command for c in container.calls if c.command.startswith('sh -c \'"$@"'))
         self.assertEqual(kept, "sh -c '\"$@\"; exit $?' sh " + job.removeprefix("exec "))
 
     def test_the_key_is_in_no_command_and_only_the_probe_file_holds_it(self) -> None:
@@ -254,7 +261,9 @@ class RunTest(unittest.TestCase):
 
         self.assertEqual([c for c in container.calls if KEY in c.command], [])
         self.assertEqual(
-            sorted(target for target, content in container.uploads.items() if KEY.encode() in content),
+            sorted(
+                target for target, content in container.uploads.items() if KEY.encode() in content
+            ),
             ["/tmp/isolation-probe.sh"],
         )
 

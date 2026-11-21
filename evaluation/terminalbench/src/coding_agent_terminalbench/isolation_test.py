@@ -94,8 +94,9 @@ def new_disposable_key() -> str:
 def summary(document: dict[str, Any]) -> str:
     if document["passed"]:
         return (
-            f"PASS: no Tool Call found the key on {len(document['probes'])} paths, and the launcher "
-            f"that keeps its shell was refused; the agent ran as uid {document['user']['uid']}"
+            f"PASS: no Tool Call found the key on {len(document['probes'])} paths, and the "
+            "launcher that keeps its shell was refused; the agent ran as uid "
+            f"{document['user']['uid']}"
         )
     return "FAIL: " + ", ".join(failure["code"] for failure in document["failures"])
 
@@ -116,12 +117,16 @@ async def run_in_docker(arguments: Arguments, key: str) -> dict[str, Any]:
     try:
         metadata = await PackageDatasetClient().get_dataset_metadata(arguments.dataset)
     except Exception as error:  # the network, the registry service, or an unknown version
-        raise IsolationRunError(f"Harbor's registry cannot resolve {arguments.dataset}: {error}") from error
+        raise IsolationRunError(
+            f"Harbor's registry cannot resolve {arguments.dataset}: {error}"
+        ) from error
     tasks = [t for t in metadata.task_ids if isinstance(t, PackageTaskId)]
     chosen = [t for t in tasks if arguments.task in (t.name, t.get_name())]
     if not chosen:
         names = ", ".join(sorted(t.name for t in tasks))
-        raise IsolationRunError(f"{arguments.dataset} has no task {arguments.task!r}; it has: {names}")
+        raise IsolationRunError(
+            f"{arguments.dataset} has no task {arguments.task!r}; it has: {names}"
+        )
     downloaded = await TaskClient().download_tasks([chosen[0]])
     task = Task(downloaded.paths[0])
 
@@ -148,7 +153,9 @@ async def run_in_docker(arguments: Arguments, key: str) -> dict[str, Any]:
         try:
             await environment.start(force_build=False)
         except Exception as error:  # Docker is not running, or the image does not build
-            raise IsolationRunError(f"cannot start the container of {task.name}: {error}") from error
+            raise IsolationRunError(
+                f"cannot start the container of {task.name}: {error}"
+            ) from error
         try:
             # The user that Harbor runs the agent as, taken from the task, not chosen here.
             with environment.with_default_user(task.config.agent.user):

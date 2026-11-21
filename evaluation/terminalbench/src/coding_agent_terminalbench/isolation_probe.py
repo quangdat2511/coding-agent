@@ -124,7 +124,9 @@ pid=$$
 while :; do
   pid=$(ppid_of "$pid") || {{ outcome=INCOMPLETE; break; }}
   [ "$pid" -ge 1 ] 2>/dev/null || break
-  if tr '\\0' '\\n' < "/proc/$pid/environ" 2>/dev/null | grep -q -E "^($NAMES)=."; then found=true; fi
+  if tr '\\0' '\\n' < "/proc/$pid/environ" 2>/dev/null | grep -q -E "^($NAMES)=."; then
+    found=true
+  fi
   if tr '\\0' '\\n' < "/proc/$pid/environ" 2>/dev/null | grep -q -F -- "$KEY"; then found=true; fi
   command_line=$(tr '\\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null)
   case "$command_line" in

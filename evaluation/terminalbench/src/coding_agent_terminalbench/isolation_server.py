@@ -124,14 +124,14 @@ class FakeModelServer:
                 with outer._lock:
                     number = outer._requests
                     outer._requests += 1
-                    outer._keys_matched.append(
-                        self.headers.get("x-api-key") == outer._expected_key
-                    )
+                    outer._keys_matched.append(self.headers.get("x-api-key") == outer._expected_key)
                     outer._last_tool_results = _tool_result_texts(request)
                 if number >= len(outer._turns):
                     # The Agent asked for more than the script holds. Answer with an error, not a
                     # stream, so the run ends in a failure that names the cause.
-                    message = f"the script has {len(outer._turns)} turns and this is request {number + 1}"
+                    message = (
+                        f"the script has {len(outer._turns)} turns and this is request {number + 1}"
+                    )
                     failure = json.dumps(
                         {"type": "error", "error": {"type": "api_error", "message": message}}
                     ).encode()

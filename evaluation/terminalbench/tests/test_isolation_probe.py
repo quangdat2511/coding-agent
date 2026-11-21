@@ -175,8 +175,8 @@ class AncestorsTest(unittest.TestCase):
         self.assertIn(Probe(path=ANCESTORS, outcome="read", found=False), probes)
 
     def test_an_ancestor_whose_environment_is_denied_is_passed_over(self) -> None:
-        # A child is denied the environ of a non-dumpable ancestor too (ADR 0001 §8, CDA-72), so the
-        # walk goes on to the next ancestor and still finishes.
+        # A child is denied the environ of a non-dumpable ancestor too (ADR 0001 §8, CDA-72), so
+        # the walk goes on to the next ancestor and still finishes.
         probes = run_under_hardened_holder({"ANTHROPIC_API_KEY": KEY})
 
         self.assertIn(Probe(path=ANCESTORS, outcome="read", found=False), probes)
