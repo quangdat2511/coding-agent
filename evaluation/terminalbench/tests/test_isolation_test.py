@@ -1,5 +1,6 @@
 """The command line of the credential isolation test (ADR 0005 §7), without Docker or Harbor."""
 
+import asyncio
 import io
 import json
 import re
@@ -14,6 +15,7 @@ from coding_agent_terminalbench.isolation_test import (
     main,
     new_disposable_key,
     parse_arguments,
+    started,
 )
 
 SOURCE = Path(__file__).resolve().parents[1] / "src" / "coding_agent_terminalbench"
@@ -176,6 +178,82 @@ class MainTest(unittest.TestCase):
 
             self.assertEqual(code, 0)
             self.assertEqual(target.read_text(), stdout)
+
+
+class Environment:
+    """A Harbor environment that records start and stop, and fails where a test says."""
+
+    def __init__(self, start_error: Exception | None = None, stop_error: Exception | None = None):
+        self.start_error = start_error
+        self.stop_error = stop_error
+        self.stopped_with: list[bool] = []
+
+    async def start(self, force_build: bool) -> None:
+        if self.start_error is not None:
+            raise self.start_error
+
+    async def stop(self, delete: bool) -> None:
+        self.stopped_with.append(delete)
+        if self.stop_error is not None:
+            raise self.stop_error
+
+
+def use(environment: Environment, body_error: Exception | None = None) -> list[str]:
+    """Runs a body inside `started`. Returns what it logged."""
+    lines: list[str] = []
+
+    async def go() -> None:
+        async with started(environment, "example-task", lines.append):
+            if body_error is not None:
+                raise body_error
+
+    asyncio.run(go())
+    return lines
+
+
+class StartedTest(unittest.TestCase):
+    def test_the_environment_is_stopped_and_deleted_after_the_run(self) -> None:
+        environment = Environment()
+
+        use(environment)
+
+        self.assertEqual(environment.stopped_with, [True])
+
+    def test_a_start_that_fails_halfway_still_deletes_what_it_made(self) -> None:
+        # Docker can have made a container and a network before a healthcheck times out.
+        environment = Environment(start_error=RuntimeError("healthcheck timed out"))
+
+        with self.assertRaisesRegex(
+            IsolationRunError, "cannot start the container of example-task"
+        ):
+            use(environment)
+
+        self.assertEqual(environment.stopped_with, [True])
+
+    def test_a_stop_that_fails_does_not_hide_why_the_start_failed(self) -> None:
+        environment = Environment(
+            start_error=RuntimeError("healthcheck timed out"),
+            stop_error=RuntimeError("no such project"),
+        )
+
+        with self.assertRaisesRegex(IsolationRunError, "healthcheck timed out"):
+            use(environment)
+
+        self.assertEqual(environment.stopped_with, [True])
+
+    def test_a_stop_that_fails_is_logged(self) -> None:
+        lines = use(Environment(stop_error=RuntimeError("no such project")))
+
+        self.assertEqual(len(lines), 1)
+        self.assertIn("no such project", lines[0])
+
+    def test_a_run_that_fails_still_stops_the_environment(self) -> None:
+        environment = Environment()
+
+        with self.assertRaises(ValueError):
+            use(environment, body_error=ValueError("the run broke"))
+
+        self.assertEqual(environment.stopped_with, [True])
 
 
 class DisposableKeyTest(unittest.TestCase):

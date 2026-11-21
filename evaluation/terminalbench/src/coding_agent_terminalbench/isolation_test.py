@@ -19,10 +19,11 @@ import re
 import secrets
 import sys
 import tempfile
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, NoReturn, TextIO
+from typing import Any, NoReturn, Protocol, TextIO
 
 from coding_agent_terminalbench.install import ArtifactInstallError
 from coding_agent_terminalbench.isolation_install import install_artifact
@@ -136,6 +137,35 @@ def summary_line(document: dict[str, Any]) -> str:
 Runner = Callable[[Arguments, str], Awaitable[dict[str, Any]]]
 
 
+class Startable(Protocol):
+    async def start(self, force_build: bool) -> None: ...
+
+    async def stop(self, delete: bool) -> None: ...
+
+
+@asynccontextmanager
+async def started(
+    environment: Startable, name: str, log: Callable[[str], None]
+) -> AsyncIterator[None]:
+    """Starts the environment, and always stops and deletes it afterwards.
+
+    The stop runs even when the start fails, because Docker can have made a container and a
+    network before a healthcheck times out. A stop that fails is logged and does not hide why the
+    run ended.
+    """
+    try:
+        try:
+            await environment.start(force_build=False)
+        except Exception as error:  # Docker is not running, or the image does not build
+            raise IsolationRunError(f"cannot start the container of {name}: {error}") from error
+        yield
+    finally:
+        try:
+            await environment.stop(delete=True)
+        except Exception as error:
+            log(f"cannot stop and delete the container of {name}: {error}")
+
+
 async def run_in_docker(arguments: Arguments, key: str) -> dict[str, Any]:
     """Builds the task's container with Harbor and runs the test in it."""
     from harbor.environments.factory import EnvironmentFactory
@@ -162,6 +192,9 @@ async def run_in_docker(arguments: Arguments, key: str) -> dict[str, Any]:
     downloaded = await TaskClient().download_tasks([chosen[0]])
     task = Task(downloaded.paths[0])
 
+    def log(line: str) -> None:
+        print(f"{PROG}: {line}", file=sys.stderr)
+
     setup = IsolationSetup(
         dataset=arguments.dataset,
         task=task.name,
@@ -182,24 +215,14 @@ async def run_in_docker(arguments: Arguments, key: str) -> dict[str, Any]:
             trial_paths=trial_paths,
             task_env_config=task.config.environment,
         )
-        try:
-            await environment.start(force_build=False)
-        except Exception as error:  # Docker is not running, or the image does not build
-            raise IsolationRunError(
-                f"cannot start the container of {task.name}: {error}"
-            ) from error
-        try:
+        async with started(environment, task.name, log):
             # The user that Harbor runs the agent as, taken from the task, not chosen here.
             with environment.with_default_user(task.config.agent.user):
                 try:
                     await install_artifact(environment, arguments.artifact_dir)
                 except (ArtifactInstallError, ArtifactManifestError) as error:
                     raise IsolationRunError(f"cannot install the artifact: {error}") from error
-                return await run_isolation_test(
-                    environment, setup, log=lambda line: print(f"{PROG}: {line}", file=sys.stderr)
-                )
-        finally:
-            await environment.stop(delete=True)
+                return await run_isolation_test(environment, setup, log=log)
 
 
 def main(
