@@ -1,0 +1,211 @@
+{
+  "schemaVersion": 1,
+  "codingAgent": {
+    "version": "0.0.1",
+    "commit": "e48b12ad1758b2016d78c04d76f591cedfdf0098"
+  },
+  "adrAmendment": "ADR 0001 \u00a77, the CDA-29 amendment of 2026-09-13 and the CDA-121 amendment of 2026-11-22",
+  "runs": [
+    {
+      "date": "2026-11-22",
+      "result": {
+        "schemaVersion": 1,
+        "passed": true,
+        "failures": [],
+        "codingAgent": {
+          "version": "0.0.1",
+          "commit": "e48b12ad1758b2016d78c04d76f591cedfdf0098"
+        },
+        "executableSha256": "217388edc5e1923fc7ef6141458df1b6014f4d4b7e6db46f5a63a6e5388f0221",
+        "dataset": "terminal-bench/terminal-bench@4.1.0",
+        "task": "terminal-bench/music-harmony",
+        "backend": "modal",
+        "user": {
+          "uid": 0,
+          "name": "root"
+        },
+        "yamaPtraceScope": 1,
+        "probes": [
+          {
+            "path": "inherited-environment",
+            "outcome": "read",
+            "found": false
+          },
+          {
+            "path": "proc-environ",
+            "outcome": "EACCES",
+            "found": false
+          },
+          {
+            "path": "proc-mem",
+            "outcome": "EACCES",
+            "found": false
+          },
+          {
+            "path": "ancestors",
+            "outcome": "read",
+            "found": false
+          }
+        ],
+        "controls": [
+          {
+            "path": "inherited-environment",
+            "found": true
+          },
+          {
+            "path": "proc-environ",
+            "found": true
+          },
+          {
+            "path": "proc-mem",
+            "found": true
+          },
+          {
+            "path": "ancestors",
+            "found": true
+          }
+        ],
+        "launcherRejected": {
+          "exitCode": 2,
+          "messageMatched": true,
+          "serverRequests": 0
+        },
+        "toolResultsReceived": 1
+      }
+    },
+    {
+      "date": "2026-11-22",
+      "result": {
+        "schemaVersion": 1,
+        "passed": true,
+        "failures": [],
+        "codingAgent": {
+          "version": "0.0.1",
+          "commit": "e48b12ad1758b2016d78c04d76f591cedfdf0098"
+        },
+        "executableSha256": "217388edc5e1923fc7ef6141458df1b6014f4d4b7e6db46f5a63a6e5388f0221",
+        "dataset": "terminal-bench/terminal-bench@4.1.0",
+        "task": "terminal-bench/music-harmony",
+        "backend": "docker",
+        "user": {
+          "uid": 0,
+          "name": "root"
+        },
+        "yamaPtraceScope": null,
+        "probes": [
+          {
+            "path": "inherited-environment",
+            "outcome": "read",
+            "found": false
+          },
+          {
+            "path": "proc-environ",
+            "outcome": "EACCES",
+            "found": false
+          },
+          {
+            "path": "proc-mem",
+            "outcome": "EACCES",
+            "found": false
+          },
+          {
+            "path": "ancestors",
+            "outcome": "read",
+            "found": false
+          }
+        ],
+        "controls": [
+          {
+            "path": "inherited-environment",
+            "found": true
+          },
+          {
+            "path": "proc-environ",
+            "found": true
+          },
+          {
+            "path": "proc-mem",
+            "found": true
+          },
+          {
+            "path": "ancestors",
+            "found": true
+          }
+        ],
+        "launcherRejected": {
+          "exitCode": 2,
+          "messageMatched": true,
+          "serverRequests": 0
+        },
+        "toolResultsReceived": 1
+      }
+    },
+    {
+      "date": "2026-11-22",
+      "result": {
+        "schemaVersion": 1,
+        "passed": true,
+        "failures": [],
+        "codingAgent": {
+          "version": "0.0.1",
+          "commit": "e48b12ad1758b2016d78c04d76f591cedfdf0098"
+        },
+        "executableSha256": "217388edc5e1923fc7ef6141458df1b6014f4d4b7e6db46f5a63a6e5388f0221",
+        "dataset": "terminal-bench/terminal-bench@4.1.0",
+        "task": "terminal-bench/rs-archive-clone",
+        "backend": "docker",
+        "user": {
+          "uid": 10001,
+          "name": "agent"
+        },
+        "yamaPtraceScope": null,
+        "probes": [
+          {
+            "path": "inherited-environment",
+            "outcome": "read",
+            "found": false
+          },
+          {
+            "path": "proc-environ",
+            "outcome": "EACCES",
+            "found": false
+          },
+          {
+            "path": "proc-mem",
+            "outcome": "EACCES",
+            "found": false
+          },
+          {
+            "path": "ancestors",
+            "outcome": "read",
+            "found": false
+          }
+        ],
+        "controls": [
+          {
+            "path": "inherited-environment",
+            "found": true
+          },
+          {
+            "path": "proc-environ",
+            "found": true
+          },
+          {
+            "path": "proc-mem",
+            "found": true
+          },
+          {
+            "path": "ancestors",
+            "found": true
+          }
+        ],
+        "launcherRejected": {
+          "exitCode": 2,
+          "messageMatched": true,
+          "serverRequests": 0
+        },
+        "toolResultsReceived": 1
+      }
+    }
+  ]
+}

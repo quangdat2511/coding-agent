@@ -261,8 +261,10 @@ refuses to run if it remains. That is expected to make §7 item 2 hold on Modal 
 artifact built from a branch commit passed the isolation test on Modal as root; that run is evidence
 of the change and not an Isolation Record, and ADR 0001 §7 (CDA-121 amendment) reports it. No
 Isolation Record of an artifact with the change exists yet, so the precondition is not shown to hold
-until one does. The Record of such an artifact names both the CDA-29 and the CDA-121 amendments. It
-comes from an artifact built at a commit of `main`, with a passing run on Modal as root and on Docker
+until one does. The Record of such an artifact names both the CDA-29 and the CDA-121 amendments.
+The PR that adds this Record also lets the adapter take those amendments explicitly when creating a
+Record, so the CDA-29 default still applies to earlier artifacts. The CDA-121 Record comes from an
+artifact built at a commit of `main`, with a passing run on Modal as root and on Docker
 as root and as a non-root agent user. Modal stays uncleared until the Record also holds the
 non-root run on `fp8-rmsnorm-gemm`, which needs a payment method for its H100, so this amendment
 does not lift the block on the recorded job. The Evidence section below holds what the prototype

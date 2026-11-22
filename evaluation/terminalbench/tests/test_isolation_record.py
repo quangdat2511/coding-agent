@@ -84,6 +84,38 @@ class AddTest(RecordTestCase):
             "ADR 0001 §7, the CDA-29 amendment of 2026-09-13",
         )
 
+    def test_a_new_record_keeps_its_explicit_amendments_when_more_runs_are_added(self) -> None:
+        amendment = (
+            "ADR 0001 §7, the CDA-29 amendment of 2026-09-13 "
+            "and the CDA-121 amendment of 2026-11-22"
+        )
+        path = self.directory / "first.json"
+        path.write_text(json.dumps(result()))
+
+        code, _, stderr = self.run_cli(
+            ["add", "--record", str(self.record), "--result", str(path), "--adr-amendment", amendment]
+        )
+
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(self.add(result(backend="docker"))[0], 0)
+        document = json.loads(self.record.read_text())
+        self.assertEqual(document["adrAmendment"], amendment)
+        self.assertEqual(len(document["runs"]), 2)
+
+    def test_an_explicit_amendment_cannot_relabel_an_existing_record(self) -> None:
+        self.assertEqual(self.add(result())[0], 0)
+        original = self.record.read_bytes()
+        path = self.directory / "second.json"
+        path.write_text(json.dumps(result(backend="docker")))
+
+        code, _, stderr = self.run_cli(
+            ["add", "--record", str(self.record), "--result", str(path), "--adr-amendment", "CDA-121"]
+        )
+
+        self.assertEqual(code, 1, stderr)
+        self.assertIn("does not match the existing Isolation Record", stderr)
+        self.assertEqual(self.record.read_bytes(), original)
+
     def test_a_failed_run_is_refused_and_nothing_is_written(self) -> None:
         code, _, stderr = self.add(result(passed=False))
 

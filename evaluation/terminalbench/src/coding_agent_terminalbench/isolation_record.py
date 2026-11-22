@@ -49,7 +49,13 @@ def utc_today() -> date:
     return datetime.now(UTC).date()
 
 
-def add_run(record: dict[str, Any] | None, result: dict[str, Any], day: date) -> dict[str, Any]:
+def add_run(
+    record: dict[str, Any] | None,
+    result: dict[str, Any],
+    day: date,
+    *,
+    adr_amendment: str | None = None,
+) -> dict[str, Any]:
     """The record with `result` added. It raises RecordError when the run cannot be recorded."""
     try:
         agent = result["codingAgent"]
@@ -63,11 +69,13 @@ def add_run(record: dict[str, Any] | None, result: dict[str, Any], day: date) ->
             "the run did not pass, so it is not recorded; write its cause in the Jira ticket of "
             "the run, and start no job that carries a credential (ADR 0005 §7)"
         )
+    if adr_amendment is not None and not adr_amendment.strip():
+        raise RecordError("the ADR amendment must not be blank")
     if record is None:
         record = {
             "schemaVersion": SCHEMA_VERSION,
             "codingAgent": {"version": version, "commit": commit},
-            "adrAmendment": ADR_AMENDMENT,
+            "adrAmendment": ADR_AMENDMENT if adr_amendment is None else adr_amendment,
             "runs": [],
         }
     elif not (
@@ -82,6 +90,8 @@ def add_run(record: dict[str, Any] | None, result: dict[str, Any], day: date) ->
             f"the record is for Coding Agent {record['codingAgent'].get('commit')}, and the run is "
             f"for {commit}; a record holds the runs of one commit"
         )
+    elif adr_amendment is not None and record.get("adrAmendment") != adr_amendment:
+        raise RecordError("the ADR amendment does not match the existing Isolation Record")
     return {**record, "runs": [*record["runs"], {"date": day.isoformat(), "result": result}]}
 
 
@@ -165,6 +175,7 @@ def main(
     add = commands.add_parser("add")
     add.add_argument("--record", required=True, type=Path)
     add.add_argument("--result", required=True, type=Path)
+    add.add_argument("--adr-amendment", help="ADR amendments implemented by a new record's artifact")
     check = commands.add_parser("check")
     check.add_argument("--record", required=True, type=Path)
     check.add_argument("--artifact-dir", required=True, type=Path)
@@ -183,7 +194,7 @@ def main(
                 print("the Isolation Record covers every backend of the job", file=out)
             return 1 if problems else 0
         result = _read_json(arguments.result)
-        updated = add_run(record, result, today())
+        updated = add_run(record, result, today(), adr_amendment=arguments.adr_amendment)
         arguments.record.parent.mkdir(parents=True, exist_ok=True)
         arguments.record.write_text(json.dumps(updated, indent=2) + "\n", encoding="utf-8")
     except (UsageError, ArtifactManifestError) as error:

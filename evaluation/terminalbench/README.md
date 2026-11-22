@@ -480,6 +480,10 @@ uv run --project evaluation/terminalbench --frozen python -m \
   --record evaluation/terminalbench/isolation/<artifact commit>.json --result isolation-result.json
 ```
 
+`add --adr-amendment "…"` names the amendments implemented by the artifact when creating a Record.
+For an artifact with CDA-121, supply both the CDA-29 and CDA-121 amendments. The default is CDA-29.
+When adding later runs, omit the option to keep the Record's existing value.
+
 `add` refuses a run that did not pass and a run of another commit, and changes nothing then. A
 failed run is not recorded here: write its cause in the Jira ticket of the run, and start no job
 that carries a credential (ADR 0005 §7). Run the test once for each backend of the jobs, as a root
