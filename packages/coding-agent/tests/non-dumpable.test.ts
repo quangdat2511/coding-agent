@@ -4,6 +4,7 @@ import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { type Libc, markProcessNonDumpable } from "../src/non-dumpable.ts";
 import { runnerChainIsClean } from "./support/ancestor-chain.ts";
+import { parsedRun } from "./support/parsed-run.ts";
 import { onLinux } from "./support/platform.ts";
 import {
   bunLikeShebang as bun,
@@ -18,22 +19,6 @@ const failHardening = join(import.meta.dir, "support", "fail-hardening.ts");
 
 const credentialName = "ANTHROPIC_API_KEY";
 const credential = { [credentialName]: "sk-test-credential-value" };
-
-// Arguments that parse, so cli.ts reaches the hardening. Without a task.md in the working
-// directory, the run then stops with a configuration error.
-const parsedRun = [
-  "run",
-  "--task-file",
-  "task.md",
-  "--provider",
-  "anthropic",
-  "--model",
-  "claude-haiku-4-5",
-  "--approval-policy",
-  "auto-approve",
-  "--output-dir",
-  "out",
-];
 
 // <linux/prctl.h>
 const PR_GET_DUMPABLE = 3;

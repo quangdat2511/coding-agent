@@ -146,6 +146,17 @@ The precondition of §7 therefore does not hold on Modal for a root agent, and t
 blocked there until a later decision amends this record, for example by keeping the credential out of
 the task container, as §7 already says.
 
+**Tried on 2026-11-22 (CDA-121 prototype).** On Modal (`music-harmony`, root, `4.19.0-gvisor`), a
+compiled Bun program that held a disposable key and marked itself non-dumpable was read by its root
+child through `environ` and `mem`. After it also removed `CAP_SYS_PTRACE` (its bounding set, and its
+effective, permitted and inheritable sets), the same child was denied both, for `Bun.spawnSync` and
+for `Bun.spawn`. The only ancestor of the child that held the key was the program itself, which
+supports that the `ancestors` leak of CDA-94 was the Coding Agent process and not another one. That is
+not verified for the real artifact. Docker Desktop with `--cap-add=SYS_PTRACE` reproduced the leak
+locally, and there only the bounding-set drop stopped the root child; clearing the other sets was not
+enough. ADR 0001 §7 holds the table and what is not executed. The prototype is commit `c5b47c3` of
+the branch `prototype/cda-121-drop-ptrace`, not part of `main`.
+
 **Assumed, not yet executed.** The smoke job in §7 is the first point at which these are checked:
 
 - No Harbor job has run: Harbor was not installed, the Docker daemon was not running, and no Modal
@@ -241,6 +252,15 @@ precondition on Modal.
 
 That Isolation Record covers Docker only and is bound to the executable that this smoke job ran. It
 is not the record of the recorded job: a changed artifact needs a new record (§9 criterion 4).
+
+On 2026-11-22, [CDA-121](https://datn-fit-hcmus.atlassian.net/browse/CDA-121) amended this record:
+the Modal failure of CDA-94 is answered in ADR 0001, whose §7 now has a CDA-121 amendment: under
+`"auto-approve"` Coding Agent removes `CAP_SYS_PTRACE` before its first child and refuses to run if
+it remains, so §7 item 2 no longer depends on the launcher. The Isolation Record of an artifact that
+has the change names both the CDA-29 and the CDA-121 amendments. A Modal root run of that artifact is
+recorded when it passes. Modal stays uncleared until the Record also holds the non-root run on
+`fp8-rmsnorm-gemm`, which needs a payment method for its H100, so this amendment does not lift the
+block on the recorded job. The Evidence section below holds what the prototype showed.
 
 ### 2. Coding Agent artifact
 

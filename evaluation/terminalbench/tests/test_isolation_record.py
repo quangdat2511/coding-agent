@@ -75,6 +75,15 @@ class AddTest(RecordTestCase):
         self.assertEqual(document["codingAgent"], {"version": "0.0.1", "commit": COMMIT})
         self.assertEqual(document["runs"], [{"date": "2026-11-22", "result": result()}])
 
+    def test_a_new_record_names_both_amendments_that_the_artifact_implements(self) -> None:
+        self.add(result())
+
+        document = json.loads(self.record.read_text())
+        self.assertEqual(
+            document["adrAmendment"],
+            "ADR 0001 §7, the CDA-29 amendment of 2026-09-13 and the CDA-121 amendment of 2026-11-22",
+        )
+
     def test_a_failed_run_is_refused_and_nothing_is_written(self) -> None:
         code, _, stderr = self.add(result(passed=False))
 

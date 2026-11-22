@@ -9,7 +9,8 @@
 //
 // Limits of the guarantee (see also the package README):
 // - A child with CAP_SYS_PTRACE can still read these files, for example root with the full
-//   capability set on a host.
+//   capability set on a host. Under "auto-approve" ptrace-capability.ts removes the capability
+//   from this process first, so a child starts without it; under "ask" the limit stays.
 // - A reader with CAP_SYS_ADMIN or CAP_PERFMON can still open /proc/<pid>/environ, though not
 //   mem or the fd links: mm_access falls back to perfmon_capable() for read access. The file is
 //   root-owned once this process is non-dumpable, so such a reader must also be root or hold

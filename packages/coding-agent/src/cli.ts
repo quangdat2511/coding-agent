@@ -10,6 +10,7 @@ import { parseCommandLine } from "./command-line.ts";
 import { diagnostic } from "./diagnostics.ts";
 import { runHeadless } from "./headless.ts";
 import { markProcessNonDumpable } from "./non-dumpable.ts";
+import { dropPtraceCapability } from "./ptrace-capability.ts";
 
 // A stream calls back in order, so once its last write has called back, everything was written.
 function trackedWriter(stream: NodeJS.WriteStream) {
@@ -81,7 +82,8 @@ async function main(
   // ADR 0001 §8 rule 2. Keep this right after argument parsing, so a usage error still exits 2
   // before any I/O, and ahead of configuration and command dispatch, so that it precedes every
   // Tool Call and Verification child on both entry points and under both Approval Policies. The
-  // modules imported above run before main, so they must not start a child when they load.
+  // modules imported above run before main, so they must not start a child when they load. The
+  // CAP_SYS_PTRACE drop below applies to "auto-approve" only.
   const hardened = markProcessNonDumpable();
   if (!hardened.ok) {
     stderr.write(
@@ -90,6 +92,16 @@ async function main(
       ),
     );
     return 70;
+  }
+  // ADR 0001 §8, CDA-121 amendment. A child that holds CAP_SYS_PTRACE can read a Coding Agent
+  // process that is non-dumpable, so under "auto-approve" the capability goes before the first
+  // child. The interactive path runs under "ask", which §8 exempts, and keeps its capabilities.
+  if (parsed.command === "run") {
+    const dropped = dropPtraceCapability();
+    if (!dropped.ok) {
+      stderr.write(diagnostic(dropped.message));
+      return dropped.code === "CAPABILITY_REMAINS" ? 2 : 70;
+    }
   }
   const children = createConfiguredChildLauncher();
   if (!children.ok) {

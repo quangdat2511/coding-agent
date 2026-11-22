@@ -28,8 +28,11 @@ PROG = "isolation-record"
 
 SCHEMA_VERSION = 1
 
-# ADR 0005 §7 item 3 asks the record to name the ADR amendment that the artifact implements.
-ADR_AMENDMENT = "ADR 0001 §7, the CDA-29 amendment of 2026-09-13"
+# ADR 0005 §7 item 3 asks the record to name the ADR amendments that the artifact implements: the
+# credential isolation rules (CDA-29) and the drop of CAP_SYS_PTRACE that Modal's root needs (CDA-121).
+ADR_AMENDMENT = (
+    "ADR 0001 §7, the CDA-29 amendment of 2026-09-13 and the CDA-121 amendment of 2026-11-22"
+)
 
 
 class UsageError(ValueError):
