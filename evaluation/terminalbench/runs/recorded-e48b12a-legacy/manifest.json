@@ -1,0 +1,389 @@
+{
+  "schemaVersion": 1,
+  "job": {
+    "name": "recorded-e48b12a-legacy",
+    "id": "ee230e02-dd9c-4398-a5b7-d5a7ccd812f1",
+    "startedAt": "2026-11-22T17:17:47.838256",
+    "finishedAt": "2026-11-22T17:56:39.537999",
+    "wallClockSeconds": 2331.699743
+  },
+  "command": "harbor run -d factory-ai/legacy-bench@v0.1 -a coding_agent_terminalbench.agent:CodingAgent -m opencode/deepseek-v4.1-flash --ak artifact_dir=dist/artifact --ae OPENCODE_API_KEY='${OPENCODE_API_KEY}' -e modal -k 1 -n 10 -r 0 -o jobs --job-name recorded-e48b12a-legacy",
+  "pins": {
+    "harbor": {
+      "version": "0.23.0",
+      "gitCommitHash": null
+    },
+    "modalSdk": {
+      "version": "1.6.4",
+      "source": "uv.lock"
+    },
+    "python": {
+      "minimum": "3.12",
+      "used": "3.12.3"
+    }
+  },
+  "artifact": {
+    "version": "0.0.1",
+    "commit": "e48b12ad1758b2016d78c04d76f591cedfdf0098",
+    "dirty": false,
+    "bunVersion": "1.3.14",
+    "executables": [
+      {
+        "file": "coding-agent-linux-x64",
+        "target": "bun-linux-x64-baseline",
+        "sha256": "217388edc5e1923fc7ef6141458df1b6014f4d4b7e6db46f5a63a6e5388f0221"
+      },
+      {
+        "file": "coding-agent-linux-arm64",
+        "target": "bun-linux-arm64",
+        "sha256": "09fed01b434e52397839aece483a944e384e1f165749999855afeb5d09c86731"
+      }
+    ],
+    "installedExecutables": {
+      "coding-agent-linux-x64": 13
+    }
+  },
+  "profile": {
+    "name": "terminalbench",
+    "limits": {
+      "maxModelTurns": 250,
+      "maxToolCalls": 1000,
+      "maxDurationMs": 3600000,
+      "maxConsecutiveRecoverableFailures": 10,
+      "cancellationGraceMs": 5000
+    }
+  },
+  "model": {
+    "provider": "opencode",
+    "model": "deepseek-v4.1-flash",
+    "sampling": {
+      "maxOutputTokens": null,
+      "temperature": null
+    }
+  },
+  "flags": {
+    "agent": "coding_agent_terminalbench.agent:CodingAgent",
+    "agentKwargs": {
+      "artifact_dir": "dist/artifact"
+    },
+    "model": "opencode/deepseek-v4.1-flash",
+    "environment": "modal",
+    "nAttempts": 1,
+    "nConcurrentTrials": 10,
+    "maxRetries": 0,
+    "taskFilter": [],
+    "jobsDir": "jobs",
+    "jobName": "recorded-e48b12a-legacy",
+    "agent_timeout_multiplier": 5.0
+  },
+  "environmentVariableNames": ["OPENCODE_API_KEY"],
+  "dataset": {
+    "identifier": "factory-ai/legacy-bench@v0.1",
+    "contentHash": "sha256:0a3cca4cca8cd6f96abcfe4f627afafa75d6e5ca5b173b6429321418d6e373a5",
+    "sourceRepository": "https://github.com/Factory-AI/legacy-bench",
+    "releaseTag": "v0.1",
+    "releaseCommit": "12fa7cf969b7a253183388040d566fb353a1ab31",
+    "releaseCommitResolvedBy": "recorded in evaluation/terminalbench/datasets/factory-ai/legacy-bench@v0.1.md: https://github.com/Factory-AI/legacy-bench publishes no Git tag; the record names the main commit the published tasks were built from",
+    "taskCount": 10,
+    "taskList": [
+      {
+        "name": "factory-ai/16b04d-cobol-railroad-retirement-migration",
+        "digest": "sha256:ded4b24ccc982dfb6dd5bd5cbed7b96f9be6c771cdb1c0812dcc90a1e913ab3e"
+      },
+      {
+        "name": "factory-ai/1907c2-c-debug-legacy-buddy-fix",
+        "digest": "sha256:8f9959362cc4a444f1818266e63312da838a9aff923c647b6b8bf4d8c920a3c2"
+      },
+      {
+        "name": "factory-ai/2831b5-java7-rating-engine-repair",
+        "digest": "sha256:47f5a185b0db394cfe87a3b2394f469786367c14ecded6101d2fafcb9c500ea9"
+      },
+      {
+        "name": "factory-ai/3af1fe-cobol-bond-settlement-reconcile",
+        "digest": "sha256:dd61c3b30718ff55832bb477c8da24f80ae0c2b10ea9a4e03d59a0fa61e61675"
+      },
+      {
+        "name": "factory-ai/505812-java7-inventory-cost-fix",
+        "digest": "sha256:2526472df82e083915a105ad6550a1dc88ee493a9e008a16f7f725c3e28bc97f"
+      },
+      {
+        "name": "factory-ai/6fe1ab-java7-mtom-attachment-corruption-fix",
+        "digest": "sha256:e766954e52972de8b50d7fe7a79eb95b646334d050ddeab185ff4074049c8cfb"
+      },
+      {
+        "name": "factory-ai/8e8098-cobol-railcar-settlement-fix",
+        "digest": "sha256:7aad8a3791c9e3d43d0d8a149e1bea9b95a6d915d57e40992ece67b0e2b3aad8"
+      },
+      {
+        "name": "factory-ai/d1ddc1-fortran-to-cpp-lattice-qcd-migration",
+        "digest": "sha256:b0a7fa724fc03e13a6cacc7b2c2187bfa739a6011c1472e3ea97223791eed886"
+      },
+      {
+        "name": "factory-ai/ecf5e7-asm-debug-mz-ne-header-fix",
+        "digest": "sha256:3da8b6cb6d89e9cee50c787c22f93597c1b7e85e76a23052ec9dd5fcdc8f68c7"
+      },
+      {
+        "name": "factory-ai/fac397-cobol-batch-interest-migration",
+        "digest": "sha256:2aade514943edddd0a4315d5ae333edde9b724443b5d6c4c31b9c68a0c7aae5c"
+      }
+    ],
+    "smokeTasks": [
+      "ecf5e7-asm-debug-mz-ne-header-fix",
+      "1907c2-c-debug-legacy-buddy-fix",
+      "505812-java7-inventory-cost-fix"
+    ],
+    "record": {
+      "path": "evaluation/terminalbench/datasets/factory-ai/legacy-bench@v0.1.md",
+      "rows": {
+        "Environment": "a Dockerfile per task (`ubuntu:24.04`, `python:3.13-slim-bookworm`, and similar); no task has a Docker Compose file",
+        "Single step": "every task",
+        "Verifier environment": "shared: no task declares `[verifier.environment]`, so the verifier runs in the agent's container, and ADR 0008 \u00a73 property 3 does not hold for this dataset",
+        "Per-task agent timeout": "300 s for nine tasks and 720 s for `fac397-cobol-batch-interest-migration`, so ADR 0008 \u00a73 property 4 does not hold for this dataset",
+        "Dataset identifier": "`factory-ai/legacy-bench@v0.1`",
+        "Source repository": "`https://github.com/Factory-AI/legacy-bench`",
+        "Release tag": "`v0.1`",
+        "Release commit": "`12fa7cf969b7a253183388040d566fb353a1ab31`",
+        "Smoke tasks": "`ecf5e7-asm-debug-mz-ne-header-fix`, `1907c2-c-debug-legacy-buddy-fix`, `505812-java7-inventory-cost-fix`",
+        "Tasks with declared MCP servers": "none",
+        "Tasks with a declared skills directory": "none"
+      }
+    },
+    "properties": [
+      {
+        "property": "image-based-tasks",
+        "label": "Environment",
+        "evidence": "a Dockerfile per task (ubuntu:24.04, python:3.13-slim-bookworm, and similar); no task has a Docker Compose file",
+        "source": "evaluation/terminalbench/datasets/factory-ai/legacy-bench@v0.1.md:14",
+        "shown": true,
+        "problems": []
+      },
+      {
+        "property": "single-step-tasks",
+        "label": "Single step",
+        "evidence": "every task",
+        "source": "evaluation/terminalbench/datasets/factory-ai/legacy-bench@v0.1.md:15",
+        "shown": true,
+        "problems": []
+      },
+      {
+        "property": "separate-verifier-environment",
+        "label": "Verifier environment",
+        "evidence": "shared: no task declares [verifier.environment], so the verifier runs in the agent's container, and ADR 0008 \u00a73 property 3 does not hold for this dataset",
+        "source": "evaluation/terminalbench/datasets/factory-ai/legacy-bench@v0.1.md:16",
+        "shown": true,
+        "problems": [
+          "trial 16b04d-cobol-railroad-retirement__XrmtSoz of factory-ai/16b04d-cobol-railroad-retirement-migration records verifier environment mode 'shared', not 'separate'",
+          "trial 1907c2-c-debug-legacy-buddy-fix__hUcWktx of factory-ai/1907c2-c-debug-legacy-buddy-fix records verifier environment mode 'shared', not 'separate'",
+          "trial 2831b5-java7-rating-engine-repai__adQFWxJ of factory-ai/2831b5-java7-rating-engine-repair records verifier environment mode 'shared', not 'separate'",
+          "trial 3af1fe-cobol-bond-settlement-rec__VCA83Wo of factory-ai/3af1fe-cobol-bond-settlement-reconcile records verifier environment mode 'shared', not 'separate'",
+          "trial 505812-java7-inventory-cost-fix__VsYG5qx of factory-ai/505812-java7-inventory-cost-fix records verifier environment mode 'shared', not 'separate'",
+          "trial 6fe1ab-java7-mtom-attachment-cor__6gWSKq7 of factory-ai/6fe1ab-java7-mtom-attachment-corruption-fix records verifier environment mode 'shared', not 'separate'",
+          "trial 8e8098-cobol-railcar-settlement__eWXWbkA of factory-ai/8e8098-cobol-railcar-settlement-fix records verifier environment mode 'shared', not 'separate'",
+          "trial d1ddc1-fortran-to-cpp-lattice-qc__LgpoXs8 of factory-ai/d1ddc1-fortran-to-cpp-lattice-qcd-migration records verifier environment mode 'shared', not 'separate'",
+          "trial ecf5e7-asm-debug-mz-ne-header-fi__yQaWSnB of factory-ai/ecf5e7-asm-debug-mz-ne-header-fix records verifier environment mode 'shared', not 'separate'",
+          "trial fac397-cobol-batch-interest-migr__qVhRheQ of factory-ai/fac397-cobol-batch-interest-migration records verifier environment mode 'shared', not 'separate'"
+        ]
+      },
+      {
+        "property": "per-task-agent-timeout",
+        "label": "Per-task agent timeout",
+        "evidence": "300 s for nine tasks and 720 s for fac397-cobol-batch-interest-migration, so ADR 0008 \u00a73 property 4 does not hold for this dataset",
+        "source": "evaluation/terminalbench/datasets/factory-ai/legacy-bench@v0.1.md:17",
+        "shown": true,
+        "problems": [
+          "the dataset declares a 300 s per-task agent timeout, below the profile's 3600 s maxDurationMs"
+        ]
+      }
+    ],
+    "ignoredDeclarations": {
+      "mcpServers": [],
+      "skillsDirectories": []
+    }
+  },
+  "relatedJobs": {
+    "oracle": "oracle-e48b12a-legacy",
+    "smoke": "smoke-e48b12a-legacy",
+    "rerun": null
+  },
+  "credentialIsolation": {
+    "schemaVersion": 1,
+    "codingAgent": {
+      "version": "0.0.1",
+      "commit": "e48b12ad1758b2016d78c04d76f591cedfdf0098"
+    },
+    "adrAmendment": "ADR 0001 \u00a77, the CDA-29 amendment of 2026-09-13",
+    "runs": [
+      {
+        "date": "2026-11-22",
+        "result": {
+          "schemaVersion": 1,
+          "passed": true,
+          "failures": [],
+          "codingAgent": {
+            "version": "0.0.1",
+            "commit": "e48b12ad1758b2016d78c04d76f591cedfdf0098"
+          },
+          "executableSha256": "217388edc5e1923fc7ef6141458df1b6014f4d4b7e6db46f5a63a6e5388f0221",
+          "dataset": "harbor/hello-world@1",
+          "task": "hello-world/hello-world",
+          "backend": "modal",
+          "user": {
+            "uid": 0,
+            "name": "root"
+          },
+          "yamaPtraceScope": 1,
+          "probes": [
+            {
+              "path": "inherited-environment",
+              "outcome": "read",
+              "found": false
+            },
+            {
+              "path": "proc-environ",
+              "outcome": "EACCES",
+              "found": false
+            },
+            {
+              "path": "proc-mem",
+              "outcome": "EACCES",
+              "found": false
+            },
+            {
+              "path": "ancestors",
+              "outcome": "read",
+              "found": false
+            }
+          ],
+          "controls": [
+            {
+              "path": "inherited-environment",
+              "found": true
+            },
+            {
+              "path": "proc-environ",
+              "found": true
+            },
+            {
+              "path": "proc-mem",
+              "found": true
+            },
+            {
+              "path": "ancestors",
+              "found": true
+            }
+          ],
+          "launcherRejected": {
+            "exitCode": 2,
+            "messageMatched": true,
+            "serverRequests": 0
+          },
+          "toolResultsReceived": 1
+        }
+      },
+      {
+        "date": "2026-11-22",
+        "result": {
+          "schemaVersion": 1,
+          "passed": true,
+          "failures": [],
+          "codingAgent": {
+            "version": "0.0.1",
+            "commit": "e48b12ad1758b2016d78c04d76f591cedfdf0098"
+          },
+          "executableSha256": "217388edc5e1923fc7ef6141458df1b6014f4d4b7e6db46f5a63a6e5388f0221",
+          "dataset": "factory-ai/legacy-bench@v0.1",
+          "task": "factory-ai/ecf5e7-asm-debug-mz-ne-header-fix",
+          "backend": "modal",
+          "user": {
+            "uid": 0,
+            "name": "root"
+          },
+          "yamaPtraceScope": 1,
+          "probes": [
+            {
+              "path": "inherited-environment",
+              "outcome": "read",
+              "found": false
+            },
+            {
+              "path": "proc-environ",
+              "outcome": "EACCES",
+              "found": false
+            },
+            {
+              "path": "proc-mem",
+              "outcome": "EACCES",
+              "found": false
+            },
+            {
+              "path": "ancestors",
+              "outcome": "read",
+              "found": false
+            }
+          ],
+          "controls": [
+            {
+              "path": "inherited-environment",
+              "found": true
+            },
+            {
+              "path": "proc-environ",
+              "found": true
+            },
+            {
+              "path": "proc-mem",
+              "found": true
+            },
+            {
+              "path": "ancestors",
+              "found": true
+            }
+          ],
+          "launcherRejected": {
+            "exitCode": 2,
+            "messageMatched": true,
+            "serverRequests": 0
+          },
+          "toolResultsReceived": 1
+        }
+      }
+    ]
+  },
+  "waivers": [
+    {
+      "check": "credential-isolation",
+      "reason": "every task of factory-ai/legacy-bench@v0.1 runs the agent as root on Modal, so no non-root isolation run exists for this dataset; the passing root run on Modal is recorded"
+    },
+    {
+      "check": "dataset-release-tag",
+      "reason": "https://github.com/Factory-AI/legacy-bench publishes no Git tag; the record names the main commit the published tasks were built from"
+    },
+    {
+      "check": "timeout-override",
+      "reason": "the dataset caps the agent at 300 s and 720 s, below the terminalbench profile; the rehearsal raised the agent timeout 5x so the tasks could finish"
+    }
+  ],
+  "secretScan": {
+    "roots": ["jobs/recorded-e48b12a-legacy"],
+    "patterns": {
+      "credentialVariables": ["OPENCODE_API_KEY"],
+      "prefixes": ["sk-ant-", "sk-or-", "sk-proj-", "xai-", "AIza", "oc_sk_"],
+      "redactedMarker": "[REDACTED]"
+    },
+    "files": 114,
+    "result": "passed",
+    "explained": [],
+    "unexplained": 0
+  },
+  "archive": {
+    "parts": [
+      {
+        "file": "recorded-e48b12a-legacy.tar.zst.part-aa",
+        "bytes": 676234,
+        "sha256": "e5831550f475ec349d60fa23ffbee84a08ae207c337b558e37b87eff565d7968"
+      }
+    ],
+    "assetLimitBytes": 2147483648,
+    "assetCountLimit": 1000
+  }
+}

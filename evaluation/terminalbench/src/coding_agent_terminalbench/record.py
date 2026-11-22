@@ -23,9 +23,12 @@ retry, or a literal credential), whose trials did not run the planned tasks, who
 the one the build hashed, or whose rerun job or smoke job does not belong to the recorded job. It
 writes nothing when it refuses, like oracle_job.py.
 
-`--waive-isolation REASON` records a job whose backend the Isolation Record does not clear. The
-manifest names the waived requirement and the reason, and the report states that the record does
-not count under ADR 0005 §9 criterion 5. It is for a rehearsal, not for the MVP's recorded job.
+Three options record a job that ADR 0005 §7 would refuse, each naming the waived requirement and
+the reason: `--waive-isolation` for a backend the Isolation Record does not clear,
+`--waive-release-tag` for a dataset repository that publishes no tag, and
+`--waive-timeout-override` for a job that raised the task timeouts. The manifest and the report
+carry every waiver, and the report states that such a record does not count under §9 criterion 5.
+They are for a rehearsal, not for the MVP's recorded job.
 
 harbor_job.py reads Harbor 0.23.0's job files and Coding Agent's run files as JSON, like
 oracle_job.py, and report.py renders report.md from the data computed here. Its tests write a job
@@ -123,6 +126,15 @@ ALLOWED_JOB_FIELDS = frozenset(
     {"job_name", "jobs_dir", "n_concurrent_trials", "environment", "agents", "datasets"}
 )
 ALLOWED_AGENT_FIELDS = frozenset({"name", "import_path", "model_name", "env", "kwargs"})
+# The top-level fields that a timeout override adds to config.json. ADR 0005 §7 forbids a
+# recorded job to set one; --waive-timeout-override admits them and names the waiver.
+TIMEOUT_OVERRIDE_FIELDS = frozenset({
+    "timeout_multiplier",
+    "agent_timeout_multiplier",
+    "verifier_timeout_multiplier",
+    "agent_setup_timeout_multiplier",
+    "environment_build_timeout_multiplier",
+})
 ALLOWED_ENVIRONMENT_FIELDS = frozenset({"type"})
 ALLOWED_DATASET_FIELDS = frozenset({"name", "ref"})
 ALLOWED_RUN_DATASET_FIELDS = ALLOWED_DATASET_FIELDS | {"task_names"}
@@ -267,10 +279,11 @@ def job_config_problems(
     allowed: frozenset[str],
     environment_types: set[str],
     dataset_fields: frozenset[str],
+    allowed_extra: frozenset[str] = frozenset(),
 ) -> list[str]:
     """Compares a job's config.json with the command of ADR 0005 §7 that writes it."""
     config = job.config
-    problems = unexpected_fields("", config, allowed)
+    problems = unexpected_fields("", config, allowed | allowed_extra)
     name = config.get("job_name")
     if not isinstance(name, str) or name == "":
         problems.append("config.json has no job name (--job-name)")
@@ -297,26 +310,30 @@ def job_config_problems(
     return problems
 
 
-def recorded_job_problems(job: HarborJob) -> list[str]:
+def recorded_job_problems(job: HarborJob, allowed_extra: frozenset[str]) -> list[str]:
     """The problems of the recorded job's config.json (ADR 0005 §7 step 4)."""
     problems = job_config_problems(
         job,
         allowed=ALLOWED_JOB_FIELDS,
         environment_types={"modal"},
         dataset_fields=ALLOWED_DATASET_FIELDS,
+        allowed_extra=allowed_extra,
     )
     if job.task_filter():
         problems.append("the recorded job must run every task; config.json has a -i task filter")
     return problems
 
 
-def rerun_job_problems(recorded: HarborJob, rerun: HarborJob) -> list[str]:
+def rerun_job_problems(
+    recorded: HarborJob, rerun: HarborJob, allowed_extra: frozenset[str]
+) -> list[str]:
     """The problems of the rerun job's config.json (ADR 0005 §7 step 5)."""
     problems = job_config_problems(
         rerun,
         allowed=ALLOWED_JOB_FIELDS,
         environment_types={"modal"},
         dataset_fields=ALLOWED_RUN_DATASET_FIELDS,
+        allowed_extra=allowed_extra,
     )
     expected_name = recorded.name + "-rerun"
     if rerun.name != expected_name:
@@ -328,13 +345,16 @@ def rerun_job_problems(recorded: HarborJob, rerun: HarborJob) -> list[str]:
     return problems
 
 
-def smoke_job_problems(recorded: HarborJob, smoke: HarborJob) -> list[str]:
+def smoke_job_problems(
+    recorded: HarborJob, smoke: HarborJob, allowed_extra: frozenset[str]
+) -> list[str]:
     """The problems of the smoke job's config.json (ADR 0005 §7 step 3)."""
     problems = job_config_problems(
         smoke,
         allowed=ALLOWED_JOB_FIELDS,
         environment_types={"modal", "docker"},
         dataset_fields=ALLOWED_RUN_DATASET_FIELDS,
+        allowed_extra=allowed_extra,
     )
     problems.extend(related_job_problems(recorded, smoke, "the smoke job"))
     return problems
@@ -681,6 +701,10 @@ class RecordInputs:
     isolation_record: Mapping[str, Any]
     # Why the record waives §7's credential isolation precondition, or None when it does not.
     isolation_waiver: str | None = None
+    # Why the record waives resolving the dataset's release tag, or None when it does not.
+    release_tag_waiver: str | None = None
+    # Why the record waives ADR 0005 §7's ban on a timeout override, or None when it does not.
+    timeout_waiver: str | None = None
 
 
 def isolation_record_problems(inputs: RecordInputs) -> list[str]:
@@ -698,9 +722,10 @@ def protocol_problems(inputs: RecordInputs) -> list[str]:
     rerun = inputs.rerun
     smoke = inputs.smoke
     dataset = inputs.dataset
+    allowed_extra = TIMEOUT_OVERRIDE_FIELDS if inputs.timeout_waiver else frozenset()
     problems = [
-        *recorded_job_problems(recorded),
-        *smoke_job_problems(recorded, smoke),
+        *recorded_job_problems(recorded, allowed_extra),
+        *smoke_job_problems(recorded, smoke, allowed_extra),
         *pinned_job_problems(recorded, inputs.pins, "the recorded job"),
         *pinned_job_problems(smoke, inputs.pins, "the smoke job"),
         *job_result_problems(recorded, "the recorded job"),
@@ -708,7 +733,11 @@ def protocol_problems(inputs: RecordInputs) -> list[str]:
         *job_trial_problems(recorded, "the recorded job"),
         *job_trial_problems(smoke, "the smoke job"),
         *dataset_problems(dataset, inputs.oracle, recorded, smoke, rerun),
-        *release_commit_problems(dataset, inputs.release_commit),
+        *(
+            []
+            if inputs.release_tag_waiver
+            else release_commit_problems(dataset, inputs.release_commit)
+        ),
         *oracle_problems(inputs.oracle, dataset, recorded),
         *model_problems(recorded),
         *artifact_problems(
@@ -727,7 +756,7 @@ def protocol_problems(inputs: RecordInputs) -> list[str]:
     if rerun is not None:
         problems.extend(
             [
-                *rerun_job_problems(recorded, rerun),
+                *rerun_job_problems(recorded, rerun, allowed_extra),
                 *pinned_job_problems(rerun, inputs.pins, "the rerun job"),
                 *job_result_problems(rerun, "the rerun job"),
                 *job_trial_problems(rerun, "the rerun job"),
@@ -853,6 +882,8 @@ class RecordData:
     archive_parts: tuple[ArchivePart, ...]
     isolation_record: Mapping[str, Any]
     isolation_waiver: str | None
+    release_tag_waiver: str | None
+    timeout_waiver: str | None
     scan: ScanReport
     outcomes: tuple[TaskOutcome, ...]
     properties: tuple[Mapping[str, Any], ...]
@@ -962,6 +993,8 @@ def build_record_data(inputs: RecordInputs, scan: ScanReport) -> RecordData:
         archive_parts=inputs.archive_parts,
         isolation_record=inputs.isolation_record,
         isolation_waiver=inputs.isolation_waiver,
+        release_tag_waiver=inputs.release_tag_waiver,
+        timeout_waiver=inputs.timeout_waiver,
         scan=scan,
         outcomes=outcomes,
         properties=properties,
@@ -970,8 +1003,13 @@ def build_record_data(inputs: RecordInputs, scan: ScanReport) -> RecordData:
     )
 
 
-def release_commit_resolved_by(dataset: DatasetRecord) -> str:
-    """The command that resolves the release tag to its commit (ADR 0008 §1)."""
+def release_commit_resolved_by(dataset: DatasetRecord, waiver: str | None = None) -> str:
+    """The command that resolves the release tag to its commit (ADR 0008 §1).
+
+    A record that waives the resolution names the commit it recorded and the reason instead.
+    """
+    if waiver is not None:
+        return f"recorded in {dataset.path}: {waiver}"
     ref = f"refs/tags/{dataset.release_tag}"
     return f"git ls-remote --tags {dataset.source_repository} {ref} {ref}^{{}}"
 
@@ -1013,7 +1051,7 @@ def run_command(job: HarborJob, dataset: DatasetRecord) -> str:
 
 def job_flags(job: HarborJob) -> Mapping[str, Any]:
     """Every Harbor flag that the recorded job used, with the defaults the command relies on."""
-    return {
+    flags: dict[str, Any] = {
         "agent": agent_adapter(job.agent),
         "agentKwargs": dict(job.agent_kwargs),
         "model": job.model_name,
@@ -1025,6 +1063,10 @@ def job_flags(job: HarborJob) -> Mapping[str, Any]:
         "jobsDir": job.jobs_dir,
         "jobName": job.name,
     }
+    for field in sorted(TIMEOUT_OVERRIDE_FIELDS):
+        if field in job.config:
+            flags[field] = job.config[field]
+    return flags
 
 
 def dataset_section(data: RecordData) -> Mapping[str, Any]:
@@ -1035,7 +1077,9 @@ def dataset_section(data: RecordData) -> Mapping[str, Any]:
         "sourceRepository": data.dataset.source_repository,
         "releaseTag": data.dataset.release_tag,
         "releaseCommit": data.release_commit,
-        "releaseCommitResolvedBy": release_commit_resolved_by(data.dataset),
+        "releaseCommitResolvedBy": release_commit_resolved_by(
+            data.dataset, data.release_tag_waiver
+        ),
         "taskCount": len(data.outcomes),
         "taskList": [
             {"name": outcome.task, "digest": outcome.digest} for outcome in data.outcomes
@@ -1108,11 +1152,23 @@ def manifest_data(data: RecordData) -> Mapping[str, Any]:
             "rerun": data.rerun.name if data.rerun is not None else None,
         },
         "credentialIsolation": dict(data.isolation_record),
-        "waivers": (
-            [{"check": "credential-isolation", "reason": data.isolation_waiver}]
-            if data.isolation_waiver is not None
-            else []
-        ),
+        "waivers": [
+            *(
+                [{"check": "credential-isolation", "reason": data.isolation_waiver}]
+                if data.isolation_waiver is not None
+                else []
+            ),
+            *(
+                [{"check": "dataset-release-tag", "reason": data.release_tag_waiver}]
+                if data.release_tag_waiver is not None
+                else []
+            ),
+            *(
+                [{"check": "timeout-override", "reason": data.timeout_waiver}]
+                if data.timeout_waiver is not None
+                else []
+            ),
+        ],
         "secretScan": scan_record(data.scan),
         "archive": {
             "parts": [
@@ -1213,6 +1269,16 @@ def summary_text(data: RecordData) -> str:
                 if data.isolation_waiver is not None
                 else []
             ),
+            *(
+                [f"Waived dataset release tag: {data.release_tag_waiver}"]
+                if data.release_tag_waiver is not None
+                else []
+            ),
+            *(
+                [f"Waived timeout override: {data.timeout_waiver}"]
+                if data.timeout_waiver is not None
+                else []
+            ),
         ]
     )
 
@@ -1268,6 +1334,22 @@ def main(
         help=(
             "record a job whose backend the Isolation Record does not clear, stating why; the "
             "record names the waiver and does not count under ADR 0005 §9 criterion 5"
+        ),
+    )
+    parser.add_argument(
+        "--waive-release-tag",
+        metavar="REASON",
+        help=(
+            "record the dataset release commit the record names without resolving its tag, "
+            "stating why; for a source repository that publishes no tag"
+        ),
+    )
+    parser.add_argument(
+        "--waive-timeout-override",
+        metavar="REASON",
+        help=(
+            "record a job that raised its task timeouts, stating why; ADR 0005 §7 forbids a "
+            "timeout override in the MVP's recorded job"
         ),
     )
     parser.add_argument(
@@ -1334,8 +1416,10 @@ def main(
         print(f"error: {exc}", file=sys.stderr)
         return 1
     try:
-        release_commit = resolve_release_commit(
-            dataset.source_repository, dataset.release_tag, run
+        release_commit = (
+            dataset.release_commit
+            if args.waive_release_tag is not None
+            else resolve_release_commit(dataset.source_repository, dataset.release_tag, run)
         )
         archive_parts = hash_archive_parts(args.archive_part)
     except (OracleJobError, RecordError) as exc:
@@ -1354,6 +1438,8 @@ def main(
         archive_parts=archive_parts,
         isolation_record=isolation_record,
         isolation_waiver=args.waive_isolation,
+        release_tag_waiver=args.waive_release_tag,
+        timeout_waiver=args.waive_timeout_override,
     )
     try:
         problems = protocol_problems(inputs)

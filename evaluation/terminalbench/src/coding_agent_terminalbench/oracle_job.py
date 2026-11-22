@@ -109,6 +109,8 @@ class Evidence:
     pins: LockedPins
     release_commit: str
     registry: RegistryDataset
+    # Why the record names the release commit without resolving its tag, or None.
+    release_tag_waiver: str | None = None
 
 
 @dataclass(frozen=True)
@@ -609,8 +611,12 @@ def oracle_record(job: OracleJob, evidence: Evidence) -> dict[str, Any]:
             "sourceRepository": dataset.source_repository,
             "releaseTag": dataset.release_tag,
             "releaseCommit": evidence.release_commit,
-            "releaseCommitResolvedBy": "git "
-            + " ".join(ls_remote_args(dataset.source_repository, dataset.release_tag)),
+            "releaseCommitResolvedBy": (
+                f"recorded: {evidence.release_tag_waiver}"
+                if evidence.release_tag_waiver is not None
+                else "git "
+                + " ".join(ls_remote_args(dataset.source_repository, dataset.release_tag))
+            ),
             "taskCount": len(job.planned_trials),
         },
         "tasks": [
@@ -686,6 +692,14 @@ def main(
     parser.add_argument("--release-tag", required=True, help="the record's release tag")
     parser.add_argument("--release-commit", required=True, help="the record's release commit")
     parser.add_argument("--output", type=Path, required=True, help="the oracle.json file to write")
+    parser.add_argument(
+        "--waive-release-tag",
+        metavar="REASON",
+        help=(
+            "record the release commit the dataset record names without resolving its tag, "
+            "stating why; for a source repository that publishes no tag"
+        ),
+    )
     parser.add_argument("--uv-lock", type=Path, default=DEFAULT_UV_LOCK, help="the uv.lock file")
     args = parser.parse_args(argv)
     name, _, version = args.dataset.rpartition("@")
@@ -706,10 +720,15 @@ def main(
         evidence = Evidence(
             dataset=dataset,
             pins=pins,
-            release_commit=resolve_release_commit(
-                dataset.source_repository, dataset.release_tag, run
+            release_commit=(
+                dataset.release_commit
+                if args.waive_release_tag is not None
+                else resolve_release_commit(
+                    dataset.source_repository, dataset.release_tag, run
+                )
             ),
             registry=resolve_dataset(dataset.identifier),
+            release_tag_waiver=args.waive_release_tag,
         )
     except OracleJobError as exc:
         print(f"error: {exc}", file=sys.stderr)

@@ -981,6 +981,78 @@ class IsolationWaiverTest(RecordTestCase):
         self.assertIn("--isolation-record", stderr)
 
 
+class ReleaseTagWaiverTest(RecordTestCase):
+    """A source repository that publishes no tag may be recorded with a waiver (CDA-96)."""
+
+    @staticmethod
+    def fail_run(command: list[str]) -> str:
+        raise AssertionError(f"the tag was resolved although the waiver was given: {command}")
+
+    def test_a_waived_release_tag_skips_the_resolution(self) -> None:
+        self.write_standard_jobs()
+
+        code, _, stderr = self.run_main(
+            extra=(
+                "--waive-release-tag",
+                "the source repository publishes no tag",
+            ),
+            run=self.fail_run,
+        )
+
+        self.assertEqual(code, 0, stderr)
+        manifest = self.manifest()
+        self.assertIn(
+            {
+                "check": "dataset-release-tag",
+                "reason": "the source repository publishes no tag",
+            },
+            manifest["waivers"],
+        )
+        self.assertEqual(manifest["dataset"]["releaseCommit"], RELEASE_COMMIT)
+        self.assertIn("waives resolving that commit", self.report())
+
+    def test_without_the_waiver_the_tag_is_resolved(self) -> None:
+        self.write_standard_jobs()
+        calls: list[list[str]] = []
+
+        def run(command: list[str]) -> str:
+            calls.append(command)
+            return f"{RELEASE_COMMIT}\trefs/tags/{RELEASE_TAG}^{{}}"
+
+        code, _, stderr = self.run_main(run=run)
+
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(len(calls), 1)
+
+
+class TimeoutOverrideWaiverTest(RecordTestCase):
+    """A job that raised its task timeouts is recorded only with a waiver (CDA-96)."""
+
+    def test_a_timeout_override_is_refused_without_the_waiver(self) -> None:
+        self.write_standard_jobs()
+        self.write_recorded(extra_config={"agent_timeout_multiplier": 5.0})
+
+        code, _, stderr = self.run_main()
+
+        self.assertEqual(code, 1)
+        self.assertIn("agent_timeout_multiplier", stderr)
+
+    def test_a_waived_timeout_override_is_recorded(self) -> None:
+        self.write_standard_jobs()
+        self.write_recorded(extra_config={"agent_timeout_multiplier": 5.0})
+        reason = "the dataset caps the agent at 300 s, which the model needs more of"
+
+        code, _, stderr = self.run_main(
+            extra=("--waive-timeout-override", reason),
+        )
+
+        self.assertEqual(code, 0, stderr)
+        manifest = self.manifest()
+        self.assertIn({"check": "timeout-override", "reason": reason}, manifest["waivers"])
+        self.assertEqual(manifest["flags"]["agent_timeout_multiplier"], 5.0)
+        self.assertIn("**Timeout override**", self.report())
+
+
 class MeanTest(unittest.TestCase):
     """The mean of ADR 0005 §8 must be what Harbor's own Mean metric computes."""
 

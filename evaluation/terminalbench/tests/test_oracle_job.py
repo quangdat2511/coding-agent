@@ -722,6 +722,37 @@ class MainTest(OracleJobTestCase):
         self.assertEqual(record["schemaVersion"], 1)
         self.assertEqual(len(record["harnessFlakyTasks"]), 2)
 
+    def test_a_waived_release_tag_skips_the_resolution(self) -> None:
+        write_job(self.job_dir, TRIALS)
+        output = self.root / "runs" / "oracle-waived" / "oracle.json"
+        calls: list[list[str]] = []
+
+        def run(command: list[str]) -> str:
+            calls.append(command)
+            raise AssertionError("the tag was resolved although the waiver was given")
+
+        argv = [
+            str(self.job_dir),
+            "--dataset", DATASET.identifier,
+            "--source-repository", DATASET.source_repository,
+            "--release-tag", DATASET.release_tag,
+            "--release-commit", DATASET.release_commit,
+            "--output", str(output),
+            "--uv-lock", str(UV_LOCK),
+            "--waive-release-tag", "the source repository publishes no tag",
+        ]
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            code = main(argv, run=run, resolve_dataset=lambda _: EVIDENCE.registry)
+
+        self.assertEqual(code, 0, stderr.getvalue())
+        self.assertEqual(calls, [])
+        record = json.loads(output.read_text())
+        self.assertEqual(
+            record["dataset"]["releaseCommitResolvedBy"],
+            "recorded: the source repository publishes no tag",
+        )
+
     def test_a_job_with_problems_writes_nothing(self) -> None:
         write_job(self.job_dir, TRIALS, config=job_config(n_attempts=2))
         code, _, stderr = self.run_main()

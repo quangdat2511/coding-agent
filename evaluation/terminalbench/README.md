@@ -649,6 +649,14 @@ requirement and the reason, and `report.md` has a `## Waivers` section stating t
 not count under ADR 0005 §9 criterion 5. Use it for a rehearsal of the tooling, not for the MVP's
 recorded job; a record that waives the precondition is not a valid job record.
 
+Two more waivers serve a rehearsal of a dataset the protocol does not admit.
+`--waive-release-tag REASON` records the release commit the dataset record names without resolving
+it from a tag, for a source repository that publishes no tag; the manifest says so in
+`dataset.releaseCommitResolvedBy`. `--waive-timeout-override REASON` admits the job flags that raise
+the task timeouts (`--agent-timeout-multiplier` and the other multiplier flags), which ADR 0005 §7
+forbids the MVP's recorded job to set; the manifest records them under `flags`. Each waiver is a
+`waivers` entry and a `## Waivers` line, and a record with any waiver publishes no headline reward.
+
 The command refuses, and writes nothing, when:
 
 - `config.json` is not the recorded-job command of ADR 0005 §7: another agent or import path,
