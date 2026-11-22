@@ -552,8 +552,8 @@ sandbox holds it. `src/ptrace-capability.ts` therefore removes the capability fr
 starts every child:
 
 1. If the bounding set holds it, `PR_CAPBSET_DROP` lowers it. This needs `CAP_SETPCAP`.
-2. `capset` clears it from the effective, permitted and inheritable sets. The kernel removes it from
-   the ambient set as well.
+2. `capset` clears it from the effective, permitted and inheritable sets, when one of them holds it.
+   The kernel removes it from the ambient set as well.
 3. `capget`, `PR_CAPBSET_READ` and `PR_CAP_AMBIENT_IS_SET` read every set back.
 
 | Outcome | Exit code | Message |
@@ -575,8 +575,8 @@ The guarantee has these limits:
 
 `tests/ptrace-capability.test.ts` runs the decisions against a fake kernel on every platform, and
 against the real kernel on Linux, where it reads the sets back from `/proc/thread-self/status`.
-`tests/ptrace-capability-cli.test.ts` preloads `tests/support/force-ptrace-drop.ts` into the
-executable and checks both exit codes, that a refusal creates no output directory, and that the
+`tests/ptrace-capability-cli.test.ts` preloads `tests/support/force-ptrace-drop.ts` into the CLI
+that Bun runs from source, not into the compiled executable, and checks both exit codes, that a refusal creates no output directory, and that the
 interactive path is not refused.
 
 `tests/ptrace-capability-proc.test.ts` shows the effect and needs root with `CAP_SYS_PTRACE`, so CI

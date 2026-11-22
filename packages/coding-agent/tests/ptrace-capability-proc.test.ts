@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { runnerChainIsClean } from "./support/ancestor-chain.ts";
+import { bit, CAP_SYS_PTRACE } from "./support/fake-kernel-capabilities.ts";
 import { parsedRun } from "./support/parsed-run.ts";
 import { onLinux } from "./support/platform.ts";
 import { bunLikeShebang as bun, runProcess, withTemporaryDirectory } from "./support/process.ts";
@@ -13,7 +14,7 @@ import { bunLikeShebang as bun, runProcess, withTemporaryDirectory } from "./sup
 function holdsPtraceAsRoot(): boolean {
   if (!onLinux || process.getuid?.() !== 0) return false;
   const capEff = /^CapEff:\s*([0-9a-f]+)$/m.exec(readFileSync("/proc/self/status", "utf8"))?.[1];
-  return capEff !== undefined && (BigInt(`0x${capEff}`) & (1n << 19n)) !== 0n;
+  return capEff !== undefined && (BigInt(`0x${capEff}`) & bit(CAP_SYS_PTRACE)) !== 0n;
 }
 
 const cli = join(import.meta.dir, "..", "src", "cli.ts");

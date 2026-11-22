@@ -247,9 +247,10 @@ On 2026-11-22, [CDA-121](https://datn-fit-hcmus.atlassian.net/browse/CDA-121) am
   1. If the bounding set holds the capability, lower it with `PR_CAPBSET_DROP`, which needs
      `CAP_SETPCAP`. A caller without it gets `EPERM`, and the read-back below decides whether that
      matters.
-  2. Clear the capability from the effective, permitted and inheritable sets with `capset`. The
-     kernel removes it from the ambient set too, because an ambient capability must also be
-     permitted and inheritable.
+  2. Clear the capability from the effective, permitted and inheritable sets with `capset`, when one
+     of them holds it. The kernel removes it from the ambient set too, because an ambient capability
+     must also be permitted and inheritable. With nothing to clear, `capset` is not called, so a
+     sandbox that denies it by seccomp does not stop an ordinary user.
   3. Read every set back on the same thread. The run is refused if the capability is still in the
      effective, permitted, inheritable or ambient set, or in the bounding set while the real or
      effective user is root. A child of root gets permitted = bounding | inheritable at `execve`,
@@ -260,8 +261,9 @@ On 2026-11-22, [CDA-121](https://datn-fit-hcmus.atlassian.net/browse/CDA-121) am
 - **Refusal** (§8): a refusal exits 2, as a configuration error that the launcher can correct, for
   example with `docker run --cap-drop SYS_PTRACE`. The message names the capability and the first
   set that still holds it, in the order bounding, effective, permitted, inheritable, ambient. A
-  failure of a step exits 70 with its `errno`: the C library cannot load, `capget`, `capset` or
-  `PR_CAPBSET_DROP` fails, or a read-back call fails. The only call whose failure is tolerated is
+  failure of a step exits 70: `capget`, `capset` or `PR_CAPBSET_DROP` fails, or a read-back call
+  fails, and the message carries the `errno`; or the C library cannot load, and the message carries
+  the loader's own text. The only call whose failure is tolerated is
   `EPERM` from `PR_CAPBSET_DROP`, and the ambient read-back on a kernel before 4.3, which has no
   ambient set and answers `EINVAL`. The interactive path runs under `"ask"`, which §8 exempts, so
   it neither drops nor refuses.
@@ -288,12 +290,12 @@ The evidence is separated into what was read, tried and not yet executed.
   ambient set to what is still permitted and inheritable
   ([L307](https://github.com/torvalds/linux/blob/v6.16/security/commoncap.c#L307)).
 - At `execve`, root's new permitted set is its bounding set combined with its inheritable set
-  ([L841](https://github.com/torvalds/linux/blob/v6.16/security/commoncap.c#L841)). With
+  ([L840-L843](https://github.com/torvalds/linux/blob/v6.16/security/commoncap.c#L840-L843)). With
   `no_new_privs`, an exec cannot gain beyond the old permitted set
-  ([L951](https://github.com/torvalds/linux/blob/v6.16/security/commoncap.c#L951)).
+  ([L945-L954](https://github.com/torvalds/linux/blob/v6.16/security/commoncap.c#L945-L954)).
 - `capget` and `capset` with a header pid of 0 act on the calling thread
   ([`kernel/capability.c` L110](https://github.com/torvalds/linux/blob/v6.16/kernel/capability.c#L110),
-  [L232](https://github.com/torvalds/linux/blob/v6.16/kernel/capability.c#L232)).
+  [L233](https://github.com/torvalds/linux/blob/v6.16/kernel/capability.c#L233)).
 - `Bun.spawn` calls `spawnProcess` from the binding
   ([`js_bun_spawn_bindings.zig` L621](https://github.com/oven-sh/bun/blob/0d9b296/src/runtime/api/bun/js_bun_spawn_bindings.zig#L621)),
   which on Linux runs `vfork` and `execve` on the calling thread
@@ -303,27 +305,41 @@ The evidence is separated into what was read, tried and not yet executed.
 **Tried.** A compiled Bun program, as root, held the key in its environment, marked itself
 non-dumpable, applied one of four drops, and started a root `sh` with `Bun.spawnSync` and with
 `Bun.spawn`; the child read the program's `environ` and opened its `mem`. The prototype is commit
-`c5b47c3` of the branch `prototype/cda-121-drop-ptrace`, not part of `main`, with the logs of both
-runs. It ran on 2026-11-22 on Modal (`music-harmony`, `4.19.0-gvisor`) and in Docker Desktop with
+`c5b47c3` of the branch `prototype/cda-121-drop-ptrace`, which is pushed to the same remote as this
+change and is not part of `main`. Its logs are `prototype/cda-121/modal-run.log` (all four variants,
+on Modal) and `prototype/cda-121/docker-ptrace-eff-bnd.log` (two variants, in Docker). It ran on
+2026-11-22 on Modal (`music-harmony`, `4.19.0-gvisor`) and in Docker Desktop with
 `--cap-add=SYS_PTRACE`, which reproduces Modal's root capability locally.
 
 | Drop | Modal | Docker with `SYS_PTRACE` |
 | --- | --- | --- |
-| none, only the non-dumpable mark | child read `environ`, `mem` opened | same |
+| none, only the non-dumpable mark | child read `environ`, `mem` opened | same (not in the kept log; see below) |
 | `capset` only | denied | **child read `environ`, `mem` opened** |
 | bounding set only | denied | denied |
-| both | denied | denied |
+| both | denied | denied (not in the kept log; see below) |
+
+The two Docker rows that the kept log lacks were run by the same prototype, but only the other two
+variants were saved. The same two cases are tested in the repository, and the second paragraph below
+reports them: the control of `tests/ptrace-capability-proc.test.ts` for "none" and its test of the
+Coding Agent after the drop for "both".
 
 On Modal the sandbox sets `NoNewPrivs: 1`, which probably explains why `capset` alone was enough
 there, as the `no_new_privs` rule above limits what an `execve` gains; that link was not tested. On
-Docker, which does not set it, the child of root took the capability back from the bounding set. Only the thread that applied the
-drop changed: the Bun helper threads still showed the capability. The implementation's tests ran on
-2026-11-22 against the real kernel in `oven/bun:1.3.14` containers as uid 1000, as root, as root with
-`--cap-add=SYS_PTRACE`, and as uid 1000 with it: 30 passed and 2 were skipped in each. In every
-run the real-libc test read `CapEff`, `CapPrm`, `CapInh` and `CapAmb` (and `CapBnd` for root) back
-from `/proc/thread-self/status` and found no capability. With root and `CAP_SYS_PTRACE`, a control
-that only marks itself non-dumpable was read through `environ`, `mem` and the fd links, and the
-Coding Agent after the drop was denied all three. With the drop disabled in `cli.ts`, that test
+Docker, which does not set it, the child of root took the capability back from the bounding set.
+Only the thread that applied the drop changed: the Bun helper threads still showed the capability.
+
+The implementation's tests ran on 2026-11-22 against the real kernel in `oven/bun:1.3.14`
+containers as uid 1000, as root, as root with `--cap-add=SYS_PTRACE`, and as uid 1000 with it. Each
+run was `bun test` of `tests/ptrace-capability.test.ts`, `tests/ptrace-capability-cli.test.ts`,
+`tests/ptrace-capability-proc.test.ts` and `tests/non-dumpable.test.ts` in `packages/coding-agent`,
+and each gave 31 passed and 2 skipped. The skipped pair was the proc-access test, which needs root
+with the capability, in the three runs that were not root with it, and the pair in
+`non-dumpable.test.ts`, which needs the capability absent, in the run as root with it. The output of
+these runs was not saved. In
+every run the real-libc test read `CapEff`, `CapPrm`, `CapInh` and `CapAmb` (and `CapBnd` for root)
+back from `/proc/thread-self/status` and found no capability. With root and `CAP_SYS_PTRACE`, a
+control that only marks itself non-dumpable was read through `environ`, `mem` and the fd links, and
+the Coding Agent after the drop was denied all three. With the drop disabled in `cli.ts`, that test
 failed because the child read the process.
 
 **Not yet executed.**
@@ -339,7 +355,10 @@ failed because the child read the process.
 - A setuid-root program or a file capability in the child was not tried; the limit above is
   reasoned from the kernel source.
 - That a kernel before 4.3 answers `EINVAL` to `PR_CAP_AMBIENT` is taken from `prctl(2)` and was
-  not run; a fake kernel tests the branch.
+  not run; a fake kernel tests the branch. A sandbox that answers the ambient read with another
+  errno would make the run exit 70; no such sandbox was seen, and gVisor on Modal answers 0 or 1.
+- The compiled artifact (`bun build --compile`, the form that Harbor runs) has not run the drop. The
+  tests above run the CLI from source with `bun`; the prototype was compiled but is not the artifact.
 
 ### 8. Credential Isolation for Tool and Verification Processes
 
@@ -350,20 +369,20 @@ This rule was grounded in Linux experiments (Docker, kernel 6.12, same-uid child
 Two rules hold on every entry point and under both policies:
 
 1. **Non-inheritance.** Every process started for a Tool Call or by the Verification Runner is launched with an environment from which Coding Agent's MVP provider-credential variables are removed. The removed set is exactly `PROVIDER_CREDENTIAL_ENV_VARS`, the names `@coding-agent/ai` exports for the `--provider` values ADR 0005 §3 accepts ([ADR 0006](./0006-implementation-order-and-mvp-completion-checklist.md) §3), including providers not selected for the current run. [ADR 0007](./0007-evaluation-provider-and-model.md) adds `OPENCODE_API_KEY` with the sixth provider, so the export stays the only place the list lives. This export is the single source of truth, not an arbitrary denylist. Variables outside that set, such as a task's own `GH_TOKEN`, are not touched, so there is no separate opt-out to misconfigure.
-2. **Agent non-recovery.** Because a same-user child can read a launcher's `/proc/<pid>/environ`, `/proc/<pid>/mem`, and `/proc/<pid>/fd`, where the credential remains after an in-process delete, item 1 alone is insufficient. On Linux the Coding Agent process marks itself non-dumpable (`prctl(PR_SET_DUMPABLE, SUID_DUMP_DISABLE)`) before it starts the first Tool Call or Verification child, so a same-uid child without `CAP_SYS_PTRACE` cannot read those files of the Coding Agent process. This closes the Coding Agent process as a vector; it does not affect any other process.
+2. **Agent non-recovery.** Because a same-user child can read a launcher's `/proc/<pid>/environ`, `/proc/<pid>/mem`, and `/proc/<pid>/fd`, where the credential remains after an in-process delete, item 1 alone is insufficient. On Linux the Coding Agent process marks itself non-dumpable (`prctl(PR_SET_DUMPABLE, SUID_DUMP_DISABLE)`) before it starts the first Tool Call or Verification child, so a same-uid child without `CAP_SYS_PTRACE` cannot read those files of the Coding Agent process. This closes the Coding Agent process as a vector; it does not affect any other process. Under `"auto-approve"` on Linux, `coding-agent run` also removes `CAP_SYS_PTRACE` from the thread that starts every child, and refuses to run if it remains (CDA-121, §7), because a child that holds that capability reads a non-dumpable process of the same user.
 
 **MVP credential scope and residual (CDA-68, 2026-11-11).** In this section, the provider-credential guarantee covers the fixed MVP set above. OpenCode was outside this set for as long as the CLI could not select it; ADR 0007 promotes the adapter and adds `OPENCODE_API_KEY` to the fixed set as part of the implementation, and that credential is covered on the same terms as the rest once that lands. Custom Provider's configurable `apiKeyEnv` is still outside the fixed set and still inherited, and is not covered by the isolation guarantee under either Approval Policy, including `"auto-approve"`. Adding CLI support for a Custom Provider requires extending credential-name discovery and passing the resulting names through the composition root before enabling it, because a fixed static set cannot cover arbitrary names. This clarification preserves CDA-68's accepted MVP scope rather than silently extending it to every AI-library adapter.
 
 **Verification parity.** Verification Runner commands follow every rule in this section identically to `bash`.
 
-**Under `"auto-approve"` (isolated execution harness).** The guarantee is that a Tool Call or Verification child running as the same user, without `CAP_SYS_PTRACE`, cannot obtain a provider credential. Items 1 and 2 are necessary but not sufficient, because the process that launched Coding Agent may itself hold the credential. Two further requirements close that gap:
+**Under `"auto-approve"` (isolated execution harness).** The guarantee is that a Tool Call or Verification child running as the same user, without `CAP_SYS_PTRACE` (which Coding Agent removes from itself under this policy, §7), cannot obtain a provider credential. Items 1 and 2 are necessary but not sufficient, because the process that launched Coding Agent may itself hold the credential. Two further requirements close that gap:
 
 - **Launch contract.** No same-uid process reachable by a tool child may hold a provider credential in a readable form. The launcher must replace itself with the Coding Agent process (`exec`) rather than remain as a credential-bearing ancestor, must not leave a credential-bearing sibling such as a pipeline stage, and must not write the credential to a file a same-uid process can read. Coding Agent cannot mark or scrub a process it did not start, so this is an obligation on the launcher. [ADR 0005](./0005-terminalbench-evaluation-protocol.md) is the concrete instance for Harbor: the adapter `exec`s the agent and pipes its output nowhere.
 - **Startup verification.** Before the composition root opens an Agent Session under `"auto-approve"`, it walks its ancestor chain from its own parent (`/proc/self/stat` field 4, then each `/proc/<pid>/environ`, which it can read because the ancestors are the same user and not hardened) and, if any ancestor still holds one of the provider-credential variables Coding Agent uses, opens no Agent Session and returns a configuration error ([ADR 0002](./0002-agent-session-state-machine-and-event-protocol.md) §1; the headless path maps this to exit code 2, [ADR 0005](./0005-terminalbench-evaluation-protocol.md) §3). This makes the launch contract a checked precondition rather than a trusted one, and on Linux it rejects a launcher that failed to `exec`-replace itself. It walks only the ancestor chain, so a credential-bearing unrelated sibling remains the launcher's responsibility under the launch contract.
 
 **Under `"ask"` (interactive TUI and any attended headless).** The cross-process guarantee above is not claimed, and this section does not require it. The process that launched Coding Agent — typically the user's shell, which exported the provider key — remains a live, dumpable, same-uid ancestor holding the credential, and Coding Agent can neither scrub nor re-mark it. This residual is accepted for the MVP and bounded by two controls already in this ADR: read-only tools (`read`) are jailed to `repoRoot` (§2) and cannot open a `/proc` path, so no auto-approved tool can reach an ancestor's environment; and every mutating `bash` is gated by Approval (§4), so the only tool that can read `/proc` runs only after a human allows that specific command. Requiring interactive users to launch from a credential-free shell, or adding an opt-in hardened launch that delivers the credential to Coding Agent without any ancestor holding it, is deferred; this section states the residual rather than closing it.
 
-**Scope of the guarantee.** Even under `"auto-approve"` the guarantee excludes a child granted `CAP_SYS_PTRACE`, and platforms without a non-dumpable equivalent: on macOS a same-user process can read another's startup environment through `KERN_PROCARGS2` and `ps`, and there is no `PR_SET_DUMPABLE` analogue, so item 2 and the startup ancestor read are Linux-only. It also excludes a Coding Agent that runs as root with `CAP_SETUID` and `CAP_SETGID`. Its child can take the uid and gid of an ancestor of another user, such as the shell behind `sudo -E`. The child can then read the environment of that ancestor, which the startup check passed over because Coding Agent itself was denied it. Reproducible evaluation runs under `"auto-approve"` in Linux containers, where the contract and the check are enforceable.
+**Scope of the guarantee.** Even under `"auto-approve"` the guarantee excludes a child that regains `CAP_SYS_PTRACE` after Coding Agent removed it (§7, CDA-121), for example through a setuid-root program, and platforms without a non-dumpable equivalent: on macOS a same-user process can read another's startup environment through `KERN_PROCARGS2` and `ps`, and there is no `PR_SET_DUMPABLE` analogue, so item 2 and the startup ancestor read are Linux-only. It also excludes a Coding Agent that runs as root with `CAP_SETUID` and `CAP_SETGID`. Its child can take the uid and gid of an ancestor of another user, such as the shell behind `sudo -E`. The child can then read the environment of that ancestor, which the startup check passed over because Coding Agent itself was denied it. Reproducible evaluation runs under `"auto-approve"` in Linux containers, where the contract and the check are enforceable.
 
 Enforcement follows the package boundaries in [ADR 0004](./0004-package-apis-and-dependency-direction.md). `@coding-agent/ai` exports the credential variable names as the single source of truth. `@coding-agent/tools`, which implements the `bash` tool and the Verification Runner adapter, builds the scrubbed child environment. `@coding-agent/coding-agent`, the composition root that reads the credentials, applies the non-dumpable hardening, performs the `"auto-approve"` startup ancestor check, and supplies the credential-name set to strip. The Harbor adapter obligations that satisfy the launch contract are fixed by ADR 0005.
 

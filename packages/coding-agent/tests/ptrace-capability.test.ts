@@ -1,7 +1,12 @@
 import { describe, expect, it } from "bun:test";
 import { readFileSync } from "node:fs";
 import { type CapabilityLibc, dropPtraceCapability } from "../src/ptrace-capability.ts";
-import { fakeKernel } from "./support/fake-kernel-capabilities.ts";
+import {
+  bit,
+  CAP_SETPCAP,
+  CAP_SYS_PTRACE,
+  fakeKernel,
+} from "./support/fake-kernel-capabilities.ts";
 import { onLinux } from "./support/platform.ts";
 
 // The capability sets of root in a Modal task sandbox, read from /proc/self/status by the CDA-121
@@ -95,6 +100,18 @@ describe("dropPtraceCapability", () => {
     expect(kernel.closed()).toBe(true);
   });
 
+  it("does not call capset when no set holds the capability", () => {
+    // A sandbox may deny capset by seccomp. An ordinary user with nothing to drop must still run.
+    const kernel = fakeKernel(
+      { effective: 0n, permitted: 0n, inheritable: 0n, bounding: 0n, ambient: 0n },
+      { capsetErrno: 1 },
+    );
+    expect(dropPtraceCapability("linux", kernel.open, { ruid: 1000, euid: 1000 })).toEqual({
+      ok: true,
+    });
+    expect(kernel.calls).not.toContain("capset");
+  });
+
   it("lets an ordinary user run although the bounding set still holds the capability", () => {
     // An ordinary user on a Linux host: no effective or permitted capabilities, and the default
     // bounding set that holds every capability, bit 19 included. It cannot lower the bounding set.
@@ -123,7 +140,7 @@ describe("dropPtraceCapability", () => {
 
   it("refuses root that cannot lower the bounding set", () => {
     // Root without CAP_SETPCAP (bit 8): its child would regain the capability at execve.
-    const withoutSetpcap = modalRoot.effective & ~(1n << 8n);
+    const withoutSetpcap = modalRoot.effective & ~bit(CAP_SETPCAP);
     const kernel = fakeKernel({
       ...modalRoot,
       effective: withoutSetpcap,
@@ -137,10 +154,10 @@ describe("dropPtraceCapability", () => {
   it("names the effective set when a capset that reported success changed nothing", () => {
     const kernel = fakeKernel(
       {
-        effective: 1n << 19n,
-        permitted: 1n << 19n,
+        effective: bit(CAP_SYS_PTRACE),
+        permitted: bit(CAP_SYS_PTRACE),
         inheritable: 0n,
-        bounding: 1n << 19n,
+        bounding: bit(CAP_SYS_PTRACE),
         ambient: 0n,
       },
       { ignoresChanges: true },
@@ -196,7 +213,7 @@ describe.skipIf(!onLinux)("dropPtraceCapability with the real C library", () => 
       if (value === undefined) throw new Error(`${name} is missing from /proc/thread-self/status`);
       return BigInt(`0x${value}`);
     };
-    const bit19 = 1n << 19n;
+    const bit19 = bit(CAP_SYS_PTRACE);
     expect(mask("CapEff") & bit19).toBe(0n);
     expect(mask("CapPrm") & bit19).toBe(0n);
     expect(mask("CapInh") & bit19).toBe(0n);

@@ -214,13 +214,17 @@ export function dropPtraceCapability(
     }
     const sets = libc.capget();
     if (sets === null) return dropFailed(`capget failed: ${describeErrno(libc.errno())}`);
-    const cleared = {
-      effective: sets.effective & ~PTRACE_BIT,
-      permitted: sets.permitted & ~PTRACE_BIT,
-      inheritable: sets.inheritable & ~PTRACE_BIT,
-    };
-    if (libc.capset(cleared) !== 0) {
-      return dropFailed(`capset failed: ${describeErrno(libc.errno())}`);
+    // Skip capset when nothing holds the capability: a sandbox can deny the call by seccomp, and an
+    // ordinary user with nothing to drop must still run.
+    if (((sets.effective | sets.permitted | sets.inheritable) & PTRACE_BIT) !== 0n) {
+      const cleared = {
+        effective: sets.effective & ~PTRACE_BIT,
+        permitted: sets.permitted & ~PTRACE_BIT,
+        inheritable: sets.inheritable & ~PTRACE_BIT,
+      };
+      if (libc.capset(cleared) !== 0) {
+        return dropFailed(`capset failed: ${describeErrno(libc.errno())}`);
+      }
     }
 
     // Read every set back, so a call that reports success but changes nothing still fails closed.

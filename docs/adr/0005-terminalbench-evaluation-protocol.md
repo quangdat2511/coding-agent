@@ -155,7 +155,8 @@ supports that the `ancestors` leak of CDA-94 was the Coding Agent process and no
 not verified for the real artifact. Docker Desktop with `--cap-add=SYS_PTRACE` reproduced the leak
 locally, and there only the bounding-set drop stopped the root child; clearing the other sets was not
 enough. ADR 0001 §7 holds the table and what is not executed. The prototype is commit `c5b47c3` of
-the branch `prototype/cda-121-drop-ptrace`, not part of `main`.
+the branch `prototype/cda-121-drop-ptrace`, pushed to the same remote as this change and not part of
+`main`; its logs are under `prototype/cda-121/` on that branch.
 
 **Assumed, not yet executed.** The smoke job in §7 is the first point at which these are checked:
 
@@ -254,9 +255,11 @@ That Isolation Record covers Docker only and is bound to the executable that thi
 is not the record of the recorded job: a changed artifact needs a new record (§9 criterion 4).
 
 On 2026-11-22, [CDA-121](https://datn-fit-hcmus.atlassian.net/browse/CDA-121) amended this record:
-the Modal failure of CDA-94 is answered in ADR 0001, whose §7 now has a CDA-121 amendment: under
-`"auto-approve"` Coding Agent removes `CAP_SYS_PTRACE` before its first child and refuses to run if
-it remains, so §7 item 2 no longer depends on the launcher. The Isolation Record of an artifact that
+ADR 0001, whose §7 now has a CDA-121 amendment, prescribes the answer to the Modal failure of
+CDA-94: under `"auto-approve"` Coding Agent removes `CAP_SYS_PTRACE` before its first child and
+refuses to run if it remains. That is expected to make §7 item 2 hold on Modal for a root agent, but
+no artifact has run there yet, so the precondition is not shown to hold until the Isolation Record
+says so. The Isolation Record of an artifact that
 has the change names both the CDA-29 and the CDA-121 amendments. A Modal root run of that artifact is
 recorded when it passes. Modal stays uncleared until the Record also holds the non-root run on
 `fp8-rmsnorm-gemm`, which needs a payment method for its H100, so this amendment does not lift the
