@@ -341,8 +341,12 @@ The order of the startup checks comes from two runs of the isolation test's laun
 asks that a launcher that keeps its shell is refused with exit 2. With the ancestor check after the
 drop, the artifact built at commit `4fd7393` on Modal (`music-harmony`, root) did not refuse it: the
 agent opened a session and exited 1 (`LAUNCHER_NOT_REJECTED`), while all four probe paths passed and
-all four controls found the key. The result file is outside the repository, in the author's
-session scratchpad, `isolation-modal-4fd7393-root.json`. Reproduced in Docker with the same code
+all four controls found the key. The result file is outside the repository, on the author's
+machine in `cda121-evidence/isolation-modal-4fd7393-root.json`, and is not yet attached to Jira. The
+commit hashes `4fd7393` and `4298d32` in this amendment are those of this branch before it was
+rebased onto `main` at `d6499b6`. The rebase changed no file but ADR 0005 and the Isolation Record
+of CDA-95, so the sources of the packages that the two artifacts were built from are unchanged.
+Reproduced in Docker with the same code
 (CLI from source, a shell that exported a disposable key and did not `exec`): the launcher was
 refused with exit 2 and the message `ancestor process 1 (sh) holds ANTHROPIC_API_KEY`, both for
 root with `--cap-add=SYS_PTRACE` and for Docker's default root. So Docker and Modal differ, and
@@ -353,8 +357,8 @@ from a clean tree) passed the isolation test on Modal on 2026-11-22: root, `musi
 dataset `terminal-bench/terminal-bench@4.1.0`. No Tool Call found the key. `inherited-environment`
 and `ancestors` found nothing, `proc-environ` and `proc-mem` gave `EACCES`, all four controls found
 the key, and the launcher that keeps its shell was refused with exit 2 and the expected message,
-after no request to the model server. The result file is outside the repository, in the author's
-session scratchpad, `isolation-modal-4298d32-root.json`. This run shows that the change works; it is
+after no request to the model server. The result file is outside the repository, on the author's
+machine in `cda121-evidence/isolation-modal-4298d32-root.json`, and is not yet attached to Jira. This run shows that the change works; it is
 not an Isolation Record, which must come from an artifact built at a commit of `main` (ADR 0005 §7,
 amendment of CDA-94).
 
