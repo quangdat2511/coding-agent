@@ -13,10 +13,15 @@ const usageError = (flag: string | undefined, message: string) => ({
 });
 
 describe("parsing the interactive options", () => {
-  it("returns the provider and model, defaulting the repository root to the working directory", () => {
+  it("returns the session options, including the ask policy and the default repository root", () => {
     expect(parseInteractiveArgs(valid, cwd)).toEqual({
       ok: true,
-      args: { provider: "anthropic", model: "claude-haiku-4-5", repoRoot: cwd },
+      args: {
+        provider: "anthropic",
+        model: "claude-haiku-4-5",
+        repoRoot: cwd,
+        approvalPolicy: "ask",
+      },
     });
   });
 

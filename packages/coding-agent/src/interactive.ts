@@ -160,7 +160,11 @@ export async function runInteractive(options: InteractiveOptions): Promise<ExitC
   async function runTask(objective: string): Promise<void> {
     try {
       const opened = await openSession(
-        { ...settings, approvalPolicy: "ask", limits: SESSION_LIMITS_BY_PROFILE.default },
+        {
+          ...settings,
+          approvalPolicy: options.args.approvalPolicy,
+          limits: SESSION_LIMITS_BY_PROFILE.default,
+        },
         options.launcher,
       );
       if (!opened.ok) {

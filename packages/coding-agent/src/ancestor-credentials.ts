@@ -16,14 +16,16 @@
 // - It sees only the environment that each ancestor received from execve, and its arguments. An
 //   ancestor that set the variable itself after it started, such as a shell that ran `export`,
 //   keeps it only in its memory, which this check cannot read.
-// - It reads each environment as this process can. A Tool Call child runs with the same user and
-//   capabilities, so an ancestor whose environment this process cannot read, such as a root-owned
-//   init or another non-dumpable process, is passed over. The child is denied it too, with one
+// - It reads each environment as this process can. cli.ts runs it before ptrace-capability.ts
+//   drops CAP_SYS_PTRACE, so it can read a root ancestor that holds the capability itself, which a
+//   child cannot (CDA-121, ADR 0001 §7). That is stricter than the child, on purpose. An ancestor
+//   whose environment this process still cannot read, such as a root-owned init or another
+//   non-dumpable process, is passed over: a Tool Call child runs with the same user and no more
+//   capabilities, and is denied it too, with one
 //   exception that ADR 0001 §8 leaves out of scope: when Coding Agent runs as root with CAP_SETUID
 //   and CAP_SETGID, a child can switch to the uid and gid of an ancestor that belongs to another
 //   user, such as the shell behind `sudo -E`, and then read its environment.
 import { readFile } from "node:fs/promises";
-import type { ApprovalPolicy } from "@coding-agent/agent-core";
 import { PROVIDER_CREDENTIAL_ENV_VARS, readEnvCredential } from "@coding-agent/ai";
 import { errnoOf } from "@coding-agent/tools";
 
@@ -170,15 +172,12 @@ async function readOrEmpty(read: () => Promise<string>, path: string): Promise<s
 // Every outcome except "no ancestor holds a credential" refuses the run, so a walk that cannot
 // finish fails closed. The optional platform, files and variables are test seams; callers use the
 // defaults.
-export async function checkAncestorCredentials(
-  approvalPolicy: ApprovalPolicy,
-  {
-    platform = process.platform,
-    proc = procFiles,
-    variables = PROVIDER_CREDENTIAL_ENV_VARS,
-  }: AncestorCheckOptions = {},
-): Promise<AncestorCheckResult> {
-  if (approvalPolicy !== "auto-approve" || platform !== "linux") return { ok: true };
+export async function checkAncestorCredentials({
+  platform = process.platform,
+  proc = procFiles,
+  variables = PROVIDER_CREDENTIAL_ENV_VARS,
+}: AncestorCheckOptions = {}): Promise<AncestorCheckResult> {
+  if (platform !== "linux") return { ok: true };
 
   const self = await readStat(proc, "self", "fail");
   if (isFailure(self)) return self;

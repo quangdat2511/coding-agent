@@ -17,7 +17,7 @@ import {
   type UsageError,
 } from "./flags.ts";
 
-export type InteractiveArgs = SessionFlags;
+export type InteractiveArgs = SessionFlags & { readonly approvalPolicy: "ask" };
 
 export type ParseInteractiveArgsResult =
   | { readonly ok: true; readonly args: InteractiveArgs }
@@ -43,5 +43,8 @@ export function parseInteractiveArgs(
   const model = requireValue(sessionFlagOf.model, raw.model);
   if (typeof model !== "string") return fail(model);
 
-  return { ok: true, args: { provider, model, repoRoot: raw.repoRoot ?? cwd } };
+  return {
+    ok: true,
+    args: { provider, model, repoRoot: raw.repoRoot ?? cwd, approvalPolicy: "ask" },
+  };
 }

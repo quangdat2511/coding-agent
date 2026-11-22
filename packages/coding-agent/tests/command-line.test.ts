@@ -27,7 +27,12 @@ describe("choosing between the two entry points", () => {
     expect(parseCommandLine(["--provider", "google", "--model", "gemini-2.5-flash"], cwd)).toEqual({
       ok: true,
       command: "interactive",
-      args: { provider: "google", model: "gemini-2.5-flash", repoRoot: cwd },
+      args: {
+        provider: "google",
+        model: "gemini-2.5-flash",
+        repoRoot: cwd,
+        approvalPolicy: "ask",
+      },
     });
   });
 

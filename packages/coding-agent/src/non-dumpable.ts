@@ -9,7 +9,8 @@
 //
 // Limits of the guarantee (see also the package README):
 // - A child with CAP_SYS_PTRACE can still read these files, for example root with the full
-//   capability set on a host.
+//   capability set on a host. Under "auto-approve" ptrace-capability.ts removes the capability
+//   from this process first, so a child starts without it; under "ask" the limit stays.
 // - A reader with CAP_SYS_ADMIN or CAP_PERFMON can still open /proc/<pid>/environ, though not
 //   mem or the fd links: mm_access falls back to perfmon_capable() for read access. The file is
 //   root-owned once this process is non-dumpable, so such a reader must also be root or hold
@@ -27,17 +28,13 @@
 //   there and on Windows, and the guarantee is not claimed on those platforms.
 // - A non-dumpable process writes no core dump.
 import { dlopen, read } from "bun:ffi";
-import { constants } from "node:os";
+import { describeErrno, LIBC } from "./libc.ts";
 
 // <linux/prctl.h>
 const PR_GET_DUMPABLE = 3;
 const PR_SET_DUMPABLE = 4;
 // SUID_DUMP_DISABLE in <linux/sched/coredump.h>
 const SUID_DUMP_DISABLE = 0;
-
-// glibc's soname. musl's dynamic loader answers any "libc." name with itself, so the same name also
-// loads the C library on Alpine.
-const LIBC = "libc.so.6";
 
 export type MarkNonDumpableResult =
   | { readonly ok: true }
@@ -77,11 +74,6 @@ export function openLibc(): Libc {
 }
 
 const refuse = (message: string): MarkNonDumpableResult => ({ ok: false, message });
-
-function describeErrno(code: number): string {
-  const name = Object.entries(constants.errno).find(([, value]) => value === code)?.[0];
-  return name === undefined ? `errno ${code}` : `errno ${code} (${name})`;
-}
 
 // Changes nothing on every platform except Linux. On Linux a failure is returned rather than
 // ignored, because the caller must not start a child without the guarantee. The optional platform

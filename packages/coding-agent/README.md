@@ -475,8 +475,9 @@ Checks run in that order and the first problem wins. The output directory is cre
 other check has passed, and whatever it created is removed again if it then proves unusable, so a
 configuration error writes nothing.
 
-The [ancestor check](#ancestor-check) runs before all of these. When it finds a credential in an
-ancestor process, it also exits 2 and writes nothing.
+The [ancestor check](#ancestor-check) and then the
+[CAP_SYS_PTRACE drop](#dropping-cap_sys_ptrace) run before all of these. When the ancestor check finds a credential in an ancestor process, or the drop
+finds the capability still held, the run also exits 2 and writes nothing.
 
 ## Process hardening
 
@@ -502,7 +503,9 @@ nothing and exits 70. The message names the `errno` of a failed `prctl`.
 The guarantee has these limits:
 
 - A child with `CAP_SYS_PTRACE` can still read these files, for example root with the full
-  capability set on a host.
+  capability set on a host. Under `"auto-approve"` the Coding Agent removes the capability from
+  itself first, so a child starts without it (see
+  [Dropping CAP_SYS_PTRACE](#dropping-cap_sys_ptrace)). Under `"ask"` the limit stays.
 - A reader with `CAP_SYS_ADMIN` or `CAP_PERFMON` can still open `/proc/<pid>/environ`, but not the
   memory or the fd links. If the ptrace check fails for read access, the kernel accepts these
   capabilities instead (`perfmon_capable()` in `mm_access`). The file belongs to root once the process is
@@ -537,6 +540,55 @@ On every platform, the same file checks each failure of `markProcessNonDumpable`
 library. It also preloads `tests/support/fail-hardening.ts` into the executable, which makes the
 hardening fail, and checks that the run exits 70 before it resolves the configuration.
 
+## Dropping CAP_SYS_PTRACE
+
+This step applies to `coding-agent run` on Linux, which runs under `"auto-approve"`. The interactive
+path runs under `"ask"` and keeps its capabilities. It follows the non-dumpable mark and the
+[ancestor check](#ancestor-check), and comes before the configuration and the first child. See the CDA-121 amendment of
+[ADR 0001 §7](../../docs/adr/0001-tool-contracts-and-safety-policy.md) for the rule and its evidence.
+
+The non-dumpable mark does not stop a reader that holds `CAP_SYS_PTRACE`, and root in a Modal
+sandbox holds it. `src/ptrace-capability.ts` therefore removes the capability from the thread that
+starts every child:
+
+1. If the bounding set holds it, `PR_CAPBSET_DROP` lowers it. This needs `CAP_SETPCAP`.
+2. `capset` clears it from the effective, permitted and inheritable sets, when one of them holds it.
+   The kernel removes it from the ambient set as well.
+3. `capget`, `PR_CAPBSET_READ` and `PR_CAP_AMBIENT_IS_SET` read every set back.
+
+| Outcome | Exit code | Message |
+| --- | --- | --- |
+| The capability is in no set, or only in the bounding set of a user that is not root | continues | none |
+| It is still in the effective, permitted, inheritable or ambient set, or in the bounding set of root | 2 | `CAP_SYS_PTRACE is still in the <set> set after the drop, ...`, with `docker run --cap-drop SYS_PTRACE` as one fix |
+| The C library cannot load, or a call fails (`EPERM` from `PR_CAPBSET_DROP` and `EINVAL` from the ambient read are tolerated) | 70 | `cannot drop CAP_SYS_PTRACE, so no child can be started safely: <cause with errno>` |
+
+The guarantee has these limits:
+
+- Capabilities belong to a thread. Only the thread that runs the JavaScript changes, and it is the
+  thread where `Bun.spawn` runs `vfork` and `execve`, so every child starts from the dropped set.
+  Bun's helper threads keep the capability. They start no child.
+- A user that is not root cannot lower the bounding set without `CAP_SETPCAP`, and its child gets no
+  capability from that set, so the run goes on. Such a child can still regain the capability by
+  running a setuid-root program or a file with file capabilities. The Coding Agent does not set
+  `PR_SET_NO_NEW_PRIVS`, because that would break `sudo` for every Tool Call.
+- On macOS and Windows the step does nothing.
+
+`tests/ptrace-capability.test.ts` runs the decisions against a fake kernel on every platform, and
+against the real kernel on Linux, where it reads the sets back from `/proc/thread-self/status`.
+`tests/ptrace-capability-cli.test.ts` preloads `tests/support/force-ptrace-drop.ts` into the CLI
+that Bun runs from source, not into the compiled executable, and checks both exit codes, that a refusal creates no output directory, and that the
+interactive path is not refused.
+
+`tests/ptrace-capability-proc.test.ts` shows the effect and needs root with `CAP_SYS_PTRACE`, so CI
+skips it. A control that only marks itself non-dumpable is read by a root child; the Coding Agent
+after the drop is not. To run it on a local machine with Docker:
+
+```sh
+docker run --rm --cap-add=SYS_PTRACE -e HOME=/tmp -v "$PWD:/repo" \
+  -w /repo/packages/coding-agent oven/bun:1.3.14 \
+  bun test tests/ptrace-capability-proc.test.ts
+```
+
 ## Ancestor check
 
 This check applies under `"auto-approve"` on Linux. If a process above the Coding Agent still
@@ -548,7 +600,11 @@ it did not start. The launcher must replace itself with the Coding Agent through
 check makes that rule a checked precondition.
 
 `main` in `src/cli.ts` calls `checkAncestorCredentials` from `src/ancestor-credentials.ts` right
-after the hardening step and before it resolves the configuration. The check reads the parent from
+after the non-dumpable mark, before the [CAP_SYS_PTRACE drop](#dropping-cap_sys_ptrace) and before it
+resolves the configuration. The order is deliberate: with the capability still held, the check can
+read the environment of a root launcher that holds the capability itself, and a child cannot. That
+makes the check stricter than the child. After the drop it would read as the child does, and on Modal
+it did not refuse such a launcher (CDA-121, ADR 0001 §7). The check reads the parent from
 field 4 of `/proc/self/stat`. For each ancestor up to the end of the chain, it reads
 `/proc/<pid>/environ` and `/proc/<pid>/cmdline`. Then it reads the stat again and goes on to that
 ancestor's parent. The credential variables are all the names in `PROVIDER_CREDENTIAL_ENV_VARS`

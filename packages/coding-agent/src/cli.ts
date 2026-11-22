@@ -10,6 +10,7 @@ import { parseCommandLine } from "./command-line.ts";
 import { diagnostic } from "./diagnostics.ts";
 import { runHeadless } from "./headless.ts";
 import { markProcessNonDumpable } from "./non-dumpable.ts";
+import { dropPtraceCapability } from "./ptrace-capability.ts";
 
 // A stream calls back in order, so once its last write has called back, everything was written.
 function trackedWriter(stream: NodeJS.WriteStream) {
@@ -81,7 +82,8 @@ async function main(
   // ADR 0001 §8 rule 2. Keep this right after argument parsing, so a usage error still exits 2
   // before any I/O, and ahead of configuration and command dispatch, so that it precedes every
   // Tool Call and Verification child on both entry points and under both Approval Policies. The
-  // modules imported above run before main, so they must not start a child when they load.
+  // modules imported above run before main, so they must not start a child when they load. The
+  // CAP_SYS_PTRACE drop below applies to "auto-approve" only.
   const hardened = markProcessNonDumpable();
   if (!hardened.ok) {
     stderr.write(
@@ -90,6 +92,29 @@ async function main(
       ),
     );
     return 70;
+  }
+  // The "auto-approve" steps, in this order. The interactive path runs under "ask", which ADR 0001
+  // §8 exempts from both, so it keeps its capabilities and skips the ancestor check
+  // (ADR 0006, Join 3).
+  if (parsed.args.approvalPolicy === "auto-approve") {
+    // ADR 0001 §8, startup verification. Before the capability drop, on purpose: it reads each
+    // ancestor's environment as this process can, and with CAP_SYS_PTRACE still held that includes a
+    // root launcher that holds the capability itself. After the drop it would read as a child can,
+    // and on Modal it would pass such a launcher over, so the launch contract would go unchecked.
+    // Before configuration, so that a refused launch writes nothing, and before any Agent Session
+    // opens. It does nothing unless the platform is Linux.
+    const ancestors = await checkAncestorCredentials();
+    if (!ancestors.ok) {
+      stderr.write(diagnostic(ancestors.message));
+      return ancestors.code === "CREDENTIAL_IN_ANCESTOR" ? 2 : 70;
+    }
+    // ADR 0001 §8, CDA-121 amendment. A child that holds CAP_SYS_PTRACE can read a Coding Agent
+    // process that is non-dumpable, so the capability goes before the first child.
+    const dropped = dropPtraceCapability();
+    if (!dropped.ok) {
+      stderr.write(diagnostic(dropped.message));
+      return dropped.code === "CAPABILITY_REMAINS" ? 2 : 70;
+    }
   }
   const children = createConfiguredChildLauncher();
   if (!children.ok) {
@@ -101,8 +126,7 @@ async function main(
   process.stderr.on("error", () => undefined);
   const cancellation = listenForCancellation();
   try {
-    // The interactive path runs under `ask`, which ADR 0001 §8 exempts from the ancestor check
-    // (ADR 0006, Join 3), so it goes straight on. The hardening above still applies to it.
+    // The interactive path goes straight on. The hardening above still applies to it.
     if (parsed.command === "interactive") {
       // Loaded here, not at the top, so a headless run never loads the TUI and its Yoga layout
       // engine: they are startup cost and a failure surface that `coding-agent run` does not need.
@@ -117,14 +141,6 @@ async function main(
         isTerminal: Boolean(process.stdin.isTTY && process.stdout.isTTY),
         onReady: cancellation.onSessionOpened,
       });
-    }
-    // ADR 0001 §8, startup verification. Before configuration, so that a refused launch writes
-    // nothing, and before any Agent Session opens. It does nothing unless the policy is
-    // "auto-approve" and the platform is Linux.
-    const ancestors = await checkAncestorCredentials(parsed.args.approvalPolicy);
-    if (!ancestors.ok) {
-      stderr.write(diagnostic(ancestors.message));
-      return ancestors.code === "CREDENTIAL_IN_ANCESTOR" ? 2 : 70;
     }
     const { exitCode } = await runHeadless({
       args: parsed.args,
