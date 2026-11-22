@@ -109,12 +109,42 @@ denies it ([L346](https://github.com/torvalds/linux/blob/v6.16/kernel/ptrace.c#L
 which `/proc/<pid>/mem` uses
 ([`fs/proc/base.c` L874](https://github.com/torvalds/linux/blob/v6.16/fs/proc/base.c#L874)) but
 `environ` does not. Whether a backend's container runtime serves `/proc` the same way was not
-checked, which is why §7's isolation test runs on each backend.
+checked when this record was written, which is why §7's isolation test runs on each backend. The
+runs of 2026-11-21, described below, checked two backends.
 
 **Tried locally.** Bun 1.3.14 on macOS arm64 compiled a one-line script for both §2 targets with
 both autoload flags. `file` reported glibc-linked x86-64 and aarch64 ELF executables of about
 94 MB, and the highest `GLIBC_` symbol version found by `strings` was 2.17, a heuristic rather than
 a loader test. The Coding Agent CLI does not exist yet, so its size and behavior are untested.
+
+**Tried on 2026-11-21 (CDA-94).** The isolation test ran from an artifact built at commit
+`ff26365`, which is not the evaluated commit, so these runs are evidence about the backends and not
+a record of any artifact. The dataset was `terminal-bench/terminal-bench@4.1.0`.
+
+| Backend and kernel | Agent user | Task | Result |
+| --- | --- | --- | --- |
+| Docker Desktop, `6.12.76-linuxkit` | root | `music-harmony` | passed: `proc-environ` and `proc-mem` denied |
+| Docker Desktop, `6.12.76-linuxkit` | uid 10001 | `rs-archive-clone` | passed |
+| Modal, `4.19.0-gvisor` | root | `music-harmony` | **failed**: `KEY_FOUND` on `proc-environ`, `proc-mem` and `ancestors`; all four controls found the key and the launcher that keeps its shell was refused |
+| Modal | non-root | `fp8-rmsnorm-gemm` | did not run: Modal asks for a payment method before it starts an H100 sandbox |
+
+A diagnostic in the same containers measured the capabilities and the dumpable rule. On Modal the
+root user holds `CAP_SYS_PTRACE` (`CapEff` `a80c05fb`, bit 19), and on Docker Desktop it does not
+(`a80425fb`). On Modal a child that had set `PR_SET_DUMPABLE` to 0 could be read through
+`/proc/<pid>/environ` by root, and was denied to the user `nobody` for `environ` and for `mem`. So
+gVisor honours the dumpable rule, and root's `CAP_SYS_PTRACE` is the likely reason that the test
+failed, which is the exception that the Linux paragraph above names. Not verified: that this is the
+only cause of all three paths, and in particular of `ancestors`.
+
+Modal also ignored the `USER` of two Dockerfiles (`rs-archive-clone` and `risk-scorer-replay`): the
+agent ran as root. Harbor's Modal environment switches user only for a task that sets `[agent] user`
+in `task.toml`, by wrapping the command in `su <user> -s /bin/bash -c`. At the default pin, only
+`fp8-rmsnorm-gemm` sets it, so every other task runs a root agent on Modal. That `su` process is a
+root-owned ancestor that holds the key, and a non-root agent is denied its environment.
+
+The precondition of §7 therefore does not hold on Modal for a root agent, and the recorded job stays
+blocked there until a later decision amends this record, for example by keeping the credential out of
+the task container, as §7 already says.
 
 **Assumed, not yet executed.** The smoke job in §7 is the first point at which these are checked:
 
@@ -176,6 +206,18 @@ dataset; §7's two commands take `<dataset>`, its isolation precondition names t
 images, and its validity rule includes ADR 0008 §3's properties; §8 derives `N` from the job's task
 list; and the Consequences follow the job's task list. The task count and smoke task names left this
 record for ADR 0008's dataset data.
+
+On 2026-11-21, [CDA-94](https://datn-fit-hcmus.atlassian.net/browse/CDA-94) amended this record:
+§7 item 3 asks the artifact manifest to record the passing test run, but the build writes
+`artifact-manifest.json` before any test runs and `dist/` is not committed, so the run cannot live
+there. The passing runs are recorded in the Isolation Record, a file committed at
+`evaluation/terminalbench/isolation/<artifact commit>.json`. It holds each passing run with the day
+it was added, and it names the [CDA-29](https://datn-fit-hcmus.atlassian.net/browse/CDA-29)
+amendment of ADR 0001 that item 1 requires. The record command takes it with `--isolation-record`,
+refuses a job whose backends it does not clear, and copies it into `manifest.json` as
+`credentialIsolation`. A backend is cleared when the record holds a passing run as root and one as a
+non-root agent user, of an executable that the artifact holds, on the job's dataset. The Evidence
+section below holds what the first runs showed.
 
 ### 2. Coding Agent artifact
 

@@ -13,6 +13,7 @@ The container is anything with `exec` and `upload_file`, which is Harbor's `Base
 module imports nothing from Harbor, so its tests need no Docker.
 """
 
+import asyncio
 import re
 import shlex
 import tempfile
@@ -32,7 +33,12 @@ from coding_agent_terminalbench.isolation_report import (
     ServerObservations,
     result_document,
 )
-from coding_agent_terminalbench.isolation_server import FakeModelServer, TextTurn, ToolCallTurn
+from coding_agent_terminalbench.isolation_server import (
+    FakeModelServer,
+    TextTurn,
+    ToolCallTurn,
+    Turn,
+)
 from coding_agent_terminalbench.launch import (
     INSTRUCTION_PATH,
     PROVIDER_KEY_VARIABLES,
@@ -71,6 +77,32 @@ class Container(Protocol):
     async def upload_file(self, source_path: Path | str, target_path: str) -> None: ...
 
 
+class ModelServer(Protocol):
+    """What the run needs of a model server, wherever it runs: on this host, or in another
+    sandbox that the container reaches over the internet (CDA-94)."""
+
+    @property
+    def base_url(self) -> str: ...
+
+    @property
+    def reach_target(self) -> tuple[str, int]: ...
+
+    @property
+    def request_count(self) -> int: ...
+
+    def start(self) -> None: ...
+
+    def stop(self) -> None: ...
+
+    def tool_result_texts(self) -> list[str]: ...
+
+    def observations(self, expected_tool_results: int) -> ServerObservations: ...
+
+
+# Starts nothing: it makes a server that plays `turns`, and the run starts and stops it.
+ServerFactory = Callable[[list[Turn]], ModelServer]
+
+
 @dataclass(frozen=True)
 class IsolationSetup:
     """What the run needs besides the container."""
@@ -88,16 +120,31 @@ class IsolationSetup:
     server_host: str = "127.0.0.1"
 
 
+def local_servers(setup: IsolationSetup) -> ServerFactory:
+    """Servers on this host, which the container reaches as `setup.container_host`."""
+    return lambda turns: FakeModelServer(
+        turns=turns,
+        expected_key=setup.key,
+        host=setup.server_host,
+        container_host=setup.container_host,
+    )
+
+
 async def run_isolation_test(
     container: Container,
     setup: IsolationSetup,
     log: Callable[[str], None] = lambda _: None,
+    serve: ServerFactory | None = None,
 ) -> dict[str, Any]:
-    """The result document of the test. It raises IsolationRunError when it cannot run."""
+    """The result document of the test. It raises IsolationRunError when it cannot run.
+
+    `serve` makes the model server. The default runs it on this host (Docker); Modal cannot reach
+    the host, so its runner passes a server that runs in another sandbox."""
+    serve = serve or local_servers(setup)
     context, yama_ptrace_scope = await _read_identity(container, setup)
     await _prepare(container, setup)
-    launcher = await _run_launcher_that_keeps_its_shell(container, setup, log)
-    probes, server = await _run_agent(container, setup, log)
+    launcher = await _run_launcher_that_keeps_its_shell(container, setup, log, serve)
+    probes, server = await _run_agent(container, setup, log, serve)
     controls = await _run_control(container, setup)
     observed = Observations(probes, controls, yama_ptrace_scope, launcher, server)
     return result_document(context, observed)
@@ -149,12 +196,12 @@ async def _prepare(container: Container, setup: IsolationSetup) -> None:
     )
 
 
-def _agent_environment(setup: IsolationSetup, server: FakeModelServer) -> dict[str, str]:
+def _agent_environment(setup: IsolationSetup, server: ModelServer) -> dict[str, str]:
     """The environment of the launcher: the disposable key, and the server as the base URL. The key
     is the only credential, as in a job (ADR 0005 §6)."""
     return {
         KEY_VARIABLE: setup.key,
-        BASE_URL_VARIABLE: f"http://{setup.container_host}:{server.port}",
+        BASE_URL_VARIABLE: server.base_url,
     }
 
 
@@ -163,20 +210,25 @@ def _agent_command(setup: IsolationSetup) -> str:
 
 
 async def _run_launcher_that_keeps_its_shell(
-    container: Container, setup: IsolationSetup, log: Callable[[str], None]
+    container: Container,
+    setup: IsolationSetup,
+    log: Callable[[str], None],
+    serve: ServerFactory,
 ) -> LauncherResult:
     # The same command as the job's, without its `exec`: the shell stays alive and holds the key.
     command = "sh -c '\"$@\"; exit $?' sh " + _agent_command(setup).removeprefix("exec ")
-    server = FakeModelServer(turns=[], expected_key=setup.key, host=setup.server_host)
-    server.start()
+    server = serve([])
     try:
+        await asyncio.to_thread(server.start)
         result = await container.exec(
             command,
             env=_agent_environment(setup, server),
             timeout_sec=AGENT_TIMEOUT_SECONDS,
         )
+        # Read before `stop`: a server in another sandbox is gone once it is stopped.
+        server_requests = await asyncio.to_thread(lambda: server.request_count)
     finally:
-        server.stop()
+        await _stop(server, log)
     # Harbor's Docker environment sends standard error into standard output, so the refusal can
     # arrive in either stream. The agent prints nothing before it refuses.
     output = f"{result.stderr or ''}\n{result.stdout or ''}"
@@ -190,20 +242,28 @@ async def _run_launcher_that_keeps_its_shell(
     return LauncherResult(
         exit_code=result.return_code,
         message_matched=matched,
-        server_requests=server.request_count,
+        server_requests=server_requests,
     )
 
 
-async def _check_server_reachable(
-    container: Container, setup: IsolationSetup, server: FakeModelServer
-) -> None:
+async def _stop(server: ModelServer, log: Callable[[str], None]) -> None:
+    """Stops the server. A stop that fails is logged and does not hide why the run ended, as in
+    `started()` of isolation_test: a sandbox that never came up can also fail to terminate."""
+    try:
+        await asyncio.to_thread(server.stop)
+    except Exception as error:
+        log(f"cannot stop the fake model server: {error}")
+
+
+async def _check_server_reachable(container: Container, server: ModelServer) -> None:
     """Fails with IsolationRunError unless the container can open a connection to the server.
 
     Without this, a container that cannot reach the host would look like an artifact that ignores
     ANTHROPIC_BASE_URL: the server gets no Tool Result either way. The connection sends no request,
     so the server does not count it. It uses bash, which install_artifact already requires.
     """
-    target = f"/dev/tcp/{setup.container_host}/{server.port}"
+    host, port = server.reach_target
+    target = f"/dev/tcp/{host}/{port}"
     try:
         reach = await container.exec(
             "bash -c " + shlex.quote(f"exec 3<>{target}"), timeout_sec=REACH_TIMEOUT_SECONDS
@@ -213,33 +273,37 @@ async def _check_server_reachable(
         reached = False
     if not reached:
         raise IsolationRunError(
-            f"the task container cannot reach the fake model server at "
-            f"{setup.container_host}:{server.port}; on a Linux host, set --container-host and "
-            "--server-host"
+            f"the task container cannot reach the fake model server at {host}:{port}; "
+            "on a Linux host with Docker, set --container-host and --server-host"
         )
 
 
 async def _run_agent(
-    container: Container, setup: IsolationSetup, log: Callable[[str], None]
+    container: Container,
+    setup: IsolationSetup,
+    log: Callable[[str], None],
+    serve: ServerFactory,
 ) -> tuple[list[Probe], ServerObservations]:
-    turns = [ToolCallTurn(command=f"sh {PROBE_PATH}"), TextTurn(text="Done.")]
-    server = FakeModelServer(turns=turns, expected_key=setup.key, host=setup.server_host)
-    server.start()
+    turns: list[Turn] = [ToolCallTurn(command=f"sh {PROBE_PATH}"), TextTurn(text="Done.")]
+    server = serve(turns)
     try:
-        await _check_server_reachable(container, setup, server)
+        await asyncio.to_thread(server.start)
+        await _check_server_reachable(container, server)
         result = await container.exec(
             _agent_command(setup),
             env=_agent_environment(setup, server),
             timeout_sec=AGENT_TIMEOUT_SECONDS,
         )
+        # Read before `stop`: a server in another sandbox is gone once it is stopped.
+        texts = await asyncio.to_thread(server.tool_result_texts)
+        observed = await asyncio.to_thread(server.observations, expected_tool_results=1)
     finally:
-        server.stop()
+        await _stop(server, log)
     if result.return_code != 0:
         output = f"{result.stderr or ''}{result.stdout or ''}"
         tail = output.replace(setup.key, "[redacted]").strip()[-400:]
         log(f"the agent exited {result.return_code}: {tail}")
-    probes = parse_probe_output("\n".join(server.tool_result_texts()))
-    return probes, server.observations(expected_tool_results=1)
+    return parse_probe_output("\n".join(texts)), observed
 
 
 async def _run_control(container: Container, setup: IsolationSetup) -> list[Control]:

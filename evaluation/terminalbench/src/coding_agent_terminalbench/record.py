@@ -61,6 +61,7 @@ from coding_agent_terminalbench.harbor_job import (
     read_oracle_record,
     trial_completed,
 )
+from coding_agent_terminalbench.isolation_record import record_problems as isolation_problems
 from coding_agent_terminalbench.launch import KEY_VARIABLES, PROVIDER_KEY_VARIABLES, split_model
 from coding_agent_terminalbench.manifest import (
     SHA256_PATTERN,
@@ -665,6 +666,17 @@ class RecordInputs:
     pins: LockedPins
     release_commit: str
     archive_parts: tuple[ArchivePart, ...]
+    # The committed Isolation Record of the artifact (ADR 0005 §7 item 3).
+    isolation_record: Mapping[str, Any]
+
+
+def isolation_record_problems(inputs: RecordInputs) -> list[str]:
+    """Why the isolation test does not clear the backends that these jobs ran on."""
+    jobs = [inputs.recorded, inputs.smoke, *([inputs.rerun] if inputs.rerun is not None else [])]
+    backends = sorted({str(job.environment_type) for job in jobs})
+    return isolation_problems(
+        dict(inputs.isolation_record), inputs.artifact, inputs.dataset.identifier, backends
+    )
 
 
 def protocol_problems(inputs: RecordInputs) -> list[str]:
@@ -697,6 +709,7 @@ def protocol_problems(inputs: RecordInputs) -> list[str]:
             ]
         ),
         *archive_problems(inputs.archive_parts),
+        *isolation_record_problems(inputs),
     ]
     if rerun is not None:
         problems.extend(
@@ -825,6 +838,7 @@ class RecordData:
     pins: LockedPins
     release_commit: str
     archive_parts: tuple[ArchivePart, ...]
+    isolation_record: Mapping[str, Any]
     scan: ScanReport
     outcomes: tuple[TaskOutcome, ...]
     properties: tuple[Mapping[str, Any], ...]
@@ -932,6 +946,7 @@ def build_record_data(inputs: RecordInputs, scan: ScanReport) -> RecordData:
         pins=inputs.pins,
         release_commit=inputs.release_commit,
         archive_parts=inputs.archive_parts,
+        isolation_record=inputs.isolation_record,
         scan=scan,
         outcomes=outcomes,
         properties=properties,
@@ -1077,6 +1092,7 @@ def manifest_data(data: RecordData) -> Mapping[str, Any]:
             "smoke": data.smoke.name,
             "rerun": data.rerun.name if data.rerun is not None else None,
         },
+        "credentialIsolation": dict(data.isolation_record),
         "secretScan": scan_record(data.scan),
         "archive": {
             "parts": [
@@ -1217,6 +1233,12 @@ def main(
         "--artifact-dir", type=Path, required=True, help="the directory build:artifact wrote"
     )
     parser.add_argument(
+        "--isolation-record",
+        type=Path,
+        required=True,
+        help="the artifact's committed Isolation Record: the passing isolation test runs",
+    )
+    parser.add_argument(
         "--archive-part",
         type=Path,
         action="append",
@@ -1245,8 +1267,18 @@ def main(
         artifact = load_manifest(args.artifact_dir)
         pins = read_locked_pins(args.uv_lock)
         oracle = read_oracle_record(args.oracle_record)
+        isolation_record = json.loads(args.isolation_record.read_text(encoding="utf-8"))
     except (DatasetRecordError, ArtifactManifestError, OracleJobError) as exc:
         print(f"error: {exc}", file=sys.stderr)
+        return 2
+    except (OSError, json.JSONDecodeError) as exc:
+        print(f"error: cannot read the Isolation Record {args.isolation_record}: {exc}", file=sys.stderr)
+        return 2
+    if not isinstance(isolation_record, dict):
+        print(
+            f"error: the Isolation Record {args.isolation_record} is not a JSON object",
+            file=sys.stderr,
+        )
         return 2
     try:
         recorded = read_job(args.job_dir)
@@ -1277,6 +1309,7 @@ def main(
         pins=pins,
         release_commit=release_commit,
         archive_parts=archive_parts,
+        isolation_record=isolation_record,
     )
     try:
         problems = protocol_problems(inputs)

@@ -15,11 +15,13 @@ from pathlib import Path
 from typing import Any
 
 from coding_agent_terminalbench.install import INSTALLED_EXECUTABLE
+from coding_agent_terminalbench.isolation_report import ServerObservations
 from coding_agent_terminalbench.isolation_run import (
     IsolationRunError,
     IsolationSetup,
     run_isolation_test,
 )
+from coding_agent_terminalbench.isolation_server import Turn
 
 from tests.support import ExecOutcome
 
@@ -158,6 +160,117 @@ def run(
     container: ScriptedContainer, log: Callable[[str], None] = lambda _: None
 ) -> dict[str, Any]:
     return asyncio.run(run_isolation_test(container, SETUP, log))
+
+
+class ServerInAnotherSandbox:
+    """A model server that the container reaches over the internet, as on Modal. It answers from
+    what the test scripts, because nothing in the container talks to it here."""
+
+    base_url = "https://abc123.w.modal.host"
+    reach_target = ("abc123.w.modal.host", 443)
+
+    def __init__(self, turns: list[Turn]) -> None:
+        self._turns = turns
+        self._stopped = False
+
+    def start(self) -> None: ...
+
+    def stop(self) -> None:
+        self._stopped = True
+
+    def _read(self) -> None:
+        # The sandbox that held the server is deleted by `stop`, so nothing can be read after it.
+        if self._stopped:
+            raise RuntimeError("the sandbox of the model server is gone")
+
+    @property
+    def request_count(self) -> int:
+        self._read()
+        return len(self._turns)
+
+    def tool_result_texts(self) -> list[str]:
+        self._read()
+        return [HARDENED_OUTPUT] if self._turns else []
+
+    def observations(self, expected_tool_results: int) -> ServerObservations:
+        self._read()
+        return ServerObservations(
+            tool_results_received=len(self.tool_result_texts()),
+            expected_tool_results=expected_tool_results,
+            key_matched=True,
+        )
+
+
+class RunWithAServerInAnotherSandboxTest(unittest.TestCase):
+    def test_the_agent_is_pointed_at_the_servers_url_and_the_connection_is_checked_there(
+        self,
+    ) -> None:
+        container = ScriptedContainer(plays_agent=False)
+
+        result = asyncio.run(
+            run_isolation_test(container, SETUP, serve=lambda turns: ServerInAnotherSandbox(turns))
+        )
+
+        agent_runs = [
+            c for c in container.calls if c.command.startswith(f"exec {INSTALLED_EXECUTABLE}")
+        ]
+        reach_checks = [c.command for c in container.calls if "/dev/tcp/" in c.command]
+        self.assertEqual(
+            [c.env["ANTHROPIC_BASE_URL"] for c in agent_runs], ["https://abc123.w.modal.host"]
+        )
+        self.assertEqual(len(reach_checks), 1)
+        self.assertIn("/dev/tcp/abc123.w.modal.host/443", reach_checks[0])
+        self.assertTrue(result["passed"], result["failures"])
+
+
+class RunWithAServerThatFailsToStartTest(unittest.TestCase):
+    def test_a_server_that_fails_to_start_is_still_stopped(self) -> None:
+        # A server in another sandbox can be created and then fail to come up. Its sandbox holds the
+        # disposable key and lives for 30 minutes unless the run stops it.
+        stopped: list[bool] = []
+
+        class FailsToStart(ServerInAnotherSandbox):
+            def start(self) -> None:
+                raise RuntimeError("the second sandbox did not come up")
+
+            def stop(self) -> None:
+                stopped.append(True)
+
+        with self.assertRaisesRegex(RuntimeError, "did not come up"):
+            asyncio.run(
+                run_isolation_test(
+                    ScriptedContainer(), SETUP, serve=lambda turns: FailsToStart(turns)
+                )
+            )
+
+        self.assertEqual(stopped, [True])
+
+
+class RunWithAServerThatFailsToStopTest(unittest.TestCase):
+    def test_a_failed_stop_is_logged_and_does_not_hide_why_the_start_failed(self) -> None:
+        # PR #114 review: the network can break both the start and the stop of the second sandbox.
+        class FailsToStartAndToStop(ServerInAnotherSandbox):
+            def start(self) -> None:
+                raise RuntimeError("the second sandbox did not come up")
+
+            def stop(self) -> None:
+                raise RuntimeError("cannot terminate the sandbox")
+
+        lines: list[str] = []
+
+        with self.assertRaisesRegex(RuntimeError, "did not come up"):
+            asyncio.run(
+                run_isolation_test(
+                    ScriptedContainer(),
+                    SETUP,
+                    log=lines.append,
+                    serve=lambda turns: FailsToStartAndToStop(turns),
+                )
+            )
+
+        self.assertEqual(len(lines), 1)
+        self.assertIn("cannot stop the fake model server", lines[0])
+        self.assertIn("cannot terminate the sandbox", lines[0])
 
 
 class RunTest(unittest.TestCase):

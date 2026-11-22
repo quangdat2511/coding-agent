@@ -208,6 +208,39 @@ class RecordTestCase(unittest.TestCase):
         self.archive.parent.mkdir(parents=True, exist_ok=True)
         self.archive.write_bytes(b"synthetic archive part")
         self.output = self.root / "runs" / "recorded-job"
+        self.isolation_path = self.root / "isolation" / f"{ARTIFACT_COMMIT}.json"
+        self.write_isolation_record()
+
+    def write_isolation_record(self, backends: tuple[str, ...] = ("modal",)) -> None:
+        """The Isolation Record of ADR 0005 §7 item 3: a root and a non-root run per backend.
+
+        Written by hand, not by `isolation_record`, so that the record tooling is checked against
+        the file's shape and not against its own writer."""
+        runs = [
+            {
+                "date": "2026-11-22",
+                "result": {
+                    "passed": True,
+                    "failures": [],
+                    "codingAgent": {"version": ARTIFACT_VERSION, "commit": ARTIFACT_COMMIT},
+                    "executableSha256": self.artifact_hashes[INSTALLED_EXECUTABLE],
+                    "dataset": DATASET_IDENTIFIER,
+                    "task": "example-org/alpha",
+                    "backend": backend,
+                    "user": {"uid": uid, "name": "root" if uid == 0 else "agent"},
+                },
+            }
+            for backend in backends
+            for uid in (0, 1000)
+        ]
+        document = {
+            "schemaVersion": 1,
+            "codingAgent": {"version": ARTIFACT_VERSION, "commit": ARTIFACT_COMMIT},
+            "adrAmendment": "ADR 0001 §7, the CDA-29 amendment of 2026-09-13",
+            "runs": runs,
+        }
+        self.isolation_path.parent.mkdir(parents=True, exist_ok=True)
+        self.isolation_path.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
 
     def write_oracle(self, **overrides: Any) -> None:
         data: dict[str, Any] = {
@@ -490,9 +523,12 @@ class RecordTestCase(unittest.TestCase):
         uv_lock: Path | None = None,
         output_dir: Path | None = None,
         artifact_dir: Path | None = None,
+        isolation_record: Path | None = None,
     ) -> tuple[int, str, str]:
         argv = [
             str(self.recorded),
+            "--isolation-record",
+            str(isolation_record or self.isolation_path),
             "--smoke-job",
             str(self.smoke),
             "--oracle-record",
@@ -771,6 +807,8 @@ class DefaultRecordTest(RecordTestCase):
         self.assertNotIn("environment", smoke_config)
         recorded_config = json.loads((self.recorded / "config.json").read_text())
         self.assertEqual(recorded_config["environment"], {"type": "modal"})
+        # The smoke job ran on Docker, so the isolation test must have passed there too.
+        self.write_isolation_record(backends=("modal", "docker"))
         code, _, stderr = self.run_main()
         self.assertEqual(code, 0, stderr)
         self.assertEqual(self.manifest()["flags"]["environment"], "modal")
@@ -791,6 +829,62 @@ class DefaultRecordTest(RecordTestCase):
         # The record's Task count row is prose and must not become N.
         self.assertEqual(len(manifest["dataset"]["taskList"]), len(TASKS))
         self.assertIn("N is " + str(len(TASKS)), report)
+
+
+class IsolationRecordTest(RecordTestCase):
+    """ADR 0005 §7 item 3: no job record without a passing isolation test for the artifact."""
+
+    def test_the_manifest_holds_the_isolation_record(self) -> None:
+        manifest, _, _ = self.record_ok()
+
+        self.assertEqual(
+            manifest["credentialIsolation"], json.loads(self.isolation_path.read_text("utf-8"))
+        )
+
+    def test_a_record_without_a_run_on_the_jobs_backend_writes_nothing(self) -> None:
+        self.write_isolation_record(backends=("docker",))
+        self.write_standard_jobs()
+
+        code, _, stderr = self.run_main()
+
+        self.assertEqual(code, 1)
+        self.assertIn("no passing run on modal", stderr)
+        self.assertFalse((self.output / "manifest.json").exists())
+
+    def test_a_smoke_job_on_docker_needs_a_passing_docker_run_too(self) -> None:
+        # Written after the behavior existed, so it passed at once: a guard, not a red step.
+        self.write_recorded()
+        self.write_smoke(environment="docker")
+        self.write_rerun()
+
+        code, _, stderr = self.run_main()
+
+        self.assertEqual(code, 1)
+        self.assertIn("no passing run on docker", stderr)
+        self.assertNotIn("no passing run on modal", stderr)
+        self.assertFalse((self.output / "manifest.json").exists())
+
+    def test_an_isolation_record_that_is_not_a_json_object_writes_nothing(self) -> None:
+        # A record can be edited by hand (PR #114 review).
+        self.write_standard_jobs()
+        for text in ('"x"', "[]", "[1, 2]"):
+            with self.subTest(record=text):
+                self.isolation_path.write_text(text, encoding="utf-8")
+
+                code, _, stderr = self.run_main()
+
+                self.assertEqual(code, 2)
+                self.assertIn("not a JSON object", stderr)
+                self.assertFalse((self.output / "manifest.json").exists())
+
+    def test_a_missing_isolation_record_file_writes_nothing(self) -> None:
+        self.write_standard_jobs()
+
+        code, _, stderr = self.run_main(isolation_record=self.root / "isolation" / "absent.json")
+
+        self.assertEqual(code, 2)
+        self.assertIn("absent.json", stderr)
+        self.assertFalse((self.output / "manifest.json").exists())
 
 
 class MeanTest(unittest.TestCase):
