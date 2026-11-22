@@ -96,14 +96,14 @@ async function main(
   // The "auto-approve" steps, in this order. The interactive path runs under "ask", which ADR 0001
   // §8 exempts from both, so it keeps its capabilities and skips the ancestor check
   // (ADR 0006, Join 3).
-  if (parsed.command === "run") {
+  if (parsed.args.approvalPolicy === "auto-approve") {
     // ADR 0001 §8, startup verification. Before the capability drop, on purpose: it reads each
     // ancestor's environment as this process can, and with CAP_SYS_PTRACE still held that includes a
     // root launcher that holds the capability itself. After the drop it would read as a child can,
     // and on Modal it would pass such a launcher over, so the launch contract would go unchecked.
     // Before configuration, so that a refused launch writes nothing, and before any Agent Session
     // opens. It does nothing unless the platform is Linux.
-    const ancestors = await checkAncestorCredentials(parsed.args.approvalPolicy);
+    const ancestors = await checkAncestorCredentials();
     if (!ancestors.ok) {
       stderr.write(diagnostic(ancestors.message));
       return ancestors.code === "CREDENTIAL_IN_ANCESTOR" ? 2 : 70;

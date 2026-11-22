@@ -28,17 +28,13 @@
 //   there and on Windows, and the guarantee is not claimed on those platforms.
 // - A non-dumpable process writes no core dump.
 import { dlopen, read } from "bun:ffi";
-import { constants } from "node:os";
+import { describeErrno, LIBC } from "./libc.ts";
 
 // <linux/prctl.h>
 const PR_GET_DUMPABLE = 3;
 const PR_SET_DUMPABLE = 4;
 // SUID_DUMP_DISABLE in <linux/sched/coredump.h>
 const SUID_DUMP_DISABLE = 0;
-
-// glibc's soname. musl's dynamic loader answers any "libc." name with itself, so the same name also
-// loads the C library on Alpine.
-const LIBC = "libc.so.6";
 
 export type MarkNonDumpableResult =
   | { readonly ok: true }
@@ -78,11 +74,6 @@ export function openLibc(): Libc {
 }
 
 const refuse = (message: string): MarkNonDumpableResult => ({ ok: false, message });
-
-function describeErrno(code: number): string {
-  const name = Object.entries(constants.errno).find(([, value]) => value === code)?.[0];
-  return name === undefined ? `errno ${code}` : `errno ${code} (${name})`;
-}
 
 // Changes nothing on every platform except Linux. On Linux a failure is returned rather than
 // ignored, because the caller must not start a child without the guarantee. The optional platform

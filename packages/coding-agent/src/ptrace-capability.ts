@@ -19,10 +19,7 @@
 //   for every Tool Call.
 // - It does nothing on macOS and Windows, which have no capability sets.
 import { dlopen, ptr, read } from "bun:ffi";
-import { constants } from "node:os";
-
-// glibc's soname; musl's loader answers any "libc." name with itself, as in non-dumpable.ts.
-const LIBC = "libc.so.6";
+import { describeErrno, LIBC } from "./libc.ts";
 
 // <linux/capability.h>
 const CAP_SYS_PTRACE = 19;
@@ -89,13 +86,6 @@ const dropFailed = (cause: string): DropFailure => ({
   code: "DROP_FAILED",
   message: `cannot drop CAP_SYS_PTRACE, so no child can be started safely: ${cause}`,
 });
-
-// Same wording as non-dumpable.ts, kept here so that this module does not import it: a test
-// preload replaces that file.
-function describeErrno(code: number): string {
-  const name = Object.entries(constants.errno).find(([, value]) => value === code)?.[0];
-  return name === undefined ? `errno ${code}` : `errno ${code} (${name})`;
-}
 
 const joinWords = (low: number, high: number): bigint => BigInt(low) | (BigInt(high) << 32n);
 

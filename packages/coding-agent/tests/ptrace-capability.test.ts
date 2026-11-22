@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { type CapabilityLibc, dropPtraceCapability } from "../src/ptrace-capability.ts";
 import {
   bit,
@@ -8,11 +8,12 @@ import {
   fakeKernel,
 } from "./support/fake-kernel-capabilities.ts";
 import { onLinux } from "./support/platform.ts";
+import { bunLikeShebang as bun, runProcess } from "./support/process.ts";
 
 // The capability sets of root in a Modal task sandbox, read from /proc/self/status by the CDA-121
 // prototype on branch prototype/cda-121-drop-ptrace (commit c5b47c3, file
-// prototype/cda-121/modal-run.log, variant "none"): bit 19 is in all five sets. The ADR 0001 §7
-// amendment of CDA-121 holds the same numbers.
+// prototype/cda-121/modal-run.log, variant "none"): bit 19 is set everywhere but inheritable.
+// The ADR 0001 §7 amendment of CDA-121 holds the same numbers.
 const modalRoot = {
   effective: 0xa80c05fbn,
   permitted: 0xa80c05fbn,
@@ -37,7 +38,7 @@ describe("dropPtraceCapability", () => {
     expect(dropPtraceCapability(platform, open, { ruid: 0, euid: 0 })).toEqual({ ok: true });
   });
 
-  it("removes the capability from all five sets of root on Modal", () => {
+  it("leaves all five Modal root sets without the capability", () => {
     const kernel = fakeKernel(modalRoot);
     expect(dropPtraceCapability("linux", kernel.open, { ruid: 0, euid: 0 })).toEqual({ ok: true });
     expect(kernel.state()).toEqual(modalRootAfter);
@@ -166,6 +167,28 @@ describe("dropPtraceCapability", () => {
     expect(result).toMatchObject({ ok: false, code: "CAPABILITY_REMAINS" });
     expect(result.ok ? "" : result.message).toContain("the effective set");
   });
+
+  it.each(["inheritable", "ambient"] as const)(
+    "refuses when only the %s set reports the capability",
+    (set) => {
+      // An ambient-only read-back is inconsistent with Linux's invariants. Check that
+      // the agent still refuses startup if the kernel reports it.
+      const kernel = fakeKernel(
+        {
+          effective: 0n,
+          permitted: 0n,
+          inheritable: 0n,
+          bounding: 0n,
+          ambient: 0n,
+          [set]: bit(CAP_SYS_PTRACE),
+        },
+        { ignoresChanges: true },
+      );
+      const result = dropPtraceCapability("linux", kernel.open, { ruid: 1000, euid: 1000 });
+      expect(result).toMatchObject({ ok: false, code: "CAPABILITY_REMAINS" });
+      expect(result.ok ? "" : result.message).toContain(`the ${set} set`);
+    },
+  );
 });
 
 describe("dropPtraceCapability when the read-back cannot be trusted", () => {
@@ -197,19 +220,19 @@ describe("dropPtraceCapability when the read-back cannot be trusted", () => {
   });
 });
 
-// The real kernel, so a fake that disagrees with Linux cannot hide a wrong call. It runs wherever
-// the tests run on Linux: as an ordinary user on CI, and as root with CAP_SYS_PTRACE in a container
-// started with --cap-add=SYS_PTRACE, which is the Modal case. The drop is permanent for the test
-// runner's thread, and it only removes a capability.
+// The drop is permanent on the calling thread. Run it in a subprocess so the Bun
+// test runner and its other tests keep their original capabilities.
 describe.skipIf(!onLinux)("dropPtraceCapability with the real C library", () => {
-  it("leaves the thread without the capability in any set", () => {
-    expect(dropPtraceCapability()).toEqual({ ok: true });
+  it("leaves the calling thread without the capability in each required set", async () => {
+    const probe = join(import.meta.dir, "support", "drop-ptrace-and-read-status.ts");
+    const { exitCode, stdout, stderr } = await runProcess([...bun, probe]);
+    expect(stderr).toBe("");
+    expect(exitCode).toBe(0);
 
     // An independent read, through /proc, so a wrong capget or capset layout cannot agree with
     // itself. /proc/thread-self is this thread, the one that starts every child.
-    const status = readFileSync("/proc/thread-self/status", "utf8");
     const mask = (name: string) => {
-      const value = new RegExp(`^${name}:\\s*([0-9a-f]+)$`, "m").exec(status)?.[1];
+      const value = new RegExp(`^${name}:\\s*([0-9a-f]+)$`, "m").exec(stdout)?.[1];
       if (value === undefined) throw new Error(`${name} is missing from /proc/thread-self/status`);
       return BigInt(`0x${value}`);
     };
@@ -219,6 +242,8 @@ describe.skipIf(!onLinux)("dropPtraceCapability with the real C library", () => 
     expect(mask("CapInh") & bit19).toBe(0n);
     expect(mask("CapAmb") & bit19).toBe(0n);
     // An ordinary user cannot lower the bounding set, and may keep the capability there.
-    if (process.geteuid?.() === 0) expect(mask("CapBnd") & bit19).toBe(0n);
+    if (process.getuid?.() === 0 || process.geteuid?.() === 0) {
+      expect(mask("CapBnd") & bit19).toBe(0n);
+    }
   });
 });

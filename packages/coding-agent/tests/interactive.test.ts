@@ -70,6 +70,7 @@ function start(setup: Setup = {}) {
       provider: "google",
       model: setup.model ?? READ_ONLY_RUN.model,
       repoRoot: setup.repoRoot ?? repoRoot,
+      approvalPolicy: "ask",
     },
     cwd: repoRoot,
     env: setup.env ?? { GOOGLE_API_KEY: secret },

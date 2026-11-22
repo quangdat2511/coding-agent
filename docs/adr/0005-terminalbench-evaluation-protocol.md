@@ -143,8 +143,8 @@ in `task.toml`, by wrapping the command in `su <user> -s /bin/bash -c`. At the d
 root-owned ancestor that holds the key, and a non-root agent is denied its environment.
 
 The precondition of §7 therefore does not hold on Modal for a root agent, and the recorded job stays
-blocked there until a later decision amends this record, for example by keeping the credential out of
-the task container, as §7 already says.
+blocked there until a later decision amends this record and the precondition is shown to hold on
+Modal for the artifact being evaluated (see the CDA-121 note below).
 
 **Tried on 2026-11-22 (CDA-121 prototype).** On Modal (`music-harmony`, root, `4.19.0-gvisor`), a
 compiled Bun program that held a disposable key and marked itself non-dumpable was read by its root

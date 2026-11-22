@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import { readdir } from "node:fs/promises";
 import { join } from "node:path";
+import { runnerChainIsClean } from "./support/ancestor-chain.ts";
 import { parsedRun } from "./support/parsed-run.ts";
 import {
   bunLikeShebang as bun,
@@ -12,6 +13,7 @@ import {
 const cli = join(import.meta.dir, "..", "src", "cli.ts");
 const forcePtraceDrop = join(import.meta.dir, "support", "force-ptrace-drop.ts");
 const failAncestorCheck = join(import.meta.dir, "support", "fail-ancestor-check.ts");
+const cleanChain = await runnerChainIsClean();
 
 const credential = { ANTHROPIC_API_KEY: "sk-test-credential-value" };
 
@@ -45,7 +47,7 @@ function runWith(
 }
 
 describe("the coding-agent executable when CAP_SYS_PTRACE cannot be dropped", () => {
-  it("exits 2 with the message when the capability remains", async () => {
+  it.skipIf(!cleanChain)("exits 2 with the message when the capability remains", async () => {
     const { exitCode, stdout, stderr, files } = await runWith(remains, parsedRun);
 
     expect(firstLine(stderr)).toBe(`coding-agent: ${remains.message}`);
@@ -55,7 +57,7 @@ describe("the coding-agent executable when CAP_SYS_PTRACE cannot be dropped", ()
     expect(files).toEqual(["task.md"]);
   });
 
-  it("exits 70 with the cause when a call fails", async () => {
+  it.skipIf(!cleanChain)("exits 70 with the cause when a call fails", async () => {
     const { exitCode, stdout, stderr, files } = await runWith(failed, parsedRun);
 
     expect(firstLine(stderr)).toBe(`coding-agent: ${failed.message}`);
@@ -84,16 +86,15 @@ describe("the coding-agent executable when CAP_SYS_PTRACE cannot be dropped", ()
     expect(exitCode).toBe(2);
   });
 
-  it("does not drop on the interactive path, which runs under ask", async () => {
-    const { exitCode, stderr } = await runWith(failed, [
-      "--provider",
-      "anthropic",
-      "--model",
-      "claude-haiku-4-5",
-    ]);
+  it("skips the ancestor check and the drop under ask", async () => {
+    const { exitCode, stderr } = await runWith(
+      failed,
+      ["--provider", "anthropic", "--model", "claude-haiku-4-5"],
+      [failAncestorCheck, forcePtraceDrop],
+    );
 
-    // A test runner has no terminal, so the interactive path stops there, after the point where the
-    // run path would have refused. The drop's own message must not appear.
+    // A test runner has no terminal, so the interactive path stops there after both checks would
+    // have refused under auto-approve.
     expect(exitCode).toBe(2);
     expect(firstLine(stderr)).toBe(
       "coding-agent: the interactive path needs a terminal on standard input and output; use `coding-agent run` for a task without one",

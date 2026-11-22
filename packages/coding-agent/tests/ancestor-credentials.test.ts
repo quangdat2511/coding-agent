@@ -143,21 +143,12 @@ describe("credentialAssignment", () => {
 describe("checkAncestorCredentials", () => {
   const credential = "ANTHROPIC_API_KEY=sk-test\0";
 
-  it("does not run under ask, even on Linux", async () => {
-    const { proc, read } = fakeProc(10, {
-      10: { parent: 9 },
-      9: { parent: 0, environ: credential },
-    });
-    expect(await checkAncestorCredentials("ask", linux(proc))).toEqual({ ok: true });
-    expect(read).toEqual([]);
-  });
-
   it.each(["darwin", "win32"] as const)("does not run on %s", async (platform) => {
     const { proc, read } = fakeProc(10, {
       10: { parent: 9 },
       9: { parent: 0, environ: credential },
     });
-    expect(await checkAncestorCredentials("auto-approve", { platform, proc })).toEqual({
+    expect(await checkAncestorCredentials({ platform, proc })).toEqual({
       ok: true,
     });
     expect(read).toEqual([]);
@@ -165,7 +156,7 @@ describe("checkAncestorCredentials", () => {
 
   it("walks every ancestor from the parent to the end of the chain", async () => {
     const { proc, read } = fakeProc(10, { 10: { parent: 9 }, 9: { parent: 1 }, 1: { parent: 0 } });
-    expect(await checkAncestorCredentials("auto-approve", linux(proc))).toEqual({ ok: true });
+    expect(await checkAncestorCredentials(linux(proc))).toEqual({ ok: true });
     expect(read).toEqual([
       "self/stat",
       ...["9/stat", "9/environ", "9/cmdline", "9/stat"],
@@ -175,7 +166,7 @@ describe("checkAncestorCredentials", () => {
 
   it("does not read the environment of this process, which holds the credential by design", async () => {
     const { proc } = fakeProc(10, { 10: { parent: 0, environ: credential } });
-    expect(await checkAncestorCredentials("auto-approve", linux(proc))).toEqual({ ok: true });
+    expect(await checkAncestorCredentials(linux(proc))).toEqual({ ok: true });
   });
 
   it("refuses when an ancestor holds a credential, and names it without the value", async () => {
@@ -184,7 +175,7 @@ describe("checkAncestorCredentials", () => {
       9: { parent: 5, name: "harbor-agent" },
       5: { parent: 0, name: "bash", environ: `HOME=/root\0${credential}` },
     });
-    const result = await checkAncestorCredentials("auto-approve", linux(proc));
+    const result = await checkAncestorCredentials(linux(proc));
     expect(result).toEqual({
       ok: false,
       code: "CREDENTIAL_IN_ANCESTOR",
@@ -201,7 +192,7 @@ describe("checkAncestorCredentials", () => {
       10: { parent: 9 },
       9: { parent: 0, cmdline: "sh\0-c\0ANTHROPIC_API_KEY=sk-test coding-agent run; cp out\0" },
     });
-    const result = await checkAncestorCredentials("auto-approve", linux(proc));
+    const result = await checkAncestorCredentials(linux(proc));
     expect(result.ok ? undefined : result.message).toContain(" holds ANTHROPIC_API_KEY,");
     expect(JSON.stringify(result)).not.toContain("sk-test");
   });
@@ -212,7 +203,7 @@ describe("checkAncestorCredentials", () => {
       10: { parent: 9 },
       9: { parent: 0, name: "cafÃ©\n\u001b[2J", environ: credential },
     });
-    const result = await checkAncestorCredentials("auto-approve", linux(proc));
+    const result = await checkAncestorCredentials(linux(proc));
     expect(result.ok ? undefined : result.message).toContain(" (café\\x0a\\x1b[2J) holds ");
   });
 
@@ -222,7 +213,7 @@ describe("checkAncestorCredentials", () => {
         10: { parent: 9 },
         9: { parent: 0, environ: `${variable}=k` },
       });
-      const result = await checkAncestorCredentials("auto-approve", linux(proc));
+      const result = await checkAncestorCredentials(linux(proc));
       expect(result.ok ? undefined : result.message).toContain(` holds ${variable},`);
     }
   });
@@ -235,7 +226,7 @@ describe("checkAncestorCredentials", () => {
         9: { parent: 5, environ: { error } },
         5: { parent: 0, environ: credential },
       });
-      const result = await checkAncestorCredentials("auto-approve", linux(proc));
+      const result = await checkAncestorCredentials(linux(proc));
       expect(result.ok ? undefined : result.code).toBe("CREDENTIAL_IN_ANCESTOR");
       expect(read).toContain("5/environ");
     },
@@ -249,7 +240,7 @@ describe("checkAncestorCredentials", () => {
       9: { parent: 5, statError: "ENOENT" },
       5: { parent: 0, environ: credential },
     });
-    expect(await checkAncestorCredentials("auto-approve", linux(proc))).toEqual({
+    expect(await checkAncestorCredentials(linux(proc))).toEqual({
       ok: false,
       code: "CHECK_FAILED",
       message: `${checkFailed}cannot read /proc/9/stat: ENOENT`,
@@ -261,7 +252,7 @@ describe("checkAncestorCredentials", () => {
       10: { parent: 9, parents: [9, 1] },
       1: { parent: 0, name: "init" },
     });
-    expect(await checkAncestorCredentials("auto-approve", linux(proc))).toEqual({ ok: true });
+    expect(await checkAncestorCredentials(linux(proc))).toEqual({ ok: true });
     expect(read).toEqual([
       "self/stat",
       "9/stat",
@@ -275,7 +266,7 @@ describe("checkAncestorCredentials", () => {
       10: { parent: 9 },
       9: { parent: 8, exitsAfterFirstStat: true },
     });
-    expect(await checkAncestorCredentials("auto-approve", linux(proc))).toEqual({
+    expect(await checkAncestorCredentials(linux(proc))).toEqual({
       ok: false,
       code: "CHECK_FAILED",
       message: `${checkFailed}cannot read /proc/8/stat: ENOENT`,
@@ -290,7 +281,7 @@ describe("checkAncestorCredentials", () => {
         9: { parent: 1 },
         1: { parent: 0, statError, environ: credential },
       });
-      expect(await checkAncestorCredentials("auto-approve", linux(proc))).toEqual({ ok: true });
+      expect(await checkAncestorCredentials(linux(proc))).toEqual({ ok: true });
     },
   );
 
@@ -303,7 +294,7 @@ describe("checkAncestorCredentials", () => {
       9: nine,
       5: { parent: 0, name: "bash", environ: credential },
     });
-    const result = await checkAncestorCredentials("auto-approve", linux(proc));
+    const result = await checkAncestorCredentials(linux(proc));
     expect(result.ok ? undefined : result.message).toContain("ancestor process 5 (bash) holds");
   });
 
@@ -312,13 +303,13 @@ describe("checkAncestorCredentials", () => {
       10: { parent: 9 },
       9: { parent: 0, starts: [100, 200], environ: credential },
     });
-    expect(await checkAncestorCredentials("auto-approve", linux(proc))).toEqual({ ok: true });
+    expect(await checkAncestorCredentials(linux(proc))).toEqual({ ok: true });
     expect(read.at(-1)).toBe("9/stat");
   });
 
   it("fails closed when /proc/self/stat cannot be read, for example without /proc", async () => {
     const { proc } = fakeProc(10, {});
-    expect(await checkAncestorCredentials("auto-approve", linux(proc))).toEqual({
+    expect(await checkAncestorCredentials(linux(proc))).toEqual({
       ok: false,
       code: "CHECK_FAILED",
       message: `${checkFailed}cannot read /proc/self/stat: ENOENT`,
@@ -327,7 +318,7 @@ describe("checkAncestorCredentials", () => {
 
   it("fails closed when an ancestor's stat cannot be read for another reason", async () => {
     const { proc } = fakeProc(10, { 10: { parent: 9 }, 9: { parent: 0, statError: "EACCES" } });
-    expect(await checkAncestorCredentials("auto-approve", linux(proc))).toEqual({
+    expect(await checkAncestorCredentials(linux(proc))).toEqual({
       ok: false,
       code: "CHECK_FAILED",
       message: `${checkFailed}cannot read /proc/9/stat: EACCES`,
@@ -341,7 +332,7 @@ describe("checkAncestorCredentials", () => {
         10: { parent: 9 },
         9: { parent: 0, [file]: { error: "EIO" } },
       });
-      expect(await checkAncestorCredentials("auto-approve", linux(proc))).toEqual({
+      expect(await checkAncestorCredentials(linux(proc))).toEqual({
         ok: false,
         code: "CHECK_FAILED",
         message: `${checkFailed}cannot read /proc/9/${file}: EIO`,
@@ -355,7 +346,7 @@ describe("checkAncestorCredentials", () => {
       environ: async () => "",
       cmdline: async () => "",
     };
-    expect(await checkAncestorCredentials("auto-approve", linux(proc))).toEqual({
+    expect(await checkAncestorCredentials(linux(proc))).toEqual({
       ok: false,
       code: "CHECK_FAILED",
       message: `${checkFailed}cannot parse /proc/self/stat`,
@@ -364,7 +355,7 @@ describe("checkAncestorCredentials", () => {
 
   it("fails closed on a chain that never ends", async () => {
     const { proc } = fakeProc(10, { 10: { parent: 9 }, 9: { parent: 9 } });
-    expect(await checkAncestorCredentials("auto-approve", linux(proc))).toEqual({
+    expect(await checkAncestorCredentials(linux(proc))).toEqual({
       ok: false,
       code: "CHECK_FAILED",
       message: `${checkFailed}the ancestor chain is longer than 4096 processes`,

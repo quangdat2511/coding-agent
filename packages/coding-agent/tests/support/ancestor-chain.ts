@@ -15,5 +15,5 @@ export async function runnerChainIsClean(): Promise<boolean> {
     readFileSync("/proc/self/environ", "utf8"),
     new Set(PROVIDER_CREDENTIAL_ENV_VARS),
   );
-  return own === undefined && (await checkAncestorCredentials("auto-approve")).ok;
+  return own === undefined && (await checkAncestorCredentials()).ok;
 }

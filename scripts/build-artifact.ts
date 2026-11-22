@@ -255,7 +255,7 @@ async function credentialProblem(): Promise<string | undefined> {
   if (held !== undefined) {
     return `${held} is set in the environment of this build, or in the repository's .env; unset it and run the build again`;
   }
-  const ancestors = await checkAncestorCredentials("auto-approve");
+  const ancestors = await checkAncestorCredentials();
   return ancestors.ok
     ? undefined
     : `the .env check cannot run: ${ancestors.message}; unset the credential and run the build again`;

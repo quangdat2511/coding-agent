@@ -26,7 +26,6 @@
 //   and CAP_SETGID, a child can switch to the uid and gid of an ancestor that belongs to another
 //   user, such as the shell behind `sudo -E`, and then read its environment.
 import { readFile } from "node:fs/promises";
-import type { ApprovalPolicy } from "@coding-agent/agent-core";
 import { PROVIDER_CREDENTIAL_ENV_VARS, readEnvCredential } from "@coding-agent/ai";
 import { errnoOf } from "@coding-agent/tools";
 
@@ -173,15 +172,12 @@ async function readOrEmpty(read: () => Promise<string>, path: string): Promise<s
 // Every outcome except "no ancestor holds a credential" refuses the run, so a walk that cannot
 // finish fails closed. The optional platform, files and variables are test seams; callers use the
 // defaults.
-export async function checkAncestorCredentials(
-  approvalPolicy: ApprovalPolicy,
-  {
-    platform = process.platform,
-    proc = procFiles,
-    variables = PROVIDER_CREDENTIAL_ENV_VARS,
-  }: AncestorCheckOptions = {},
-): Promise<AncestorCheckResult> {
-  if (approvalPolicy !== "auto-approve" || platform !== "linux") return { ok: true };
+export async function checkAncestorCredentials({
+  platform = process.platform,
+  proc = procFiles,
+  variables = PROVIDER_CREDENTIAL_ENV_VARS,
+}: AncestorCheckOptions = {}): Promise<AncestorCheckResult> {
+  if (platform !== "linux") return { ok: true };
 
   const self = await readStat(proc, "self", "fail");
   if (isFailure(self)) return self;
