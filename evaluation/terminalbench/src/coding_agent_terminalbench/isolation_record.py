@@ -70,6 +70,13 @@ def add_run(record: dict[str, Any] | None, result: dict[str, Any], day: date) ->
             "adrAmendment": ADR_AMENDMENT,
             "runs": [],
         }
+    elif not (
+        isinstance(record, dict)
+        and isinstance(record.get("codingAgent"), dict)
+        and isinstance(record.get("runs"), list)
+    ):
+        # The record can be edited by hand, so its shape is checked before it is read.
+        raise RecordError("the Isolation Record is malformed: it needs codingAgent and runs")
     elif record["codingAgent"] != {"version": version, "commit": commit}:
         raise RecordError(
             f"the record is for Coding Agent {record['codingAgent']['commit']}, and the run is "

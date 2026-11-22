@@ -228,7 +228,7 @@ async def _run_launcher_that_keeps_its_shell(
         # Read before `stop`: a server in another sandbox is gone once it is stopped.
         server_requests = await asyncio.to_thread(lambda: server.request_count)
     finally:
-        await asyncio.to_thread(server.stop)
+        await _stop(server, log)
     # Harbor's Docker environment sends standard error into standard output, so the refusal can
     # arrive in either stream. The agent prints nothing before it refuses.
     output = f"{result.stderr or ''}\n{result.stdout or ''}"
@@ -244,6 +244,15 @@ async def _run_launcher_that_keeps_its_shell(
         message_matched=matched,
         server_requests=server_requests,
     )
+
+
+async def _stop(server: ModelServer, log: Callable[[str], None]) -> None:
+    """Stops the server. A stop that fails is logged and does not hide why the run ended, as in
+    `started()` of isolation_test: a sandbox that never came up can also fail to terminate."""
+    try:
+        await asyncio.to_thread(server.stop)
+    except Exception as error:
+        log(f"cannot stop the fake model server: {error}")
 
 
 async def _check_server_reachable(container: Container, server: ModelServer) -> None:
@@ -289,7 +298,7 @@ async def _run_agent(
         texts = await asyncio.to_thread(server.tool_result_texts)
         observed = await asyncio.to_thread(server.observations, expected_tool_results=1)
     finally:
-        await asyncio.to_thread(server.stop)
+        await _stop(server, log)
     if result.return_code != 0:
         output = f"{result.stderr or ''}{result.stdout or ''}"
         tail = output.replace(setup.key, "[redacted]").strip()[-400:]

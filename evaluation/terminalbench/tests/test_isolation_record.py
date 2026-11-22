@@ -101,6 +101,25 @@ class AddTest(RecordTestCase):
         self.assertIn("not an isolation test result", stderr)
         self.assertFalse(self.record.exists())
 
+    def test_a_record_of_the_wrong_shape_is_refused_with_a_message_not_a_traceback(self) -> None:
+        # A record can be edited by hand (PR #114 review).
+        shapes = (
+            {"runs": []},
+            "x",
+            [],
+            {"codingAgent": {"version": "0.0.1", "commit": COMMIT}, "runs": 3},
+        )
+        for shape in shapes:
+            with self.subTest(record=shape):
+                self.record.write_text(json.dumps(shape))
+
+                code, _, stderr = self.add(result())
+
+                self.assertEqual(code, 1)
+                self.assertIn("malformed", stderr)
+                self.assertNotIn("Traceback", stderr)
+                self.assertEqual(json.loads(self.record.read_text()), shape)
+
     def test_a_run_of_another_commit_is_refused_and_the_record_is_unchanged(self) -> None:
         self.add(result())
         before = self.record.read_text()

@@ -864,6 +864,19 @@ class IsolationRecordTest(RecordTestCase):
         self.assertNotIn("no passing run on modal", stderr)
         self.assertFalse((self.output / "manifest.json").exists())
 
+    def test_an_isolation_record_that_is_not_a_json_object_writes_nothing(self) -> None:
+        # A record can be edited by hand (PR #114 review).
+        self.write_standard_jobs()
+        for text in ('"x"', "[]", "[1, 2]"):
+            with self.subTest(record=text):
+                self.isolation_path.write_text(text, encoding="utf-8")
+
+                code, _, stderr = self.run_main()
+
+                self.assertEqual(code, 2)
+                self.assertIn("not a JSON object", stderr)
+                self.assertFalse((self.output / "manifest.json").exists())
+
     def test_a_missing_isolation_record_file_writes_nothing(self) -> None:
         self.write_standard_jobs()
 

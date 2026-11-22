@@ -246,6 +246,33 @@ class RunWithAServerThatFailsToStartTest(unittest.TestCase):
         self.assertEqual(stopped, [True])
 
 
+class RunWithAServerThatFailsToStopTest(unittest.TestCase):
+    def test_a_failed_stop_is_logged_and_does_not_hide_why_the_start_failed(self) -> None:
+        # PR #114 review: the network can break both the start and the stop of the second sandbox.
+        class FailsToStartAndToStop(ServerInAnotherSandbox):
+            def start(self) -> None:
+                raise RuntimeError("the second sandbox did not come up")
+
+            def stop(self) -> None:
+                raise RuntimeError("cannot terminate the sandbox")
+
+        lines: list[str] = []
+
+        with self.assertRaisesRegex(RuntimeError, "did not come up"):
+            asyncio.run(
+                run_isolation_test(
+                    ScriptedContainer(),
+                    SETUP,
+                    log=lines.append,
+                    serve=lambda turns: FailsToStartAndToStop(turns),
+                )
+            )
+
+        self.assertEqual(len(lines), 1)
+        self.assertIn("cannot stop the fake model server", lines[0])
+        self.assertIn("cannot terminate the sandbox", lines[0])
+
+
 class RunTest(unittest.TestCase):
     def test_a_hardened_artifact_passes_and_the_result_names_the_run(self) -> None:
         result = run(ScriptedContainer())

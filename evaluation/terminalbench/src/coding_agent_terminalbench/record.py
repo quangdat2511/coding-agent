@@ -1274,6 +1274,12 @@ def main(
     except (OSError, json.JSONDecodeError) as exc:
         print(f"error: cannot read the Isolation Record {args.isolation_record}: {exc}", file=sys.stderr)
         return 2
+    if not isinstance(isolation_record, dict):
+        print(
+            f"error: the Isolation Record {args.isolation_record} is not a JSON object",
+            file=sys.stderr,
+        )
+        return 2
     try:
         recorded = read_job(args.job_dir)
         rerun = read_job(args.rerun_job) if args.rerun_job is not None else None
