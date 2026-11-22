@@ -120,6 +120,19 @@ class AddTest(RecordTestCase):
                 self.assertNotIn("Traceback", stderr)
                 self.assertEqual(json.loads(self.record.read_text()), shape)
 
+    def test_a_record_whose_coding_agent_has_no_commit_is_refused_without_a_traceback(self) -> None:
+        # PR #114 review: the shape check passes it, and the refusal message must not read the
+        # commit that it does not have.
+        shape = {"codingAgent": {}, "runs": []}
+        self.record.write_text(json.dumps(shape))
+
+        code, _, stderr = self.add(result())
+
+        self.assertEqual(code, 1)
+        self.assertIn(COMMIT, stderr)
+        self.assertNotIn("Traceback", stderr)
+        self.assertEqual(json.loads(self.record.read_text()), shape)
+
     def test_a_run_of_another_commit_is_refused_and_the_record_is_unchanged(self) -> None:
         self.add(result())
         before = self.record.read_text()

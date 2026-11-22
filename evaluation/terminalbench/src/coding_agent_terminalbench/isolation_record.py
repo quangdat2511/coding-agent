@@ -79,7 +79,7 @@ def add_run(record: dict[str, Any] | None, result: dict[str, Any], day: date) ->
         raise RecordError("the Isolation Record is malformed: it needs codingAgent and runs")
     elif record["codingAgent"] != {"version": version, "commit": commit}:
         raise RecordError(
-            f"the record is for Coding Agent {record['codingAgent']['commit']}, and the run is "
+            f"the record is for Coding Agent {record['codingAgent'].get('commit')}, and the run is "
             f"for {commit}; a record holds the runs of one commit"
         )
     return {**record, "runs": [*record["runs"], {"date": day.isoformat(), "result": result}]}
