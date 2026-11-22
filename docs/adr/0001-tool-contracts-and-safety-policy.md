@@ -240,7 +240,8 @@ a real install made with that option.
 On 2026-11-22, [CDA-121](https://datn-fit-hcmus.atlassian.net/browse/CDA-121) amended this record:
 
 - **Capability drop** (§8, rule 2): under `"auto-approve"` on Linux, `coding-agent run` removes
-  `CAP_SYS_PTRACE` after it marks itself non-dumpable and before it starts the first child. The
+  `CAP_SYS_PTRACE` after it marks itself non-dumpable and runs the startup ancestor check, and before
+  it starts the first child. The
   non-dumpable mark does not stop a reader that holds the capability, and root in a Modal sandbox
   holds it (CDA-94, ADR 0005 Evidence). The drop has three steps, all on the thread that starts every
   child:
@@ -267,6 +268,14 @@ On 2026-11-22, [CDA-121](https://datn-fit-hcmus.atlassian.net/browse/CDA-121) am
   `EPERM` from `PR_CAPBSET_DROP`, and the ambient read-back on a kernel before 4.3, which has no
   ambient set and answers `EINVAL`. The interactive path runs under `"ask"`, which §8 exempts, so
   it neither drops nor refuses.
+- **Order of the startup checks** (§8, startup verification): the ancestor check runs before the
+  capability drop, not after it. The check reads each ancestor's `/proc/<pid>/environ` as Coding
+  Agent can, so with the capability still held it also reads a root launcher that holds the
+  capability itself. After the drop it reads as a child does, and a launcher that keeps its shell
+  and holds the capability could be passed over, because its environment is denied to the reader.
+  The check is therefore stricter than the child on purpose: a launcher that a child could not read
+  is still refused, which keeps the launch contract a checked precondition and does not depend on
+  the sandbox's kernel. The cost is that some launchers are refused that no child could have read.
 - **Scope of the guarantee** (§8): under `"auto-approve"` the exclusion of "a child granted
   `CAP_SYS_PTRACE`" narrows to a child that regains the capability after the drop. This happens when
   it runs a setuid-root program or a file with file capabilities, and the bounding set still holds
@@ -328,11 +337,22 @@ there, as the `no_new_privs` rule above limits what an `execve` gains; that link
 Docker, which does not set it, the child of root took the capability back from the bounding set.
 Only the thread that applied the drop changed: the Bun helper threads still showed the capability.
 
+The order of the startup checks comes from two runs of the isolation test's launcher check, which
+asks that a launcher that keeps its shell is refused with exit 2. With the ancestor check after the
+drop, the artifact built at commit `4fd7393` on Modal (`music-harmony`, root) did not refuse it: the
+agent opened a session and exited 1 (`LAUNCHER_NOT_REJECTED`), while all four probe paths passed and
+all four controls found the key. The result file is outside the repository, in the author's
+session scratchpad, `isolation-modal-4fd7393-root.json`. Reproduced in Docker with the same code
+(CLI from source, a shell that exported a disposable key and did not `exec`): the launcher was
+refused with exit 2 and the message `ancestor process 1 (sh) holds ANTHROPIC_API_KEY`, both for
+root with `--cap-add=SYS_PTRACE` and for Docker's default root. So Docker and Modal differ, and
+the launcher check passed in CDA-94's earlier Modal trial, when nothing was dropped.
+
 The implementation's tests ran on 2026-11-22 against the real kernel in `oven/bun:1.3.14`
 containers as uid 1000, as root, as root with `--cap-add=SYS_PTRACE`, and as uid 1000 with it. Each
 run was `bun test` of `tests/ptrace-capability.test.ts`, `tests/ptrace-capability-cli.test.ts`,
 `tests/ptrace-capability-proc.test.ts` and `tests/non-dumpable.test.ts` in `packages/coding-agent`,
-and each gave 31 passed and 2 skipped. The skipped pair was the proc-access test, which needs root
+and each gave 32 passed and 2 skipped. The skipped pair was the proc-access test, which needs root
 with the capability, in the three runs that were not root with it, and the pair in
 `non-dumpable.test.ts`, which needs the capability absent, in the run as root with it. The output of
 these runs was not saved. In
@@ -357,8 +377,17 @@ failed because the child read the process.
 - That a kernel before 4.3 answers `EINVAL` to `PR_CAP_AMBIENT` is taken from `prctl(2)` and was
   not run; a fake kernel tests the branch. A sandbox that answers the ambient read with another
   errno would make the run exit 70; no such sandbox was seen, and gVisor on Modal answers 0 or 1.
-- The compiled artifact (`bun build --compile`, the form that Harbor runs) has not run the drop. The
-  tests above run the CLI from source with `bun`; the prototype was compiled but is not the artifact.
+- Why Docker refuses the launcher after the drop and Modal does not was not measured. A hypothesis:
+  on Linux the check's `readFile` runs on a Bun helper thread that still holds the capability, so it
+  reads more than the dropped thread, while on gVisor it reads with the dropped set. That would make
+  the check pass over a root launcher that holds the capability. It was not traced.
+- Whether a Tool Call child can read such a launcher's environment on Modal after the drop was not
+  measured; the isolation test does not measure it, and its `ancestors` probe ran with a launcher
+  that had replaced itself with `exec`. Keeping the check before the drop does not depend on the
+  answer.
+- The compiled artifact (`bun build --compile`, the form that Harbor runs) was built at `4fd7393`
+  and ran the isolation test on Modal as above, but only with the order that failed. Its run with
+  the order of this amendment is reported in ADR 0005 §7.
 
 ### 8. Credential Isolation for Tool and Verification Processes
 
@@ -378,7 +407,7 @@ Two rules hold on every entry point and under both policies:
 **Under `"auto-approve"` (isolated execution harness).** The guarantee is that a Tool Call or Verification child running as the same user, without `CAP_SYS_PTRACE` (which Coding Agent removes from itself under this policy, §7), cannot obtain a provider credential. Items 1 and 2 are necessary but not sufficient, because the process that launched Coding Agent may itself hold the credential. Two further requirements close that gap:
 
 - **Launch contract.** No same-uid process reachable by a tool child may hold a provider credential in a readable form. The launcher must replace itself with the Coding Agent process (`exec`) rather than remain as a credential-bearing ancestor, must not leave a credential-bearing sibling such as a pipeline stage, and must not write the credential to a file a same-uid process can read. Coding Agent cannot mark or scrub a process it did not start, so this is an obligation on the launcher. [ADR 0005](./0005-terminalbench-evaluation-protocol.md) is the concrete instance for Harbor: the adapter `exec`s the agent and pipes its output nowhere.
-- **Startup verification.** Before the composition root opens an Agent Session under `"auto-approve"`, it walks its ancestor chain from its own parent (`/proc/self/stat` field 4, then each `/proc/<pid>/environ`, which it can read because the ancestors are the same user and not hardened) and, if any ancestor still holds one of the provider-credential variables Coding Agent uses, opens no Agent Session and returns a configuration error ([ADR 0002](./0002-agent-session-state-machine-and-event-protocol.md) §1; the headless path maps this to exit code 2, [ADR 0005](./0005-terminalbench-evaluation-protocol.md) §3). This makes the launch contract a checked precondition rather than a trusted one, and on Linux it rejects a launcher that failed to `exec`-replace itself. It walks only the ancestor chain, so a credential-bearing unrelated sibling remains the launcher's responsibility under the launch contract.
+- **Startup verification.** Before the composition root opens an Agent Session under `"auto-approve"`, it walks its ancestor chain from its own parent (`/proc/self/stat` field 4, then each `/proc/<pid>/environ`, which it can read because the ancestors are the same user and not hardened) and, if any ancestor still holds one of the provider-credential variables Coding Agent uses, opens no Agent Session and returns a configuration error ([ADR 0002](./0002-agent-session-state-machine-and-event-protocol.md) §1; the headless path maps this to exit code 2, [ADR 0005](./0005-terminalbench-evaluation-protocol.md) §3). The check runs before Coding Agent drops `CAP_SYS_PTRACE` (§7, CDA-121), so that it reads as strongly as the process can and is stricter than the child. This makes the launch contract a checked precondition rather than a trusted one, and on Linux it rejects a launcher that failed to `exec`-replace itself. It walks only the ancestor chain, so a credential-bearing unrelated sibling remains the launcher's responsibility under the launch contract.
 
 **Under `"ask"` (interactive TUI and any attended headless).** The cross-process guarantee above is not claimed, and this section does not require it. The process that launched Coding Agent — typically the user's shell, which exported the provider key — remains a live, dumpable, same-uid ancestor holding the credential, and Coding Agent can neither scrub nor re-mark it. This residual is accepted for the MVP and bounded by two controls already in this ADR: read-only tools (`read`) are jailed to `repoRoot` (§2) and cannot open a `/proc` path, so no auto-approved tool can reach an ancestor's environment; and every mutating `bash` is gated by Approval (§4), so the only tool that can read `/proc` runs only after a human allows that specific command. Requiring interactive users to launch from a credential-free shell, or adding an opt-in hardened launch that delivers the credential to Coding Agent without any ancestor holding it, is deferred; this section states the residual rather than closing it.
 

@@ -2,8 +2,8 @@
 // child that holds CAP_SYS_PTRACE: the kernel lets such a caller read a non-dumpable process of the
 // same user. Root on Modal holds it, so a Tool Call child read the key there. Under "auto-approve"
 // this module removes the capability from the thread that starts every child, so a child never
-// receives it. cli.ts calls dropPtraceCapability right after markProcessNonDumpable, on the
-// `run` path only, and ahead of every child.
+// receives it. cli.ts calls dropPtraceCapability on the `run` path only, after
+// markProcessNonDumpable and after the ancestor check, and ahead of every child.
 //
 // Limits of the guarantee (see also the package README):
 // - Only the calling thread changes, because capabilities belong to a thread. Bun.spawn runs vfork

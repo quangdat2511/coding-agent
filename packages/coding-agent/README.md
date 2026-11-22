@@ -475,8 +475,8 @@ Checks run in that order and the first problem wins. The output directory is cre
 other check has passed, and whatever it created is removed again if it then proves unusable, so a
 configuration error writes nothing.
 
-The [ancestor check](#ancestor-check) and the [CAP_SYS_PTRACE drop](#dropping-cap_sys_ptrace) run
-before all of these. When the ancestor check finds a credential in an ancestor process, or the drop
+The [ancestor check](#ancestor-check) and then the
+[CAP_SYS_PTRACE drop](#dropping-cap_sys_ptrace) run before all of these. When the ancestor check finds a credential in an ancestor process, or the drop
 finds the capability still held, the run also exits 2 and writes nothing.
 
 ## Process hardening
@@ -543,8 +543,8 @@ hardening fail, and checks that the run exits 70 before it resolves the configur
 ## Dropping CAP_SYS_PTRACE
 
 This step applies to `coding-agent run` on Linux, which runs under `"auto-approve"`. The interactive
-path runs under `"ask"` and keeps its capabilities. It follows the non-dumpable mark and comes
-before the ancestor check, the configuration and the first child. See the CDA-121 amendment of
+path runs under `"ask"` and keeps its capabilities. It follows the non-dumpable mark and the
+[ancestor check](#ancestor-check), and comes before the configuration and the first child. See the CDA-121 amendment of
 [ADR 0001 §7](../../docs/adr/0001-tool-contracts-and-safety-policy.md) for the rule and its evidence.
 
 The non-dumpable mark does not stop a reader that holds `CAP_SYS_PTRACE`, and root in a Modal
@@ -600,7 +600,11 @@ it did not start. The launcher must replace itself with the Coding Agent through
 check makes that rule a checked precondition.
 
 `main` in `src/cli.ts` calls `checkAncestorCredentials` from `src/ancestor-credentials.ts` right
-after the hardening step and before it resolves the configuration. The check reads the parent from
+after the non-dumpable mark, before the [CAP_SYS_PTRACE drop](#dropping-cap_sys_ptrace) and before it
+resolves the configuration. The order is deliberate: with the capability still held, the check can
+read the environment of a root launcher that holds the capability itself, and a child cannot. That
+makes the check stricter than the child. After the drop it would read as the child does, and on Modal
+it did not refuse such a launcher (CDA-121, ADR 0001 §7). The check reads the parent from
 field 4 of `/proc/self/stat`. For each ancestor up to the end of the chain, it reads
 `/proc/<pid>/environ` and `/proc/<pid>/cmdline`. Then it reads the stat again and goes on to that
 ancestor's parent. The credential variables are all the names in `PROVIDER_CREDENTIAL_ENV_VARS`

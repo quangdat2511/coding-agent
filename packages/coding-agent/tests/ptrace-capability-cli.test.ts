@@ -11,6 +11,7 @@ import {
 
 const cli = join(import.meta.dir, "..", "src", "cli.ts");
 const forcePtraceDrop = join(import.meta.dir, "support", "force-ptrace-drop.ts");
+const failAncestorCheck = join(import.meta.dir, "support", "fail-ancestor-check.ts");
 
 const credential = { ANTHROPIC_API_KEY: "sk-test-credential-value" };
 
@@ -27,10 +28,15 @@ const failed = {
 };
 
 // ptrace-capability.ts is replaced in the child, so this runs on every platform.
-function runWith(forced: unknown, args: readonly string[]) {
+function runWith(
+  forced: unknown,
+  args: readonly string[],
+  preloads: readonly string[] = [forcePtraceDrop],
+) {
   return withTemporaryDirectory(async (directory) => {
     await Bun.write(join(directory, "task.md"), "Add a failing test, then make it pass.\n");
-    const result = await runProcess([...bun, "--preload", forcePtraceDrop, cli, ...args], {
+    const flags = preloads.flatMap((preload) => ["--preload", preload]);
+    const result = await runProcess([...bun, ...flags, cli, ...args], {
       cwd: directory,
       env: { ...credential, FORCED_PTRACE_DROP: JSON.stringify(forced) },
     });
@@ -56,6 +62,19 @@ describe("the coding-agent executable when CAP_SYS_PTRACE cannot be dropped", ()
     expect(exitCode).toBe(70);
     expect(stdout).toBe("");
     expect(files).toEqual(["task.md"]);
+  });
+
+  it("checks the ancestors before it drops the capability", async () => {
+    // The check reads each ancestor's environment as this process can. Dropping first would leave it
+    // reading as the child can, and on Modal a root launcher that holds the capability would be
+    // passed over instead of refused. Both stubs fail here; the first message tells which ran first.
+    const { exitCode, stderr } = await runWith(failed, parsedRun, [
+      failAncestorCheck,
+      forcePtraceDrop,
+    ]);
+
+    expect(firstLine(stderr)).toBe("coding-agent: forced by the test");
+    expect(exitCode).toBe(70);
   });
 
   it("still exits 2 on a usage error, which is decided before the drop", async () => {
