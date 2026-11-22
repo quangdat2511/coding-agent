@@ -346,7 +346,17 @@ session scratchpad, `isolation-modal-4fd7393-root.json`. Reproduced in Docker wi
 (CLI from source, a shell that exported a disposable key and did not `exec`): the launcher was
 refused with exit 2 and the message `ancestor process 1 (sh) holds ANTHROPIC_API_KEY`, both for
 root with `--cap-add=SYS_PTRACE` and for Docker's default root. So Docker and Modal differ, and
-the launcher check passed in CDA-94's earlier Modal trial, when nothing was dropped.
+the launcher check passed in CDA-94's earlier Modal trial, when nothing was dropped (ADR 0005
+Evidence). With the ancestor check moved before the drop, the artifact built at commit `4298d32`
+(x64 executable SHA-256 `b75c55462f162aea2dda9b8ffd62a3dde9f8f3a4d53c9f5cf9e33876d6632336`, built
+from a clean tree) passed the isolation test on Modal on 2026-11-22: root, `music-harmony`,
+dataset `terminal-bench/terminal-bench@4.1.0`. No Tool Call found the key. `inherited-environment`
+and `ancestors` found nothing, `proc-environ` and `proc-mem` gave `EACCES`, all four controls found
+the key, and the launcher that keeps its shell was refused with exit 2 and the expected message,
+after no request to the model server. The result file is outside the repository, in the author's
+session scratchpad, `isolation-modal-4298d32-root.json`. This run shows that the change works; it is
+not an Isolation Record, which must come from an artifact built at a commit of `main` (ADR 0005 §7,
+amendment of CDA-94).
 
 The implementation's tests ran on 2026-11-22 against the real kernel in `oven/bun:1.3.14`
 containers as uid 1000, as root, as root with `--cap-add=SYS_PTRACE`, and as uid 1000 with it. Each
@@ -385,9 +395,9 @@ failed because the child read the process.
   measured; the isolation test does not measure it, and its `ancestors` probe ran with a launcher
   that had replaced itself with `exec`. Keeping the check before the drop does not depend on the
   answer.
-- The compiled artifact (`bun build --compile`, the form that Harbor runs) was built at `4fd7393`
-  and ran the isolation test on Modal as above, but only with the order that failed. Its run with
-  the order of this amendment is reported in ADR 0005 §7.
+- The compiled artifact (`bun build --compile`, the form that Harbor runs) has run the isolation
+  test on Modal as root only, on `music-harmony`. It has not run on Docker, root or non-root, and
+  not on Modal as a non-root agent user.
 
 ### 8. Credential Isolation for Tool and Verification Processes
 

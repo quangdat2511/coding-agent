@@ -263,7 +263,9 @@ says so. The Isolation Record of an artifact that
 has the change names both the CDA-29 and the CDA-121 amendments. A Modal root run of that artifact is
 recorded when it passes. Modal stays uncleared until the Record also holds the non-root run on
 `fp8-rmsnorm-gemm`, which needs a payment method for its H100, so this amendment does not lift the
-block on the recorded job. The Evidence section below holds what the prototype showed.
+block on the recorded job. An artifact with the change passed the isolation test on Modal as root
+(evidence of the change, not an Isolation Record); ADR 0001 §7, CDA-121 amendment, reports it. The
+Evidence section below holds what the prototype showed.
 
 ### 2. Coding Agent artifact
 
