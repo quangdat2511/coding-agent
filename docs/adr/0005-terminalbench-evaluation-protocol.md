@@ -219,6 +219,29 @@ refuses a job whose backends it does not clear, and copies it into `manifest.jso
 non-root agent user, of an executable that the artifact holds, on the job's dataset. The Evidence
 section below holds what the first runs showed.
 
+On 2026-11-22, [CDA-95](https://datn-fit-hcmus.atlassian.net/browse/CDA-95) ran the first smoke job
+and the team accepted two exceptions. They apply to that job only, and they change no rule of this
+record: §7 step 3 still asks for a reward in every trial, and §7 step 4 still follows the isolation
+precondition on Modal.
+
+- The job ran on Docker with `opencode/deepseek-v4.1-flash`, on the artifact built from `main` at
+  `1fd9966`, which is the artifact of the Isolation Record committed for that commit. The trial of
+  `bun-sourcemap-leak` has no reward: the verifier of the task stops with `Worker can access
+  private path: /logs/verifier`. An oracle run of the same task on Docker, with no model and no key,
+  stops the same way, so the task is harness-flaky on Docker. The team accepted the smoke job with a
+  reward on the other two trials. It is not known whether the verifier fails on Modal, where the
+  recorded job runs, or why it fails on Docker.
+- Two trials (`photonic-waveguide-routing`, `music-harmony`) ended with `MODEL_FAILURE` when one
+  Model Turn produced exactly 65,536 output tokens, all of them reasoning, after 466 s and 514 s;
+  the provider's usage log shows the finish reason `length`. The artifact sends no output limit and
+  no reasoning effort for `opencode` (`SAMPLING_BY_PROVIDER` in `run-config.ts`). The team accepted
+  this as a known risk and not as a defect to fix before the recorded job, which may meet it again
+  and lose those tasks. [ADR 0007](./0007-evaluation-provider-and-model.md) keeps the job at the
+  provider's default effort, so a change of this setting amends that record.
+
+That Isolation Record covers Docker only and is bound to the executable that this smoke job ran. It
+is not the record of the recorded job: a changed artifact needs a new record (§9 criterion 4).
+
 ### 2. Coding Agent artifact
 
 A recorded job evaluates a standalone executable, not a source checkout. It is built from a commit
