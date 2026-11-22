@@ -1,0 +1,10 @@
+[parent effective] after: Uid: 0 0 0 0 | CapInh: 0000000000000000 | CapPrm: 00000000a80425fb | CapEff: 00000000a80425fb | CapBnd: 00000000a80c25fb | CapAmb: 0000000000000000 | NoNewPrivs: 0 | Seccomp: 2
+[child] self: Uid: 0 0 0 0 CapPrm: 00000000a80c25fb CapEff: 00000000a80c25fb CapBnd: 00000000a80c25fb 
+[child] ancestor pid=1 comm=proto uid=0 environ=KEY_FOUND mem=OPENS cmdline=no-key
+[child] self: Uid: 0 0 0 0 CapPrm: 00000000a80c25fb CapEff: 00000000a80c25fb CapBnd: 00000000a80c25fb 
+[child] ancestor pid=1 comm=proto uid=0 environ=KEY_FOUND mem=OPENS cmdline=no-key
+[parent bounding] after: Uid: 0 0 0 0 | CapInh: 0000000000000000 | CapPrm: 00000000a80c25fb | CapEff: 00000000a80c25fb | CapBnd: 00000000a80425fb | CapAmb: 0000000000000000 | NoNewPrivs: 0 | Seccomp: 2
+[child] self: Uid: 0 0 0 0 CapPrm: 00000000a80425fb CapEff: 00000000a80425fb CapBnd: 00000000a80425fb 
+[child] ancestor pid=1 comm=proto uid=0 environ=denied(/proto/probe.sh: 15: cannot open /proc/1/environ: Permission denied) mem=denied cmdline=no-key
+[child] self: Uid: 0 0 0 0 CapPrm: 00000000a80425fb CapEff: 00000000a80425fb CapBnd: 00000000a80425fb 
+[child] ancestor pid=1 comm=proto uid=0 environ=denied(/proto/probe.sh: 15: cannot open /proc/1/environ: Permission denied) mem=denied cmdline=no-key
