@@ -1,4 +1,4 @@
-# Recorded TerminalBench job: recorded-e48b12a-legacy
+# Recorded TerminalBench job: recorded-e48b12a-legacy-full
 
 - Dataset pin: factory-ai/legacy-bench@v0.1
 - Release commit: 12fa7cf969b7a253183388040d566fb353a1ab31
@@ -13,16 +13,16 @@ The report has no pass or fail threshold and no Pi column: ADR 0005 §8 makes th
 
 **Not valid.** ADR 0005 §7 makes a job valid only when every task has a completed trial in the recorded job or the rerun job, and the dataset has the properties ADR 0008 §3 requires. No headline reward is published. The problems are:
 
-- trial 16b04d-cobol-railroad-retirement__XrmtSoz of factory-ai/16b04d-cobol-railroad-retirement-migration records verifier environment mode 'shared', not 'separate'
-- trial 1907c2-c-debug-legacy-buddy-fix__hUcWktx of factory-ai/1907c2-c-debug-legacy-buddy-fix records verifier environment mode 'shared', not 'separate'
-- trial 2831b5-java7-rating-engine-repai__adQFWxJ of factory-ai/2831b5-java7-rating-engine-repair records verifier environment mode 'shared', not 'separate'
-- trial 3af1fe-cobol-bond-settlement-rec__VCA83Wo of factory-ai/3af1fe-cobol-bond-settlement-reconcile records verifier environment mode 'shared', not 'separate'
-- trial 505812-java7-inventory-cost-fix__VsYG5qx of factory-ai/505812-java7-inventory-cost-fix records verifier environment mode 'shared', not 'separate'
-- trial 6fe1ab-java7-mtom-attachment-cor__6gWSKq7 of factory-ai/6fe1ab-java7-mtom-attachment-corruption-fix records verifier environment mode 'shared', not 'separate'
-- trial 8e8098-cobol-railcar-settlement__eWXWbkA of factory-ai/8e8098-cobol-railcar-settlement-fix records verifier environment mode 'shared', not 'separate'
-- trial d1ddc1-fortran-to-cpp-lattice-qc__LgpoXs8 of factory-ai/d1ddc1-fortran-to-cpp-lattice-qcd-migration records verifier environment mode 'shared', not 'separate'
-- trial ecf5e7-asm-debug-mz-ne-header-fi__yQaWSnB of factory-ai/ecf5e7-asm-debug-mz-ne-header-fix records verifier environment mode 'shared', not 'separate'
-- trial fac397-cobol-batch-interest-migr__qVhRheQ of factory-ai/fac397-cobol-batch-interest-migration records verifier environment mode 'shared', not 'separate'
+- trial 16b04d-cobol-railroad-retirement__w5xLjC4 of factory-ai/16b04d-cobol-railroad-retirement-migration records verifier environment mode 'shared', not 'separate'
+- trial 1907c2-c-debug-legacy-buddy-fix__sVidqXY of factory-ai/1907c2-c-debug-legacy-buddy-fix records verifier environment mode 'shared', not 'separate'
+- trial 2831b5-java7-rating-engine-repai__FsRng5J of factory-ai/2831b5-java7-rating-engine-repair records verifier environment mode 'shared', not 'separate'
+- trial 3af1fe-cobol-bond-settlement-rec__5gfdpaj of factory-ai/3af1fe-cobol-bond-settlement-reconcile records verifier environment mode 'shared', not 'separate'
+- trial 505812-java7-inventory-cost-fix__QL5vvPk of factory-ai/505812-java7-inventory-cost-fix records verifier environment mode 'shared', not 'separate'
+- trial 6fe1ab-java7-mtom-attachment-cor__v7Dr5TS of factory-ai/6fe1ab-java7-mtom-attachment-corruption-fix records verifier environment mode 'shared', not 'separate'
+- trial 8e8098-cobol-railcar-settlement__coNgMiW of factory-ai/8e8098-cobol-railcar-settlement-fix records verifier environment mode 'shared', not 'separate'
+- trial d1ddc1-fortran-to-cpp-lattice-qc__C2WNrD7 of factory-ai/d1ddc1-fortran-to-cpp-lattice-qcd-migration records verifier environment mode 'shared', not 'separate'
+- trial ecf5e7-asm-debug-mz-ne-header-fi__i9rzK9C of factory-ai/ecf5e7-asm-debug-mz-ne-header-fix records verifier environment mode 'shared', not 'separate'
+- trial fac397-cobol-batch-interest-migr__xeuE6kd of factory-ai/fac397-cobol-batch-interest-migration records verifier environment mode 'shared', not 'separate'
 - the dataset declares a 300 s per-task agent timeout, below the profile's 3600 s maxDurationMs
 
 ## Waivers
@@ -31,7 +31,7 @@ This record waives a requirement of ADR 0005 §7, so it does not count under §9
 
 - **Credential isolation**: every task of factory-ai/legacy-bench@v0.1 runs the agent as root on Modal, so no non-root isolation run exists for this dataset; the passing root run on Modal is recorded
 - **Dataset release tag**: https://github.com/Factory-AI/legacy-bench publishes no Git tag; the record names the main commit the published tasks were built from
-- **Timeout override**: the dataset caps the agent at 300 s and 720 s, below the terminalbench profile; the rehearsal raised the agent timeout 5x so the tasks could finish
+- **Timeout override**: the dataset caps the agent at 300 s and 720 s; the rehearsal raised the timeout 13x so Harbor never preempts the artifact's own 1 h maxDurationMs, and two trials ended at that limit
 
 ## Dataset
 
@@ -56,36 +56,36 @@ Smoke set: ecf5e7-asm-debug-mz-ne-header-fix, 1907c2-c-debug-legacy-buddy-fix, 5
 
 **No headline reward:** the job is not valid (ADR 0005 §7).
 
-For diagnosis only, the mean over the 10 recorded outcomes is 0.6, counting a trial without a verifier reward as 0.
+For diagnosis only, the mean over the 10 recorded outcomes is 0.9, counting a trial without a verifier reward as 0.
 
 ## Reward distribution
 
 | Recorded reward | Tasks |
 | --- | --- |
-| 0 | 4 |
-| 1 | 6 |
+| 0 | 1 |
+| 1 | 9 |
 
 ## Per-task results
 
 | Task | Reward | Source | Agent Result | Failure code | Model Turns | Tool Calls | Input tokens | Cache tokens | Output tokens | Duration (s) | Trial exception |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| factory-ai/16b04d-cobol-railroad-retirement-migration | 0 | recorded | no Agent Result | — | 41 | 58 | 1272728 | 1217536 | 182690 | 1500.0 | AgentTimeoutError |
-| factory-ai/1907c2-c-debug-legacy-buddy-fix | 1 | recorded | succeeded | — | 48 | 51 | 1041245 | 1002624 | 84628 | 810.5 | — |
-| factory-ai/2831b5-java7-rating-engine-repair | 0 | recorded | succeeded | — | 73 | 80 | 2875810 | 2802944 | 153520 | 1482.9 | — |
-| factory-ai/3af1fe-cobol-bond-settlement-reconcile | 1 | recorded | succeeded | — | 50 | 63 | 1462751 | 1409792 | 134612 | 1284.3 | — |
-| factory-ai/505812-java7-inventory-cost-fix | 1 | recorded | no Agent Result | — | 24 | 35 | 369611 | 338688 | 145052 | 1500.0 | AgentTimeoutError |
-| factory-ai/6fe1ab-java7-mtom-attachment-corruption-fix | 1 | recorded | succeeded | — | 94 | 105 | 3775573 | 3701632 | 95768 | 876.6 | — |
-| factory-ai/8e8098-cobol-railcar-settlement-fix | 0 | recorded | no Agent Result | — | 22 | 29 | 321004 | 296448 | 145765 | 1500.0 | AgentTimeoutError |
-| factory-ai/d1ddc1-fortran-to-cpp-lattice-qcd-migration | 1 | recorded | succeeded | — | 42 | 52 | 1382145 | 1333376 | 93089 | 900.9 | — |
-| factory-ai/ecf5e7-asm-debug-mz-ne-header-fix | 0 | recorded | no Agent Result | — | 29 | 28 | 705967 | 660992 | 193009 | 1500.0 | AgentTimeoutError |
-| factory-ai/fac397-cobol-batch-interest-migration | 1 | recorded | succeeded | — | 79 | 86 | 4251267 | 4155648 | 257591 | 2293.5 | — |
+| factory-ai/16b04d-cobol-railroad-retirement-migration | 1 | recorded | succeeded | — | 109 | 128 | 7826862 | 7705984 | 332185 | 3362.8 | — |
+| factory-ai/1907c2-c-debug-legacy-buddy-fix | 1 | recorded | succeeded | — | 57 | 66 | 1819374 | 1765120 | 155875 | 1749.5 | — |
+| factory-ai/2831b5-java7-rating-engine-repair | 1 | recorded | succeeded | — | 39 | 46 | 1537425 | 1469312 | 81231 | 728.9 | — |
+| factory-ai/3af1fe-cobol-bond-settlement-reconcile | 1 | recorded | succeeded | — | 83 | 96 | 2890823 | 2827136 | 228288 | 2281.8 | — |
+| factory-ai/505812-java7-inventory-cost-fix | 1 | recorded | succeeded | — | 86 | 96 | 3876852 | 3794304 | 158247 | 1636.4 | — |
+| factory-ai/6fe1ab-java7-mtom-attachment-corruption-fix | 1 | recorded | succeeded | — | 68 | 80 | 2571110 | 2503552 | 112862 | 1125.1 | — |
+| factory-ai/8e8098-cobol-railcar-settlement-fix | 1 | recorded | failed | LIMIT_EXCEEDED | 89 | 109 | 5775717 | 5668096 | 363338 | 3602.0 | — |
+| factory-ai/d1ddc1-fortran-to-cpp-lattice-qcd-migration | 1 | recorded | succeeded | — | 54 | 58 | 1912840 | 1854720 | 66704 | 678.3 | — |
+| factory-ai/ecf5e7-asm-debug-mz-ne-header-fix | 0 | recorded | failed | LIMIT_EXCEEDED | 20 | 26 | 362339 | 331008 | 335232 | 3601.9 | — |
+| factory-ai/fac397-cobol-batch-interest-migration | 1 | recorded | succeeded | — | 60 | 77 | 2529202 | 2454016 | 191293 | 2016.6 | — |
 
 ## Agent Result against reward
 
 | Agent Result | 0 | 1 |
 | --- | --- | --- |
-| no Agent Result | 3 | 1 |
-| succeeded | 1 | 5 |
+| failed | 1 | 1 |
+| succeeded | 0 | 8 |
 
 ## Rerun-eligible trials
 

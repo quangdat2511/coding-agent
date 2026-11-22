@@ -1,13 +1,13 @@
 {
   "schemaVersion": 1,
   "job": {
-    "name": "recorded-e48b12a-legacy",
-    "id": "ee230e02-dd9c-4398-a5b7-d5a7ccd812f1",
-    "startedAt": "2026-11-22T17:17:47.838256",
-    "finishedAt": "2026-11-22T17:56:39.537999",
-    "wallClockSeconds": 2331.699743
+    "name": "recorded-e48b12a-legacy-full",
+    "id": "82dcb261-a8a0-4cf6-9eb6-5564893be90f",
+    "startedAt": "2026-11-22T19:09:29.246127",
+    "finishedAt": "2026-11-22T20:10:38.855548",
+    "wallClockSeconds": 3669.609421
   },
-  "command": "harbor run -d factory-ai/legacy-bench@v0.1 -a coding_agent_terminalbench.agent:CodingAgent -m opencode/deepseek-v4.1-flash --ak artifact_dir=dist/artifact --ae OPENCODE_API_KEY='${OPENCODE_API_KEY}' -e modal -k 1 -n 10 -r 0 -o jobs --job-name recorded-e48b12a-legacy",
+  "command": "harbor run -d factory-ai/legacy-bench@v0.1 -a coding_agent_terminalbench.agent:CodingAgent -m opencode/deepseek-v4.1-flash --ak artifact_dir=dist/artifact --ae OPENCODE_API_KEY='${OPENCODE_API_KEY}' -e modal -k 1 -n 10 -r 0 -o jobs --job-name recorded-e48b12a-legacy-full",
   "pins": {
     "harbor": {
       "version": "0.23.0",
@@ -73,8 +73,8 @@
     "maxRetries": 0,
     "taskFilter": [],
     "jobsDir": "jobs",
-    "jobName": "recorded-e48b12a-legacy",
-    "agent_timeout_multiplier": 5.0
+    "jobName": "recorded-e48b12a-legacy-full",
+    "agent_timeout_multiplier": 13.0
   },
   "environmentVariableNames": ["OPENCODE_API_KEY"],
   "dataset": {
@@ -172,16 +172,16 @@
         "source": "evaluation/terminalbench/datasets/factory-ai/legacy-bench@v0.1.md:16",
         "shown": true,
         "problems": [
-          "trial 16b04d-cobol-railroad-retirement__XrmtSoz of factory-ai/16b04d-cobol-railroad-retirement-migration records verifier environment mode 'shared', not 'separate'",
-          "trial 1907c2-c-debug-legacy-buddy-fix__hUcWktx of factory-ai/1907c2-c-debug-legacy-buddy-fix records verifier environment mode 'shared', not 'separate'",
-          "trial 2831b5-java7-rating-engine-repai__adQFWxJ of factory-ai/2831b5-java7-rating-engine-repair records verifier environment mode 'shared', not 'separate'",
-          "trial 3af1fe-cobol-bond-settlement-rec__VCA83Wo of factory-ai/3af1fe-cobol-bond-settlement-reconcile records verifier environment mode 'shared', not 'separate'",
-          "trial 505812-java7-inventory-cost-fix__VsYG5qx of factory-ai/505812-java7-inventory-cost-fix records verifier environment mode 'shared', not 'separate'",
-          "trial 6fe1ab-java7-mtom-attachment-cor__6gWSKq7 of factory-ai/6fe1ab-java7-mtom-attachment-corruption-fix records verifier environment mode 'shared', not 'separate'",
-          "trial 8e8098-cobol-railcar-settlement__eWXWbkA of factory-ai/8e8098-cobol-railcar-settlement-fix records verifier environment mode 'shared', not 'separate'",
-          "trial d1ddc1-fortran-to-cpp-lattice-qc__LgpoXs8 of factory-ai/d1ddc1-fortran-to-cpp-lattice-qcd-migration records verifier environment mode 'shared', not 'separate'",
-          "trial ecf5e7-asm-debug-mz-ne-header-fi__yQaWSnB of factory-ai/ecf5e7-asm-debug-mz-ne-header-fix records verifier environment mode 'shared', not 'separate'",
-          "trial fac397-cobol-batch-interest-migr__qVhRheQ of factory-ai/fac397-cobol-batch-interest-migration records verifier environment mode 'shared', not 'separate'"
+          "trial 16b04d-cobol-railroad-retirement__w5xLjC4 of factory-ai/16b04d-cobol-railroad-retirement-migration records verifier environment mode 'shared', not 'separate'",
+          "trial 1907c2-c-debug-legacy-buddy-fix__sVidqXY of factory-ai/1907c2-c-debug-legacy-buddy-fix records verifier environment mode 'shared', not 'separate'",
+          "trial 2831b5-java7-rating-engine-repai__FsRng5J of factory-ai/2831b5-java7-rating-engine-repair records verifier environment mode 'shared', not 'separate'",
+          "trial 3af1fe-cobol-bond-settlement-rec__5gfdpaj of factory-ai/3af1fe-cobol-bond-settlement-reconcile records verifier environment mode 'shared', not 'separate'",
+          "trial 505812-java7-inventory-cost-fix__QL5vvPk of factory-ai/505812-java7-inventory-cost-fix records verifier environment mode 'shared', not 'separate'",
+          "trial 6fe1ab-java7-mtom-attachment-cor__v7Dr5TS of factory-ai/6fe1ab-java7-mtom-attachment-corruption-fix records verifier environment mode 'shared', not 'separate'",
+          "trial 8e8098-cobol-railcar-settlement__coNgMiW of factory-ai/8e8098-cobol-railcar-settlement-fix records verifier environment mode 'shared', not 'separate'",
+          "trial d1ddc1-fortran-to-cpp-lattice-qc__C2WNrD7 of factory-ai/d1ddc1-fortran-to-cpp-lattice-qcd-migration records verifier environment mode 'shared', not 'separate'",
+          "trial ecf5e7-asm-debug-mz-ne-header-fi__i9rzK9C of factory-ai/ecf5e7-asm-debug-mz-ne-header-fix records verifier environment mode 'shared', not 'separate'",
+          "trial fac397-cobol-batch-interest-migr__xeuE6kd of factory-ai/fac397-cobol-batch-interest-migration records verifier environment mode 'shared', not 'separate'"
         ]
       },
       {
@@ -360,11 +360,11 @@
     },
     {
       "check": "timeout-override",
-      "reason": "the dataset caps the agent at 300 s and 720 s, below the terminalbench profile; the rehearsal raised the agent timeout 5x so the tasks could finish"
+      "reason": "the dataset caps the agent at 300 s and 720 s; the rehearsal raised the timeout 13x so Harbor never preempts the artifact's own 1 h maxDurationMs, and two trials ended at that limit"
     }
   ],
   "secretScan": {
-    "roots": ["jobs/recorded-e48b12a-legacy"],
+    "roots": ["jobs/recorded-e48b12a-legacy-full"],
     "patterns": {
       "credentialVariables": ["OPENCODE_API_KEY"],
       "prefixes": ["sk-ant-", "sk-or-", "sk-proj-", "xai-", "AIza", "oc_sk_"],
@@ -378,9 +378,9 @@
   "archive": {
     "parts": [
       {
-        "file": "recorded-e48b12a-legacy.tar.zst.part-aa",
-        "bytes": 676234,
-        "sha256": "e5831550f475ec349d60fa23ffbee84a08ae207c337b558e37b87eff565d7968"
+        "file": "recorded-e48b12a-legacy-full.tar.zst.part-aa",
+        "bytes": 884553,
+        "sha256": "07509c5aad12ddba18d568faf79ea93f5537f5d039a4b3312402905a10044fb1"
       }
     ],
     "assetLimitBytes": 2147483648,
