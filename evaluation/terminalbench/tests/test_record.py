@@ -523,12 +523,20 @@ class RecordTestCase(unittest.TestCase):
         uv_lock: Path | None = None,
         output_dir: Path | None = None,
         artifact_dir: Path | None = None,
-        isolation_record: Path | None = None,
+        isolation_record: Path | None | object = DEFAULT,
+        waive_isolation: str | None = None,
     ) -> tuple[int, str, str]:
+        if waive_isolation is not None:
+            isolation_args = ["--waive-isolation", waive_isolation]
+        elif isolation_record is DEFAULT:
+            isolation_args = ["--isolation-record", str(self.isolation_path)]
+        elif isolation_record is None:
+            isolation_args = []
+        else:
+            isolation_args = ["--isolation-record", str(isolation_record)]
         argv = [
             str(self.recorded),
-            "--isolation-record",
-            str(isolation_record or self.isolation_path),
+            *isolation_args,
             "--smoke-job",
             str(self.smoke),
             "--oracle-record",
@@ -885,6 +893,92 @@ class IsolationRecordTest(RecordTestCase):
         self.assertEqual(code, 2)
         self.assertIn("absent.json", stderr)
         self.assertFalse((self.output / "manifest.json").exists())
+
+
+class HarborAgentShapeTest(RecordTestCase):
+    """Harbor 0.23.0 writes -a into agents[0].name; both shapes name the same adapter."""
+
+    def adapter(self) -> dict[str, Any]:
+        return {
+            "name": ADAPTER_IMPORT_PATH,
+            "model_name": MODEL_NAME,
+            "env": {KEY_VARIABLE: record_module.provider_env_template(KEY_VARIABLE)},
+            "kwargs": {"artifact_dir": "dist/artifact"},
+        }
+
+    def test_a_job_that_names_the_adapter_is_recorded(self) -> None:
+        agent = self.adapter()
+        self.write_recorded(agents=[agent])
+        self.write_smoke(agents=[agent])
+        self.write_rerun(agents=[agent])
+
+        code, _, stderr = self.run_main()
+
+        self.assertEqual(code, 0, stderr)
+        self.assertTrue((self.output / "manifest.json").is_file())
+
+    def test_both_fields_naming_the_adapter_are_refused(self) -> None:
+        agent = self.adapter() | {"import_path": ADAPTER_IMPORT_PATH}
+        self.write_recorded(agents=[agent])
+        self.write_smoke(agents=[agent])
+        self.write_rerun(agents=[agent])
+
+        code, _, stderr = self.run_main()
+
+        self.assertEqual(code, 1)
+        self.assertIn("both", stderr)
+
+
+class IsolationWaiverTest(RecordTestCase):
+    """A record may waive §7's isolation precondition, and then says so (CDA-96)."""
+
+    def test_a_backend_the_record_does_not_clear_is_recorded_with_a_waiver(self) -> None:
+        self.write_isolation_record(backends=("docker",))
+        self.write_standard_jobs()
+
+        code, stdout, stderr = self.run_main(
+            waive_isolation="the dataset has no task whose agent user is not root"
+        )
+
+        self.assertEqual(code, 0, stderr)
+        manifest = self.manifest()
+        self.assertEqual(
+            manifest["waivers"],
+            [
+                {
+                    "check": "credential-isolation",
+                    "reason": "the dataset has no task whose agent user is not root",
+                }
+            ],
+        )
+        self.assertIn("## Waivers", self.report())
+        self.assertIn("does not count under §9 criterion 5", self.report())
+        self.assertIn("Waived credential isolation", stdout)
+
+    def test_without_the_waiver_the_job_is_refused(self) -> None:
+        self.write_isolation_record(backends=("docker",))
+        self.write_standard_jobs()
+
+        code, _, stderr = self.run_main()
+
+        self.assertEqual(code, 1)
+        self.assertIn("no passing run on modal", stderr)
+
+    def test_a_waiver_without_an_isolation_record_writes_an_empty_section(self) -> None:
+        self.write_standard_jobs()
+
+        code, _, stderr = self.run_main(waive_isolation="a rehearsal on a local backend")
+
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(self.manifest()["credentialIsolation"], {})
+
+    def test_no_isolation_input_at_all_is_a_usage_error(self) -> None:
+        self.write_standard_jobs()
+
+        code, _, stderr = self.run_main(isolation_record=None)
+
+        self.assertEqual(code, 2)
+        self.assertIn("--isolation-record", stderr)
 
 
 class MeanTest(unittest.TestCase):

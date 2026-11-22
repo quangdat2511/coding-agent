@@ -1,0 +1,47 @@
+{
+  "schemaVersion": 1,
+  "job": {
+    "name": "oracle-e48b12a-hello",
+    "id": "4eea4fed-277e-482a-8379-48a9fc628250",
+    "startedAt": "2026-11-22T16:46:43.283784",
+    "finishedAt": "2026-11-22T16:47:52.275592",
+    "wallClockSeconds": 68.991808
+  },
+  "command": "harbor run -d harbor/hello-world@1 -a oracle -e modal -k 1 -n 1 -r 0 -o jobs --job-name oracle-e48b12a-hello",
+  "harbor": {
+    "version": "0.23.0",
+    "gitCommitHash": null
+  },
+  "modalSdk": {
+    "version": "1.6.4",
+    "source": "uv.lock"
+  },
+  "flags": {
+    "agent": "oracle",
+    "environment": "modal",
+    "nAttempts": 1,
+    "nConcurrentTrials": 1,
+    "maxRetries": 0
+  },
+  "environmentVariableNames": [],
+  "dataset": {
+    "identifier": "harbor/hello-world@1",
+    "contentHash": "sha256:d10e96e201d6816b22553504e06e7de0153a26381e808d11404cbca530b9d388",
+    "contentHashResolvedBy": "Harbor's package registry, the lookup that `harbor run -d` makes",
+    "sourceRepository": "https://github.com/laude-institute/harbor",
+    "releaseTag": "v0.23.0",
+    "releaseCommit": "1e5c5c6db929a10a140d05e606882c671ae20729",
+    "releaseCommitResolvedBy": "git ls-remote --tags https://github.com/laude-institute/harbor refs/tags/v0.23.0 refs/tags/v0.23.0^{}",
+    "taskCount": 1
+  },
+  "tasks": [
+    {
+      "name": "hello-world/hello-world",
+      "trial": "hello-world__xQHHRFk",
+      "digest": "sha256:38d7a077f07fbee8efc78db5dec9a72f82e727510ad1dcfeac0b55fa845256b7",
+      "reward": 1.0,
+      "exceptionType": null
+    }
+  ],
+  "harnessFlakyTasks": []
+}

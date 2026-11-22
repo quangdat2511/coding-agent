@@ -642,6 +642,13 @@ parts (ADR 0005 §8). `--credential NAME` adds a variable to the scan when the j
 the record cannot derive from its configuration. Commit `manifest.json` and `report.md` under the
 job's directory; CDA-97 publishes the archive parts and commits that record for the MVP's job.
 
+`--waive-isolation REASON` records a job whose backend the Isolation Record does not clear, for
+example a dataset whose only task runs the agent as root, so that no non-root run exists to record.
+The record keeps the isolation runs it has, `manifest.json` carries a `waivers` entry naming the
+requirement and the reason, and `report.md` has a `## Waivers` section stating that the job does
+not count under ADR 0005 §9 criterion 5. Use it for a rehearsal of the tooling, not for the MVP's
+recorded job; a record that waives the precondition is not a valid job record.
+
 The command refuses, and writes nothing, when:
 
 - `config.json` is not the recorded-job command of ADR 0005 §7: another agent or import path,
@@ -660,7 +667,8 @@ The command refuses, and writes nothing, when:
 - the oracle record describes another dataset pin, or names a harness-flaky task that the job did
   not run;
 - the Isolation Record does not clear every backend that the jobs ran on (see Isolation Record), and
-  the manifest then holds the record as `credentialIsolation`;
+  the manifest then holds the record as `credentialIsolation`, unless `--waive-isolation` states
+  why the record waives that requirement;
 - the dataset record's release tag does not resolve to the commit it names, or its smoke set and
   its declared MCP-server and skills tasks are not in the job's resolved task list;
 - there is no archive part, two parts share a file name, any part is 2 GiB or larger, or there

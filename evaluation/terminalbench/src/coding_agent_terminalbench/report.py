@@ -111,6 +111,21 @@ def validity_section(data: RecordData) -> list[str]:
     return lines
 
 
+def waivers_section(data: RecordData) -> list[str]:
+    """The protocol requirements this record waives, and why (ADR 0005 §7 and §9)."""
+    if data.isolation_waiver is None:
+        return []
+    return [
+        "## Waivers",
+        "",
+        "This record waives a requirement of ADR 0005 §7, so it does not count under §9 "
+        "criterion 5 and is not the MVP's recorded job:",
+        "",
+        f"- **Credential isolation**: {data.isolation_waiver}",
+        "",
+    ]
+
+
 def dataset_section_report(data: RecordData) -> list[str]:
     dataset = data.dataset
     lines = [
@@ -358,6 +373,7 @@ def build_report(data: RecordData) -> str:
         "",
     ]
     lines.extend(validity_section(data))
+    lines.extend(waivers_section(data))
     lines.extend(dataset_section_report(data))
     lines.extend(result_section(data))
     lines.extend(distribution_section(data))

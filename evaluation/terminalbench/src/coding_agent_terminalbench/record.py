@@ -23,6 +23,10 @@ retry, or a literal credential), whose trials did not run the planned tasks, who
 the one the build hashed, or whose rerun job or smoke job does not belong to the recorded job. It
 writes nothing when it refuses, like oracle_job.py.
 
+`--waive-isolation REASON` records a job whose backend the Isolation Record does not clear. The
+manifest names the waived requirement and the reason, and the report states that the record does
+not count under ADR 0005 §9 criterion 5. It is for a rehearsal, not for the MVP's recorded job.
+
 harbor_job.py reads Harbor 0.23.0's job files and Coding Agent's run files as JSON, like
 oracle_job.py, and report.py renders report.md from the data computed here. Its tests write a job
 directory by hand.
@@ -118,7 +122,7 @@ MINIMUM_PYTHON = "3.12"
 ALLOWED_JOB_FIELDS = frozenset(
     {"job_name", "jobs_dir", "n_concurrent_trials", "environment", "agents", "datasets"}
 )
-ALLOWED_AGENT_FIELDS = frozenset({"import_path", "model_name", "env", "kwargs"})
+ALLOWED_AGENT_FIELDS = frozenset({"name", "import_path", "model_name", "env", "kwargs"})
 ALLOWED_ENVIRONMENT_FIELDS = frozenset({"type"})
 ALLOWED_DATASET_FIELDS = frozenset({"name", "ref"})
 ALLOWED_RUN_DATASET_FIELDS = ALLOWED_DATASET_FIELDS | {"task_names"}
@@ -149,6 +153,11 @@ def unexpected_fields(
     return problems
 
 
+def agent_adapter(agent: Mapping[str, Any]) -> Any:
+    """The adapter a job's agent names, in the field that Harbor or the older shape writes it."""
+    return agent.get("import_path", agent.get("name"))
+
+
 def agent_problems(job: HarborJob) -> list[str]:
     """The problems of a job's agent section, which ADR 0005 §7 passes as -a, -m, --ak and --ae."""
     agents = job.agents
@@ -156,15 +165,16 @@ def agent_problems(job: HarborJob) -> list[str]:
         return [f"the job must run exactly one agent ({ADAPTER_IMPORT_PATH})"]
     agent = agents[0]
     problems = unexpected_fields("agents[0]", agent, ALLOWED_AGENT_FIELDS)
-    if agent.get("import_path") != ADAPTER_IMPORT_PATH:
+    # Harbor 0.23.0 writes the -a value into `name`; an older shape writes the same value into
+    # `import_path`. Exactly one of them must name the adapter.
+    if agent.get("import_path") is not None and agent.get("name") is not None:
+        problems.append(
+            "config.json names the adapter by both agents[0].name and agents[0].import_path"
+        )
+    elif agent_adapter(agent) != ADAPTER_IMPORT_PATH:
         problems.append(
             f"the job must run the adapter at {ADAPTER_IMPORT_PATH} (-a {ADAPTER_IMPORT_PATH}), "
-            f"found import_path {agent.get('import_path')!r}"
-        )
-    if agent.get("name") is not None:
-        problems.append(
-            f"the job must select the adapter by import path, not by name; found name "
-            f"{agent.get('name')!r}"
+            f"found {agent_adapter(agent)!r}"
         )
     model_name = agent.get("model_name")
     if not isinstance(model_name, str) or model_name == "":
@@ -335,8 +345,9 @@ def related_job_problems(recorded: HarborJob, job: HarborJob, label: str) -> lis
     problems = []
     if job.dataset_pin != recorded.dataset_pin:
         problems.append(f"{label} must run the same dataset as the recorded job")
+    if agent_adapter(job.agent) != agent_adapter(recorded.agent):
+        problems.append(f"{label} must use the recorded job's adapter")
     for field, value in (
-        ("import_path", recorded.agent.get("import_path")),
         ("model_name", recorded.agent.get("model_name")),
         ("env", recorded.agent.get("env")),
         ("kwargs", recorded.agent.get("kwargs")),
@@ -668,6 +679,8 @@ class RecordInputs:
     archive_parts: tuple[ArchivePart, ...]
     # The committed Isolation Record of the artifact (ADR 0005 §7 item 3).
     isolation_record: Mapping[str, Any]
+    # Why the record waives §7's credential isolation precondition, or None when it does not.
+    isolation_waiver: str | None = None
 
 
 def isolation_record_problems(inputs: RecordInputs) -> list[str]:
@@ -709,7 +722,7 @@ def protocol_problems(inputs: RecordInputs) -> list[str]:
             ]
         ),
         *archive_problems(inputs.archive_parts),
-        *isolation_record_problems(inputs),
+        *([] if inputs.isolation_waiver else isolation_record_problems(inputs)),
     ]
     if rerun is not None:
         problems.extend(
@@ -839,6 +852,7 @@ class RecordData:
     release_commit: str
     archive_parts: tuple[ArchivePart, ...]
     isolation_record: Mapping[str, Any]
+    isolation_waiver: str | None
     scan: ScanReport
     outcomes: tuple[TaskOutcome, ...]
     properties: tuple[Mapping[str, Any], ...]
@@ -947,6 +961,7 @@ def build_record_data(inputs: RecordInputs, scan: ScanReport) -> RecordData:
         release_commit=inputs.release_commit,
         archive_parts=inputs.archive_parts,
         isolation_record=inputs.isolation_record,
+        isolation_waiver=inputs.isolation_waiver,
         scan=scan,
         outcomes=outcomes,
         properties=properties,
@@ -999,7 +1014,7 @@ def run_command(job: HarborJob, dataset: DatasetRecord) -> str:
 def job_flags(job: HarborJob) -> Mapping[str, Any]:
     """Every Harbor flag that the recorded job used, with the defaults the command relies on."""
     return {
-        "agent": job.agent.get("import_path"),
+        "agent": agent_adapter(job.agent),
         "agentKwargs": dict(job.agent_kwargs),
         "model": job.model_name,
         "environment": job.environment_type,
@@ -1093,6 +1108,11 @@ def manifest_data(data: RecordData) -> Mapping[str, Any]:
             "rerun": data.rerun.name if data.rerun is not None else None,
         },
         "credentialIsolation": dict(data.isolation_record),
+        "waivers": (
+            [{"check": "credential-isolation", "reason": data.isolation_waiver}]
+            if data.isolation_waiver is not None
+            else []
+        ),
         "secretScan": scan_record(data.scan),
         "archive": {
             "parts": [
@@ -1188,6 +1208,11 @@ def summary_text(data: RecordData) -> str:
             f"harness-flaky: {len(data.oracle.harness_flaky)}",
             f"Secret scan: {data.scan.files_scanned} files, "
             f"{'passed' if data.scan.passed else 'failed'}",
+            *(
+                [f"Waived credential isolation: {data.isolation_waiver}"]
+                if data.isolation_waiver is not None
+                else []
+            ),
         ]
     )
 
@@ -1235,8 +1260,15 @@ def main(
     parser.add_argument(
         "--isolation-record",
         type=Path,
-        required=True,
         help="the artifact's committed Isolation Record: the passing isolation test runs",
+    )
+    parser.add_argument(
+        "--waive-isolation",
+        metavar="REASON",
+        help=(
+            "record a job whose backend the Isolation Record does not clear, stating why; the "
+            "record names the waiver and does not count under ADR 0005 §9 criterion 5"
+        ),
     )
     parser.add_argument(
         "--archive-part",
@@ -1260,6 +1292,13 @@ def main(
     parser.add_argument("--output-dir", type=Path, required=True, help="where to write the record")
     parser.add_argument("--uv-lock", type=Path, default=DEFAULT_UV_LOCK, help="the uv.lock file")
     args = parser.parse_args(argv)
+    if args.isolation_record is None and args.waive_isolation is None:
+        print(
+            "error: --isolation-record is required unless --waive-isolation states why this "
+            "record does not show ADR 0005 §7's credential isolation precondition",
+            file=sys.stderr,
+        )
+        return 2
     host = dict(os.environ if environment is None else environment)
 
     try:
@@ -1267,7 +1306,11 @@ def main(
         artifact = load_manifest(args.artifact_dir)
         pins = read_locked_pins(args.uv_lock)
         oracle = read_oracle_record(args.oracle_record)
-        isolation_record = json.loads(args.isolation_record.read_text(encoding="utf-8"))
+        isolation_record = (
+            json.loads(args.isolation_record.read_text(encoding="utf-8"))
+            if args.isolation_record is not None
+            else {}
+        )
     except (DatasetRecordError, ArtifactManifestError, OracleJobError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
@@ -1310,6 +1353,7 @@ def main(
         release_commit=release_commit,
         archive_parts=archive_parts,
         isolation_record=isolation_record,
+        isolation_waiver=args.waive_isolation,
     )
     try:
         problems = protocol_problems(inputs)
