@@ -68,6 +68,9 @@ from coding_agent_terminalbench.harbor_job import (
     read_oracle_record,
     trial_completed,
 )
+from coding_agent_terminalbench.isolation_record import (
+    evidence_problems as isolation_evidence_problems,
+)
 from coding_agent_terminalbench.isolation_record import record_problems as isolation_problems
 from coding_agent_terminalbench.launch import KEY_VARIABLES, PROVIDER_KEY_VARIABLES, split_model
 from coding_agent_terminalbench.manifest import (
@@ -126,16 +129,9 @@ ALLOWED_JOB_FIELDS = frozenset(
     {"job_name", "jobs_dir", "n_concurrent_trials", "environment", "agents", "datasets"}
 )
 ALLOWED_AGENT_FIELDS = frozenset({"name", "import_path", "model_name", "env", "kwargs"})
-# The top-level fields that a timeout override adds to config.json. ADR 0005 §7 forbids a
-# recorded job to set one; --waive-timeout-override admits them and names the waiver.
-TIMEOUT_OVERRIDE_FIELDS = frozenset({
-    "timeout_multiplier",
-    "agent_timeout_multiplier",
-    "verifier_timeout_multiplier",
-    "agent_setup_timeout_multiplier",
-    "environment_build_timeout_multiplier",
-})
-# The `harbor run` flag of each of those fields, so the manifest's command and its flags agree.
+# The top-level config fields that a timeout override adds, and the `harbor run` flag of each, so
+# the check, the rerun comparison, the manifest's flags and its command share one source. ADR 0005
+# §7 forbids a recorded job to set one; --waive-timeout-override admits them and names the waiver.
 TIMEOUT_OVERRIDE_FLAGS: Mapping[str, str] = {
     "timeout_multiplier": "--timeout-multiplier",
     "agent_timeout_multiplier": "--agent-timeout-multiplier",
@@ -143,6 +139,7 @@ TIMEOUT_OVERRIDE_FLAGS: Mapping[str, str] = {
     "agent_setup_timeout_multiplier": "--agent-setup-timeout-multiplier",
     "environment_build_timeout_multiplier": "--environment-build-timeout-multiplier",
 }
+TIMEOUT_OVERRIDE_FIELDS = frozenset(TIMEOUT_OVERRIDE_FLAGS)
 ALLOWED_ENVIRONMENT_FIELDS = frozenset({"type"})
 ALLOWED_DATASET_FIELDS = frozenset({"name", "ref"})
 ALLOWED_RUN_DATASET_FIELDS = ALLOWED_DATASET_FIELDS | {"task_names"}
@@ -292,6 +289,15 @@ def job_config_problems(
     """Compares a job's config.json with the command of ADR 0005 §7 that writes it."""
     config = job.config
     problems = unexpected_fields("", config, allowed | allowed_extra)
+    # A waiver admits the timeout fields; it does not admit a value the command cannot replay.
+    for field in sorted(TIMEOUT_OVERRIDE_FIELDS):
+        if field in config:
+            value = config[field]
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or value <= 0:
+                problems.append(
+                    f"config.json has a timeout override `{field}` that is not a positive "
+                    f"number, found {value!r}"
+                )
     name = config.get("job_name")
     if not isinstance(name, str) or name == "":
         problems.append("config.json has no job name (--job-name)")
@@ -724,7 +730,15 @@ class RecordInputs:
 
 
 def isolation_record_problems(inputs: RecordInputs) -> list[str]:
-    """Why the isolation test does not clear the backends that these jobs ran on."""
+    """Why the isolation test does not clear the backends that these jobs ran on.
+
+    A waiver lifts the clearance condition, not the evidence: a record that is still attached has
+    to be a record of this artifact (review of PR #118).
+    """
+    if inputs.isolation_waiver is not None:
+        if not inputs.isolation_record:
+            return []
+        return isolation_evidence_problems(dict(inputs.isolation_record), inputs.artifact)
     jobs = [inputs.recorded, inputs.smoke, *([inputs.rerun] if inputs.rerun is not None else [])]
     backends = sorted({str(job.environment_type) for job in jobs})
     return isolation_problems(
@@ -767,7 +781,7 @@ def protocol_problems(inputs: RecordInputs) -> list[str]:
             ]
         ),
         *archive_problems(inputs.archive_parts),
-        *([] if inputs.isolation_waiver else isolation_record_problems(inputs)),
+        *isolation_record_problems(inputs),
     ]
     if rerun is not None:
         problems.extend(

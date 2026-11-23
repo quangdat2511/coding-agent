@@ -964,6 +964,37 @@ class IsolationWaiverTest(RecordTestCase):
         self.assertEqual(code, 1)
         self.assertIn("no passing run on modal", stderr)
 
+    def test_a_waiver_does_not_attach_a_record_of_another_artifact(self) -> None:
+        self.write_standard_jobs()
+        document = json.loads(self.isolation_path.read_text(encoding="utf-8"))
+        document["codingAgent"]["commit"] = "d" * 40
+        self.isolation_path.write_text(json.dumps(document), encoding="utf-8")
+
+        code, _, stderr = self.run_main(
+            waive_isolation="a rehearsal",
+            extra=("--isolation-record", str(self.isolation_path)),
+        )
+
+        self.assertEqual(code, 1)
+        self.assertIn("but the artifact is", stderr)
+        self.assertFalse((self.output / "manifest.json").exists())
+
+    def test_a_waiver_does_not_attach_a_run_of_another_executable(self) -> None:
+        self.write_standard_jobs()
+        document = json.loads(self.isolation_path.read_text(encoding="utf-8"))
+        for entry in document["runs"]:
+            entry["result"]["executableSha256"] = "e" * 64
+        self.isolation_path.write_text(json.dumps(document), encoding="utf-8")
+
+        code, _, stderr = self.run_main(
+            waive_isolation="a rehearsal",
+            extra=("--isolation-record", str(self.isolation_path)),
+        )
+
+        self.assertEqual(code, 1)
+        self.assertIn("executable of another artifact", stderr)
+        self.assertFalse((self.output / "manifest.json").exists())
+
     def test_a_waiver_without_an_isolation_record_writes_an_empty_section(self) -> None:
         self.write_standard_jobs()
 
@@ -1036,6 +1067,18 @@ class TimeoutOverrideWaiverTest(RecordTestCase):
 
         self.assertEqual(code, 1)
         self.assertIn("agent_timeout_multiplier", stderr)
+
+    def test_a_timeout_override_that_is_not_a_number_is_refused(self) -> None:
+        self.write_standard_jobs()
+        self.write_recorded(extra_config={"agent_timeout_multiplier": None})
+
+        code, _, stderr = self.run_main(
+            extra=("--waive-timeout-override", "a rehearsal"),
+        )
+
+        self.assertEqual(code, 1)
+        self.assertIn("not a positive number", stderr)
+        self.assertFalse((self.output / "manifest.json").exists())
 
     def test_a_waived_timeout_override_is_recorded(self) -> None:
         self.write_standard_jobs()

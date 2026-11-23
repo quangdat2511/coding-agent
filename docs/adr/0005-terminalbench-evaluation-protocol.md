@@ -273,6 +273,21 @@ cannot recover it. The Record still lacks a passing Modal non-root run, so the r
 remains blocked under §7. ADR 0001 §7 records the results, and
 [CDA-96](https://datn-fit-hcmus.atlassian.net/browse/CDA-96) tracks the remaining evidence.
 
+On 2026-11-23, [CDA-96](https://datn-fit-hcmus.atlassian.net/browse/CDA-96) amended this record:
+the team accepted a smaller dataset for CDA-96's recorded job instead of the default pin. Running
+the default pin's 66 tasks on Modal is too expensive for the project's budget, so CDA-96 records a
+job on `factory-ai/legacy-bench@v0.1` (10 tasks) and accepts the trade-off that its result is not
+comparable with a TerminalBench result and is never pooled with one. That job is not valid under
+§7: the dataset has no separate verifier environment (ADR 0008 §3 property 3), its per-task agent
+timeout is below the profile's 3,600,000 ms (property 4), and the rehearsal raised the timeout 13×.
+Its record names the three waived requirements — credential isolation, dataset release tag and
+timeout override — in `manifest.json` and `report.md`, and publishes no headline reward. The
+artifact's Isolation Record names both the CDA-29 and the CDA-121 amendments, and Modal is cleared
+for a root agent on these datasets only; the non-root run on `fp8-rmsnorm-gemm` remains future
+work. CDA-97 scans, archives and publishes this record. The runs that started before §9 criterion 4
+held do not count, and their credential is subject to revocation under §9; the ticket tracks the
+owner's confirmation.
+
 ### 2. Coding Agent artifact
 
 A recorded job evaluates a standalone executable, not a source checkout. It is built from a commit

@@ -167,6 +167,67 @@ def _record_problems(
     return problems
 
 
+def evidence_problems(record: dict[str, Any] | None, artifact: ArtifactManifest) -> list[str]:
+    """Why `record` is not evidence about `artifact`, whatever runs it holds (ADR 0005 §7 item 3).
+
+    This is the part of `record_problems` that does not depend on the backend or on the root and
+    non-root runs, so a record that waives the clearance condition still has to be a record of the
+    artifact the job ran: its format, its commit and version, and an executable of that artifact.
+    """
+    if record is None:
+        return ["there is no Isolation Record"]
+    if not isinstance(record, dict):
+        return ["the Isolation Record is not a JSON object"]
+    problems: list[str] = []
+    agent = record.get("codingAgent")
+    if not isinstance(agent, dict):
+        return ["the Isolation Record is malformed: it needs a codingAgent object"]
+    version, commit = agent.get("version"), agent.get("commit")
+    if not isinstance(commit, str) or not isinstance(version, str):
+        return [
+            "the Isolation Record is malformed: it needs codingAgent.version and "
+            "codingAgent.commit"
+        ]
+    if commit != artifact.commit:
+        problems.append(
+            f"the Isolation Record is for Coding Agent {commit}, but the artifact is "
+            f"{artifact.commit}"
+        )
+    if version != artifact.version:
+        problems.append(
+            f"the Isolation Record is for Coding Agent {version}, but the artifact is "
+            f"{artifact.version}"
+        )
+    held = {executable.sha256 for executable in artifact.executables}
+    runs = record.get("runs")
+    if not isinstance(runs, list) or not runs:
+        return problems + ["the Isolation Record is malformed: it needs at least one run"]
+    for index, entry in enumerate(runs):
+        result = entry.get("result") if isinstance(entry, dict) else None
+        if not isinstance(result, dict):
+            problems.append(
+                f"run {index} of the Isolation Record is malformed: it has no result object"
+            )
+            continue
+        if not isinstance(result.get("backend"), str) or not isinstance(
+            result.get("dataset"), str
+        ):
+            problems.append(
+                f"run {index} of the Isolation Record is malformed: it needs a backend and a "
+                "dataset"
+            )
+        user = result.get("user")
+        if not isinstance(user, dict) or not isinstance(user.get("uid"), int):
+            problems.append(f"run {index} of the Isolation Record is malformed: it needs user.uid")
+        sha256 = result.get("executableSha256")
+        if sha256 not in held:
+            problems.append(
+                f"run {index} of the Isolation Record used an executable of another artifact: "
+                f"{sha256!r}"
+            )
+    return problems
+
+
 def _read_json(path: Path) -> Any:
     try:
         return json.loads(path.read_text(encoding="utf-8"))
