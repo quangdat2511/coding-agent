@@ -661,6 +661,27 @@ it; publication is still treated as permanent. GitHub requires each release asse
 ([GitHub documentation](https://docs.github.com/en/repositories/releasing-projects-on-github/about-releases)),
 so an archive of 2 GiB or more is split into parts.
 
+On 2026-11-23, [CDA-97](https://datn-fit-hcmus.atlassian.net/browse/CDA-97) published the archives
+of the two CDA-96 rehearsal records. The GitHub Release
+[`terminalbench-e48b12a`](https://github.com/quangdat2511/coding-agent/releases/tag/terminalbench-e48b12a)
+is tagged at the evaluated commit `e48b12ad…`, not at the commit that holds the records, and it
+holds one asset per record: a single zstd tar part under the 2 GiB asset limit, whose SHA-256 is the
+value the record's `manifest.json` holds. The scan of this section ran over both uncompressed job
+directories before the upload: 130 files, no credential value, no `[REDACTED]` occurrence and no
+key-prefix match, so step 4 of this section had no object and the scanner reported a pass. The
+`oc_sk_` prefix of step 3 matches the key the jobs used, but that comparison was made after the
+upload and after the key was rotated, so the precondition that step 3 makes before publication was
+not met. CDA-97 records AC1 as not met for that reason, while both manifests keep
+`secretScan.result: "passed"` as the scanner's own result. §9 criterion 5 separately revokes the
+credential of every smoke, recorded and rerun job that started before criterion 4 held; criterion 4
+never held for a non-root agent on Modal, so its owner rotated `OPENCODE_API_KEY` on 2026-11-23,
+revoking the old value, and CDA-97 records the confirmation. §9 criterion 5 remains unmet: each
+record is invalid under §7 for the reasons its report states — the ADR 0008 §3 dataset properties
+that its dataset fails, and the waivers CDA-96 records (credential isolation, and for legacy-bench
+the dataset release tag and the timeout override) — and §9 criterion 4 still lacks a passing
+non-root run on Modal. The repository was public when the release was published, contrary to this
+section's assumption that it is private, so the archives are visible to anyone.
+
 Agent logs can contain credentials, because a Tool Result records command output. Harbor's scrub
 does not make them safe. At the end of each trial it replaces values passed through `--ae` or
 verifier settings with `[REDACTED]`, but only in files that look like UTF-8 text
