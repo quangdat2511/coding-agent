@@ -37,6 +37,7 @@ directory by hand.
 
 import argparse
 import json
+import math
 import os
 import platform
 import sys
@@ -293,10 +294,15 @@ def job_config_problems(
     for field in sorted(TIMEOUT_OVERRIDE_FIELDS):
         if field in config:
             value = config[field]
-            if isinstance(value, bool) or not isinstance(value, (int, float)) or value <= 0:
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not math.isfinite(value)
+                or value <= 0
+            ):
                 problems.append(
-                    f"config.json has a timeout override `{field}` that is not a positive "
-                    f"number, found {value!r}"
+                    f"config.json has a timeout override `{field}` that is not a finite "
+                    f"positive number, found {value!r}"
                 )
     name = config.get("job_name")
     if not isinstance(name, str) or name == "":
@@ -719,8 +725,9 @@ class RecordInputs:
     pins: LockedPins
     release_commit: str
     archive_parts: tuple[ArchivePart, ...]
-    # The committed Isolation Record of the artifact (ADR 0005 §7 item 3).
-    isolation_record: Mapping[str, Any]
+    # The committed Isolation Record of the artifact (ADR 0005 §7 item 3), or None when no file
+    # was given, which a waiver allows and a malformed `{}` file does not.
+    isolation_record: Mapping[str, Any] | None
     # Why the record waives §7's credential isolation precondition, or None when it does not.
     isolation_waiver: str | None = None
     # Why the record waives resolving the dataset's release tag, or None when it does not.
@@ -732,13 +739,16 @@ class RecordInputs:
 def isolation_record_problems(inputs: RecordInputs) -> list[str]:
     """Why the isolation test does not clear the backends that these jobs ran on.
 
-    A waiver lifts the clearance condition, not the evidence: a record that is still attached has
-    to be a record of this artifact (review of PR #118).
+    A waiver lifts the clearance condition, not the evidence (review of PR #118): a file that was
+    given, even `{}`, still has to be a record of this artifact, and only a missing file is
+    accepted.
     """
     if inputs.isolation_waiver is not None:
-        if not inputs.isolation_record:
+        if inputs.isolation_record is None:
             return []
         return isolation_evidence_problems(dict(inputs.isolation_record), inputs.artifact)
+    if inputs.isolation_record is None:
+        return ["there is no Isolation Record"]
     jobs = [inputs.recorded, inputs.smoke, *([inputs.rerun] if inputs.rerun is not None else [])]
     backends = sorted({str(job.environment_type) for job in jobs})
     return isolation_problems(
@@ -1030,7 +1040,7 @@ def build_record_data(inputs: RecordInputs, scan: ScanReport) -> RecordData:
         pins=inputs.pins,
         release_commit=inputs.release_commit,
         archive_parts=inputs.archive_parts,
-        isolation_record=inputs.isolation_record,
+        isolation_record=inputs.isolation_record or {},
         isolation_waiver=inputs.isolation_waiver,
         release_tag_waiver=inputs.release_tag_waiver,
         timeout_waiver=inputs.timeout_waiver,
@@ -1441,7 +1451,7 @@ def main(
         isolation_record = (
             json.loads(args.isolation_record.read_text(encoding="utf-8"))
             if args.isolation_record is not None
-            else {}
+            else None
         )
     except (DatasetRecordError, ArtifactManifestError, OracleJobError) as exc:
         print(f"error: {exc}", file=sys.stderr)
@@ -1449,7 +1459,7 @@ def main(
     except (OSError, json.JSONDecodeError) as exc:
         print(f"error: cannot read the Isolation Record {args.isolation_record}: {exc}", file=sys.stderr)
         return 2
-    if not isinstance(isolation_record, dict):
+    if isolation_record is not None and not isinstance(isolation_record, dict):
         print(
             f"error: the Isolation Record {args.isolation_record} is not a JSON object",
             file=sys.stderr,
