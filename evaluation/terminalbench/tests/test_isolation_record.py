@@ -20,6 +20,9 @@ OTHER_COMMIT = "0000000000000000000000000000000000000001"
 SHA_X64 = "a" * 64
 SHA_ARM64 = "b" * 64
 DATASET = "example/dataset@1.0.0"
+AMENDMENTS = (
+    "ADR 0001 §7, the CDA-29 amendment of 2026-09-13 and the CDA-121 amendment of 2026-11-22"
+)
 
 
 def result(
@@ -56,10 +59,19 @@ class RecordTestCase(unittest.TestCase):
         code = main(argv, today=lambda: day, stdout=stdout, stderr=stderr)
         return code, stdout.getvalue(), stderr.getvalue()
 
-    def add(self, document: dict[str, Any], day: date = date(2026, 11, 22)) -> tuple[int, str, str]:
+    def add(
+        self,
+        document: dict[str, Any],
+        day: date = date(2026, 11, 22),
+        *,
+        amendments: tuple[str, ...] = (AMENDMENTS,),
+    ) -> tuple[int, str, str]:
         path = self.directory / f"result-{len(list(self.directory.iterdir()))}.json"
         path.write_text(json.dumps(document))
-        return self.run_cli(["add", "--record", str(self.record), "--result", str(path)], day)
+        argv = ["add", "--record", str(self.record), "--result", str(path)]
+        for amendment in amendments:
+            argv.extend(["--adr-amendment", amendment])
+        return self.run_cli(argv, day)
 
     def runs(self) -> list[dict[str, Any]]:
         return json.loads(self.record.read_text())["runs"]
@@ -67,22 +79,75 @@ class RecordTestCase(unittest.TestCase):
 
 class AddTest(RecordTestCase):
     def test_a_passing_run_is_written_with_the_date_of_the_day_it_was_added(self) -> None:
-        code, _, _ = self.add(result(), date(2026, 11, 22))
+        code, _, stderr = self.add(result(), date(2026, 11, 22))
 
-        self.assertEqual(code, 0)
+        self.assertEqual(code, 0, stderr)
         document = json.loads(self.record.read_text())
         self.assertEqual(document["schemaVersion"], 1)
         self.assertEqual(document["codingAgent"], {"version": "0.0.1", "commit": COMMIT})
         self.assertEqual(document["runs"], [{"date": "2026-11-22", "result": result()}])
 
-    def test_a_new_record_does_not_assume_cda_121_for_any_artifact(self) -> None:
-        self.add(result())
+    def test_a_new_record_requires_explicit_amendments(self) -> None:
+        code, _, stderr = self.add(result(), amendments=())
 
+        self.assertEqual(code, 2, stderr)
+        self.assertIn("--adr-amendment is required", stderr)
+        self.assertFalse(self.record.exists())
+
+    def test_a_new_record_keeps_its_explicit_amendments_when_more_runs_are_added(self) -> None:
+        code, _, stderr = self.add(result())
+        self.assertEqual(code, 0, stderr)
+        code, _, stderr = self.add(result(backend="docker"), amendments=())
+        self.assertEqual(code, 0, stderr)
         document = json.loads(self.record.read_text())
-        self.assertEqual(
-            document["adrAmendment"],
-            "ADR 0001 §7, the CDA-29 amendment of 2026-09-13",
-        )
+        self.assertEqual(document["adrAmendment"], AMENDMENTS)
+        self.assertEqual([run["result"]["backend"] for run in document["runs"]], ["modal", "docker"])
+
+    def test_a_matching_explicit_amendment_allows_another_run(self) -> None:
+        code, _, stderr = self.add(result())
+        self.assertEqual(code, 0, stderr)
+        code, _, stderr = self.add(result(backend="docker", uid=1000))
+
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(self.runs()[1]["result"]["backend"], "docker")
+
+    def test_amendments_are_trimmed_when_creating_and_comparing(self) -> None:
+        code, _, stderr = self.add(result(), amendments=(f"  {AMENDMENTS}  ",))
+
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(json.loads(self.record.read_text())["adrAmendment"], AMENDMENTS)
+        code, _, stderr = self.add(result(backend="docker"), amendments=(f"\t{AMENDMENTS} ",))
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(self.runs()[1]["result"]["backend"], "docker")
+
+    def test_blank_amendments_are_a_usage_error(self) -> None:
+        for amendment in ("", " \t "):
+            with self.subTest(amendment=amendment):
+                code, _, stderr = self.add(result(), amendments=(amendment,))
+                self.assertEqual(code, 2, stderr)
+                self.assertIn("--adr-amendment must not be blank", stderr)
+                self.assertFalse(self.record.exists())
+
+    def test_repeated_amendment_options_are_a_usage_error(self) -> None:
+        code, _, stderr = self.add(result(), amendments=(AMENDMENTS, AMENDMENTS))
+
+        self.assertEqual(code, 2, stderr)
+        self.assertIn("--adr-amendment may only be specified once", stderr)
+        self.assertFalse(self.record.exists())
+
+    def test_an_explicit_amendment_cannot_relabel_an_existing_record(self) -> None:
+        code, _, stderr = self.add(result())
+        self.assertEqual(code, 0, stderr)
+        original = self.record.read_bytes()
+        other_amendments = "ADR 0001 §7, the CDA-29 amendment of 2026-09-13"
+
+        code, _, stderr = self.add(result(backend="docker"), amendments=(other_amendments,))
+
+        self.assertEqual(code, 1, stderr)
+        self.assertIn("does not match the existing Isolation Record", stderr)
+        self.assertIn(repr(AMENDMENTS), stderr)
+        self.assertIn(repr(other_amendments), stderr)
+        self.assertEqual(self.record.read_bytes(), original)
 
     def test_a_failed_run_is_refused_and_nothing_is_written(self) -> None:
         code, _, stderr = self.add(result(passed=False))

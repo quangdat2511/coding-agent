@@ -449,8 +449,10 @@ line goes to standard error. `--output` writes the same JSON to a file.
   address that the server binds. Before the agent runs, the container opens one connection to
   the server. If it cannot, the test stops with exit 2 and says so, because a server that gets no
   Tool Result would otherwise look like an artifact that ignores `ANTHROPIC_BASE_URL`.
-- If `ptrace_scope` is 1 or more, the result has `MEM_NOT_DEMONSTRABLE` and the test exits 2.
-  Docker Desktop's kernel does not load Yama, so the test can pass there.
+- If `ptrace_scope` is 1 or more and the `proc-mem` control cannot find the disposable
+  credential, the result has `MEM_NOT_DEMONSTRABLE`. The test exits 2 when all failures are
+  inconclusive. A successful `proc-mem` control can pass even with `ptrace_scope=1`, as in the
+  Modal root run of the CDA-121 Isolation Record.
 - It installs nothing in the task container. A container without `bash`, `sha256sum` or GNU `dd`
   fails the test or stops it.
 
@@ -477,13 +479,20 @@ so the date lives in the record, not in the result.
 ```sh
 uv run --project evaluation/terminalbench --frozen python -m \
   coding_agent_terminalbench.isolation_record add \
-  --record evaluation/terminalbench/isolation/<artifact commit>.json --result isolation-result.json
+  --record "evaluation/terminalbench/isolation/<artifact commit>.json" \
+  --result isolation-result.json \
+  --adr-amendment "ADR 0001 §7, the CDA-29 amendment of 2026-09-13 and the CDA-121 amendment of 2026-11-22"
 ```
 
-`add` refuses a run that did not pass and a run of another commit, and changes nothing then. A
-failed run is not recorded here: write its cause in the Jira ticket of the run, and start no job
-that carries a credential (ADR 0005 §7). Run the test once for each backend of the jobs, as a root
-agent user and as a non-root one, on the dataset of the jobs.
+`add` requires `--adr-amendment` when creating a Record. Supply the amendments the artifact
+implements. The option can be omitted when appending a run. If supplied then, it must match the
+existing Record. Leading and trailing whitespace is ignored.
+
+`add` exits 2 for a missing amendment on a new Record, a blank value, or a repeated option. It
+exits 1 for a run that did not pass, a run of another commit, or an amendment that differs from the
+existing Record. A refusal leaves the Record unchanged. For a failed run, record the cause on its
+Jira ticket and keep jobs carrying a credential blocked (ADR 0005 §7). Run the test once for each
+backend of the jobs, as a root agent user and as a non-root one, on the dataset of the jobs.
 
 `check` asks whether a job may start. It exits 0 when, for every `--backend`, the record holds a
 passing run as root and one as a non-root user, of an executable that the artifact's
