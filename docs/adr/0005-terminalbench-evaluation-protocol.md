@@ -257,18 +257,21 @@ is not the record of the recorded job: a changed artifact needs a new record (§
 On 2026-11-22, [CDA-121](https://datn-fit-hcmus.atlassian.net/browse/CDA-121) amended this record:
 ADR 0001, whose §7 now has a CDA-121 amendment, prescribes the answer to the Modal failure of
 CDA-94: under `"auto-approve"` Coding Agent removes `CAP_SYS_PTRACE` before its first child and
-refuses to run if it remains. That is expected to make §7 item 2 hold on Modal for a root agent. An
-artifact built from a branch commit passed the isolation test on Modal as root; that run is evidence
-of the change and not an Isolation Record, and ADR 0001 §7 (CDA-121 amendment) reports it. No
-Isolation Record of an artifact with the change exists yet, so the precondition is not shown to hold
-until one does. The Record of such an artifact names both the CDA-29 and the CDA-121 amendments.
-The PR that adds this Record also lets the adapter take those amendments explicitly when creating a
-Record, so the CDA-29 default still applies to earlier artifacts. The CDA-121 Record comes from an
-artifact built at a commit of `main`, with a passing run on Modal as root and on Docker
-as root and as a non-root agent user. Modal stays uncleared until the Record also holds the
-non-root run on `fp8-rmsnorm-gemm`, which needs a payment method for its H100, so this amendment
-does not lift the block on the recorded job. The Evidence section below holds what the prototype
-showed.
+refuses to run if it remains. The
+[Isolation Record for `e48b12a`](../../evaluation/terminalbench/isolation/e48b12ad1758b2016d78c04d76f591cedfdf0098.json)
+records the passing runs of that `main` artifact on 2026-11-22 for
+`terminal-bench/terminal-bench@4.1.0`: Docker as root and non-root, and Modal as root.
+When creating an Isolation Record, the adapter requires an explicit declaration of the ADR
+amendments implemented by its artifact. This Record names both CDA-29 and CDA-121. Later runs
+preserve the declaration in the existing Record.
+
+The Modal non-root run on `fp8-rmsnorm-gemm` reached UID 1000 and was inconclusive
+(`MEM_NOT_DEMONSTRABLE`). Yama `ptrace_scope=1` blocked the `proc-mem` control. Under the
+current test, the control must show that the path can recover the disposable credential from the
+unhardened process, and the probe against the evaluated artifact must show that the same path
+cannot recover it. The Record still lacks a passing Modal non-root run, so the recorded job
+remains blocked under §7. ADR 0001 §7 records the results, and
+[CDA-96](https://datn-fit-hcmus.atlassian.net/browse/CDA-96) tracks the remaining evidence.
 
 ### 2. Coding Agent artifact
 

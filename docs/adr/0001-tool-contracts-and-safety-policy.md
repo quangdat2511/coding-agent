@@ -376,12 +376,23 @@ control that only marks itself non-dumpable was read through `environ`, `mem` an
 the Coding Agent after the drop was denied all three. With the drop disabled in `cli.ts`, that test
 failed because the child read the process.
 
+On 2026-11-22, the compiled artifact built from `main` at `e48b12a` passed the isolation test
+on Modal as root (`music-harmony`), on Docker as root (`music-harmony`), and on Docker as
+UID 10001 (`rs-archive-clone`) for `terminal-bench/terminal-bench@4.1.0`. The
+[Isolation Record](../../evaluation/terminalbench/isolation/e48b12ad1758b2016d78c04d76f591cedfdf0098.json)
+holds the three passing runs.
+
+The same artifact ran on Modal as UID 1000 on `fp8-rmsnorm-gemm`. No probe found the
+disposable credential, and the launcher that kept its shell was refused before any model request.
+The result was inconclusive (`MEM_NOT_DEMONSTRABLE`): with `ptrace_scope=1`, the
+`proc-mem` control could not find the disposable credential even on the unhardened process.
+The Record still needs a passing Modal non-root run under the evidence rule in ADR 0005 §7.
+
 **Not yet executed.**
 
-- The artifact built from the fixing commit has not run on Modal; ADR 0005 §7 item 3 and the
-  Isolation Record hold that run. It is also unverified that `CAP_SYS_PTRACE` is the only cause of
-  the `ancestors` leak that CDA-94 saw. The prototype's child walked up to the program that held the
-  key and found no other holder, which suggests that the leaking process was Coding Agent itself.
+- Whether `CAP_SYS_PTRACE` was the only cause of the `ancestors` leak in CDA-94. The prototype's
+  child walked up to the program that held the key and found no other holder, which suggests that
+  the leaking process was Coding Agent itself.
 - An ordinary user on a Linux host that keeps the default bounding set was tried only with Docker's
   `--cap-add=SYS_PTRACE`, which puts the capability in the bounding set; no bare-metal host was used.
 - musl: `capget` and `capset` were called through the glibc `libc.so.6` only. Whether musl exports
@@ -399,9 +410,6 @@ failed because the child read the process.
   measured; the isolation test does not measure it, and its `ancestors` probe ran with a launcher
   that had replaced itself with `exec`. Keeping the check before the drop does not depend on the
   answer.
-- The compiled artifact (`bun build --compile`, the form that Harbor runs) has run the isolation
-  test on Modal as root only, on `music-harmony`. It has not run on Docker, root or non-root, and
-  not on Modal as a non-root agent user.
 
 ### 8. Credential Isolation for Tool and Verification Processes
 
