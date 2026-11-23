@@ -620,7 +620,8 @@ review file as the command above (`--scan-review`).
 
 Run this from the repository root after the recorded job, the smoke job and any rerun job finished.
 The archive parts are created before the record is written, because the manifest holds their
-SHA-256 values (CDA-97 attaches them to the GitHub Release):
+SHA-256 values. CDA-97 attached them to the GitHub Release described under
+[Published archive](#published-archive):
 
 ```sh
 uv run --project evaluation/terminalbench --frozen python -m coding_agent_terminalbench.record \
@@ -640,7 +641,8 @@ uv run --project evaluation/terminalbench --frozen python -m coding_agent_termin
 each part must be under the 2 GiB that GitHub allows a release asset, and there may be at most 1,000
 parts (ADR 0005 §8). `--credential NAME` adds a variable to the scan when the job passed one that
 the record cannot derive from its configuration. Commit `manifest.json` and `report.md` under the
-job's directory; CDA-97 publishes the archive parts and commits that record for the MVP's job.
+job's directory; CDA-97 published the archive parts in the release described under
+[Published archive](#published-archive).
 
 `--waive-isolation REASON` records a job whose backend the Isolation Record does not clear, for
 example a dataset whose only task runs the agent as root, so that no non-root run exists to record.
@@ -698,3 +700,43 @@ trial without a reward counting as 0 as Harbor's mean counts it.
 
 The command writes both files through temporary files, so a failed write leaves no partial record.
 
+### Published archive
+
+ADR 0005 §8 attaches the archive of a recorded job to a GitHub Release of this repository, tagged at
+the evaluated commit. Both CDA-96 records come from the artifact built at
+`e48b12ad1758b2016d78c04d76f591cedfdf0098`, so they share one release. The release is
+[`terminalbench-e48b12a`][release], whose tag points at that evaluated commit rather than at the
+commit that holds the records:
+
+| Record | Dataset pin | Validity | Asset | Bytes | SHA-256 |
+| --- | --- | --- | --- | --- | --- |
+| `recorded-e48b12a-legacy-full` | `factory-ai/legacy-bench@v0.1` | not valid | `recorded-e48b12a-legacy-full.tar.zst.part-aa` | 884553 | `07509c5aad12ddba18d568faf79ea93f5537f5d039a4b3312402905a10044fb1` |
+| `recorded-e48b12a-hello-modal` | `harbor/hello-world@1` | not valid | `recorded-e48b12a-hello-modal.tar.zst.part-aa` | 10522 | `4d32bd04d3f6f6a9d5285d403abbadc2aef293579d70fcc377a3e4370798e4e9` |
+
+Each part is under the 2 GiB that GitHub allows a release asset, and each SHA-256 is the value the
+record's `manifest.json` holds under `archive.parts`.
+
+The scan ran over the two uncompressed job directories before the upload:
+
+```sh
+uv run --project evaluation/terminalbench --frozen python -m coding_agent_terminalbench.secret_scan \
+  jobs/recorded-e48b12a-legacy-full jobs/recorded-e48b12a-hello-modal \
+  --credential OPENCODE_API_KEY
+```
+
+It scanned 130 files and found no credential value, no `[REDACTED]` occurrence and no provider
+key-prefix match, so it had no match to review and ADR 0005 §8 step 4 had no object. ADR 0005 §9
+separately requires the credential of a job that started before criterion 4 held to be revoked;
+criterion 4 never held for a non-root agent on Modal, so `OPENCODE_API_KEY` still needs its owner
+to rotate it, and CDA-97 tracks that confirmation. Both records are rehearsals under ADR 0005 §7:
+neither report claims the default profile, and neither publishes a headline reward.
+
+To check a published asset against its record:
+
+```sh
+gh release download terminalbench-e48b12a --dir /tmp/terminalbench
+sha256sum /tmp/terminalbench/*.part-aa
+tar --zstd -xf /tmp/terminalbench/recorded-e48b12a-legacy-full.tar.zst.part-aa -C /tmp/terminalbench
+```
+
+[release]: https://github.com/quangdat2511/coding-agent/releases/tag/terminalbench-e48b12a
