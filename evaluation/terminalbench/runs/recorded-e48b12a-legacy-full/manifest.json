@@ -7,7 +7,7 @@
     "finishedAt": "2026-11-22T20:10:38.855548",
     "wallClockSeconds": 3669.609421
   },
-  "command": "harbor run -d factory-ai/legacy-bench@v0.1 -a coding_agent_terminalbench.agent:CodingAgent -m opencode/deepseek-v4.1-flash --ak artifact_dir=dist/artifact --ae OPENCODE_API_KEY='${OPENCODE_API_KEY}' -e modal -k 1 -n 10 -r 0 -o jobs --job-name recorded-e48b12a-legacy-full",
+  "command": "harbor run -d factory-ai/legacy-bench@v0.1 -a coding_agent_terminalbench.agent:CodingAgent -m opencode/deepseek-v4.1-flash --ak artifact_dir=dist/artifact --ae OPENCODE_API_KEY='${OPENCODE_API_KEY}' -e modal -k 1 -n 10 -r 0 --agent-timeout-multiplier 13.0 -o jobs --job-name recorded-e48b12a-legacy-full",
   "pins": {
     "harbor": {
       "version": "0.23.0",

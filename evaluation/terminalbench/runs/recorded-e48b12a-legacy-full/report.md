@@ -24,6 +24,9 @@ The report has no pass or fail threshold and no Pi column: ADR 0005 §8 makes th
 - trial ecf5e7-asm-debug-mz-ne-header-fi__i9rzK9C of factory-ai/ecf5e7-asm-debug-mz-ne-header-fix records verifier environment mode 'shared', not 'separate'
 - trial fac397-cobol-batch-interest-migr__xeuE6kd of factory-ai/fac397-cobol-batch-interest-migration records verifier environment mode 'shared', not 'separate'
 - the dataset declares a 300 s per-task agent timeout, below the profile's 3600 s maxDurationMs
+- the record waives credential isolation: every task of factory-ai/legacy-bench@v0.1 runs the agent as root on Modal, so no non-root isolation run exists for this dataset; the passing root run on Modal is recorded
+- the record waives the dataset release tag: https://github.com/Factory-AI/legacy-bench publishes no Git tag; the record names the main commit the published tasks were built from
+- the record waives the timeout override: the dataset caps the agent at 300 s and 720 s; the rehearsal raised the timeout 13x so Harbor never preempts the artifact's own 1 h maxDurationMs, and two trials ended at that limit
 
 ## Waivers
 

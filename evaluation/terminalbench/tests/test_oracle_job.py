@@ -753,6 +753,15 @@ class MainTest(OracleJobTestCase):
             "recorded: the source repository publishes no tag",
         )
 
+    def test_an_empty_waiver_reason_exits_2(self) -> None:
+        write_job(self.job_dir, TRIALS)
+
+        code, _, stderr = self.run_main(**{"--waive-release-tag": "  "})
+
+        self.assertEqual(code, 2)
+        self.assertIn("--waive-release-tag", stderr)
+        self.assertFalse((self.root / "runs" / "oracle-example" / "oracle.json").exists())
+
     def test_a_job_with_problems_writes_nothing(self) -> None:
         write_job(self.job_dir, TRIALS, config=job_config(n_attempts=2))
         code, _, stderr = self.run_main()

@@ -135,6 +135,14 @@ TIMEOUT_OVERRIDE_FIELDS = frozenset({
     "agent_setup_timeout_multiplier",
     "environment_build_timeout_multiplier",
 })
+# The `harbor run` flag of each of those fields, so the manifest's command and its flags agree.
+TIMEOUT_OVERRIDE_FLAGS: Mapping[str, str] = {
+    "timeout_multiplier": "--timeout-multiplier",
+    "agent_timeout_multiplier": "--agent-timeout-multiplier",
+    "verifier_timeout_multiplier": "--verifier-timeout-multiplier",
+    "agent_setup_timeout_multiplier": "--agent-setup-timeout-multiplier",
+    "environment_build_timeout_multiplier": "--environment-build-timeout-multiplier",
+}
 ALLOWED_ENVIRONMENT_FIELDS = frozenset({"type"})
 ALLOWED_DATASET_FIELDS = frozenset({"name", "ref"})
 ALLOWED_RUN_DATASET_FIELDS = ALLOWED_DATASET_FIELDS | {"task_names"}
@@ -374,8 +382,16 @@ def related_job_problems(recorded: HarborJob, job: HarborJob, label: str) -> lis
     ):
         if job.agent.get(field) != value:
             problems.append(f"{label} must use the recorded job's agents[0].{field}")
-    if label == "the rerun job" and job.environment_type != recorded.environment_type:
-        problems.append(f"{label} must use the recorded job's environment")
+    if label == "the rerun job":
+        if job.environment_type != recorded.environment_type:
+            problems.append(f"{label} must use the recorded job's environment")
+        # A rerun repeats the recorded job's flags, so a timeout override must be the same.
+        for field in sorted(TIMEOUT_OVERRIDE_FIELDS):
+            if job.config.get(field) != recorded.config.get(field):
+                problems.append(
+                    f"{label} must use the recorded job's {field}: "
+                    f"{job.config.get(field)!r} is not {recorded.config.get(field)!r}"
+                )
     return problems
 
 
@@ -978,6 +994,15 @@ def build_record_data(inputs: RecordInputs, scan: ScanReport) -> RecordData:
             "the rerun job ran tasks that the recorded job did not select for a rerun: "
             + ", ".join(unexpected)
         )
+    # A waiver is a protocol requirement the record does not show, so the record is not valid and
+    # publishes no headline reward even when every trial has a reward (review of PR #118).
+    for check, reason in (
+        ("credential isolation", inputs.isolation_waiver),
+        ("the dataset release tag", inputs.release_tag_waiver),
+        ("the timeout override", inputs.timeout_waiver),
+    ):
+        if reason is not None:
+            problems.append(f"the record waives {check}: {reason}")
     mean = harbor_mean(
         [outcome.recorded.reward if outcome.recorded is not None else None for outcome in outcomes]
     )
@@ -1043,6 +1068,9 @@ def run_command(job: HarborJob, dataset: DatasetRecord) -> str:
         f"-n {job.n_concurrent_trials}",
         f"-r {job.max_retries}",
     ]
+    for field in sorted(TIMEOUT_OVERRIDE_FIELDS):
+        if field in job.config:
+            parts.append(f"{TIMEOUT_OVERRIDE_FLAGS[field]} {job.config[field]}")
     for task in job.task_filter():
         parts.append(f"-i {task}")
     parts += [f"-o {job.jobs_dir}", f"--job-name {job.name}"]
@@ -1374,6 +1402,14 @@ def main(
     parser.add_argument("--output-dir", type=Path, required=True, help="where to write the record")
     parser.add_argument("--uv-lock", type=Path, default=DEFAULT_UV_LOCK, help="the uv.lock file")
     args = parser.parse_args(argv)
+    for flag, reason in (
+        ("--waive-isolation", args.waive_isolation),
+        ("--waive-release-tag", args.waive_release_tag),
+        ("--waive-timeout-override", args.waive_timeout_override),
+    ):
+        if reason is not None and reason.strip() == "":
+            print(f"error: {flag} needs a non-empty reason", file=sys.stderr)
+            return 2
     if args.isolation_record is None and args.waive_isolation is None:
         print(
             "error: --isolation-record is required unless --waive-isolation states why this "

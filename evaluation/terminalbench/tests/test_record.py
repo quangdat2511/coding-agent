@@ -1040,6 +1040,7 @@ class TimeoutOverrideWaiverTest(RecordTestCase):
     def test_a_waived_timeout_override_is_recorded(self) -> None:
         self.write_standard_jobs()
         self.write_recorded(extra_config={"agent_timeout_multiplier": 5.0})
+        self.write_rerun(extra_config={"agent_timeout_multiplier": 5.0})
         reason = "the dataset caps the agent at 300 s, which the model needs more of"
 
         code, _, stderr = self.run_main(
@@ -1051,6 +1052,91 @@ class TimeoutOverrideWaiverTest(RecordTestCase):
         self.assertIn({"check": "timeout-override", "reason": reason}, manifest["waivers"])
         self.assertEqual(manifest["flags"]["agent_timeout_multiplier"], 5.0)
         self.assertIn("**Timeout override**", self.report())
+
+
+class WaiverInvalidityTest(RecordTestCase):
+    """Any waiver makes the record invalid, even when the job and dataset are otherwise sound."""
+
+    def test_each_waiver_makes_the_record_invalid(self) -> None:
+        flags = {
+            "isolation": "--waive-isolation",
+            "release tag": "--waive-release-tag",
+            "timeout": "--waive-timeout-override",
+        }
+        for label, flag in flags.items():
+            with self.subTest(waiver=label):
+                self.write_standard_jobs()
+
+                code, stdout, stderr = self.run_main(extra=(flag, f"reason for {label}"))
+
+                self.assertEqual(code, 0, stderr)
+                self.assertIn("valid: no", stdout)
+                report = self.report()
+                self.assertIn("**Not valid.**", report)
+                self.assertIn("No headline reward", report)
+                self.assertIn(f"the record waives ", report)
+
+
+class RerunTimeoutTest(RecordTestCase):
+    """A rerun job repeats the recorded job's timeout flags (review of PR #118)."""
+
+    def test_a_rerun_job_with_another_timeout_multiplier_is_refused(self) -> None:
+        self.write_standard_jobs()
+        self.write_recorded(extra_config={"agent_timeout_multiplier": 5.0})
+        self.write_rerun(extra_config={"agent_timeout_multiplier": 13.0})
+
+        code, _, stderr = self.run_main(
+            extra=("--waive-timeout-override", "a rehearsal"),
+        )
+
+        self.assertEqual(code, 1)
+        self.assertIn("agent_timeout_multiplier", stderr)
+        self.assertFalse((self.output / "manifest.json").exists())
+
+    def test_a_rerun_job_with_the_same_timeout_multiplier_is_accepted(self) -> None:
+        self.write_standard_jobs()
+        self.write_recorded(extra_config={"agent_timeout_multiplier": 5.0})
+        self.write_rerun(extra_config={"agent_timeout_multiplier": 5.0})
+
+        code, _, stderr = self.run_main(
+            extra=("--waive-timeout-override", "a rehearsal"),
+        )
+
+        self.assertEqual(code, 0, stderr)
+
+
+class WaiverReasonTest(RecordTestCase):
+    """A waiver without a reason is refused before anything is read (review of PR #118)."""
+
+    def test_an_empty_waiver_reason_is_a_usage_error(self) -> None:
+        self.write_standard_jobs()
+        for flag in (
+            "--waive-isolation",
+            "--waive-release-tag",
+            "--waive-timeout-override",
+        ):
+            with self.subTest(flag=flag):
+                code, _, stderr = self.run_main(extra=(flag, "   "))
+
+                self.assertEqual(code, 2)
+                self.assertIn(flag, stderr)
+                self.assertFalse((self.output / "manifest.json").exists())
+
+
+class TimeoutCommandTest(RecordTestCase):
+    """manifest.json's command carries the timeout flags that its flags record."""
+
+    def test_the_command_records_the_timeout_flag(self) -> None:
+        self.write_standard_jobs()
+        self.write_recorded(extra_config={"agent_timeout_multiplier": 5.0})
+        self.write_rerun(extra_config={"agent_timeout_multiplier": 5.0})
+
+        code, _, stderr = self.run_main(
+            extra=("--waive-timeout-override", "a rehearsal"),
+        )
+
+        self.assertEqual(code, 0, stderr)
+        self.assertIn("--agent-timeout-multiplier 5.0", self.manifest()["command"])
 
 
 class MeanTest(unittest.TestCase):

@@ -16,6 +16,7 @@ The report has no pass or fail threshold and no Pi column: ADR 0005 §8 makes th
 - evaluation/terminalbench/datasets/harbor/hello-world@1.md names 1 smoke tasks, but ADR 0008 §3 requires at least 3
 - trial hello-world__yR9PmL7 of hello-world/hello-world records verifier environment mode 'shared', not 'separate'
 - the dataset declares a 120 s per-task agent timeout, below the profile's 3600 s maxDurationMs
+- the record waives credential isolation: harbor/hello-world@1 runs its single task as root on Modal, so no non-root isolation run exists for this dataset; the passing root run on Modal is recorded
 
 ## Waivers
 

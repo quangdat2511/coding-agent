@@ -702,6 +702,9 @@ def main(
     )
     parser.add_argument("--uv-lock", type=Path, default=DEFAULT_UV_LOCK, help="the uv.lock file")
     args = parser.parse_args(argv)
+    if args.waive_release_tag is not None and args.waive_release_tag.strip() == "":
+        print("error: --waive-release-tag needs a non-empty reason", file=sys.stderr)
+        return 2
     name, _, version = args.dataset.rpartition("@")
     if "/" not in name or version == "":
         # Harbor resolves `org/name@version` through its package registry; ADR 0008 §1 requires
