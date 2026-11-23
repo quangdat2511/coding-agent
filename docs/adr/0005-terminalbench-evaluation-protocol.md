@@ -670,13 +670,13 @@ value the record's `manifest.json` holds. The scan of this section ran over both
 directories before the upload: 130 files, no credential value, no `[REDACTED]` occurrence and no
 key-prefix match, so step 4 of this section had no object. §9 criterion 5 separately revokes the
 credential of every smoke, recorded and rerun job that started before criterion 4 held; criterion 4
-never held for a non-root agent on Modal, so `OPENCODE_API_KEY` still needs its owner to rotate it,
-and CDA-97 tracks that confirmation. §9 criterion 5 remains unmet: each record is invalid under §7
-for the reasons its report states — the ADR 0008 §3 dataset properties that its dataset fails, and
-the waivers CDA-96 records (credential isolation, and for legacy-bench the dataset release tag and
-the timeout override) — and §9 criterion 4 still lacks a passing non-root run on Modal. The
-repository was public when the release was published, contrary to this section's assumption that it
-is private, so the archives are visible to anyone.
+never held for a non-root agent on Modal, so its owner rotated `OPENCODE_API_KEY` on 2026-11-23,
+revoking the old value, and CDA-97 records the confirmation. §9 criterion 5 remains unmet: each
+record is invalid under §7 for the reasons its report states — the ADR 0008 §3 dataset properties
+that its dataset fails, and the waivers CDA-96 records (credential isolation, and for legacy-bench
+the dataset release tag and the timeout override) — and §9 criterion 4 still lacks a passing
+non-root run on Modal. The repository was public when the release was published, contrary to this
+section's assumption that it is private, so the archives are visible to anyone.
 
 Agent logs can contain credentials, because a Tool Result records command output. Harbor's scrub
 does not make them safe. At the end of each trial it replaces values passed through `--ae` or

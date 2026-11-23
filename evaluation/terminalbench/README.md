@@ -641,8 +641,7 @@ uv run --project evaluation/terminalbench --frozen python -m coding_agent_termin
 each part must be under the 2 GiB that GitHub allows a release asset, and there may be at most 1,000
 parts (ADR 0005 §8). `--credential NAME` adds a variable to the scan when the job passed one that
 the record cannot derive from its configuration. Commit `manifest.json` and `report.md` under the
-job's directory; CDA-97 published the archive parts in the release described under
-[Published archive](#published-archive).
+job's directory.
 
 `--waive-isolation REASON` records a job whose backend the Isolation Record does not clear, for
 example a dataset whose only task runs the agent as root, so that no non-root run exists to record.
@@ -725,11 +724,13 @@ uv run --project evaluation/terminalbench --frozen python -m coding_agent_termin
 ```
 
 It scanned 130 files and found no credential value, no `[REDACTED]` occurrence and no provider
-key-prefix match, so it had no match to review and ADR 0005 §8 step 4 had no object. ADR 0005 §9
-separately requires the credential of a job that started before criterion 4 held to be revoked;
-criterion 4 never held for a non-root agent on Modal, so `OPENCODE_API_KEY` still needs its owner
-to rotate it, and CDA-97 tracks that confirmation. Both records are rehearsals under ADR 0005 §7:
-neither report claims the default profile, and neither publishes a headline reward.
+key-prefix match, so it had no match to review and ADR 0005 §8 step 4 had no object. The `oc_sk_`
+prefix of step 3 was confirmed against the key the jobs used, so a truncated OpenCode key would
+still carry a prefix the scan searches for. ADR 0005 §9 separately requires the credential of a job
+that started before criterion 4 held to be revoked; criterion 4 never held for a non-root agent on
+Modal, so its owner rotated `OPENCODE_API_KEY` on 2026-11-23 and the old value is revoked. Both
+records are rehearsals under ADR 0005 §7: neither report claims the default profile, and neither
+publishes a headline reward.
 
 To check a published asset against its record:
 
