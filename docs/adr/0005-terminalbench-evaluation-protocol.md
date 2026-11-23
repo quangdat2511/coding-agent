@@ -282,11 +282,11 @@ comparable with a TerminalBench result and is never pooled with one. That job is
 timeout is below the profile's 3,600,000 ms (property 4), and the rehearsal raised the timeout 13×.
 Its record names the three waived requirements — credential isolation, dataset release tag and
 timeout override — in `manifest.json` and `report.md`, and publishes no headline reward. The
-artifact's Isolation Record names both the CDA-29 and the CDA-121 amendments, and Modal is cleared
-for a root agent on these datasets only; the non-root run on `fp8-rmsnorm-gemm` remains future
-work. CDA-97 scans, archives and publishes this record. The runs that started before §9 criterion 4
-held do not count, and their credential is subject to revocation under §9; the ticket tracks the
-owner's confirmation.
+artifact's Isolation Record names both the CDA-29 and the CDA-121 amendments and holds a passing
+root run on Modal for each of these datasets; the non-root requirement is waived in each record,
+and the non-root run on `fp8-rmsnorm-gemm` remains future work. CDA-97 scans, archives and
+publishes this record. The runs that started before §9 criterion 4 held do not count, and their
+credential is subject to revocation under §9; the ticket tracks the owner's confirmation.
 
 ### 2. Coding Agent artifact
 
