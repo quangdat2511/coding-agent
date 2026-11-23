@@ -725,12 +725,12 @@ uv run --project evaluation/terminalbench --frozen python -m coding_agent_termin
 
 It scanned 130 files and found no credential value, no `[REDACTED]` occurrence and no provider
 key-prefix match, so it had no match to review and ADR 0005 §8 step 4 had no object. The `oc_sk_`
-prefix of step 3 was confirmed against the key the jobs used, so a truncated OpenCode key would
-still carry a prefix the scan searches for. ADR 0005 §9 separately requires the credential of a job
-that started before criterion 4 held to be revoked; criterion 4 never held for a non-root agent on
-Modal, so its owner rotated `OPENCODE_API_KEY` on 2026-11-23 and the old value is revoked. Both
-records are rehearsals under ADR 0005 §7: neither report claims the default profile, and neither
-publishes a headline reward.
+prefix of step 3 matches the key the jobs used, but that comparison was made after the upload and
+after the key was rotated, so it did not precede the publication that step 3 asks for. ADR 0005 §9
+separately requires the credential of a job that started before criterion 4 held to be revoked;
+criterion 4 never held for a non-root agent on Modal, so its owner rotated `OPENCODE_API_KEY` on
+2026-11-23 and the old value is revoked. Both records are rehearsals under ADR 0005 §7: neither
+report claims the default profile, and neither publishes a headline reward.
 
 To check a published asset against its record:
 
