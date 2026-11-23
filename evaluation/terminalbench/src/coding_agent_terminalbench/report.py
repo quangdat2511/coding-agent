@@ -111,14 +111,57 @@ def validity_section(data: RecordData) -> list[str]:
     return lines
 
 
+def waivers_section(data: RecordData) -> list[str]:
+    """The protocol requirements this record waives, and why (ADR 0005 §7 and §9)."""
+    entries = [
+        *(
+            [f"- **Credential isolation**: {data.isolation_waiver}"]
+            if data.isolation_waiver is not None
+            else []
+        ),
+        *(
+            [f"- **Dataset release tag**: {data.release_tag_waiver}"]
+            if data.release_tag_waiver is not None
+            else []
+        ),
+        *(
+            [f"- **Timeout override**: {data.timeout_waiver}"]
+            if data.timeout_waiver is not None
+            else []
+        ),
+    ]
+    if not entries:
+        return []
+    return [
+        "## Waivers",
+        "",
+        "This record waives a requirement of ADR 0005 §7, so it does not count under §9 "
+        "criterion 5 and is not the MVP's recorded job:",
+        "",
+        *entries,
+        "",
+    ]
+
+
 def dataset_section_report(data: RecordData) -> list[str]:
     dataset = data.dataset
+    if data.release_tag_waiver is None:
+        pin = (
+            f"The job ran {dataset.identifier}, whose source repository is "
+            f"{dataset.source_repository} and whose {dataset.release_tag} tag the record says "
+            f"resolves to commit {data.release_commit}."
+        )
+    else:
+        pin = (
+            f"The job ran {dataset.identifier}, whose source repository is "
+            f"{dataset.source_repository} and whose record names commit {data.release_commit}. "
+            f"The record waives resolving that commit from a release tag: "
+            f"{data.release_tag_waiver}."
+        )
     lines = [
         "## Dataset",
         "",
-        f"The job ran {dataset.identifier}, whose source repository is "
-        f"{dataset.source_repository} and whose {dataset.release_tag} tag the record says resolves "
-        f"to commit {data.release_commit}.",
+        pin,
         "",
         f"N is {len(data.outcomes)}, the number of tasks in the job's resolved task list, not a "
         "constant: ADR 0008 makes the dataset a job parameter and derives every count from the "
@@ -358,6 +401,7 @@ def build_report(data: RecordData) -> str:
         "",
     ]
     lines.extend(validity_section(data))
+    lines.extend(waivers_section(data))
     lines.extend(dataset_section_report(data))
     lines.extend(result_section(data))
     lines.extend(distribution_section(data))

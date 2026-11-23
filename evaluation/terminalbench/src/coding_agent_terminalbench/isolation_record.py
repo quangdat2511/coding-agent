@@ -167,6 +167,111 @@ def _record_problems(
     return problems
 
 
+def evidence_problems(record: dict[str, Any] | None, artifact: ArtifactManifest) -> list[str]:
+    """Why `record` is not evidence about `artifact`, whatever runs it holds (ADR 0005 §7 item 3).
+
+    This is the part of `record_problems` that does not depend on the backend or on the root and
+    non-root runs, so a record that waives the clearance condition still has to be a record of the
+    artifact the job ran: its schema, its ADR amendment, its commit and version, and every run's
+    date, outcome and executable. A malformed file is refused here; only a missing file is
+    accepted with a waiver.
+    """
+    if record is None:
+        return ["there is no Isolation Record"]
+    if not isinstance(record, dict):
+        return ["the Isolation Record is not a JSON object"]
+    problems: list[str] = []
+    schema_version = record.get("schemaVersion")
+    # `type(...) is int` rather than `isinstance`, so `true` is not read as the version 1.
+    if type(schema_version) is not int or schema_version != SCHEMA_VERSION:
+        problems.append(
+            f"the Isolation Record has schemaVersion {schema_version!r}, not {SCHEMA_VERSION}"
+        )
+    amendment = record.get("adrAmendment")
+    if not isinstance(amendment, str) or amendment.strip() == "":
+        problems.append("the Isolation Record names no ADR amendment")
+    agent = record.get("codingAgent")
+    if not isinstance(agent, dict):
+        problems.append("the Isolation Record is malformed: it needs a codingAgent object")
+    else:
+        version, commit = agent.get("version"), agent.get("commit")
+        if not isinstance(commit, str) or not isinstance(version, str):
+            problems.append(
+                "the Isolation Record is malformed: it needs codingAgent.version and "
+                "codingAgent.commit"
+            )
+        else:
+            problems.extend(_artifact_problems("the Isolation Record", commit, version, artifact))
+    held = {executable.sha256 for executable in artifact.executables}
+    runs = record.get("runs")
+    if not isinstance(runs, list) or not runs:
+        return problems + ["the Isolation Record is malformed: it needs at least one run"]
+    for index, entry in enumerate(runs):
+        problems.extend(_run_problems(index, entry, artifact, held))
+    return problems
+
+
+def _artifact_problems(
+    label: str, commit: str, version: str, artifact: ArtifactManifest
+) -> list[str]:
+    """Why a commit and version name another artifact than this one."""
+    problems = []
+    if commit != artifact.commit:
+        problems.append(f"{label} is for Coding Agent {commit}, but the artifact is {artifact.commit}")
+    if version != artifact.version:
+        problems.append(f"{label} is for Coding Agent {version}, but the artifact is {artifact.version}")
+    return problems
+
+
+def _run_problems(
+    index: int,
+    entry: Any,
+    artifact: ArtifactManifest,
+    held: set[str],
+) -> list[str]:
+    """Why one run of the record is malformed or belongs to another artifact."""
+    label = f"run {index} of the Isolation Record"
+    if not isinstance(entry, dict):
+        return [f"{label} is malformed: it is not an object"]
+    problems: list[str] = []
+    date_text = entry.get("date")
+    if not isinstance(date_text, str) or date_text.strip() == "":
+        problems.append(f"{label} has no date")
+    else:
+        try:
+            # `add_run()` writes `date.isoformat()`, so a calendar date in that form is expected.
+            date.fromisoformat(date_text)
+        except ValueError:
+            problems.append(
+                f"{label} has a date that is not a calendar date: {date_text!r}"
+            )
+    result = entry.get("result")
+    if not isinstance(result, dict):
+        return problems + [f"{label} is malformed: it has no result object"]
+    agent = result.get("codingAgent")
+    if not isinstance(agent, dict):
+        problems.append(f"{label} has no result.codingAgent object")
+    else:
+        version, commit = agent.get("version"), agent.get("commit")
+        if not isinstance(commit, str) or not isinstance(version, str):
+            problems.append(f"{label} needs result.codingAgent.version and result.codingAgent.commit")
+        else:
+            problems.extend(_artifact_problems(label, commit, version, artifact))
+    if result.get("passed") is not True:
+        problems.append(f"{label} did not pass")
+    if not isinstance(result.get("backend"), str) or not isinstance(result.get("dataset"), str):
+        problems.append(f"{label} needs a backend and a dataset")
+    user = result.get("user")
+    if not isinstance(user, dict) or not isinstance(user.get("uid"), int):
+        problems.append(f"{label} needs user.uid")
+    sha256 = result.get("executableSha256")
+    if not isinstance(sha256, str):
+        problems.append(f"{label} has an executableSha256 that is not a string: {sha256!r}")
+    elif sha256 not in held:
+        problems.append(f"{label} used an executable of another artifact: {sha256!r}")
+    return problems
+
+
 def _read_json(path: Path) -> Any:
     try:
         return json.loads(path.read_text(encoding="utf-8"))

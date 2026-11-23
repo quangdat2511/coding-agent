@@ -523,12 +523,20 @@ class RecordTestCase(unittest.TestCase):
         uv_lock: Path | None = None,
         output_dir: Path | None = None,
         artifact_dir: Path | None = None,
-        isolation_record: Path | None = None,
+        isolation_record: Path | None | object = DEFAULT,
+        waive_isolation: str | None = None,
     ) -> tuple[int, str, str]:
+        if waive_isolation is not None:
+            isolation_args = ["--waive-isolation", waive_isolation]
+        elif isolation_record is DEFAULT:
+            isolation_args = ["--isolation-record", str(self.isolation_path)]
+        elif isolation_record is None:
+            isolation_args = []
+        else:
+            isolation_args = ["--isolation-record", str(isolation_record)]
         argv = [
             str(self.recorded),
-            "--isolation-record",
-            str(isolation_record or self.isolation_path),
+            *isolation_args,
             "--smoke-job",
             str(self.smoke),
             "--oracle-record",
@@ -885,6 +893,442 @@ class IsolationRecordTest(RecordTestCase):
         self.assertEqual(code, 2)
         self.assertIn("absent.json", stderr)
         self.assertFalse((self.output / "manifest.json").exists())
+
+
+class HarborAgentShapeTest(RecordTestCase):
+    """Harbor 0.23.0 writes -a into agents[0].name; both shapes name the same adapter."""
+
+    def adapter(self) -> dict[str, Any]:
+        return {
+            "name": ADAPTER_IMPORT_PATH,
+            "model_name": MODEL_NAME,
+            "env": {KEY_VARIABLE: record_module.provider_env_template(KEY_VARIABLE)},
+            "kwargs": {"artifact_dir": "dist/artifact"},
+        }
+
+    def test_a_job_that_names_the_adapter_is_recorded(self) -> None:
+        agent = self.adapter()
+        self.write_recorded(agents=[agent])
+        self.write_smoke(agents=[agent])
+        self.write_rerun(agents=[agent])
+
+        code, _, stderr = self.run_main()
+
+        self.assertEqual(code, 0, stderr)
+        self.assertTrue((self.output / "manifest.json").is_file())
+
+    def test_both_fields_naming_the_adapter_are_refused(self) -> None:
+        agent = self.adapter() | {"import_path": ADAPTER_IMPORT_PATH}
+        self.write_recorded(agents=[agent])
+        self.write_smoke(agents=[agent])
+        self.write_rerun(agents=[agent])
+
+        code, _, stderr = self.run_main()
+
+        self.assertEqual(code, 1)
+        self.assertIn("both", stderr)
+
+
+class IsolationWaiverTest(RecordTestCase):
+    """A record may waive §7's isolation precondition, and then says so (CDA-96)."""
+
+    def test_a_backend_the_record_does_not_clear_is_recorded_with_a_waiver(self) -> None:
+        self.write_isolation_record(backends=("docker",))
+        self.write_standard_jobs()
+
+        code, stdout, stderr = self.run_main(
+            waive_isolation="the dataset has no task whose agent user is not root"
+        )
+
+        self.assertEqual(code, 0, stderr)
+        manifest = self.manifest()
+        self.assertEqual(
+            manifest["waivers"],
+            [
+                {
+                    "check": "credential-isolation",
+                    "reason": "the dataset has no task whose agent user is not root",
+                }
+            ],
+        )
+        self.assertIn("## Waivers", self.report())
+        self.assertIn("does not count under §9 criterion 5", self.report())
+        self.assertIn("Waived credential isolation", stdout)
+
+    def test_without_the_waiver_the_job_is_refused(self) -> None:
+        self.write_isolation_record(backends=("docker",))
+        self.write_standard_jobs()
+
+        code, _, stderr = self.run_main()
+
+        self.assertEqual(code, 1)
+        self.assertIn("no passing run on modal", stderr)
+
+    def test_a_waiver_does_not_attach_a_record_of_another_artifact(self) -> None:
+        self.write_standard_jobs()
+        document = json.loads(self.isolation_path.read_text(encoding="utf-8"))
+        document["codingAgent"]["commit"] = "d" * 40
+        self.isolation_path.write_text(json.dumps(document), encoding="utf-8")
+
+        code, _, stderr = self.run_main(
+            waive_isolation="a rehearsal",
+            extra=("--isolation-record", str(self.isolation_path)),
+        )
+
+        self.assertEqual(code, 1)
+        self.assertIn("but the artifact is", stderr)
+        self.assertFalse((self.output / "manifest.json").exists())
+
+    def test_a_waiver_does_not_attach_a_run_of_another_executable(self) -> None:
+        self.write_standard_jobs()
+        document = json.loads(self.isolation_path.read_text(encoding="utf-8"))
+        for entry in document["runs"]:
+            entry["result"]["executableSha256"] = "e" * 64
+        self.isolation_path.write_text(json.dumps(document), encoding="utf-8")
+
+        code, _, stderr = self.run_main(
+            waive_isolation="a rehearsal",
+            extra=("--isolation-record", str(self.isolation_path)),
+        )
+
+        self.assertEqual(code, 1)
+        self.assertIn("executable of another artifact", stderr)
+        self.assertFalse((self.output / "manifest.json").exists())
+
+    def test_a_waiver_refuses_a_file_that_is_not_a_record(self) -> None:
+        self.write_standard_jobs()
+        self.isolation_path.write_text("{}", encoding="utf-8")
+
+        code, _, stderr = self.run_main(
+            waive_isolation="a rehearsal",
+            extra=("--isolation-record", str(self.isolation_path)),
+        )
+
+        self.assertEqual(code, 1)
+        self.assertIn("schemaVersion", stderr)
+        self.assertFalse((self.output / "manifest.json").exists())
+
+    def test_a_waiver_refuses_a_non_string_executable_hash_without_a_crash(self) -> None:
+        self.write_standard_jobs()
+        document = json.loads(self.isolation_path.read_text(encoding="utf-8"))
+        document["runs"][0]["result"]["executableSha256"] = []
+        self.isolation_path.write_text(json.dumps(document), encoding="utf-8")
+
+        code, _, stderr = self.run_main(
+            waive_isolation="a rehearsal",
+            extra=("--isolation-record", str(self.isolation_path)),
+        )
+
+        self.assertEqual(code, 1)
+        self.assertIn("not a string", stderr)
+        self.assertFalse((self.output / "manifest.json").exists())
+
+    def test_a_waiver_refuses_a_run_that_did_not_pass(self) -> None:
+        self.write_standard_jobs()
+        document = json.loads(self.isolation_path.read_text(encoding="utf-8"))
+        document["runs"][0]["result"]["passed"] = False
+        self.isolation_path.write_text(json.dumps(document), encoding="utf-8")
+
+        code, _, stderr = self.run_main(
+            waive_isolation="a rehearsal",
+            extra=("--isolation-record", str(self.isolation_path)),
+        )
+
+        self.assertEqual(code, 1)
+        self.assertIn("did not pass", stderr)
+
+    def test_a_waiver_refuses_a_run_without_a_date(self) -> None:
+        self.write_standard_jobs()
+        document = json.loads(self.isolation_path.read_text(encoding="utf-8"))
+        del document["runs"][0]["date"]
+        self.isolation_path.write_text(json.dumps(document), encoding="utf-8")
+
+        code, _, stderr = self.run_main(
+            waive_isolation="a rehearsal",
+            extra=("--isolation-record", str(self.isolation_path)),
+        )
+
+        self.assertEqual(code, 1)
+        self.assertIn("has no date", stderr)
+
+    def test_a_waiver_refuses_a_run_for_another_artifact(self) -> None:
+        self.write_standard_jobs()
+        document = json.loads(self.isolation_path.read_text(encoding="utf-8"))
+        document["runs"][0]["result"]["codingAgent"]["commit"] = "f" * 40
+        self.isolation_path.write_text(json.dumps(document), encoding="utf-8")
+
+        code, _, stderr = self.run_main(
+            waive_isolation="a rehearsal",
+            extra=("--isolation-record", str(self.isolation_path)),
+        )
+
+        self.assertEqual(code, 1)
+        self.assertIn("is for Coding Agent", stderr)
+
+    def test_a_waiver_refuses_an_unsupported_schema(self) -> None:
+        self.write_standard_jobs()
+        document = json.loads(self.isolation_path.read_text(encoding="utf-8"))
+        document["schemaVersion"] = 2
+        self.isolation_path.write_text(json.dumps(document), encoding="utf-8")
+
+        code, _, stderr = self.run_main(
+            waive_isolation="a rehearsal",
+            extra=("--isolation-record", str(self.isolation_path)),
+        )
+
+        self.assertEqual(code, 1)
+        self.assertIn("schemaVersion", stderr)
+
+    def test_a_waiver_refuses_a_boolean_schema_version(self) -> None:
+        self.write_standard_jobs()
+        document = json.loads(self.isolation_path.read_text(encoding="utf-8"))
+        document["schemaVersion"] = True
+        self.isolation_path.write_text(json.dumps(document), encoding="utf-8")
+
+        code, _, stderr = self.run_main(
+            waive_isolation="a rehearsal",
+            extra=("--isolation-record", str(self.isolation_path)),
+        )
+
+        self.assertEqual(code, 1)
+        self.assertIn("schemaVersion", stderr)
+
+    def test_a_waiver_refuses_a_date_that_is_not_a_calendar_date(self) -> None:
+        self.write_standard_jobs()
+        document = json.loads(self.isolation_path.read_text(encoding="utf-8"))
+        document["runs"][0]["date"] = "not-a-date"
+        self.isolation_path.write_text(json.dumps(document), encoding="utf-8")
+
+        code, _, stderr = self.run_main(
+            waive_isolation="a rehearsal",
+            extra=("--isolation-record", str(self.isolation_path)),
+        )
+
+        self.assertEqual(code, 1)
+        self.assertIn("not a calendar date", stderr)
+
+    def test_a_waiver_refuses_a_json_null_isolation_record(self) -> None:
+        self.write_standard_jobs()
+        self.isolation_path.write_text("null", encoding="utf-8")
+
+        code, _, stderr = self.run_main(
+            waive_isolation="a rehearsal",
+            extra=("--isolation-record", str(self.isolation_path)),
+        )
+
+        self.assertEqual(code, 2)
+        self.assertIn("not a JSON object", stderr)
+        self.assertFalse((self.output / "manifest.json").exists())
+
+    def test_a_waiver_without_an_isolation_record_writes_an_empty_section(self) -> None:
+        self.write_standard_jobs()
+
+        code, _, stderr = self.run_main(waive_isolation="a rehearsal on a local backend")
+
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(self.manifest()["credentialIsolation"], {})
+
+    def test_no_isolation_input_at_all_is_a_usage_error(self) -> None:
+        self.write_standard_jobs()
+
+        code, _, stderr = self.run_main(isolation_record=None)
+
+        self.assertEqual(code, 2)
+        self.assertIn("--isolation-record", stderr)
+
+
+class ReleaseTagWaiverTest(RecordTestCase):
+    """A source repository that publishes no tag may be recorded with a waiver (CDA-96)."""
+
+    @staticmethod
+    def fail_run(command: list[str]) -> str:
+        raise AssertionError(f"the tag was resolved although the waiver was given: {command}")
+
+    def test_a_waived_release_tag_skips_the_resolution(self) -> None:
+        self.write_standard_jobs()
+
+        code, _, stderr = self.run_main(
+            extra=(
+                "--waive-release-tag",
+                "the source repository publishes no tag",
+            ),
+            run=self.fail_run,
+        )
+
+        self.assertEqual(code, 0, stderr)
+        manifest = self.manifest()
+        self.assertIn(
+            {
+                "check": "dataset-release-tag",
+                "reason": "the source repository publishes no tag",
+            },
+            manifest["waivers"],
+        )
+        self.assertEqual(manifest["dataset"]["releaseCommit"], RELEASE_COMMIT)
+        self.assertIn("waives resolving that commit", self.report())
+
+    def test_without_the_waiver_the_tag_is_resolved(self) -> None:
+        self.write_standard_jobs()
+        calls: list[list[str]] = []
+
+        def run(command: list[str]) -> str:
+            calls.append(command)
+            return f"{RELEASE_COMMIT}\trefs/tags/{RELEASE_TAG}^{{}}"
+
+        code, _, stderr = self.run_main(run=run)
+
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(len(calls), 1)
+
+
+class TimeoutOverrideWaiverTest(RecordTestCase):
+    """A job that raised its task timeouts is recorded only with a waiver (CDA-96)."""
+
+    def test_a_timeout_override_is_refused_without_the_waiver(self) -> None:
+        self.write_standard_jobs()
+        self.write_recorded(extra_config={"agent_timeout_multiplier": 5.0})
+
+        code, _, stderr = self.run_main()
+
+        self.assertEqual(code, 1)
+        self.assertIn("agent_timeout_multiplier", stderr)
+
+    def test_a_timeout_override_that_is_not_a_number_is_refused(self) -> None:
+        self.write_standard_jobs()
+        self.write_recorded(extra_config={"agent_timeout_multiplier": None})
+
+        code, _, stderr = self.run_main(
+            extra=("--waive-timeout-override", "a rehearsal"),
+        )
+
+        self.assertEqual(code, 1)
+        self.assertIn("finite positive number", stderr)
+        self.assertFalse((self.output / "manifest.json").exists())
+
+    def test_a_timeout_override_that_is_infinite_is_refused(self) -> None:
+        self.write_standard_jobs()
+        self.write_recorded(extra_config={"agent_timeout_multiplier": float("inf")})
+
+        code, _, stderr = self.run_main(
+            extra=("--waive-timeout-override", "a rehearsal"),
+        )
+
+        self.assertEqual(code, 1)
+        self.assertIn("finite positive number", stderr)
+        self.assertFalse((self.output / "manifest.json").exists())
+
+    def test_a_timeout_override_beyond_the_float_range_is_refused(self) -> None:
+        self.write_standard_jobs()
+        self.write_recorded(extra_config={"agent_timeout_multiplier": 10**400})
+
+        code, _, stderr = self.run_main(
+            extra=("--waive-timeout-override", "a rehearsal"),
+        )
+
+        self.assertEqual(code, 1)
+        self.assertIn("finite positive number", stderr)
+        self.assertFalse((self.output / "manifest.json").exists())
+
+    def test_a_waived_timeout_override_is_recorded(self) -> None:
+        self.write_standard_jobs()
+        self.write_recorded(extra_config={"agent_timeout_multiplier": 5.0})
+        self.write_rerun(extra_config={"agent_timeout_multiplier": 5.0})
+        reason = "the dataset caps the agent at 300 s, which the model needs more of"
+
+        code, _, stderr = self.run_main(
+            extra=("--waive-timeout-override", reason),
+        )
+
+        self.assertEqual(code, 0, stderr)
+        manifest = self.manifest()
+        self.assertIn({"check": "timeout-override", "reason": reason}, manifest["waivers"])
+        self.assertEqual(manifest["flags"]["agent_timeout_multiplier"], 5.0)
+        self.assertIn("**Timeout override**", self.report())
+
+
+class WaiverInvalidityTest(RecordTestCase):
+    """Any waiver makes the record invalid, even when the job and dataset are otherwise sound."""
+
+    def test_each_waiver_makes_the_record_invalid(self) -> None:
+        flags = {
+            "isolation": "--waive-isolation",
+            "release tag": "--waive-release-tag",
+            "timeout": "--waive-timeout-override",
+        }
+        for label, flag in flags.items():
+            with self.subTest(waiver=label):
+                self.write_standard_jobs()
+
+                code, stdout, stderr = self.run_main(extra=(flag, f"reason for {label}"))
+
+                self.assertEqual(code, 0, stderr)
+                self.assertIn("valid: no", stdout)
+                report = self.report()
+                self.assertIn("**Not valid.**", report)
+                self.assertIn("No headline reward", report)
+                self.assertIn(f"the record waives ", report)
+
+
+class RerunTimeoutTest(RecordTestCase):
+    """A rerun job repeats the recorded job's timeout flags (review of PR #118)."""
+
+    def test_a_rerun_job_with_another_timeout_multiplier_is_refused(self) -> None:
+        self.write_standard_jobs()
+        self.write_recorded(extra_config={"agent_timeout_multiplier": 5.0})
+        self.write_rerun(extra_config={"agent_timeout_multiplier": 13.0})
+
+        code, _, stderr = self.run_main(
+            extra=("--waive-timeout-override", "a rehearsal"),
+        )
+
+        self.assertEqual(code, 1)
+        self.assertIn("agent_timeout_multiplier", stderr)
+        self.assertFalse((self.output / "manifest.json").exists())
+
+    def test_a_rerun_job_with_the_same_timeout_multiplier_is_accepted(self) -> None:
+        self.write_standard_jobs()
+        self.write_recorded(extra_config={"agent_timeout_multiplier": 5.0})
+        self.write_rerun(extra_config={"agent_timeout_multiplier": 5.0})
+
+        code, _, stderr = self.run_main(
+            extra=("--waive-timeout-override", "a rehearsal"),
+        )
+
+        self.assertEqual(code, 0, stderr)
+
+
+class WaiverReasonTest(RecordTestCase):
+    """A waiver without a reason is refused before anything is read (review of PR #118)."""
+
+    def test_an_empty_waiver_reason_is_a_usage_error(self) -> None:
+        self.write_standard_jobs()
+        for flag in (
+            "--waive-isolation",
+            "--waive-release-tag",
+            "--waive-timeout-override",
+        ):
+            with self.subTest(flag=flag):
+                code, _, stderr = self.run_main(extra=(flag, "   "))
+
+                self.assertEqual(code, 2)
+                self.assertIn(flag, stderr)
+                self.assertFalse((self.output / "manifest.json").exists())
+
+
+class TimeoutCommandTest(RecordTestCase):
+    """manifest.json's command carries the timeout flags that its flags record."""
+
+    def test_the_command_records_the_timeout_flag(self) -> None:
+        self.write_standard_jobs()
+        self.write_recorded(extra_config={"agent_timeout_multiplier": 5.0})
+        self.write_rerun(extra_config={"agent_timeout_multiplier": 5.0})
+
+        code, _, stderr = self.run_main(
+            extra=("--waive-timeout-override", "a rehearsal"),
+        )
+
+        self.assertEqual(code, 0, stderr)
+        self.assertIn("--agent-timeout-multiplier 5.0", self.manifest()["command"])
 
 
 class MeanTest(unittest.TestCase):

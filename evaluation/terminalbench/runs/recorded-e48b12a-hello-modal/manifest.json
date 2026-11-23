@@ -1,0 +1,532 @@
+{
+  "schemaVersion": 1,
+  "job": {
+    "name": "recorded-e48b12a-hello-modal",
+    "id": "48e510f1-4dfd-41ef-ad93-28c8afe04af8",
+    "startedAt": "2026-11-22T16:49:54.353772",
+    "finishedAt": "2026-11-22T16:51:02.106187",
+    "wallClockSeconds": 67.752415
+  },
+  "command": "harbor run -d harbor/hello-world@1 -a coding_agent_terminalbench.agent:CodingAgent -m opencode/deepseek-v4.1-flash --ak artifact_dir=dist/artifact --ae OPENCODE_API_KEY='${OPENCODE_API_KEY}' -e modal -k 1 -n 1 -r 0 -o jobs --job-name recorded-e48b12a-hello-modal",
+  "pins": {
+    "harbor": {
+      "version": "0.23.0",
+      "gitCommitHash": null
+    },
+    "modalSdk": {
+      "version": "1.6.4",
+      "source": "uv.lock"
+    },
+    "python": {
+      "minimum": "3.12",
+      "used": "3.12.3"
+    }
+  },
+  "artifact": {
+    "version": "0.0.1",
+    "commit": "e48b12ad1758b2016d78c04d76f591cedfdf0098",
+    "dirty": false,
+    "bunVersion": "1.3.14",
+    "executables": [
+      {
+        "file": "coding-agent-linux-x64",
+        "target": "bun-linux-x64-baseline",
+        "sha256": "217388edc5e1923fc7ef6141458df1b6014f4d4b7e6db46f5a63a6e5388f0221"
+      },
+      {
+        "file": "coding-agent-linux-arm64",
+        "target": "bun-linux-arm64",
+        "sha256": "09fed01b434e52397839aece483a944e384e1f165749999855afeb5d09c86731"
+      }
+    ],
+    "installedExecutables": {
+      "coding-agent-linux-x64": 2
+    }
+  },
+  "profile": {
+    "name": "terminalbench",
+    "limits": {
+      "maxModelTurns": 250,
+      "maxToolCalls": 1000,
+      "maxDurationMs": 3600000,
+      "maxConsecutiveRecoverableFailures": 10,
+      "cancellationGraceMs": 5000
+    }
+  },
+  "model": {
+    "provider": "opencode",
+    "model": "deepseek-v4.1-flash",
+    "sampling": {
+      "maxOutputTokens": null,
+      "temperature": null
+    }
+  },
+  "flags": {
+    "agent": "coding_agent_terminalbench.agent:CodingAgent",
+    "agentKwargs": {
+      "artifact_dir": "dist/artifact"
+    },
+    "model": "opencode/deepseek-v4.1-flash",
+    "environment": "modal",
+    "nAttempts": 1,
+    "nConcurrentTrials": 1,
+    "maxRetries": 0,
+    "taskFilter": [],
+    "jobsDir": "jobs",
+    "jobName": "recorded-e48b12a-hello-modal"
+  },
+  "environmentVariableNames": ["OPENCODE_API_KEY"],
+  "dataset": {
+    "identifier": "harbor/hello-world@1",
+    "contentHash": "sha256:d10e96e201d6816b22553504e06e7de0153a26381e808d11404cbca530b9d388",
+    "sourceRepository": "https://github.com/laude-institute/harbor",
+    "releaseTag": "v0.23.0",
+    "releaseCommit": "1e5c5c6db929a10a140d05e606882c671ae20729",
+    "releaseCommitResolvedBy": "git ls-remote --tags https://github.com/laude-institute/harbor refs/tags/v0.23.0 refs/tags/v0.23.0^{}",
+    "taskCount": 1,
+    "taskList": [
+      {
+        "name": "hello-world/hello-world",
+        "digest": "sha256:38d7a077f07fbee8efc78db5dec9a72f82e727510ad1dcfeac0b55fa845256b7"
+      }
+    ],
+    "smokeTasks": ["hello-world"],
+    "record": {
+      "path": "evaluation/terminalbench/datasets/harbor/hello-world@1.md",
+      "rows": {
+        "Environment": "a Dockerfile per task (`ubuntu:24.04`); no task has a Docker Compose file",
+        "Single step": "every task",
+        "Verifier environment": "shared: the task declares no `[verifier.environment]`, so the verifier runs in the agent's container, and ADR 0008 \u00a73 property 3 does not hold for this dataset",
+        "Per-task agent timeout": "120 s, and ADR 0008 \u00a73 property 4 does not hold for this dataset",
+        "Dataset identifier": "`harbor/hello-world@1`",
+        "Source repository": "`https://github.com/laude-institute/harbor`",
+        "Release tag": "`v0.23.0`",
+        "Release commit": "`1e5c5c6db929a10a140d05e606882c671ae20729`",
+        "Smoke tasks": "`hello-world`",
+        "Tasks with declared MCP servers": "none",
+        "Tasks with a declared skills directory": "none"
+      }
+    },
+    "properties": [
+      {
+        "property": "image-based-tasks",
+        "label": "Environment",
+        "evidence": "a Dockerfile per task (ubuntu:24.04); no task has a Docker Compose file",
+        "source": "evaluation/terminalbench/datasets/harbor/hello-world@1.md:15",
+        "shown": true,
+        "problems": []
+      },
+      {
+        "property": "single-step-tasks",
+        "label": "Single step",
+        "evidence": "every task",
+        "source": "evaluation/terminalbench/datasets/harbor/hello-world@1.md:16",
+        "shown": true,
+        "problems": []
+      },
+      {
+        "property": "separate-verifier-environment",
+        "label": "Verifier environment",
+        "evidence": "shared: the task declares no [verifier.environment], so the verifier runs in the agent's container, and ADR 0008 \u00a73 property 3 does not hold for this dataset",
+        "source": "evaluation/terminalbench/datasets/harbor/hello-world@1.md:17",
+        "shown": true,
+        "problems": [
+          "trial hello-world__yR9PmL7 of hello-world/hello-world records verifier environment mode 'shared', not 'separate'"
+        ]
+      },
+      {
+        "property": "per-task-agent-timeout",
+        "label": "Per-task agent timeout",
+        "evidence": "120 s, and ADR 0008 \u00a73 property 4 does not hold for this dataset",
+        "source": "evaluation/terminalbench/datasets/harbor/hello-world@1.md:18",
+        "shown": true,
+        "problems": [
+          "the dataset declares a 120 s per-task agent timeout, below the profile's 3600 s maxDurationMs"
+        ]
+      }
+    ],
+    "ignoredDeclarations": {
+      "mcpServers": [],
+      "skillsDirectories": []
+    }
+  },
+  "relatedJobs": {
+    "oracle": "oracle-e48b12a-hello",
+    "smoke": "smoke-e48b12a-hello",
+    "rerun": null
+  },
+  "credentialIsolation": {
+    "schemaVersion": 1,
+    "codingAgent": {
+      "version": "0.0.1",
+      "commit": "e48b12ad1758b2016d78c04d76f591cedfdf0098"
+    },
+    "adrAmendment": "ADR 0001 \u00a77, the CDA-29 amendment of 2026-09-13 and the CDA-121 amendment of 2026-11-22",
+    "runs": [
+      {
+        "date": "2026-11-22",
+        "result": {
+          "schemaVersion": 1,
+          "passed": true,
+          "failures": [],
+          "codingAgent": {
+            "version": "0.0.1",
+            "commit": "e48b12ad1758b2016d78c04d76f591cedfdf0098"
+          },
+          "executableSha256": "217388edc5e1923fc7ef6141458df1b6014f4d4b7e6db46f5a63a6e5388f0221",
+          "dataset": "terminal-bench/terminal-bench@4.1.0",
+          "task": "terminal-bench/music-harmony",
+          "backend": "modal",
+          "user": {
+            "uid": 0,
+            "name": "root"
+          },
+          "yamaPtraceScope": 1,
+          "probes": [
+            {
+              "path": "inherited-environment",
+              "outcome": "read",
+              "found": false
+            },
+            {
+              "path": "proc-environ",
+              "outcome": "EACCES",
+              "found": false
+            },
+            {
+              "path": "proc-mem",
+              "outcome": "EACCES",
+              "found": false
+            },
+            {
+              "path": "ancestors",
+              "outcome": "read",
+              "found": false
+            }
+          ],
+          "controls": [
+            {
+              "path": "inherited-environment",
+              "found": true
+            },
+            {
+              "path": "proc-environ",
+              "found": true
+            },
+            {
+              "path": "proc-mem",
+              "found": true
+            },
+            {
+              "path": "ancestors",
+              "found": true
+            }
+          ],
+          "launcherRejected": {
+            "exitCode": 2,
+            "messageMatched": true,
+            "serverRequests": 0
+          },
+          "toolResultsReceived": 1
+        }
+      },
+      {
+        "date": "2026-11-22",
+        "result": {
+          "schemaVersion": 1,
+          "passed": true,
+          "failures": [],
+          "codingAgent": {
+            "version": "0.0.1",
+            "commit": "e48b12ad1758b2016d78c04d76f591cedfdf0098"
+          },
+          "executableSha256": "217388edc5e1923fc7ef6141458df1b6014f4d4b7e6db46f5a63a6e5388f0221",
+          "dataset": "terminal-bench/terminal-bench@4.1.0",
+          "task": "terminal-bench/music-harmony",
+          "backend": "docker",
+          "user": {
+            "uid": 0,
+            "name": "root"
+          },
+          "yamaPtraceScope": null,
+          "probes": [
+            {
+              "path": "inherited-environment",
+              "outcome": "read",
+              "found": false
+            },
+            {
+              "path": "proc-environ",
+              "outcome": "EACCES",
+              "found": false
+            },
+            {
+              "path": "proc-mem",
+              "outcome": "EACCES",
+              "found": false
+            },
+            {
+              "path": "ancestors",
+              "outcome": "read",
+              "found": false
+            }
+          ],
+          "controls": [
+            {
+              "path": "inherited-environment",
+              "found": true
+            },
+            {
+              "path": "proc-environ",
+              "found": true
+            },
+            {
+              "path": "proc-mem",
+              "found": true
+            },
+            {
+              "path": "ancestors",
+              "found": true
+            }
+          ],
+          "launcherRejected": {
+            "exitCode": 2,
+            "messageMatched": true,
+            "serverRequests": 0
+          },
+          "toolResultsReceived": 1
+        }
+      },
+      {
+        "date": "2026-11-22",
+        "result": {
+          "schemaVersion": 1,
+          "passed": true,
+          "failures": [],
+          "codingAgent": {
+            "version": "0.0.1",
+            "commit": "e48b12ad1758b2016d78c04d76f591cedfdf0098"
+          },
+          "executableSha256": "217388edc5e1923fc7ef6141458df1b6014f4d4b7e6db46f5a63a6e5388f0221",
+          "dataset": "terminal-bench/terminal-bench@4.1.0",
+          "task": "terminal-bench/rs-archive-clone",
+          "backend": "docker",
+          "user": {
+            "uid": 10001,
+            "name": "agent"
+          },
+          "yamaPtraceScope": null,
+          "probes": [
+            {
+              "path": "inherited-environment",
+              "outcome": "read",
+              "found": false
+            },
+            {
+              "path": "proc-environ",
+              "outcome": "EACCES",
+              "found": false
+            },
+            {
+              "path": "proc-mem",
+              "outcome": "EACCES",
+              "found": false
+            },
+            {
+              "path": "ancestors",
+              "outcome": "read",
+              "found": false
+            }
+          ],
+          "controls": [
+            {
+              "path": "inherited-environment",
+              "found": true
+            },
+            {
+              "path": "proc-environ",
+              "found": true
+            },
+            {
+              "path": "proc-mem",
+              "found": true
+            },
+            {
+              "path": "ancestors",
+              "found": true
+            }
+          ],
+          "launcherRejected": {
+            "exitCode": 2,
+            "messageMatched": true,
+            "serverRequests": 0
+          },
+          "toolResultsReceived": 1
+        }
+      },
+      {
+        "date": "2026-11-22",
+        "result": {
+          "schemaVersion": 1,
+          "passed": true,
+          "failures": [],
+          "codingAgent": {
+            "version": "0.0.1",
+            "commit": "e48b12ad1758b2016d78c04d76f591cedfdf0098"
+          },
+          "executableSha256": "217388edc5e1923fc7ef6141458df1b6014f4d4b7e6db46f5a63a6e5388f0221",
+          "dataset": "harbor/hello-world@1",
+          "task": "hello-world/hello-world",
+          "backend": "modal",
+          "user": {
+            "uid": 0,
+            "name": "root"
+          },
+          "yamaPtraceScope": 1,
+          "probes": [
+            {
+              "path": "inherited-environment",
+              "outcome": "read",
+              "found": false
+            },
+            {
+              "path": "proc-environ",
+              "outcome": "EACCES",
+              "found": false
+            },
+            {
+              "path": "proc-mem",
+              "outcome": "EACCES",
+              "found": false
+            },
+            {
+              "path": "ancestors",
+              "outcome": "read",
+              "found": false
+            }
+          ],
+          "controls": [
+            {
+              "path": "inherited-environment",
+              "found": true
+            },
+            {
+              "path": "proc-environ",
+              "found": true
+            },
+            {
+              "path": "proc-mem",
+              "found": true
+            },
+            {
+              "path": "ancestors",
+              "found": true
+            }
+          ],
+          "launcherRejected": {
+            "exitCode": 2,
+            "messageMatched": true,
+            "serverRequests": 0
+          },
+          "toolResultsReceived": 1
+        }
+      },
+      {
+        "date": "2026-11-22",
+        "result": {
+          "schemaVersion": 1,
+          "passed": true,
+          "failures": [],
+          "codingAgent": {
+            "version": "0.0.1",
+            "commit": "e48b12ad1758b2016d78c04d76f591cedfdf0098"
+          },
+          "executableSha256": "217388edc5e1923fc7ef6141458df1b6014f4d4b7e6db46f5a63a6e5388f0221",
+          "dataset": "factory-ai/legacy-bench@v0.1",
+          "task": "factory-ai/ecf5e7-asm-debug-mz-ne-header-fix",
+          "backend": "modal",
+          "user": {
+            "uid": 0,
+            "name": "root"
+          },
+          "yamaPtraceScope": 1,
+          "probes": [
+            {
+              "path": "inherited-environment",
+              "outcome": "read",
+              "found": false
+            },
+            {
+              "path": "proc-environ",
+              "outcome": "EACCES",
+              "found": false
+            },
+            {
+              "path": "proc-mem",
+              "outcome": "EACCES",
+              "found": false
+            },
+            {
+              "path": "ancestors",
+              "outcome": "read",
+              "found": false
+            }
+          ],
+          "controls": [
+            {
+              "path": "inherited-environment",
+              "found": true
+            },
+            {
+              "path": "proc-environ",
+              "found": true
+            },
+            {
+              "path": "proc-mem",
+              "found": true
+            },
+            {
+              "path": "ancestors",
+              "found": true
+            }
+          ],
+          "launcherRejected": {
+            "exitCode": 2,
+            "messageMatched": true,
+            "serverRequests": 0
+          },
+          "toolResultsReceived": 1
+        }
+      }
+    ]
+  },
+  "waivers": [
+    {
+      "check": "credential-isolation",
+      "reason": "harbor/hello-world@1 runs its single task as root on Modal, so no non-root isolation run exists for this dataset; the passing root run on Modal is recorded"
+    }
+  ],
+  "secretScan": {
+    "roots": ["jobs/recorded-e48b12a-hello-modal"],
+    "patterns": {
+      "credentialVariables": ["OPENCODE_API_KEY"],
+      "prefixes": ["sk-ant-", "sk-or-", "sk-proj-", "xai-", "AIza", "oc_sk_"],
+      "redactedMarker": "[REDACTED]"
+    },
+    "files": 16,
+    "result": "passed",
+    "explained": [],
+    "unexplained": 0
+  },
+  "archive": {
+    "parts": [
+      {
+        "file": "recorded-e48b12a-hello-modal.tar.zst.part-aa",
+        "bytes": 10522,
+        "sha256": "4d32bd04d3f6f6a9d5285d403abbadc2aef293579d70fcc377a3e4370798e4e9"
+      }
+    ],
+    "assetLimitBytes": 2147483648,
+    "assetCountLimit": 1000
+  }
+}

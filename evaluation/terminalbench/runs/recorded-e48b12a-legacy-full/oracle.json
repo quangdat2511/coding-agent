@@ -1,0 +1,110 @@
+{
+  "schemaVersion": 1,
+  "job": {
+    "name": "oracle-e48b12a-legacy",
+    "id": "4b34cddd-4a0f-459d-80a7-bcd502651184",
+    "startedAt": "2026-11-22T17:13:32.382009",
+    "finishedAt": "2026-11-22T17:14:45.752641",
+    "wallClockSeconds": 73.370632
+  },
+  "command": "harbor run -d factory-ai/legacy-bench@v0.1 -a oracle -e modal -k 1 -n 10 -r 0 -o jobs --job-name oracle-e48b12a-legacy",
+  "harbor": {
+    "version": "0.23.0",
+    "gitCommitHash": null
+  },
+  "modalSdk": {
+    "version": "1.6.4",
+    "source": "uv.lock"
+  },
+  "flags": {
+    "agent": "oracle",
+    "environment": "modal",
+    "nAttempts": 1,
+    "nConcurrentTrials": 10,
+    "maxRetries": 0
+  },
+  "environmentVariableNames": [],
+  "dataset": {
+    "identifier": "factory-ai/legacy-bench@v0.1",
+    "contentHash": "sha256:0a3cca4cca8cd6f96abcfe4f627afafa75d6e5ca5b173b6429321418d6e373a5",
+    "contentHashResolvedBy": "Harbor's package registry, the lookup that `harbor run -d` makes",
+    "sourceRepository": "https://github.com/Factory-AI/legacy-bench",
+    "releaseTag": "v0.1",
+    "releaseCommit": "12fa7cf969b7a253183388040d566fb353a1ab31",
+    "releaseCommitResolvedBy": "recorded: the source repository publishes no Git tag; the record names the main commit the package was built from",
+    "taskCount": 10
+  },
+  "tasks": [
+    {
+      "name": "factory-ai/16b04d-cobol-railroad-retirement-migration",
+      "trial": "16b04d-cobol-railroad-retirement__7h4JP2u",
+      "digest": "sha256:ded4b24ccc982dfb6dd5bd5cbed7b96f9be6c771cdb1c0812dcc90a1e913ab3e",
+      "reward": 1.0,
+      "exceptionType": null
+    },
+    {
+      "name": "factory-ai/1907c2-c-debug-legacy-buddy-fix",
+      "trial": "1907c2-c-debug-legacy-buddy-fix__sdYthZG",
+      "digest": "sha256:8f9959362cc4a444f1818266e63312da838a9aff923c647b6b8bf4d8c920a3c2",
+      "reward": 1.0,
+      "exceptionType": null
+    },
+    {
+      "name": "factory-ai/2831b5-java7-rating-engine-repair",
+      "trial": "2831b5-java7-rating-engine-repai__ZPRPRv5",
+      "digest": "sha256:47f5a185b0db394cfe87a3b2394f469786367c14ecded6101d2fafcb9c500ea9",
+      "reward": 1.0,
+      "exceptionType": null
+    },
+    {
+      "name": "factory-ai/3af1fe-cobol-bond-settlement-reconcile",
+      "trial": "3af1fe-cobol-bond-settlement-rec__PvgXC5s",
+      "digest": "sha256:dd61c3b30718ff55832bb477c8da24f80ae0c2b10ea9a4e03d59a0fa61e61675",
+      "reward": 1.0,
+      "exceptionType": null
+    },
+    {
+      "name": "factory-ai/505812-java7-inventory-cost-fix",
+      "trial": "505812-java7-inventory-cost-fix__ZHpEW98",
+      "digest": "sha256:2526472df82e083915a105ad6550a1dc88ee493a9e008a16f7f725c3e28bc97f",
+      "reward": 1.0,
+      "exceptionType": null
+    },
+    {
+      "name": "factory-ai/6fe1ab-java7-mtom-attachment-corruption-fix",
+      "trial": "6fe1ab-java7-mtom-attachment-cor__SR3BJho",
+      "digest": "sha256:e766954e52972de8b50d7fe7a79eb95b646334d050ddeab185ff4074049c8cfb",
+      "reward": 1.0,
+      "exceptionType": null
+    },
+    {
+      "name": "factory-ai/8e8098-cobol-railcar-settlement-fix",
+      "trial": "8e8098-cobol-railcar-settlement__32XQVFm",
+      "digest": "sha256:7aad8a3791c9e3d43d0d8a149e1bea9b95a6d915d57e40992ece67b0e2b3aad8",
+      "reward": 1.0,
+      "exceptionType": null
+    },
+    {
+      "name": "factory-ai/d1ddc1-fortran-to-cpp-lattice-qcd-migration",
+      "trial": "d1ddc1-fortran-to-cpp-lattice-qc__NL7jnRe",
+      "digest": "sha256:b0a7fa724fc03e13a6cacc7b2c2187bfa739a6011c1472e3ea97223791eed886",
+      "reward": 1.0,
+      "exceptionType": null
+    },
+    {
+      "name": "factory-ai/ecf5e7-asm-debug-mz-ne-header-fix",
+      "trial": "ecf5e7-asm-debug-mz-ne-header-fi__hFwsb8M",
+      "digest": "sha256:3da8b6cb6d89e9cee50c787c22f93597c1b7e85e76a23052ec9dd5fcdc8f68c7",
+      "reward": 1.0,
+      "exceptionType": null
+    },
+    {
+      "name": "factory-ai/fac397-cobol-batch-interest-migration",
+      "trial": "fac397-cobol-batch-interest-migr__jma2rZo",
+      "digest": "sha256:2aade514943edddd0a4315d5ae333edde9b724443b5d6c4c31b9c68a0c7aae5c",
+      "reward": 1.0,
+      "exceptionType": null
+    }
+  ],
+  "harnessFlakyTasks": []
+}
