@@ -1079,13 +1079,46 @@ class IsolationWaiverTest(RecordTestCase):
         self.assertEqual(code, 1)
         self.assertIn("schemaVersion", stderr)
 
-
+    def test_a_waiver_refuses_a_boolean_schema_version(self) -> None:
         self.write_standard_jobs()
+        document = json.loads(self.isolation_path.read_text(encoding="utf-8"))
+        document["schemaVersion"] = True
+        self.isolation_path.write_text(json.dumps(document), encoding="utf-8")
 
-        code, _, stderr = self.run_main(waive_isolation="a rehearsal on a local backend")
+        code, _, stderr = self.run_main(
+            waive_isolation="a rehearsal",
+            extra=("--isolation-record", str(self.isolation_path)),
+        )
 
-        self.assertEqual(code, 0, stderr)
-        self.assertEqual(self.manifest()["credentialIsolation"], {})
+        self.assertEqual(code, 1)
+        self.assertIn("schemaVersion", stderr)
+
+    def test_a_waiver_refuses_a_date_that_is_not_a_calendar_date(self) -> None:
+        self.write_standard_jobs()
+        document = json.loads(self.isolation_path.read_text(encoding="utf-8"))
+        document["runs"][0]["date"] = "not-a-date"
+        self.isolation_path.write_text(json.dumps(document), encoding="utf-8")
+
+        code, _, stderr = self.run_main(
+            waive_isolation="a rehearsal",
+            extra=("--isolation-record", str(self.isolation_path)),
+        )
+
+        self.assertEqual(code, 1)
+        self.assertIn("not a calendar date", stderr)
+
+    def test_a_waiver_refuses_a_json_null_isolation_record(self) -> None:
+        self.write_standard_jobs()
+        self.isolation_path.write_text("null", encoding="utf-8")
+
+        code, _, stderr = self.run_main(
+            waive_isolation="a rehearsal",
+            extra=("--isolation-record", str(self.isolation_path)),
+        )
+
+        self.assertEqual(code, 2)
+        self.assertIn("not a JSON object", stderr)
+        self.assertFalse((self.output / "manifest.json").exists())
 
     def test_a_waiver_without_an_isolation_record_writes_an_empty_section(self) -> None:
         self.write_standard_jobs()
@@ -1175,6 +1208,18 @@ class TimeoutOverrideWaiverTest(RecordTestCase):
     def test_a_timeout_override_that_is_infinite_is_refused(self) -> None:
         self.write_standard_jobs()
         self.write_recorded(extra_config={"agent_timeout_multiplier": float("inf")})
+
+        code, _, stderr = self.run_main(
+            extra=("--waive-timeout-override", "a rehearsal"),
+        )
+
+        self.assertEqual(code, 1)
+        self.assertIn("finite positive number", stderr)
+        self.assertFalse((self.output / "manifest.json").exists())
+
+    def test_a_timeout_override_beyond_the_float_range_is_refused(self) -> None:
+        self.write_standard_jobs()
+        self.write_recorded(extra_config={"agent_timeout_multiplier": 10**400})
 
         code, _, stderr = self.run_main(
             extra=("--waive-timeout-override", "a rehearsal"),

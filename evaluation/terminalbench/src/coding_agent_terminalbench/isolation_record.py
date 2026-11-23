@@ -181,10 +181,11 @@ def evidence_problems(record: dict[str, Any] | None, artifact: ArtifactManifest)
     if not isinstance(record, dict):
         return ["the Isolation Record is not a JSON object"]
     problems: list[str] = []
-    if record.get("schemaVersion") != SCHEMA_VERSION:
+    schema_version = record.get("schemaVersion")
+    # `type(...) is int` rather than `isinstance`, so `true` is not read as the version 1.
+    if type(schema_version) is not int or schema_version != SCHEMA_VERSION:
         problems.append(
-            f"the Isolation Record has schemaVersion {record.get('schemaVersion')!r}, not "
-            f"{SCHEMA_VERSION}"
+            f"the Isolation Record has schemaVersion {schema_version!r}, not {SCHEMA_VERSION}"
         )
     amendment = record.get("adrAmendment")
     if not isinstance(amendment, str) or amendment.strip() == "":
@@ -233,9 +234,17 @@ def _run_problems(
     if not isinstance(entry, dict):
         return [f"{label} is malformed: it is not an object"]
     problems: list[str] = []
-    date = entry.get("date")
-    if not isinstance(date, str) or date.strip() == "":
+    date_text = entry.get("date")
+    if not isinstance(date_text, str) or date_text.strip() == "":
         problems.append(f"{label} has no date")
+    else:
+        try:
+            # `add_run()` writes `date.isoformat()`, so a calendar date in that form is expected.
+            date.fromisoformat(date_text)
+        except ValueError:
+            problems.append(
+                f"{label} has a date that is not a calendar date: {date_text!r}"
+            )
     result = entry.get("result")
     if not isinstance(result, dict):
         return problems + [f"{label} is malformed: it has no result object"]

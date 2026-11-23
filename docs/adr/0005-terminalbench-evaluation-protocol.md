@@ -284,15 +284,14 @@ Its record names the three waived requirements — credential isolation, dataset
 timeout override — in `manifest.json` and `report.md`, and publishes no headline reward. The
 artifact's Isolation Record names both the CDA-29 and the CDA-121 amendments and holds a passing
 root run on Modal for `harbor/hello-world@1` and `factory-ai/legacy-bench@v0.1`; the non-root
-requirement is waived in each of those two records, and they are the only datasets the record
-covers. The non-root run on `fp8-rmsnorm-gemm` was attempted on 2026-11-22 and returned
-`INCONCLUSIVE` (`MEM_NOT_DEMONSTRABLE`, because Yama `ptrace_scope=1` blocks the `proc-mem`
-control), so a passing non-root run is still missing. It needs an H100 and a Modal payment
-method, which the project's budget does not cover, and the team agreed not to pursue that run
-further: Modal therefore stays uncleared for a non-root agent. CDA-97 scans, archives and
-publishes this record. The runs that
-started before §9 criterion 4 held do not count, and their credential is subject to revocation
-under §9; the ticket tracks the owner's confirmation.
+requirement is waived in the two CDA-96 rehearsal records, while the shared Isolation Record
+keeps the evidence of all three datasets. The non-root run on `fp8-rmsnorm-gemm` was attempted on
+2026-11-22 and returned `INCONCLUSIVE` (`MEM_NOT_DEMONSTRABLE`, because Yama `ptrace_scope=1`
+blocks the `proc-mem` control), so a passing non-root run is still missing. It needs an H100 and a
+Modal payment method, which the project's budget does not cover, and the team agreed not to pursue
+that run further: Modal therefore stays uncleared for a non-root agent. CDA-97 scans, archives and
+publishes this record. The runs that started before §9 criterion 4 held do not count, and their
+credential is subject to revocation under §9; the ticket tracks the owner's confirmation.
 
 ### 2. Coding Agent artifact
 

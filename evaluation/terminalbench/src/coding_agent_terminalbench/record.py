@@ -294,12 +294,14 @@ def job_config_problems(
     for field in sorted(TIMEOUT_OVERRIDE_FIELDS):
         if field in config:
             value = config[field]
-            if (
-                isinstance(value, bool)
-                or not isinstance(value, (int, float))
-                or not math.isfinite(value)
-                or value <= 0
-            ):
+            valid = not isinstance(value, bool) and isinstance(value, (int, float))
+            if valid:
+                try:
+                    # A JSON integer beyond the float range makes `isfinite` raise.
+                    valid = math.isfinite(value) and value > 0
+                except OverflowError:
+                    valid = False
+            if not valid:
                 problems.append(
                     f"config.json has a timeout override `{field}` that is not a finite "
                     f"positive number, found {value!r}"
@@ -1459,7 +1461,7 @@ def main(
     except (OSError, json.JSONDecodeError) as exc:
         print(f"error: cannot read the Isolation Record {args.isolation_record}: {exc}", file=sys.stderr)
         return 2
-    if isolation_record is not None and not isinstance(isolation_record, dict):
+    if args.isolation_record is not None and not isinstance(isolation_record, dict):
         print(
             f"error: the Isolation Record {args.isolation_record} is not a JSON object",
             file=sys.stderr,
