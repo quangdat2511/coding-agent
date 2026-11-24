@@ -82,6 +82,34 @@
   >
 . Enter steer · Alt+Enter follow-up · Up queue · Esc cancel run · Shift+Enter/Ctrl+J new line     
 
+=== Run active, 2 Steers and 2 Follow-ups waiting · variant D (Framed) · ::running ===
+   PROTOTYPE CDA-144 · D Framed · macOS/Linux keys · run turn 1/4 · time paused (::play) · Tab va…
+  ╭─ add rate limiting to /api/login · ~/shop ──────────────────────────── ⠇ running · turn 1/4 ─╮
+. │                                                                                              │
+  │ verification [succeeded]                                                                     │
+. │                                                                                              │
+  │ assistant [completed]                                                                        │
+  │ Done.                                                                                        │
+. │                                                                                              │
+  │ session [succeeded]                                                                          │
+  │   workspace changed                                                                          │
+. │                                                                                              │
+  │ > use a sliding window instead of a fixed one                                                │
+. │                                                                                              │
+  │ assistant [completed]                                                                        │
+  │ Reading the handler first.                                                                   │
+. │                                                                                              │
+  │ read src/api/login.ts [succeeded]                                                            │
+  │   export async function login(req: Request) {                                                │
+. ├──────────────────────────────────────────────────────────────────────────────────────────────┤
+  │ STEER reuse the existing redis client, not a new connection                                  │
+  │ STEER keep the 429 message short                                                             │
+  │ NEXT  add tests for the limiter, including the window edge                                   │
+  │ NEXT  update the API section of the README                                                   │
+. ├──────────────────────────────────────────────────────────────────────────────────────────────┤
+  │ ›                                                                                            │
+. ╰─ ⏎ steer · ⌥⏎ follow-up · ⇧↑ queue · esc cancel · ⇧⏎ new line ──────────── 2 steer · 2 next ─╯
+
 === Queue selection mode, entered from the Prompt · variant A (Rows) · ::running ===
    PROTOTYPE CDA-144 · A Rows · macOS/Linux keys · run turn 1/4 · time paused (::play) · Tab vari…
   
@@ -165,6 +193,34 @@
 . ── Follow-up 4 of 4 is in the Prompt; nothing takes it while it is shown ───────────────────────
   Follow-up 4/4> update the API section of the README
 . Up/Down next item · type to edit · Enter save · Alt+Enter send now · Ctrl+D delete · Esc back t…
+
+=== Queue selection mode, entered from the Prompt · variant D (Framed) · ::running ===
+   PROTOTYPE CDA-144 · D Framed · macOS/Linux keys · run turn 1/4 · time paused (::play) · Tab va…
+  ╭─ add rate limiting to /api/login · ~/shop ──────────────────────────── ⠏ running · turn 1/4 ─╮
+. │                                                                                              │
+  │ verification [succeeded]                                                                     │
+. │                                                                                              │
+  │ assistant [completed]                                                                        │
+  │ Done.                                                                                        │
+. │                                                                                              │
+  │ session [succeeded]                                                                          │
+  │   workspace changed                                                                          │
+. │                                                                                              │
+  │ > use a sliding window instead of a fixed one                                                │
+. │                                                                                              │
+  │ assistant [completed]                                                                        │
+  │ Reading the handler first.                                                                   │
+. │                                                                                              │
+  │ read src/api/login.ts [succeeded]                                                            │
+  │   export async function login(req: Request) {                                                │
+. ├──────────────────────────────────────────────────────────────────────────────────────────────┤
+  │ STEER reuse the existing redis client, not a new connection                                  │
+  │ STEER keep the 429 message short                                                             │
+  │ NEXT  add tests for the limiter, including the window edge                                   │
+# │ NEXT  update the API section of the README                                                   │
+. ├──────────────────────────────────────────────────────────────────────────────────────────────┤
+. │ ›                                                                                            │
+. ╰─ ⏎ send now · e edit · d delete · ↑↓ move · esc back · ^C cancel run ───── 2 steer · 2 next ─╯
 
 === Send now on the second Follow-up during a run (after the key) · variant A (Rows) · ::sendnow ===
    PROTOTYPE CDA-144 · A Rows · macOS/Linux keys · run turn 1/4 · time paused (::play) · Tab vari…
@@ -250,6 +306,34 @@
   >
   Sent now: a Steer after 2 earlier Steer(s)                                                      
 
+=== Send now on the second Follow-up during a run (after the key) · variant D (Framed) · ::sendnow ===
+   PROTOTYPE CDA-144 · D Framed · macOS/Linux keys · run turn 1/4 · time paused (::play) · Tab va…
+  ╭─ add rate limiting to /api/login · ~/shop ──────────────────────────── ⠋ running · turn 1/4 ─╮
+. │                                                                                              │
+  │ verification [succeeded]                                                                     │
+. │                                                                                              │
+  │ assistant [completed]                                                                        │
+  │ Done.                                                                                        │
+. │                                                                                              │
+  │ session [succeeded]                                                                          │
+  │   workspace changed                                                                          │
+. │                                                                                              │
+  │ > use a sliding window instead of a fixed one                                                │
+. │                                                                                              │
+  │ assistant [completed]                                                                        │
+  │ Reading the handler first.                                                                   │
+. │                                                                                              │
+  │ read src/api/login.ts [succeeded]                                                            │
+  │   export async function login(req: Request) {                                                │
+. ├──────────────────────────────────────────────────────────────────────────────────────────────┤
+  │ STEER reuse the existing redis client, not a new connection                                  │
+  │ STEER keep the 429 message short                                                             │
+# │ STEER update the API section of the README                                                   │
+  │ NEXT  add tests for the limiter, including the window edge                                   │
+. ├──────────────────────────────────────────────────────────────────────────────────────────────┤
+. │ ›                                                                                            │
+  ╰─ Sent now: a Steer after 2 earlier Steer(s) ────────────────────────────── 3 steer · 1 next ─╯
+
 === The first Follow-up in edit while the run goes on · variant A (Rows) · ::editing ===
    PROTOTYPE CDA-144 · A Rows · macOS/Linux keys · run turn 1/4 · time paused (::play) · Tab vari…
   
@@ -333,6 +417,34 @@
 . ── Follow-up 3 of 4 is in the Prompt; nothing takes it while it is shown ───────────────────────
   Follow-up 3/4> add tests for the limiter, including the window edge
 . Up/Down next item · type to edit · Enter save · Alt+Enter send now · Ctrl+D delete · Esc back t…
+
+=== The first Follow-up in edit while the run goes on · variant D (Framed) · ::editing ===
+   PROTOTYPE CDA-144 · D Framed · macOS/Linux keys · run turn 1/4 · time paused (::play) · Tab va…
+  ╭─ add rate limiting to /api/login · ~/shop ──────────────────────────── ⠙ running · turn 1/4 ─╮
+. │                                                                                              │
+  │ verification [succeeded]                                                                     │
+. │                                                                                              │
+  │ assistant [completed]                                                                        │
+  │ Done.                                                                                        │
+. │                                                                                              │
+  │ session [succeeded]                                                                          │
+  │   workspace changed                                                                          │
+. │                                                                                              │
+  │ > use a sliding window instead of a fixed one                                                │
+. │                                                                                              │
+  │ assistant [completed]                                                                        │
+  │ Reading the handler first.                                                                   │
+. │                                                                                              │
+  │ read src/api/login.ts [succeeded]                                                            │
+  │   export async function login(req: Request) {                                                │
+. ├──────────────────────────────────────────────────────────────────────────────────────────────┤
+  │ STEER reuse the existing redis client, not a new connection                                  │
+  │ STEER keep the 429 message short                                                             │
+  │ NEXT  edit add tests for the limiter, including the window edge                              │
+  │ NEXT  update the API section of the README                                                   │
+. ├──────────────────────────────────────────────────────────────────────────────────────────────┤
+. │ ›                                                                                            │
+. ╰─ ⏎ save · ⇧⏎ new line · esc keep old text ──────────────────────────────── 2 steer · 2 next ─╯
 
 === Follow-ups waiting after a failed run · variant A (Rows) · ::failed ===
    PROTOTYPE CDA-144 · A Rows · macOS/Linux keys · no run · time paused (::play) · Tab variant · …
@@ -418,6 +530,34 @@
   >
 . Enter run · Up queue · Ctrl+R resume · Ctrl+N new Session · Shift+Enter/Ctrl+J new line · Esc t…
 
+=== Follow-ups waiting after a failed run · variant D (Framed) · ::failed ===
+   PROTOTYPE CDA-144 · D Framed · macOS/Linux keys · no run · time paused (::play) · Tab variant …
+  ╭─ add rate limiting to /api/login · ~/shop ─────────────────────────────────────── ! waiting ─╮
+  │ assistant [completed]                                                                        │
+  │ Reading the handler first.                                                                   │
+. │                                                                                              │
+  │ read src/api/login.ts [succeeded]                                                            │
+  │   export async function login(req: Request) {                                                │
+. │                                                                                              │
+  │ edit src/api/login.ts (+12 -2) [succeeded]                                                   │
+  │   applied 1 edit                                                                             │
+. │                                                                                              │
+  │ bash bun test [succeeded]                                                                    │
+  │   14 pass, 0 fail                                                                            │
+. │                                                                                              │
+  │ verification [failed]                                                                        │
+. │                                                                                              │
+  │ session [failed, VERIFICATION_FAILED]                                                        │
+  │   bun test: 1 failing test                                                                   │
+  │   workspace changed, partial changes possible                                                │
+. ├──────────────────────────────────────────────────────────────────────────────────────────────┤
+  │ Follow-ups wait: the last run failed. ⏎ runs your own task first; ⇧↑ then ⏎ sends one now.   │
+  │ WAIT  read the limit from config/limits.ts                                                   │
+  │ WAIT  add tests for the per-route limits                                                     │
+. ├──────────────────────────────────────────────────────────────────────────────────────────────┤
+  │ ›                                                                                            │
+. ╰─ ⏎ run · ⇧↑ queue · ^R resume · ^N new · esc esc quit ──────────────────── 0 steer · 2 next ─╯
+
 === After Esc cancelled the run · variant A (Rows) · ::cancelled ===
    PROTOTYPE CDA-144 · A Rows · macOS/Linux keys · no run · time paused (::play) · Tab variant · …
   assistant [completed]
@@ -501,6 +641,34 @@
 . ── Prompt Queue: 4 Follow-ups · waiting: the last run was cancelled · Up recalls ───────────────
   >
 . Enter run · Up queue · Ctrl+R resume · Ctrl+N new Session · Shift+Enter/Ctrl+J new line · Esc t…
+
+=== After Esc cancelled the run · variant D (Framed) · ::cancelled ===
+   PROTOTYPE CDA-144 · D Framed · macOS/Linux keys · no run · time paused (::play) · Tab variant …
+  ╭─ add rate limiting to /api/login · ~/shop ─────────────────────────────────────── ! waiting ─╮
+  │ session [succeeded]                                                                          │
+  │   workspace changed                                                                          │
+. │                                                                                              │
+  │ > use a sliding window instead of a fixed one                                                │
+. │                                                                                              │
+  │ assistant [completed]                                                                        │
+  │ Reading the handler first.                                                                   │
+. │                                                                                              │
+  │ read src/api/login.ts [succeeded]                                                            │
+  │   export async function login(req: Request) {                                                │
+. │                                                                                              │
+  │ Cancellation requested                                                                       │
+. │                                                                                              │
+  │ session [cancelled]                                                                          │
+  │   workspace changed, partial changes possible                                                │
+. ├──────────────────────────────────────────────────────────────────────────────────────────────┤
+  │ Follow-ups wait: the last run was cancelled. ⏎ runs your own task first; ⇧↑ then ⏎ sends on… │
+  │ WAIT  reuse the existing redis client, not a new connection                                  │
+  │ WAIT  keep the 429 message short                                                             │
+  │ WAIT  add tests for the limiter, including the window edge                                   │
+  │ WAIT  update the API section of the README                                                   │
+. ├──────────────────────────────────────────────────────────────────────────────────────────────┤
+  │ ›                                                                                            │
+. ╰─ ⏎ run · ⇧↑ queue · ^R resume · ^N new · esc esc quit ──────────────────── 0 steer · 4 next ─╯
 
 === Nine items, selection mode · variant A (Rows) · ::long ===
    PROTOTYPE CDA-144 · A Rows · macOS/Linux keys · run turn 1/4 · time paused (::play) · Tab vari…
@@ -586,6 +754,34 @@
   Follow-up 10/10> open a draft PR
 . Up/Down next item · type to edit · Enter save · Alt+Enter send now · Ctrl+D delete · Esc back t…
 
+=== Nine items, selection mode · variant D (Framed) · ::long ===
+   PROTOTYPE CDA-144 · D Framed · macOS/Linux keys · run turn 1/4 · time paused (::play) · Tab va…
+  ╭─ add rate limiting to /api/login · ~/shop ──────────────────────────── ⠸ running · turn 1/4 ─╮
+  │ assistant [completed]                                                                        │
+  │ Done.                                                                                        │
+. │                                                                                              │
+  │ session [succeeded]                                                                          │
+  │   workspace changed                                                                          │
+. │                                                                                              │
+  │ > use a sliding window instead of a fixed one                                                │
+. │                                                                                              │
+  │ assistant [completed]                                                                        │
+  │ Reading the handler first.                                                                   │
+. │                                                                                              │
+  │ read src/api/login.ts [succeeded]                                                            │
+  │   export async function login(req: Request) {                                                │
+. ├──────────────────────────────────────────────────────────────────────────────────────────────┤
+. │   4 more above                                                                               │
+  │ NEXT  update the API section of the README                                                   │
+  │ NEXT  add a metrics counter for rejected requests                                            │
+  │ NEXT  document the new env vars                                                              │
+  │ NEXT  write a changelog entry                                                                │
+  │ NEXT  check the Windows CI job                                                               │
+# │ NEXT  open a draft PR                                                                        │
+. ├──────────────────────────────────────────────────────────────────────────────────────────────┤
+. │ ›                                                                                            │
+. ╰─ ⏎ send now · e edit · d delete · ↑↓ move · esc back · ^C cancel run ───── 3 steer · 7 next ─╯
+
 === Resume list · variant A (Rows) · ::picker ===
    PROTOTYPE CDA-144 · A Rows · macOS/Linux keys · no run · time paused (::play) · Tab variant · …
    Resume a Session in ~/shop · 7 Sessions, newest first                                          
@@ -669,6 +865,34 @@
 .                                        │ 
 . >                                                                                               
 . Enter open · Up/Down move · Esc close                                                           
+
+=== Resume list · variant D (Framed) · ::picker ===
+   PROTOTYPE CDA-144 · D Framed · macOS/Linux keys · no run · time paused (::play) · Tab variant …
+  ╭─ add rate limiting to /api/login · ~/shop ────────────────────────────────────────── ● idle ─╮
+  │ Resume a Session in ~/shop · newest first                                                    │
+. │                                                                                              │
+  │ ● add rate limiting to /api/login  now              1 task    this Session                   │
+# │ ● fix login redirect loop          12 min ago       6 tasks   open in another terminal (PID… │
+  │ ● migrate session store to redis   yesterday 18:40  14 tasks  last run cut off               │
+  │ ○ Sửa test đang lỗi trong src/math…3 days ago       1 task                                   │
+. │ ✕ bump bun to 1.3                  5 days ago       ?         damaged, cannot resume         │
+. │ ✕ explore a new parser             2 weeks ago      2 tasks   made by a newer Coding Agent   │
+  │ ○ add a /health endpoint           3 weeks ago      9 tasks                                  │
+. │                                                                                              │
+. │                                                                                              │
+. │                                                                                              │
+. │                                                                                              │
+. │                                                                                              │
+. │                                                                                              │
+. │                                                                                              │
+. │                                                                                              │
+. │                                                                                              │
+. │                                                                                              │
+. │                                                                                              │
+. │                                                                                              │
+. ├──────────────────────────────────────────────────────────────────────────────────────────────┤
+. │ ›                                                                                            │
+. ╰─ ⏎ open · ↑↓ move · esc close ──────────────────────────────────────────── 0 steer · 0 next ─╯
 
 === Resume list: Enter on a Session open elsewhere · variant A (Rows) · ::picker ===
    PROTOTYPE CDA-144 · A Rows · macOS/Linux keys · no run · time paused (::play) · Tab variant · …
@@ -754,6 +978,34 @@
 . >                                                                                               
   "fix login redirect loop" is open in another terminal (PID 4242). Close it there first.         
 
+=== Resume list: Enter on a Session open elsewhere · variant D (Framed) · ::picker ===
+   PROTOTYPE CDA-144 · D Framed · macOS/Linux keys · no run · time paused (::play) · Tab variant …
+  ╭─ add rate limiting to /api/login · ~/shop ────────────────────────────────────────── ● idle ─╮
+  │ Resume a Session in ~/shop · newest first                                                    │
+. │                                                                                              │
+  │ ● add rate limiting to /api/login  now              1 task    this Session                   │
+# │ ● fix login redirect loop          12 min ago       6 tasks   open in another terminal (PID… │
+  │ ● migrate session store to redis   yesterday 18:40  14 tasks  last run cut off               │
+  │ ○ Sửa test đang lỗi trong src/math…3 days ago       1 task                                   │
+. │ ✕ bump bun to 1.3                  5 days ago       ?         damaged, cannot resume         │
+. │ ✕ explore a new parser             2 weeks ago      2 tasks   made by a newer Coding Agent   │
+  │ ○ add a /health endpoint           3 weeks ago      9 tasks                                  │
+. │                                                                                              │
+. │                                                                                              │
+. │                                                                                              │
+. │                                                                                              │
+. │                                                                                              │
+. │                                                                                              │
+. │                                                                                              │
+. │                                                                                              │
+. │                                                                                              │
+. │                                                                                              │
+. │                                                                                              │
+. │                                                                                              │
+. ├──────────────────────────────────────────────────────────────────────────────────────────────┤
+. │ ›                                                                                            │
+  ╰─ "fix login redirect loop" is open in another terminal (PID 4242). Close…─ 0 steer · 0 next ─╯
+
 === Resume list: lost the race (after Enter) · variant A (Rows) · ::race ===
    PROTOTYPE CDA-144 · A Rows · macOS/Linux keys · no run · time paused (::play) · Tab variant · …
    Resume a Session in ~/shop · 7 Sessions, newest first                                          
@@ -837,6 +1089,34 @@
 .                                        │ 
 . >                                                                                               
   "Sửa test đang lỗi trong src/math.ts" was just opened in another terminal (PID 5151)            
+
+=== Resume list: lost the race (after Enter) · variant D (Framed) · ::race ===
+   PROTOTYPE CDA-144 · D Framed · macOS/Linux keys · no run · time paused (::play) · Tab variant …
+  ╭─ add rate limiting to /api/login · ~/shop ────────────────────────────────────────── ● idle ─╮
+  │ Resume a Session in ~/shop · newest first                                                    │
+. │                                                                                              │
+  │ ● add rate limiting to /api/login  now              1 task    this Session                   │
+  │ ● fix login redirect loop          12 min ago       6 tasks   open in another terminal (PID… │
+  │ ● migrate session store to redis   yesterday 18:40  14 tasks  last run cut off               │
+# │ ● Sửa test đang lỗi trong src/math…3 days ago       1 task    open in another terminal (PID… │
+. │ ✕ bump bun to 1.3                  5 days ago       ?         damaged, cannot resume         │
+. │ ✕ explore a new parser             2 weeks ago      2 tasks   made by a newer Coding Agent   │
+  │ ○ add a /health endpoint           3 weeks ago      9 tasks                                  │
+. │                                                                                              │
+. │                                                                                              │
+. │                                                                                              │
+. │                                                                                              │
+. │                                                                                              │
+. │                                                                                              │
+. │                                                                                              │
+. │                                                                                              │
+. │                                                                                              │
+. │                                                                                              │
+. │                                                                                              │
+. │                                                                                              │
+. ├──────────────────────────────────────────────────────────────────────────────────────────────┤
+. │ ›                                                                                            │
+  ╰─ "Sửa test đang lỗi trong src/math.ts" was just opened in another termin…─ 0 steer · 0 next ─╯
 
 === Resume list while Follow-ups wait (after Enter) · variant A (Rows) · ::pickerwait ===
    PROTOTYPE CDA-144 · A Rows · macOS/Linux keys · no run · time paused (::play) · Tab variant · …
@@ -922,6 +1202,34 @@
 . >                                                                                               
   Resuming discards 2 waiting Follow-ups. Press Enter again to resume.                            
 
+=== Resume list while Follow-ups wait (after Enter) · variant D (Framed) · ::pickerwait ===
+   PROTOTYPE CDA-144 · D Framed · macOS/Linux keys · no run · time paused (::play) · Tab variant …
+  ╭─ add rate limiting to /api/login · ~/shop ─────────────────────────────────────── ! waiting ─╮
+  │ Resume a Session in ~/shop · newest first                                                    │
+. │                                                                                              │
+  │ ● add rate limiting to /api/login  now              2 tasks   this Session                   │
+  │ ● fix login redirect loop          12 min ago       6 tasks   open in another terminal (PID… │
+  │ ● migrate session store to redis   yesterday 18:40  14 tasks  last run cut off               │
+  │ ○ Sửa test đang lỗi trong src/math…3 days ago       1 task                                   │
+. │ ✕ bump bun to 1.3                  5 days ago       ?         damaged, cannot resume         │
+. │ ✕ explore a new parser             2 weeks ago      2 tasks   made by a newer Coding Agent   │
+# │ ○ add a /health endpoint           3 weeks ago      9 tasks                                  │
+. │                                                                                              │
+. │                                                                                              │
+. │                                                                                              │
+. │                                                                                              │
+. │                                                                                              │
+. │                                                                                              │
+. │                                                                                              │
+. │                                                                                              │
+. │                                                                                              │
+. │                                                                                              │
+. │                                                                                              │
+. │                                                                                              │
+. ├──────────────────────────────────────────────────────────────────────────────────────────────┤
+. │ ›                                                                                            │
+  ╰─ Resuming discards 2 waiting Follow-ups. Press Enter again to resume. ──── 0 steer · 2 next ─╯
+
 === Startup notice: another Coding Agent on this Repository Root · variant A (Rows) · ::startup ===
    PROTOTYPE CDA-144 · A Rows · macOS/Linux keys · no run · time paused (::play) · Tab variant · …
   Another Coding Agent is running in ~/shop (PID 4242, Session "fix login redirect loop").
@@ -1006,6 +1314,34 @@
   >
 . Enter run · Ctrl+R resume · Ctrl+N new Session · Shift+Enter/Ctrl+J new line · Esc twice quit   
 
+=== Startup notice: another Coding Agent on this Repository Root · variant D (Framed) · ::startup ===
+   PROTOTYPE CDA-144 · D Framed · macOS/Linux keys · no run · time paused (::play) · Tab variant …
+  ╭─ (new Session) · ~/shop ──────────────────────────────────────────────────────────── ● idle ─╮
+. │                                                                                              │
+. │                                                                                              │
+. │                                                                                              │
+. │                                                                                              │
+. │                                                                                              │
+. │                                                                                              │
+. │                                                                                              │
+. │                                                                                              │
+. │                                                                                              │
+. │                                                                                              │
+. │                                                                                              │
+. │                                                                                              │
+. │                                                                                              │
+. │                                                                                              │
+. │                                                                                              │
+. │                                                                                              │
+. │                                                                                              │
+. │                                                                                              │
+. │                                                                                              │
+. │                                                                                              │
+  │ Another Coding Agent is running in ~/shop (PID 4242, Session "fix login redirect loop").     │
+. ├──────────────────────────────────────────────────────────────────────────────────────────────┤
+  │ ›                                                                                            │
+. ╰─ ⏎ run · ^R resume · ^N new · esc esc quit ─────────────────────────────── 0 steer · 0 next ─╯
+
 === Startup notice: a new worktree · variant A (Rows) · ::worktree ===
    PROTOTYPE CDA-144 · A Rows · macOS/Linux keys · no run · time paused (::play) · Tab variant · …
   Worktree limiter created in ~/.coding-agent/worktrees/shop-3f9a1c2b7d4e/limiter, branch
@@ -1089,3 +1425,31 @@
   
   >
 . Enter run · Ctrl+R resume · Ctrl+N new Session · Shift+Enter/Ctrl+J new line · Esc twice quit   
+
+=== Startup notice: a new worktree · variant D (Framed) · ::worktree ===
+   PROTOTYPE CDA-144 · D Framed · macOS/Linux keys · no run · time paused (::play) · Tab variant …
+  ╭─ (new Session) · ~/shop ──────────────────────────────────────────────────────────── ● idle ─╮
+. │                                                                                              │
+. │                                                                                              │
+. │                                                                                              │
+. │                                                                                              │
+. │                                                                                              │
+. │                                                                                              │
+. │                                                                                              │
+. │                                                                                              │
+. │                                                                                              │
+. │                                                                                              │
+. │                                                                                              │
+. │                                                                                              │
+. │                                                                                              │
+. │                                                                                              │
+. │                                                                                              │
+. │                                                                                              │
+  │ Worktree limiter created in ~/.coding-agent/worktrees/shop-3f9a1c2b7d4e/limiter, branch      │
+  │ coding-agent/limiter from main at 8eb6bb2.                                                   │
+  │   The starting checkout has uncommitted changes; they stay there and are not in the          │
+  │ worktree.                                                                                    │
+  │   Copied from .worktreeinclude: .env, .env.local                                             │
+. ├──────────────────────────────────────────────────────────────────────────────────────────────┤
+  │ ›                                                                                            │
+. ╰─ ⏎ run · ^R resume · ^N new · esc esc quit ─────────────────────────────── 0 steer · 0 next ─╯

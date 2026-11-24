@@ -9,13 +9,15 @@ import { type Editor, type EditorView, editorView } from "../src/editor.ts";
 import { TASK_MARKER, transcriptRows, wrap } from "../src/rows.ts";
 import { type ScrollPosition, topRow } from "../src/viewport.ts";
 import { type FakeCodingAgent, type QueueKind, REPO, type SessionRow } from "./host.ts";
+import { composeD } from "./variant-d.ts";
 
-export type Variant = "A" | "B" | "C";
-export const VARIANTS: readonly Variant[] = ["A", "B", "C"];
+export type Variant = "A" | "B" | "C" | "D";
+export const VARIANTS: readonly Variant[] = ["A", "B", "C", "D"];
 export const VARIANT_NAMES: Record<Variant, string> = {
   A: "Rows",
   B: "Summary + panel",
   C: "Prompt recall",
+  D: "Framed",
 };
 export type Platform = "unix" | "windows";
 export type Mode = "prompt" | "queue" | "edit" | "picker" | "echo";
@@ -43,6 +45,8 @@ export interface Ui {
   echo: EchoRecord[];
   seen: Set<string>;
   kitty: "on" | "not answered";
+  // D: key hints in macOS symbols rather than words.
+  symbols: boolean;
 }
 
 export interface Seg {
@@ -50,6 +54,8 @@ export interface Seg {
   readonly inverse?: boolean;
   readonly dim?: boolean;
   readonly bold?: boolean;
+  readonly color?: string;
+  readonly bg?: string;
 }
 export type Row = Seg[];
 
@@ -194,6 +200,8 @@ function stripRows(
   const items = host.items();
   const reason = host.waitingReason();
   switch (ui.variant) {
+    case "D":
+      return { rows: [] };
     case "A": {
       const rows: Row[] = [];
       let cursor: { x: number; y: number } | undefined;
@@ -508,6 +516,9 @@ export function compose(
   screenRows: number,
 ): Screen {
   const director = directorRow(ui, host, columns);
+  if (ui.variant === "D" && ui.mode !== "echo") {
+    return composeD(ui, host, columns, screenRows, director);
+  }
   const hintRow: Row = ui.notice
     ? [{ text: fit(ui.notice, columns), bold: true }]
     : dim(hint(ui, host), columns);

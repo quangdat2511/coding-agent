@@ -1,4 +1,4 @@
-// PROTOTYPE (CDA-144), throwaway. bun packages/tui/prototype-cda-144/main.tsx [--variant=A|B|C]
+// PROTOTYPE (CDA-144), throwaway. bun packages/tui/prototype-cda-144/main.tsx [--variant=A|B|C|D]
 //   [--scene=<name>] [--keys=unix|windows] [--kitty=off]
 import { mountApp } from "./app.tsx";
 import type { Platform, Variant } from "./views.ts";
@@ -9,7 +9,7 @@ const args = new Map(
     return [name, value] as const;
   }),
 );
-const variant = (args.get("variant") ?? "A").toUpperCase() as Variant;
+const variant = (args.get("variant") ?? "D").toUpperCase() as Variant;
 const windowsLike =
   process.platform === "win32" ||
   process.env.WSL_DISTRO_NAME !== undefined ||
@@ -21,7 +21,7 @@ const platform: Platform =
 mountApp(
   { stdout: process.stdout, stdin: process.stdin },
   {
-    variant: ["A", "B", "C"].includes(variant) ? variant : "A",
+    variant: ["A", "B", "C", "D"].includes(variant) ? variant : "D",
     platform,
     scene: args.get("scene") ?? "running",
     kitty: args.get("kitty") !== "off",

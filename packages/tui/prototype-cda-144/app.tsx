@@ -14,6 +14,7 @@ import {
   type EchoRecord,
   type Platform,
   type Screen,
+  type Seg,
   type Ui,
   VARIANTS,
   type Variant,
@@ -58,8 +59,10 @@ const isAlt = (input: string, key: Key, letter: string) =>
   key.meta === true && key.ctrl !== true && input.toLowerCase() === letter;
 const isPlainEnter = (key: Key) => key.return === true && !key.shift && !key.meta && !key.ctrl;
 
+// Windows also takes Alt+Enter, unlisted: VS Code on Windows takes Ctrl+Q but passes Alt+Enter.
 function isFollowUpKey(platform: Platform, input: string, key: Key): boolean {
-  return platform === "unix" ? key.return === true && key.meta === true : isCtrl(input, key, "q");
+  const altEnter = key.return === true && key.meta === true;
+  return platform === "unix" ? altEnter : altEnter || isCtrl(input, key, "q");
 }
 
 function isDequeueKey(platform: Platform, input: string, key: Key): boolean {
@@ -90,6 +93,7 @@ export function mountApp(streams: Streams, options: AppOptions): App {
     echo: [],
     seen: new Set(),
     kitty: "not answered",
+    symbols: process.platform === "darwin",
   };
   let screen: Screen | undefined;
   let unmounted: Promise<void> | undefined;
@@ -130,6 +134,10 @@ export function mountApp(streams: Streams, options: AppOptions): App {
     if (ui.variant === "C") {
       return promptLayout("Follow-up 1/1> ");
     }
+    if (ui.variant === "D") {
+      // The frame's sides, the badge and the "edit " label.
+      return { kind: "wrapped", columns: Math.max(1, columns - 4 - 6 - 5), rows: 4 };
+    }
     const kind = ui.edit === undefined ? undefined : host.find(ui.edit.id)?.kind;
     const label = `Editing ${kind === "steer" ? "Steering" : "Follow-up"}: `;
     return { kind: "wrapped", columns: Math.max(1, columns - width(label)), rows: 3 };
@@ -158,7 +166,7 @@ export function mountApp(streams: Streams, options: AppOptions): App {
     if (height === 0) {
       return;
     }
-    const laidOut = transcriptRows(host.transcript, columns);
+    const laidOut = transcriptRows(host.transcript, ui.variant === "D" ? columns - 4 : columns);
     ui.position = positionAt(
       laidOut,
       height,
@@ -174,7 +182,9 @@ export function mountApp(streams: Streams, options: AppOptions): App {
     if (lower === "help" || lower === "") {
       host.transcript.push({ kind: "notice", id: `help-${Date.now()}`, text: HELP });
       ui.position = FOLLOWING;
-    } else if (lower === "a" || lower === "b" || lower === "c") {
+    } else if (lower === "symbols" || lower === "words") {
+      ui.symbols = lower === "symbols";
+    } else if (lower === "a" || lower === "b" || lower === "c" || lower === "d") {
       setVariant(lower.toUpperCase() as Variant);
     } else if (lower === "win" || lower === "windows") {
       ui.platform = "windows";
@@ -447,7 +457,7 @@ export function mountApp(streams: Streams, options: AppOptions): App {
       key.upArrow === true &&
       !key.meta &&
       !key.ctrl &&
-      (key.shift === true || (ui.variant !== "B" && promptOnFirstRow()));
+      (key.shift === true || ((ui.variant === "A" || ui.variant === "C") && promptOnFirstRow()));
     if (intoQueue && host.items().length > 0) {
       enterQueue();
       return;
@@ -491,7 +501,7 @@ export function mountApp(streams: Streams, options: AppOptions): App {
     }
     if (key.downArrow) {
       if (index >= items.length - 1) {
-        if (ui.variant === "A") {
+        if (ui.variant === "A" || ui.variant === "D") {
           leaveQueue();
         }
         return;
@@ -807,9 +817,12 @@ export function mountApp(streams: Streams, options: AppOptions): App {
     streams.stdout.write("\u001b[H");
   }
 
+  let spinner: ReturnType<typeof setInterval> | undefined;
+
   function unmount(): Promise<void> {
     unmounted ??= (async () => {
       host.stop();
+      clearInterval(spinner);
       streams.stdout.off("resize", redraw);
       const exited = instance.waitUntilExit();
       instance.unmount();
@@ -837,6 +850,12 @@ export function mountApp(streams: Streams, options: AppOptions): App {
   }
   if (options.live) {
     host.start();
+    // D's spinner turns while a run is active.
+    spinner = setInterval(() => {
+      if (host.run !== undefined && ui.variant === "D" && ui.mode !== "echo") {
+        draw();
+      }
+    }, 120);
   }
   draw();
   return app;
@@ -881,15 +900,20 @@ function Frame({
       {screen.rows.map((row, index) => (
         // biome-ignore lint/suspicious/noArrayIndexKey: rows are laid out again each frame
         <Text key={index} wrap="truncate-end">
-          {row.map((seg, part) => (
+          {(row.some((seg) => seg.text !== "")
+            ? row.filter((seg) => seg.text !== "")
+            : [{ text: " " }]
+          ).map((seg: Seg, part) => (
             <Text
               // biome-ignore lint/suspicious/noArrayIndexKey: segments are laid out again each frame
               key={part}
               inverse={seg.inverse}
               dimColor={seg.dim}
               bold={seg.bold}
+              color={seg.color}
+              backgroundColor={seg.bg}
             >
-              {seg.text === "" ? " " : seg.text}
+              {seg.text}
             </Text>
           ))}
         </Text>

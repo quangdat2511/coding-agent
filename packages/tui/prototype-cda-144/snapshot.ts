@@ -13,7 +13,7 @@ const SHIFT_UP = "\u001b[1;2A";
 const ENTER = "\r";
 const ALT_ENTER = "\u001b\r";
 
-const intoQueue = (variant: Variant) => [variant === "B" ? SHIFT_UP : UP];
+const intoQueue = (variant: Variant) => [variant === "B" || variant === "D" ? SHIFT_UP : UP];
 
 const PLAN: { title: string; scene: string; keys?: (variant: Variant) => string[] }[] = [
   { title: "Run active, 2 Steers and 2 Follow-ups waiting", scene: "running" },

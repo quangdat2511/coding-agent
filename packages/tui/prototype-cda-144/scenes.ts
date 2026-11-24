@@ -210,7 +210,8 @@ export function applyScene(name: string, app: App) {
 
 export const HELP = [
   "PROTOTYPE commands (type them in the Prompt and press Enter):",
-  "  ::A ::B ::C   switch variant (or Tab / Shift+Tab)",
+  "  ::A ::B ::C ::D   switch variant (or Tab / Shift+Tab); D is the one chosen",
+  "  ::symbols ::words   D's key hints in macOS symbols or in words",
   "  ::win ::unix  Windows or macOS/Linux key table",
   "  ::play ::pause ::step   move the fake run (one Model Turn per step)",
   "  ::fail        the active run fails at its end",
