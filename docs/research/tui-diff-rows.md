@@ -34,9 +34,9 @@ blast radius on the existing golden tests and on Group 3's footer work.
 - **ANSI would not break widths, only everything else.** `wrap-ansi` tokenizes escapes and measures
   only the plain text, Ink keeps SGR and OSC and strips other sequences, and `slice-ansi` closes open
   styles when `truncate-end` cuts a line. The costs are a color gate the TUI no longer owns,
-  hand-written resets where a style crosses an existing newline or separate `<Text>` rows
-  (`wrap-ansi` only repairs inserted wrap boundaries), and tests that can no longer see tone in the
-  row data.
+  hand-written resets and reopens where a style crosses an existing newline or separate `<Text>`
+  rows (`wrap-ansi` only repairs inserted wrap boundaries), and tests that can no longer see tone in
+  the row data.
 - **Pi's diff is a pre-formatted string, not a component tree.** Lines read `+123 content`,
   `-123 content`, ` 123 content` and `     ...`; the gutter width is global; removed lines are printed
   before added lines; context is 4 before + 4 after with a `...` marker; there are no `@@` hunk
@@ -161,15 +161,17 @@ What it costs:
    level ([chalk index.js L169](https://github.com/chalk/chalk/blob/v5.6.2/source/index.js#L169)). A raw
    SGR string is emitted whatever the level is, so `NO_COLOR`, `--no-color` and a piped stdout would
    all still print color.
-2. **A style opened outside the wrap path needs its own reset.** `wrap-ansi` 10.0.2 closes and reopens
-   SGR at **inserted wrap boundaries**, so a colored run inside one wrapped string is safe across a
-   break it inserts (probe: `abcdef` red at width 3 yields `abc` and `def` with separate open/close
-   codes). It does not repair an existing newline: `wrap("\x1b[31mabc\ndef\x1b[39m", 3)` leaves `def`
-   plain because no style is reopened after the `\n` already in the input. Drawing the two lines as
-   separate `<Text>` rows has the same effect: Ink closes the style at the end of the first row and
-   `def` appears without color. The risk is therefore a pre-styled source string whose existing line
-   breaks the row model splits outside the wrap path. Pi avoids this because its `Text` wraps one
-   multi-line string and carries ANSI state across lines
+2. **A style opened outside the wrap path needs its own reset and reopen.** `wrap-ansi` 10.0.2 closes
+   and reopens SGR at **inserted wrap boundaries**, so a colored run inside one wrapped string is safe
+   across a break it inserts (probe: `abcdef` red at width 3 yields `abc` and `def` with separate
+   open/close codes). An existing newline is different: `wrap("\x1b[31mabc\ndef\x1b[39m", 3)` keeps
+   the red SGR in the returned string, so writing that one contiguous string preserves the color.
+   `def` appears plain only when Ink draws the two rows separately: it closes the style at the end of
+   the first row, and the second row starts without an opening code. To keep the color on the next
+   row, reopen the style at the start of that row; the row model must do this itself. The risk is
+   therefore a pre-styled source string whose existing line breaks the row model splits outside the
+   wrap path. Pi avoids this because its `Text` wraps one multi-line string and carries ANSI state
+   across lines
    ([pi-tui `utils.ts` L1037-L1060](https://github.com/earendil-works/pi/blob/8209929fb553e7a8c91dc0894569f9ec43dd201f/packages/tui/src/utils.ts#L1037-L1060));
    this row model cannot when it hand-slices a style.
 3. **Tone becomes invisible to tests.** A screen assertion still passes (the characters are the same),
@@ -229,10 +231,13 @@ settled the direction: "rows carry structured tone data, not ANSI, with a protot
   `["é", "a"]`, and slicing the original with those lengths yields `["e", "\u0301"]`, losing the
   `a`. A span boundary inside a combining sequence has the same hazard: if `removed` ends with `e`
   and `added` starts with `\u0301a`, NFC merges them into `éa`, and a boundary that splits the
-  grapheme has no single tone. The rule is to attach the merged grapheme to the earlier span, so `é`
-  takes the `removed` tone and `a` takes the `added` tone. Move any boundary that would split a
-  grapheme outward to the nearest grapheme boundary before cutting. Wrapping each span separately
-  instead would let a span boundary become a line break and would re-wrap long words twice.
+  grapheme has no single tone. The rule is to attach the merged grapheme to the span that contains
+  its **first character in the source string**: `é` takes the `removed` tone and `a` the `added`
+  tone. This generalizes to emoji clusters: with `removed` ending in `👩` and `added` starting with
+  `\u200D💻a`, `👩💻` keeps the `removed` tone and `a` takes the `added` tone. Do not move the
+  boundary to the nearest grapheme edge; the first-character rule is the single rule. Wrapping each
+  span separately instead would let a span boundary become a line break and would re-wrap long words
+  twice.
 
 ---
 
@@ -267,16 +272,18 @@ chalk 5.6.2 vendors `supports-color`; the default instance takes its level from 
 | `FORCE_COLOR=1` to `3` (empty means 1) | that level; with `TERM=xterm-256color` and a TTY, `FORCE_COLOR=1` can report 2 | [L33-L45](https://github.com/chalk/chalk/blob/v5.6.2/source/vendor/supports-color/index.js#L33-L45) |
 | stdout not a TTY and no force | 0 | [L90-L92](https://github.com/chalk/chalk/blob/v5.6.2/source/vendor/supports-color/index.js#L90-L92) |
 | `TERM=dumb` on a TTY | force level, else 0 | [L96-L98](https://github.com/chalk/chalk/blob/v5.6.2/source/vendor/supports-color/index.js#L96-L98) |
-| `CI` set, plus GitHub Actions, Gitea Actions or CircleCI, with stdout a TTY | 3; 0 when stdout is a pipe | [L114-L121](https://github.com/chalk/chalk/blob/v5.6.2/source/vendor/supports-color/index.js#L114-L121) |
+| `CI` set, plus GitHub Actions, Gitea Actions or CircleCI | 3 after the TTY check; a pipe returns 0 only when no positive `FORCE_COLOR` is set | [L114-L121](https://github.com/chalk/chalk/blob/v5.6.2/source/vendor/supports-color/index.js#L114-L121) |
 | `CI` set, plus Travis, AppVeyor, GitLab, Buildkite, Drone or CodeShip | 1 | [L122-L125](https://github.com/chalk/chalk/blob/v5.6.2/source/vendor/supports-color/index.js#L122-L125) |
 | `CI` set otherwise | force level, else 0 | [L123](https://github.com/chalk/chalk/blob/v5.6.2/source/vendor/supports-color/index.js#L123) |
 | `COLORTERM=truecolor` | 3 | [L130-L132](https://github.com/chalk/chalk/blob/v5.6.2/source/vendor/supports-color/index.js#L130-L132) |
 
 Measured on macOS with chalk 5.6.2: `CI=1 GITHUB_ACTIONS=1` returns level 3 while stdout is a TTY
-and level 0 when stdout is a pipe; `FORCE_COLOR=1 TERM=xterm-256color` with a TTY can return level 2.
-The checks run in the order above: argv flags, `FORCE_COLOR`, the stdout TTY check, `TERM=dumb`, CI
-vendor detection, then `COLORTERM`. The GitHub Actions row only applies after the TTY check passes,
-so CDA-157's tests should set `FORCE_COLOR` explicitly instead of relying on the runner's TTY.
+and level 0 when stdout is a pipe with no force color; with `FORCE_COLOR=1` the piped case can still
+return 3. `FORCE_COLOR=1 TERM=xterm-256color` with a TTY can return level 2. The checks run in the
+order above: argv flags, `FORCE_COLOR`, the stdout TTY check, `TERM=dumb`, CI vendor detection, then
+`COLORTERM`. The GitHub Actions row only applies after the TTY check; a pipe hits the earlier TTY
+row and returns 0 only when no positive `FORCE_COLOR` is set. CDA-157's tests should set
+`FORCE_COLOR` explicitly instead of relying on the runner's TTY.
 
 **`NO_COLOR` is not read anywhere in chalk 5.6.2.** The string does not appear in the published
 package, and a direct probe of the vendored detector confirms it: with `TERM=xterm-256color` and a TTY,
