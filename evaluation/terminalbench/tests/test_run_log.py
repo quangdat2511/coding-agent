@@ -9,7 +9,7 @@ from coding_agent_terminalbench.run_log import RunLog, RunLogError, load_run_log
 from tests.support import (
     DEFAULT,
     OBJECTIVE,
-    SESSION_ID,
+    RUN_ID,
     SYSTEM_PROMPT,
     complete_events,
     result_record_data,
@@ -41,7 +41,7 @@ class RunLogTest(unittest.TestCase):
         self.assertEqual(log.record.provider, "google")
         self.assertEqual(log.record.model, "gemini-3.5-flash-lite")
         self.assertEqual(log.record.profile, "terminalbench")
-        self.assertEqual(log.session_id, SESSION_ID)
+        self.assertEqual(log.run_id, RUN_ID)
         self.assertFalse(log.truncated)
         self.assertEqual(log.model_turns, 2)
         self.assertEqual(log.tool_calls, 1)
@@ -49,12 +49,12 @@ class RunLogTest(unittest.TestCase):
         self.assertEqual(log.agent_result["outcome"], "succeeded")
         self.assertEqual(len(log.events), 16)
         self.assertEqual(log.events[0].sequence, 1)
-        self.assertEqual(log.events[0].type, "session_started")
+        self.assertEqual(log.events[0].type, "run_started")
         self.assertEqual(log.events[0].data["task"]["objective"], OBJECTIVE)
         self.assertEqual(log.events[0].occurred_at, "2026-11-12T00:00:00.000Z")
-        self.assertEqual(log.events[-1].type, "session_settled")
+        self.assertEqual(log.events[-1].type, "run_settled")
 
-    def test_a_log_that_does_not_end_with_session_settled_is_truncated(self) -> None:
+    def test_a_log_that_does_not_end_with_run_settled_is_truncated(self) -> None:
         log = self.read(log=truncated_events(), result=None)
 
         self.assertTrue(log.truncated)
@@ -65,7 +65,7 @@ class RunLogTest(unittest.TestCase):
     def test_a_partly_written_last_line_is_dropped(self) -> None:
         self.read(log=truncated_events())
         with (self.output_dir / "events.jsonl").open("a", encoding="utf-8") as file:
-            file.write('{"schemaVersion": 1, "sessionId": "session-1", "sequence": 16, "oc')
+            file.write('{"schemaVersion": 1, "runId": "run-1", "sequence": 16, "oc')
 
         log = load_run_log(self.output_dir)
 
@@ -93,7 +93,7 @@ class RunLogTest(unittest.TestCase):
             # The process died while appending a Tool Result with Vietnamese output, so the last
             # byte of a multi byte character never reached the file.
             file.write(
-                '{"schemaVersion": 1, "sessionId": "session-1", "data": "Tiế'.encode("utf-8")[:-1]
+                '{"schemaVersion": 1, "runId": "run-1", "data": "Tiế'.encode("utf-8")[:-1]
             )
 
         log = load_run_log(self.output_dir)
@@ -105,7 +105,7 @@ class RunLogTest(unittest.TestCase):
         log = complete_events()
         log[4] = {"schemaVersion": 1, "type": "tool_call_queued"}
         with self.assertRaisesRegex(
-            RunLogError, r"events\.jsonl line 5 does not have the Session Event envelope"
+            RunLogError, r"events\.jsonl line 5 does not have the Run Event envelope"
         ):
             self.read(log=log)
 
@@ -117,7 +117,7 @@ class RunLogTest(unittest.TestCase):
         path.write_text("\n".join(lines), encoding="utf-8")
 
         with self.assertRaisesRegex(
-            RunLogError, r"events\.jsonl line 2 is not a whole Session Event"
+            RunLogError, r"events\.jsonl line 2 is not a whole Run Event"
         ):
             load_run_log(self.output_dir)
 
@@ -210,7 +210,7 @@ class RunLogTest(unittest.TestCase):
         for index, event in enumerate(log):
             if event["type"] == "model_turn_completed":
                 log[index] = {**event, "data": {**event["data"], "usage": {"inputTokens": 7}}}
-        # The session never settled, so the log has no Agent Result to take the counts from.
+        # The Agent Run never settled, so the log has no Agent Result to take the counts from.
         truncation = self.read(log=log[:-1], result=None)
 
         self.assertEqual(truncation.usage.input, 14)

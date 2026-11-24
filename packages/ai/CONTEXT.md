@@ -48,7 +48,7 @@ _Avoid_: Provider features, model flags, feature set
 
 **Transport Retry Bound**:
 The caller-specified maximum number of attempts the AI transport layer may make to re-issue a request that fails before the response stream opens. It never retries after the first stream event.
-_Avoid_: Session retry, agent retry, loop retry
+_Avoid_: Run retry, agent retry, loop retry
 
 **Model Cost**:
 A model's list prices in USD per million tokens for uncached input, output, cache reads, and cache writes, bundled with that model's entry in the Provider Directory. A zero rate means the Model Provider makes no separate charge; a model whose prices are not known has no Model Cost at all.

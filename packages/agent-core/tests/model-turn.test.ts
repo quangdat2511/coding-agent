@@ -5,7 +5,7 @@ import type { AgentState } from "../src/index.ts";
 import {
   collect,
   continueWith,
-  openTestSession,
+  openTestRun,
   streamOf,
   textMessage,
   textTurn,
@@ -18,11 +18,11 @@ const task = { objective: "Fix the failing test" };
 
 describe("running a Model Turn", () => {
   it("settles succeeded when Verification accepts a text response", async () => {
-    const { session } = openTestSession({ model: { turns: [textTurn("Fixed it.")] } });
+    const { run } = openTestRun({ model: { turns: [textTurn("Fixed it.")] } });
 
-    await session.dispatch({ type: "start", task });
+    await run.dispatch({ type: "start", task });
 
-    expect(await session.result()).toEqual({
+    expect(await run.result()).toEqual({
       outcome: "succeeded",
       finalMessage: textMessage("Fixed it."),
       verification: {
@@ -37,10 +37,10 @@ describe("running a Model Turn", () => {
   });
 
   it("asks the model with the system prompt, the objective, the tool declarations, and parallel Tool Calls disabled", async () => {
-    const { session, model } = openTestSession({ model: { turns: [textTurn("Fixed it.")] } });
+    const { run, model } = openTestRun({ model: { turns: [textTurn("Fixed it.")] } });
 
-    await session.dispatch({ type: "start", task });
-    await session.result();
+    await run.dispatch({ type: "start", task });
+    await run.result();
 
     expect(model.requests).toEqual([
       {
@@ -56,12 +56,12 @@ describe("running a Model Turn", () => {
   });
 
   it("commits the completed Assistant Message to the transcript after the objective", async () => {
-    const { session } = openTestSession({ model: { turns: [textTurn("Fixed it.")] } });
+    const { run } = openTestRun({ model: { turns: [textTurn("Fixed it.")] } });
 
-    await session.dispatch({ type: "start", task });
-    await session.result();
+    await run.dispatch({ type: "start", task });
+    await run.result();
 
-    expect(session.snapshot().transcript).toEqual([
+    expect(run.snapshot().transcript).toEqual([
       { role: "user", content: "Fix the failing test" },
       textMessage("Fixed it."),
     ]);
@@ -70,22 +70,22 @@ describe("running a Model Turn", () => {
   it("shows streamed text in the snapshot as it arrives, before the response completes", async () => {
     const observed: AgentState[] = [];
     const events = textTurn("Fix", "ed it.");
-    const { session } = openTestSession({
+    const { run } = openTestRun({
       model: {
         turns: [
           () =>
             streamOf(async function* () {
               for (const event of events) {
                 yield event;
-                if (event.type === "content_block_delta") observed.push(session.snapshot());
+                if (event.type === "content_block_delta") observed.push(run.snapshot());
               }
             }),
         ],
       },
     });
 
-    await session.dispatch({ type: "start", task });
-    await session.result();
+    await run.dispatch({ type: "start", task });
+    await run.result();
 
     expect(observed).toMatchObject([
       {
@@ -106,14 +106,14 @@ describe("running a Model Turn", () => {
   });
 
   it("publishes paired message and turn events, with content deltas only between them", async () => {
-    const { session } = openTestSession({ model: { turns: [textTurn("Fixed it.")] } });
+    const { run } = openTestRun({ model: { turns: [textTurn("Fixed it.")] } });
 
-    await session.dispatch({ type: "start", task });
-    await session.result();
-    const events = await collect(session.events());
+    await run.dispatch({ type: "start", task });
+    await run.result();
+    const events = await collect(run.events());
 
     expect(events.map(({ type, data }) => ({ type, data }))).toEqual([
-      { type: "session_started", data: { task } },
+      { type: "run_started", data: { task } },
       {
         type: "model_turn_started",
         data: {
@@ -165,7 +165,7 @@ describe("running a Model Turn", () => {
           evidence: [{ type: "no_command_configured", workspaceChanged: false }],
         },
       },
-      { type: "session_settled", data: { result: await session.result() } },
+      { type: "run_settled", data: { result: await run.result() } },
     ]);
   });
 
@@ -179,7 +179,7 @@ describe("running a Model Turn", () => {
       ...textMessage("Fixed it."),
       content: [reasoning, { type: "text", text: "Fixed it." }],
     };
-    const { session, model } = openTestSession({
+    const { run, model } = openTestRun({
       model: {
         turns: [
           [
@@ -206,9 +206,9 @@ describe("running a Model Turn", () => {
       verification: [continueWith("[Verification Failed]")],
     });
 
-    await session.dispatch({ type: "start", task });
-    await session.result();
-    const events = await collect(session.events());
+    await run.dispatch({ type: "start", task });
+    await run.result();
+    const events = await collect(run.events());
 
     expect(
       events.filter((event) => event.type === "assistant_content_delta").map(({ data }) => data),
@@ -226,19 +226,19 @@ describe("running a Model Turn", () => {
 
   it("keeps a Tool Call's Provider Signature in the transcript for the next request", async () => {
     const call = { toolCallId: "fc-1", name: "echo", input: {}, signature: "c2lnbmVkLWNhbGw=" };
-    const { session, model } = openTestSession({
+    const { run, model } = openTestRun({
       model: { turns: [toolCallTurn(call), textTurn("Fixed it.")] },
     });
 
-    await session.dispatch({ type: "start", task });
-    await session.result();
+    await run.dispatch({ type: "start", task });
+    await run.result();
 
-    expect(session.snapshot().transcript[1]).toEqual(toolCallMessage(call));
+    expect(run.snapshot().transcript[1]).toEqual(toolCallMessage(call));
     expect(model.requests[1]?.context.messages[1]).toEqual(toolCallMessage(call));
   });
 
   it("accumulates usage across Model Turns, keeping only the token counts", async () => {
-    const { session } = openTestSession({
+    const { run } = openTestRun({
       model: {
         turns: [
           withFinalMessage(textTurn("Fixed it."), {
@@ -261,9 +261,9 @@ describe("running a Model Turn", () => {
       verification: [continueWith("[Verification Failed]")],
     });
 
-    await session.dispatch({ type: "start", task });
-    const result = await session.result();
-    const events = await collect(session.events());
+    await run.dispatch({ type: "start", task });
+    const result = await run.result();
+    const events = await collect(run.events());
 
     expect(
       events.filter((event) => event.type === "model_turn_completed").map(({ data }) => data.usage),

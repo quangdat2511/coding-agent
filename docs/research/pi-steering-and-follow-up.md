@@ -365,7 +365,7 @@ Verification. Coding Agent implements it by removing at most one Steer from its 
 **B. Pushed `steer` command (Pi's `Agent.steer()` shape).** Coding Agent calls
 `run.steer(message)`; the Agent Run keeps pending Steers in Agent State and takes one per turn.
 
-- Pending Steers become visible in Agent State and Session Events, and the run knows at once that
+- Pending Steers become visible in Agent State and Run Events, and the run knows at once that
   one is waiting.
 - Two copies exist (the run's and the Prompt Queue's). Edit and delete need extra commands
   (`withdraw`, `replace`) that can lose a race with the run's turn boundary, and the copies must

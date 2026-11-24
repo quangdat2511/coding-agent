@@ -476,7 +476,7 @@ describe("deciding what the real runner reports", () => {
     expect(bytes(evidence.stdout)).toBeLessThanOrEqual(MAX_TOOL_OUTPUT_BYTES);
   });
 
-  it("fails the session's Verification when the command is not installed", async () => {
+  it("fails the Agent Run's Verification when the command is not installed", async () => {
     const decision = await policyRunning("nonexistent_cda77_binary").verify(candidate(), ctx);
 
     expect(decision).toMatchObject({

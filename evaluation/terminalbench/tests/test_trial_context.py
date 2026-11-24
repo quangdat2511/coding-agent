@@ -16,7 +16,7 @@ from tests.support import (
     COMMIT,
     DEFAULT,
     OCCURRED_AT,
-    SESSION_ID,
+    RUN_ID,
     complete_events,
     failed_events,
     truncated_events,
@@ -97,13 +97,13 @@ class PopulateTrialContextTest(unittest.TestCase):
         self.assertEqual(context.metadata["outcome"], "failed")
         self.assertEqual(context.metadata["failure_code"], "MODEL_FAILURE")
 
-    def test_a_runtime_limit_that_ended_the_session_is_named(self) -> None:
+    def test_a_runtime_limit_that_ended_the_agent_run_is_named(self) -> None:
         log = complete_events()
         log.insert(
             len(log) - 1,
             {
                 "schemaVersion": 1,
-                "sessionId": SESSION_ID,
+                "runId": RUN_ID,
                 "sequence": 16,
                 "occurredAt": OCCURRED_AT,
                 "type": "runtime_limit_reached",
@@ -124,7 +124,7 @@ class PopulateTrialContextTest(unittest.TestCase):
         trajectory = self.trajectory()
         self.assertEqual(trajectory.agent.name, "coding-agent")
         self.assertEqual(trajectory.agent.version, AGENT.version)
-        self.assertEqual(trajectory.session_id, SESSION_ID)
+        self.assertEqual(trajectory.session_id, RUN_ID)
         written = json.loads(self.trajectory_path.read_text(encoding="utf-8"))
         self.assertEqual(written["steps"][0]["source"], "system")
 

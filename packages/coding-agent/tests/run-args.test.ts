@@ -218,7 +218,7 @@ describe("the ADR 0005 §3 contract", () => {
 });
 
 describe("public runtime surface", () => {
-  it("exports runHeadless, runInteractive and projectSessionEvent, the three entry points ADR 0004 §6 pins it to", () => {
-    expect(Object.keys(surface)).toEqual(["projectSessionEvent", "runHeadless", "runInteractive"]);
+  it("exports runHeadless, runInteractive and projectRunEvent, the three entry points ADR 0004 §6 pins it to", () => {
+    expect(Object.keys(surface)).toEqual(["projectRunEvent", "runHeadless", "runInteractive"]);
   });
 });

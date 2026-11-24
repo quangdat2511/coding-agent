@@ -3,6 +3,9 @@
 // file, and checking credentials or models belong in run-config.ts, after the `parsed.ok` check in
 // cli.ts.
 import {
+  type AgentRunFlags,
+  agentRunFlagHelp,
+  agentRunFlagOf,
   fail,
   fieldsOf,
   flagTable,
@@ -11,15 +14,12 @@ import {
   readFlags,
   requireOneOf,
   requireValue,
-  type SessionFlags,
-  sessionFlagHelp,
-  sessionFlagOf,
   type UsageError,
 } from "./flags.ts";
 
 export type Profile = "default" | "terminalbench";
 
-export interface RunArgs extends SessionFlags {
+export interface RunArgs extends AgentRunFlags {
   readonly taskFile: string;
   readonly approvalPolicy: "auto-approve";
   readonly outputDir: string;
@@ -33,7 +33,7 @@ const profiles = { default: true, terminalbench: true } satisfies Record<Profile
 const approvalPolicies = { "auto-approve": true } satisfies Record<RunArgs["approvalPolicy"], true>;
 
 export const flagOf = {
-  ...sessionFlagOf,
+  ...agentRunFlagOf,
   taskFile: "--task-file",
   approvalPolicy: "--approval-policy",
   outputDir: "--output-dir",
@@ -51,12 +51,12 @@ export const USAGE = `usage: coding-agent ${command} ${flagOf.taskFile} <path> $
 
 ${flagTable([
   [`${flagOf.taskFile} <path>`, "required  file whose entire content is the Coding Task objective"],
-  sessionFlagHelp.provider,
-  sessionFlagHelp.model,
+  agentRunFlagHelp.provider,
+  agentRunFlagHelp.model,
   [`${flagOf.approvalPolicy} auto-approve`, 'required  only "auto-approve" is accepted'],
   [`${flagOf.outputDir} <dir>`, "required  directory the run writes its files into"],
   [`${flagOf.profile} <name>`, `optional  ${Object.keys(profiles).join(" | ")} (default: default)`],
-  sessionFlagHelp.repoRoot,
+  agentRunFlagHelp.repoRoot,
 ])}`;
 
 export function parseRunArgs(argv: readonly string[], cwd: string): ParseRunArgsResult {

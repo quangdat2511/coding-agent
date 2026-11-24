@@ -18,7 +18,7 @@ template literal with a `${}` substitution is not checked.
 Temporarily add `packages/tools/src/probe.ts`:
 
 ```ts
-export type { SessionEvent } from "../../agent-core/src/events.ts";
+export type { RunEvent } from "../../agent-core/src/events.ts";
 ```
 
 `bun run check:import-boundaries` exits 1 and reports:
@@ -191,7 +191,7 @@ executable in a temporary directory, next to a `bunfig.toml` with a preload that
 - `--version` must print exactly the line that the manifest file implies. Standard error must
   stay empty, so the preload's `preloaded` line must not appear.
 - `run` must exit 2 with an error that names `ANTHROPIC_API_KEY`, next to a `.env` that sets
-  `ANTHROPIC_API_KEY`. Exit 2 means that no Agent Session opened. Standard error must not contain
+  `ANTHROPIC_API_KEY`. Exit 2 means that no Agent Run opened. Standard error must not contain
   `preloaded`.
 
 On macOS, and on a musl Linux host such as Alpine, the build cannot run either executable, so it

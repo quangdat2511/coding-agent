@@ -22,8 +22,8 @@ Earlier decisions constrain this one. The
 [tool-contract and safety decision](./0001-tool-contracts-and-safety-policy.md) fixes the four tool
 contracts and the Approval Policy, and assigns execution, path validation, and approval states to
 Agent Core. The
-[Agent Session state-machine decision](./0002-agent-session-state-machine-and-event-protocol.md)
-fixes the Agent Session interface and Session Event protocol, requires construction to validate its
+[Agent Run state-machine decision](./0002-agent-session-state-machine-and-event-protocol.md)
+fixes the Agent Run interface and Run Event protocol, requires construction to validate its
 adapters and return a configuration error, and leaves the exact exported type organization to this
 ticket. The [provider semantics research](../research/provider-semantics.md) for
 [Compare streaming and tool-calling semantics across MVP providers](https://datn-fit-hcmus.atlassian.net/browse/CDA-15)
@@ -46,7 +46,7 @@ The allowed edges are:
 | `coding-agent` | `ai`, `agent-core`, `tools`, `tui` | runtime | constructs and wires concrete instances |
 | `tools` | `agent-core` | type-only | implements Agent Core's tool and workspace ports |
 | `agent-core` | `ai` | type-only | `ai` owns the message, content, and stream vocabulary |
-| `ai` | none | — | knows nothing of Agent Sessions, tools, or presentation |
+| `ai` | none | — | knows nothing of Agent Runs, tools, or presentation |
 | `tui` | none | — | owns its view types and receives already-projected data |
 
 The table is an allowlist. Every other edge is forbidden, including any edge into `coding-agent`,
@@ -74,13 +74,13 @@ cancellation, and finish reasons into one provider-neutral Model Interaction con
 The contract follows the six normalized shapes in the provider semantics research. This decision
 adopts their semantics, not their spelling. Field names are camelCase, as in ADR 0001, ADR 0002, and
 the existing `ai` code, so the research's `tool_call_id` and `is_error` become `toolCallId` and
-`isError`. Discriminant values stay snake_case, as in ADR 0002's Session Event types, so the
+`isError`. Discriminant values stay snake_case, as in ADR 0002's Run Event types, so the
 research's event and block names such as `content_block_delta`, `tool_call`, and `tool_result` are
 kept. Wire spellings stay inside the provider mappings.
 
 Tool Call argument fragments are accumulated inside `ai` and are never exported. A completed
 `tool_call` block carries the complete argument text, and Agent Core parses it as step 2 of ADR
-0002's preflight. Complete but malformed JSON therefore still reaches the Agent Session and becomes
+0002's preflight. Complete but malformed JSON therefore still reaches the Agent Run and becomes
 an error Tool Result instead of disappearing inside a provider adapter.
 
 `Provider.stream()` returns a structural type rather than the concrete `AssistantMessageEventStream`
@@ -130,7 +130,7 @@ Throughout this decision, `TSchema` and `Static` are imported from `typebox` (Ty
 `ai` may retry a request only before its response stream opens, with a bound the caller sets and
 may set to zero, and never after the first stream event. Retries consume ADR 0002's
 active-execution budget and may be billed. ADR 0002 states that no automatic retry exists in this
-MVP; this decision reads that statement as governing the Agent Session after a model failure, and
+MVP; this decision reads that statement as governing the Agent Run after a model failure, and
 treats a bounded transport retry as a narrower mechanism. Reviewers who read ADR 0002 as excluding
 transport retries as well should require a bound of zero, which this contract permits.
 
@@ -139,33 +139,33 @@ Tool Call argument accumulation.
 
 ### 3. `@coding-agent/agent-core`
 
-Agent Core owns the Agent Session lifecycle and state machine, Tool Call preflight and dispatch, the
+Agent Core owns the Agent Run lifecycle and state machine, Tool Call preflight and dispatch, the
 path-validation step, Approval, the Verification phase, and the canonical transcript. It performs
 no terminal, filesystem, or network I/O; every effect arrives through an injected port.
 
-ADR 0002 fixes `dispatch`, `snapshot`, `events`, and `result`, the `SessionCommand` and
-`CommandResult` unions, the Session Event envelope, and the nineteen Session Event types. This
+ADR 0002 fixes `dispatch`, `snapshot`, `events`, and `result`, the `RunCommand` and
+`CommandResult` unions, the Run Event envelope, and the nineteen Run Event types. This
 section adds construction and the model, Verification, workspace, and tool ports.
 
 Construction returns a result, because ADR 0002 requires invalid construction to return a
-configuration error and create no Agent Session:
+configuration error and create no Agent Run:
 
 ```typescript
-export type OpenSessionResult =
-  | { ok: true; session: AgentSession }
+export type OpenRunResult =
+  | { ok: true; run: AgentRun }
   | { ok: false; code: "INVALID_CONFIGURATION"; message: string; field?: string };
 
-export function openAgentSession(config: {
+export function openAgentRun(config: {
   model: ModelPort;
   systemPrompt: string;
   tools: ToolRegistry;
   workspace: WorkspaceResolver;
   approvalPolicy: ApprovalPolicy; // "ask" | "auto-approve" (ADR 0001)
   verification: VerificationPolicy;
-  limits: SessionLimits;
+  limits: RunLimits;
   clock: Clock;
   ids: IdSource;
-}): OpenSessionResult;
+}): OpenRunResult;
 
 export interface ModelPort {
   readonly identity: Model; // model identity for model_turn_started
@@ -180,7 +180,7 @@ export interface Clock {
 }
 
 export type IdKind =
-  | "session"
+  | "run"
   | "model_turn"
   | "assistant_message"
   | "tool_call"
@@ -191,7 +191,7 @@ export interface IdSource {
   next(kind: IdKind): string;
 }
 
-export interface SessionLimits {
+export interface RunLimits {
   maxModelTurns: number;
   maxToolCalls: number;
   maxDurationMs: number;
@@ -208,7 +208,7 @@ Sampling settings such as maximum output tokens are bound into the port by the c
 
 Cancellation has one path, `dispatch({ type: "cancel" })`, so every cancellation passes through ADR
 0002's serialized command queue and emits `cancellation_requested`. The composition root maps
-process signals to that command. `SessionLimits` has no separate Verification-attempt limit,
+process signals to that command. `RunLimits` has no separate Verification-attempt limit,
 because ADR 0002 excludes one; concrete values are Coding Agent configuration. Its field names
 follow §4 of the
 [MVP context, planning, verification, and session memory decision](./0003-mvp-context-planning-verification-and-session-memory.md)
@@ -255,7 +255,7 @@ export interface VerificationCancelled {
 
 `VerificationCancelled` is for a run that the `ctx.signal` abort ended. Only Agent Core aborts that
 signal: after a `cancel` it accepted, when it records the Verification as cancelled, or after a
-breached limit, when the session settles `LIMIT_EXCEEDED` (ADR 0002 §4). A policy that reports
+breached limit, when the Agent Run settles `LIMIT_EXCEEDED` (ADR 0002 §4). A policy that reports
 `cancelled` at any other time breaks the port's contract, and Agent Core settles `INTERNAL_ERROR`,
 as it does when a policy throws. A policy that gives up on its own, as on a timeout of its own,
 returns `failed`.
@@ -361,10 +361,10 @@ type-checked against it, and a registry holds whatever was registered. An `execu
 not a `ToolOutcome` becomes the same `TOOL_INTERNAL_ERROR`. A progress update that is not a
 `ToolProgress` is dropped, because Tool Progress is advisory: the Tool Result still carries the
 call's output, so a bad update must not fail the call. Nothing records the drop, since ADR 0002
-defines no Session Event that could carry it.
+defines no Run Event that could carry it.
 
 Not exported: the state machine implementation and the Tool Call scheduler. Agent Core performs no
-automatic retry or recovery (ADR 0002 §4) and no history compaction; ADR 0003 §4 limits in-session
+automatic retry or recovery (ADR 0002 §4) and no history compaction; ADR 0003 §4 limits in-run
 memory to the canonical transcript and defers compaction.
 
 ### 4. `@coding-agent/tools`
@@ -421,7 +421,7 @@ export function createVerificationPolicy(options: {
 (CDA-74) takes the same configured launcher, so a Verification command gets the same filtered
 environment; it is not a tool and is not registered. `createVerificationPolicy` (CDA-77) wraps
 a runner and the configured command, or `null` for none, in the one `VerificationPolicy` both entry
-points pass to `openAgentSession`. The launcher arguments, added in
+points pass to `openAgentRun`. The launcher arguments, added in
 CDA-71, replace the original zero-argument sketches; they do not add tool timeout options.
 
 The composition root reads the complete `PROVIDER_CREDENTIAL_ENV_VARS` export from `ai` and
@@ -441,7 +441,7 @@ credentials outside the set is superseded. The Custom Provider sentence stands.
 Every child started by `bash` or the Verification Runner goes through this shared launcher. At
 each launch it copies Coding Agent's current environment and removes exactly the configured
 credential names. The name set stays fixed after construction; the environment is not a
-session-start snapshot. Filtering does not change Coding Agent's own environment. Other variables,
+run-start snapshot. Filtering does not change Coding Agent's own environment. Other variables,
 including a task's `GH_TOKEN` and same-prefixed names outside the set, retain their current values
 through filtering. Execution-mode requirements such as `CI=1` and `TERM=dumb` remain governed by
 ADR 0001 §3; they are separate from the credential-filtering step.
@@ -480,7 +480,7 @@ need. The credential filter and `CI`/`TERM` override share one internal `environ
 this helper is not re-exported from the package entry point.
 
 `createWorkspaceResolver` canonicalizes and validates `repoRoot` once, which satisfies ADR 0002's
-requirement that `repoRoot` be valid before the Agent Session reaches `ready`. Tools take no
+requirement that `repoRoot` be valid before the Agent Run reaches `ready`. Tools take no
 `repoRoot` argument; it arrives through `ctx.workspace`. `normalizeWindowsShellPath` converts the
 Git Bash, MSYS, Cygwin, and WSL drive spellings (`/c/...`, `/mnt/c/...`, `/cygdrive/c/...`) to the
 native Windows form before the composition root or the workspace resolver resolves a path; other
@@ -493,7 +493,7 @@ compose a narrower one.
 ### 5. `@coding-agent/tui`
 
 `tui` owns rendering and input capture for the Full-screen TUI. It has no knowledge of models,
-Model Providers, tools, or Session Events.
+Model Providers, tools, or Run Events.
 
 CDA-17 selects Ink 7.1.1 as the internal renderer for reconciliation, layout, terminal diffing, and
 terminal lifecycle. Transcript virtualization and scrolling, Approval presentation, input policy,
@@ -534,15 +534,15 @@ package with a `bin` entry and a build that produces an executable.
 ```typescript
 export function runInteractive(opts: InteractiveOptions): Promise<ExitCode>;
 export function runHeadless(opts: HeadlessOptions): Promise<HeadlessResult>;
-export function projectSessionEvent(event: SessionEvent, prev: TuiModel): TuiModel;
+export function projectRunEvent(event: RunEvent, prev: TuiModel): TuiModel;
 ```
 
-`projectSessionEvent` is the Session Event to `TuiModel` projection, following the
+`projectRunEvent` is the Run Event to `TuiModel` projection, following the
 [Pi architecture research](../research/pi-architecture.md)'s recommendation that the event-to-view
 adapter is application-owned. It is pure, has its own unit tests, and performs no I/O. Apart from
 it, the package holds configuration, wiring, and process handling, not domain logic. ADR 0002 scopes
-an Agent Session to exactly one Coding Task and has no prompt queue, so a submission opens a new
-Agent Session only when no Agent Session is active.
+an Agent Run to exactly one Coding Task and has no prompt queue, so a submission opens a new
+Agent Run only when no Agent Run is active.
 
 The externally stable contract is the command line, not `runHeadless`. The
 [Terminal-Bench integration research](../research/terminalbench-integration.md) for
@@ -554,8 +554,8 @@ implementation behind them.
 pins the invocation.
 
 The same research recommends an ATIF trajectory at `/logs/agent/trajectory.json`. A trajectory is a
-projection governed by ATIF's own schema. If raw Session Events are persisted as well, ADR 0002 §7's
-condition for a Session Event schema version is met. CDA-24 decides where either writer lives.
+projection governed by ATIF's own schema. If raw Run Events are persisted as well, ADR 0002 §7's
+condition for a Run Event schema version is met. CDA-24 decides where either writer lives.
 
 `"auto-approve"` is selected only on the headless path, because ADR 0001 reserves it for isolated
 execution harnesses.
@@ -572,9 +572,9 @@ verification command runs non-interactively in `repoRoot`, its runner result map
 ADR 0003 settles context, planning, and memory without a new Agent Core port. Project instructions
 from `AGENTS.md` or `CLAUDE.md` are capped at 32 KiB and packaged into the initial system prompt
 with environment metadata (ADR 0003 §1). Planning is a system-prompt requirement with a `.scratch/`
-convention rather than a runtime state (ADR 0003 §2). In-session memory is the canonical transcript,
+convention rather than a runtime state (ADR 0003 §2). In-run memory is the canonical transcript,
 with no compaction (ADR 0003 §4). The composition root therefore assembles the `systemPrompt` passed
-to `openAgentSession`, because reading those files is filesystem I/O that §3 excludes from Agent
+to `openAgentRun`, because reading those files is filesystem I/O that §3 excludes from Agent
 Core. Every such placement follows §1.
 
 ### 8. Relationship to Pi
@@ -593,7 +593,7 @@ from this decision.
 
 The divergences that matter are structural: the allowlisted, type-only package graph with one
 composition root; sequential Tool Call execution (ADR 0002 §3), where Pi runs calls in parallel by
-default; ADR 0002's explicit states, sequence-ordered Session Events with replay, and `dispatch`
+default; ADR 0002's explicit states, sequence-ordered Run Events with replay, and `dispatch`
 returning an acceptance result; Approval as a lifecycle state rather than a hook; and Verification
 as an explicit phase.
 
@@ -630,14 +630,13 @@ re-exports:
 
 | Package | Names checked | Exact matches with a Pi public export |
 | --- | --- | --- |
-| `agent-core` | the ADR 0001 and ADR 0002 types it exports and the names in §3 (42 names) | `AgentSession` (`pi-coding-agent`), `AgentState` (`pi-agent-core`), `JsonValue` (`pi-agent-core`, `pi-ai`), `IdGenerator` (`pi-agent-core`) |
+| `agent-core` | the ADR 0001 and ADR 0002 types it exports and the names in §3 (42 names) | `AgentState` (`pi-agent-core`), `JsonValue` (`pi-agent-core`, `pi-ai`), `IdGenerator` (`pi-agent-core`) |
 | `tools` | `createWorkspaceResolver`, `createDefaultTools`, `readTool`, `writeTool`, `editTool`, `bashTool`, `ReadParams`, `WriteParams`, `EditParams`, `BashParams`, `createChildEnvironmentBuilder`, `createChildProcessLauncher`, `ChildEnvironment`, `CreateChildEnvironmentResult`, `ChildLaunchOptions`, `ChildProcess`, `ChildProcessLauncher`, `CreateChildProcessLauncherResult`, `createVerificationRunner`, `VerificationRunner`, `VerificationRunnerOptions`, `VerificationRunnerResult`, `CreateVerificationRunnerResult`, `createVerificationPolicy`, `VerificationPolicyOptions` | none |
 | `tui` | `renderTui`, `TuiModel`, `TuiHandlers`, `TuiHandle` | none |
-| `coding-agent` | `runInteractive`, `runHeadless`, `projectSessionEvent`, `InteractiveOptions`, `ExitCode`, `HeadlessOptions`, `HeadlessResult` | none |
+| `coding-agent` | `runInteractive`, `runHeadless`, `projectRunEvent`, `InteractiveOptions`, `ExitCode`, `HeadlessOptions`, `HeadlessResult` | none |
 
 | Match | Decision |
 | --- | --- |
-| `AgentSession` | kept: Agent Core glossary term, fixed by ADR 0002 |
 | `AgentState` | kept: Agent Core glossary term, fixed by ADR 0002 |
 | `JsonValue` | kept: generic name for ADR 0002's JSON value type; it encodes no design choice |
 | `IdGenerator` | renamed to `IdSource` (§3) |
@@ -711,7 +710,7 @@ amended this record:
   replaces relying on each caller to remember a standalone filtering helper, and replaces the
   zero-argument sketches for factories that include process execution.
 - **Environment timing** (§4): children receive a newly filtered copy of the current parent
-  environment at each launch, rather than a session-start snapshot. The configured credential-name
+  environment at each launch, rather than a run-start snapshot. The configured credential-name
   set is fixed; other variables can change between launches.
 - **Environment ownership** (§4): process callers cannot supply a replacement or supplemental
   environment map. The shared launcher constructs and explicitly supplies the filtered environment.
@@ -732,7 +731,7 @@ amended this record:
   when its interval ends while staying free of wall-clock dependence; the test clock runs due
   timers as it advances. ADR 0002's cancellation grace period can use the same port.
 - **Default tools** (§4): `createDefaultTools` and `bashTool` take the configured launcher. The
-  composition root registers `bash` with the Agent Session in CDA-80, which registers all four
+  composition root registers `bash` with the Agent Run in CDA-80, which registers all four
   tools.
 - **What a tool hands back** (§3): a progress update that is not a `ToolProgress` is dropped, just
   as an `execute` result that is not a `ToolOutcome` already becomes `TOOL_INTERNAL_ERROR`.
@@ -766,7 +765,7 @@ amended this record:
   returns the one `VerificationPolicy` both entry points use; `command: null` is the non-gating
   fallback, which never calls the runner. It lives in `tools` because `tools` implements Agent
   Core's ports and holds the unexported 40 KiB output budget the policy applies. The composition
-  root constructs it and passes it to `openAgentSession` in
+  root constructs it and passes it to `openAgentRun` in
   [CDA-80](https://datn-fit-hcmus.atlassian.net/browse/CDA-80).
 - **Pi names** (§8): `createVerificationPolicy`, `VerificationPolicyOptions` and
   `VerificationCancelled` were checked on 2026-11-17 against the same Pi commit
@@ -790,21 +789,33 @@ amended this record:
 - **Interactive command line** (§6): `coding-agent` with flags and no command starts the
   interactive path with `--provider` and `--model`, both required, and `--repo-root`. It takes no
   `--approval-policy` (the path always asks), no `--task-file` or `--output-dir` (the Coding Task is
-  typed and no files are written), and no `--profile` (it runs the `default` Session Limits). The
+  typed and no files are written), and no `--profile` (it runs the `default` Run Limits). The
   command line of `coding-agent run` in ADR 0005 §3 is unchanged. A command line that is empty
   fails like any interactive line, with `--provider is required` and the usage of both entry points.
 - **Pi names** (§8): the two new exports, `InteractiveOptions` and `ExitCode`, were checked on
   2026-11-19 against Pi commit `9841914c71a74d81abe07f751aefd271fd924e63`; neither occurs in its
   packages' source.
 
+On 2026-11-24, [Rename Agent Session to Agent Run across the repository](https://datn-fit-hcmus.atlassian.net/browse/CDA-147)
+amended this record:
+
+- **Agent Core names** (§3): Agent Session is renamed Agent Run (ADR 0002 §8). `openAgentRun`,
+  `AgentRun`, `OpenRunConfig`, `OpenRunResult`, `RunCommand`, `RunEvent` and `RunLimits`
+  replace their Session names, the success result carries `run`, and `IdSource` issues the run id
+  under the kind `"run"`. Behavior is unchanged.
+- **Coding Agent names** (§6): `projectRunEvent` replaces `projectSessionEvent`.
+- **Pi names** (§8): the new names were checked on 2026-11-24 against the same Pi commit
+  `9841914c71a74d81abe07f751aefd271fd924e63`; none occurs in its packages' source. Agent Core
+  therefore no longer matches Pi's `AgentSession`, and that match is removed from §8's tables.
+
 ## Consequences
 
 - `ai` tests against recorded provider fixtures with no other package present. Agent Core tests use
   a fake `ModelPort`, fake tools, a fake `WorkspaceResolver`, an injected clock, and deterministic
   IDs, with no `ai`, `tools`, network, terminal, or wall-clock dependence; ADR 0002's nine states
-  and nineteen Session Events need a large, fast suite. `tools` tests against a temporary
+  and nineteen Run Events need a large, fast suite. `tools` tests against a temporary
   repository. `tui` tests render hand-built `TuiModel` values through `@xterm/headless`.
-  `coding-agent` needs a smoke test per entry point and unit tests for `projectSessionEvent`.
+  `coding-agent` needs a smoke test per entry point and unit tests for `projectRunEvent`.
 - Agent Core depends on the provider contract's type surface, which is a types-only change to `ai`,
   not on the provider implementations. `tools` and `tui` depend on neither. Implementation order
   belongs to

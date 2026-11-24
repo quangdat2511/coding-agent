@@ -16,10 +16,10 @@ import type { RunArgs } from "../src/run-args.ts";
 import {
   MAX_TASK_FILE_BYTES,
   parentIsFile,
+  RUN_LIMITS_BY_PROFILE,
   type RunConfig,
+  resolveAgentRunSettings,
   resolveRunConfig,
-  resolveSessionSettings,
-  SESSION_LIMITS_BY_PROFILE,
 } from "../src/run-config.ts";
 import { noFifos, permissionsIgnored } from "./support/platform.ts";
 import { withoutProfile } from "./support/profile.ts";
@@ -77,7 +77,7 @@ describe("resolving the settings every entry point shares", () => {
   const env = { ANTHROPIC_API_KEY: secret };
 
   it("resolves the model, credential and repository without a task file or output directory", async () => {
-    const resolved = await resolveSessionSettings(selection, { cwd: directory, env });
+    const resolved = await resolveAgentRunSettings(selection, { cwd: directory, env });
 
     expect(resolved.ok).toBe(true);
     if (!resolved.ok) return;
@@ -89,7 +89,7 @@ describe("resolving the settings every entry point shares", () => {
   });
 
   it("refuses a model the provider does not list, as the invocation does", async () => {
-    const resolved = await resolveSessionSettings(
+    const resolved = await resolveAgentRunSettings(
       { ...selection, model: "no-such-model" },
       { cwd: directory, env },
     );
@@ -537,28 +537,28 @@ describe("resolving an Evaluation Profile", () => {
     const config = await resolveProfile("terminalbench");
 
     expect(config.profile).toBe("terminalbench");
-    expect(config.limits).toBe(SESSION_LIMITS_BY_PROFILE.terminalbench);
+    expect(config.limits).toBe(RUN_LIMITS_BY_PROFILE.terminalbench);
     expect(config.limits).toEqual({
       maxModelTurns: 250,
       maxToolCalls: 1_000,
       maxDurationMs: 3_600_000,
       maxConsecutiveRecoverableFailures: 10,
-      cancellationGraceMs: SESSION_LIMITS_BY_PROFILE.default.cancellationGraceMs,
+      cancellationGraceMs: RUN_LIMITS_BY_PROFILE.default.cancellationGraceMs,
     });
   });
 
-  it("changes nothing other than SessionLimits", async () => {
+  it("changes nothing other than RunLimits", async () => {
     const standard = await resolveProfile("default");
     const terminalbench = await resolveProfile("terminalbench");
 
-    expect(standard.limits).toBe(SESSION_LIMITS_BY_PROFILE.default);
+    expect(standard.limits).toBe(RUN_LIMITS_BY_PROFILE.default);
     expect(terminalbench.limits).not.toEqual(standard.limits);
     expect(comparable(terminalbench)).toStrictEqual(comparable(standard));
   });
 
   it("freezes the source-controlled limits", () => {
-    expect(Object.isFrozen(SESSION_LIMITS_BY_PROFILE)).toBe(true);
-    expect(Object.isFrozen(SESSION_LIMITS_BY_PROFILE.default)).toBe(true);
-    expect(Object.isFrozen(SESSION_LIMITS_BY_PROFILE.terminalbench)).toBe(true);
+    expect(Object.isFrozen(RUN_LIMITS_BY_PROFILE)).toBe(true);
+    expect(Object.isFrozen(RUN_LIMITS_BY_PROFILE.default)).toBe(true);
+    expect(Object.isFrozen(RUN_LIMITS_BY_PROFILE.terminalbench)).toBe(true);
   });
 });

@@ -1,9 +1,9 @@
 export type * from "./events.ts";
 export type * from "./json.ts";
-export { openAgentSession } from "./open-session.ts";
+export { openAgentRun } from "./open-run.ts";
 export type * from "./ports.ts";
 export type * from "./result.ts";
-export type * from "./session.ts";
+export type * from "./run.ts";
 export type * from "./state.ts";
 export type * from "./task.ts";
 export type * from "./tool.ts";

@@ -1,8 +1,8 @@
 import type {
   ApprovalPolicy,
   ExecutableTool,
-  OpenSessionConfig,
-  SessionLimits,
+  OpenRunConfig,
+  RunLimits,
   WorkspaceResolver,
 } from "../../src/index.ts";
 import { type ManualClock, manualClock } from "./clock.ts";
@@ -18,18 +18,18 @@ export interface TestKitOptions {
   readonly workspace?: WorkspaceResolver;
   readonly approvalPolicy?: ApprovalPolicy;
   readonly verification?: readonly ScriptedDecision[];
-  readonly limits?: Partial<SessionLimits>;
+  readonly limits?: Partial<RunLimits>;
 }
 
 export interface TestKit {
-  readonly config: OpenSessionConfig;
+  readonly config: OpenRunConfig;
   readonly model: FakeModel;
   readonly verification: FakeVerification;
   readonly clock: ManualClock;
   readonly portCalls: readonly string[];
 }
 
-export const testLimits: SessionLimits = {
+export const testLimits: RunLimits = {
   maxModelTurns: 30,
   maxToolCalls: 100,
   maxDurationMs: 600_000,

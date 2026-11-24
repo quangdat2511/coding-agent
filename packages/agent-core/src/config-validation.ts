@@ -1,9 +1,9 @@
 import { type Fields, isNonEmptyString, isOneOf, isRecord, messageOf } from "./guards.ts";
-import type { ApprovalPolicy, IdSource, ModelPort, SessionLimits } from "./ports.ts";
-import type { OpenSessionConfig, OpenSessionResult } from "./session.ts";
+import type { ApprovalPolicy, IdSource, ModelPort, RunLimits } from "./ports.ts";
+import type { OpenRunConfig, OpenRunResult } from "./run.ts";
 import type { ExecutableTool, ToolMutation, ToolRegistry } from "./tool.ts";
 
-export type ConfigProblem = Pick<Extract<OpenSessionResult, { ok: false }>, "field" | "message">;
+export type ConfigProblem = Pick<Extract<OpenRunResult, { ok: false }>, "field" | "message">;
 
 type Check = (value: unknown) => ConfigProblem | undefined;
 
@@ -22,7 +22,7 @@ const limitNames = {
   maxDurationMs: true,
   maxConsecutiveRecoverableFailures: true,
   cancellationGraceMs: true,
-} satisfies Record<keyof SessionLimits, true>;
+} satisfies Record<keyof RunLimits, true>;
 
 const isAbsolutePath = (value: unknown): boolean =>
   typeof value === "string" && /^(?:\/|[A-Za-z]:[\\/])/.test(value);
@@ -161,7 +161,7 @@ const checks = {
   limits: checkLimits,
   clock: (value) => checkPort("clock", value, ["now", "monotonicMs", "setTimer"]),
   ids: (value) => checkPort("ids", value, ["next"]),
-} satisfies Record<keyof OpenSessionConfig, Check>;
+} satisfies Record<keyof OpenRunConfig, Check>;
 
 export function findConfigProblem(config: unknown): ConfigProblem | undefined {
   if (!isRecord(config)) return { message: "configuration is required" };
@@ -172,14 +172,14 @@ export function findConfigProblem(config: unknown): ConfigProblem | undefined {
   return undefined;
 }
 
-export function issueSessionId(ids: IdSource): string | ConfigProblem {
-  let sessionId: unknown;
+export function issueRunId(ids: IdSource): string | ConfigProblem {
+  let runId: unknown;
   try {
-    sessionId = ids.next("session");
+    runId = ids.next("run");
   } catch (error) {
     return threw("ids", error);
   }
-  return isNonEmptyString(sessionId)
-    ? sessionId
-    : problem("ids", 'ids.next("session") must return a non-empty string');
+  return isNonEmptyString(runId)
+    ? runId
+    : problem("ids", 'ids.next("run") must return a non-empty string');
 }

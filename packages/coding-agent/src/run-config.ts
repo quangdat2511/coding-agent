@@ -1,7 +1,7 @@
 import { constants, type Stats } from "node:fs";
 import { access, chmod, mkdir, open, realpath, rmdir, stat } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
-import type { SessionLimits } from "@coding-agent/agent-core";
+import type { RunLimits } from "@coding-agent/agent-core";
 import {
   createProviderDirectory,
   type Model,
@@ -10,13 +10,13 @@ import {
 } from "@coding-agent/ai";
 import { errnoOf, normalizeWindowsShellPath } from "@coding-agent/tools";
 import { readAtMost } from "./files.ts";
-import type { ProviderId, SessionFlags } from "./flags.ts";
+import type { AgentRunFlags, ProviderId } from "./flags.ts";
 import type { Profile, RunArgs } from "./run-args.ts";
 
 // The ADR 0003 §4 defaults. CDA-59 chose cancellationGraceMs: long enough for a tool or
 // Verification child to go from SIGTERM to SIGKILL, and short enough that a cancelled run still
 // writes its files inside the 10 s `docker stop` allows before it kills the container.
-const DEFAULT_SESSION_LIMITS: SessionLimits = Object.freeze({
+const DEFAULT_RUN_LIMITS: RunLimits = Object.freeze({
   maxModelTurns: 30,
   maxToolCalls: 100,
   maxDurationMs: 600_000,
@@ -24,17 +24,17 @@ const DEFAULT_SESSION_LIMITS: SessionLimits = Object.freeze({
   cancellationGraceMs: 5_000,
 });
 
-// The Evaluation Profiles of ADR 0005 §5. A profile selects only SessionLimits: every other part of
+// The Evaluation Profiles of ADR 0005 §5. A profile selects only RunLimits: every other part of
 // the configuration is the same under each, so the evaluated agent is the MVP with a larger budget.
 // The values live here, not in a flag or an environment variable, so a build fixes them.
-export const SESSION_LIMITS_BY_PROFILE: Readonly<Record<Profile, SessionLimits>> = Object.freeze({
-  default: DEFAULT_SESSION_LIMITS,
+export const RUN_LIMITS_BY_PROFILE: Readonly<Record<Profile, RunLimits>> = Object.freeze({
+  default: DEFAULT_RUN_LIMITS,
   terminalbench: Object.freeze({
     maxModelTurns: 250,
     maxToolCalls: 1_000,
     maxDurationMs: 3_600_000,
     maxConsecutiveRecoverableFailures: 10,
-    cancellationGraceMs: DEFAULT_SESSION_LIMITS.cancellationGraceMs,
+    cancellationGraceMs: DEFAULT_RUN_LIMITS.cancellationGraceMs,
   }),
 });
 
@@ -80,10 +80,10 @@ export interface VerificationConfig {
   readonly command: string | null;
 }
 
-// What every entry point resolves before it opens an Agent Session: the model, its credential and
+// What every entry point resolves before it opens an Agent Run: the model, its credential and
 // the repository. `coding-agent run` adds a task and an output directory to it; the interactive
 // path adds neither, because the person types the Coding Task and nothing is written to files.
-export interface SessionSettings {
+export interface AgentRunSettings {
   readonly model: Model;
   readonly credential: ResolvedCredential;
   readonly sampling: SamplingSettings;
@@ -97,20 +97,20 @@ export interface SessionSettings {
   readonly verification: VerificationConfig;
 }
 
-export interface RunConfig extends SessionSettings {
+export interface RunConfig extends AgentRunSettings {
   readonly objective: string;
   readonly taskFile: string;
   readonly approvalPolicy: RunArgs["approvalPolicy"];
   readonly outputDir: string;
   readonly profile: Profile;
-  readonly limits: SessionLimits;
+  readonly limits: RunLimits;
 }
 
 export type ResolveRunConfigResult =
   | {
       readonly ok: true;
       readonly config: RunConfig;
-      // The output directories this run created, for removeCreated when no Agent Session opens.
+      // The output directories this run created, for removeCreated when no Agent Run opens.
       readonly createdDirectories: readonly string[];
     }
   | {
@@ -338,10 +338,10 @@ async function prepareOutputDir(cwd: string, given: string): Promise<Checked<Out
 
 // The checks that need no file written, cheapest first, and the first problem wins. Both entry
 // points call it, so a refusal reads the same on either, and it creates nothing to remove.
-export async function resolveSessionSettings(
-  flags: SessionFlags,
+export async function resolveAgentRunSettings(
+  flags: AgentRunFlags,
   { cwd, env }: ResolveRunConfigContext,
-): Promise<Checked<SessionSettings>> {
+): Promise<Checked<AgentRunSettings>> {
   const model = createProviderDirectory().getModel(flags.provider, flags.model);
   if (model === undefined) {
     return refuse("--model", `--model "${flags.model}" is not a known ${flags.provider} model`);
@@ -379,14 +379,14 @@ export async function resolveSessionSettings(
   });
 }
 
-// The session settings first, then the task, and the output directory last because it is the only
+// The Agent Run settings first, then the task, and the output directory last because it is the only
 // check that writes: it is created only once every other check has passed, and removed again if it
 // is refused.
 export async function resolveRunConfig(
   args: RunArgs,
   context: ResolveRunConfigContext,
 ): Promise<ResolveRunConfigResult> {
-  const settings = await resolveSessionSettings(args, context);
+  const settings = await resolveAgentRunSettings(args, context);
   if (!settings.ok) return settings;
   const task = await readObjective(context.cwd, args.taskFile);
   if (!task.ok) return task;
@@ -403,7 +403,7 @@ export async function resolveRunConfig(
       approvalPolicy: args.approvalPolicy,
       outputDir: outputDir.value.path,
       profile: args.profile,
-      limits: SESSION_LIMITS_BY_PROFILE[args.profile],
+      limits: RUN_LIMITS_BY_PROFILE[args.profile],
     },
   };
 }

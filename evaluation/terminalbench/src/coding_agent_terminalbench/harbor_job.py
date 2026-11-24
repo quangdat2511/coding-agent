@@ -70,7 +70,7 @@ class RecordError(ValueError):
 
 
 @dataclass(frozen=True)
-class AgentRun:
+class RunJson:
     """The part of Coding Agent's run.json that the record reads (ADR 0005 §4)."""
 
     provider: str | None
@@ -105,7 +105,7 @@ class Trial:
     multi_step: bool
     verifier_environment_mode: str | None
     agent_context: Mapping[str, Any]
-    run: AgentRun | None
+    run: RunJson | None
     outcome: AgentOutcome | None
     rerun_reason: str | None
 
@@ -246,7 +246,7 @@ class HarborJob:
         return config_section(self.lock.get("harbor")).get("git_commit_hash")
 
     @property
-    def first_run(self) -> AgentRun | None:
+    def first_run(self) -> RunJson | None:
         """The first trial's Coding Agent run.json, when one trial reached the agent phase."""
         for trial in self.trials:
             if trial.run is not None:
@@ -260,7 +260,7 @@ class HarborJob:
 
     @property
     def limits(self) -> Mapping[str, Any]:
-        """The SessionLimits every trial ran, or an empty mapping when none did."""
+        """The RunLimits every trial ran, or an empty mapping when none did."""
         run = self.first_run
         return run.limits if run is not None else {}
 
@@ -458,7 +458,7 @@ def rerun_reason(
     return None
 
 
-def read_agent_run(run_dir: Path) -> AgentRun | None:
+def read_run_json(run_dir: Path) -> RunJson | None:
     """Reads Coding Agent's run.json from a trial's agent log directory, when it wrote one."""
     path = run_dir / "run.json"
     if not path.exists():
@@ -466,7 +466,7 @@ def read_agent_run(run_dir: Path) -> AgentRun | None:
     data = read_object(path)
     coding_agent = config_section(data.get("codingAgent"))
     sampling = data.get("sampling")
-    return AgentRun(
+    return RunJson(
         provider=optional_text(data, "provider"),
         model=optional_text(data, "model"),
         sampling=dict(sampling) if isinstance(sampling, Mapping) else None,
@@ -532,7 +532,7 @@ def read_trial(trial_dir: Path) -> Trial:
     verifier_result = config_section(result.get("verifier_result"))
     reward = read_rewards(verifier_result.get("rewards"), str(result_path))
     run_dir = trial_dir / AGENT_LOG_DIR / RUN_FILES_DIR
-    run = read_agent_run(run_dir)
+    run = read_run_json(run_dir)
     outcome = read_agent_outcome(run_dir)
     interrupted = interrupted_phase(
         phases, parse_time(exception_info.get("occurred_at"))

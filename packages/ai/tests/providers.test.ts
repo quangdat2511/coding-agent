@@ -212,7 +212,7 @@ describe("Built-in Providers & Registry", () => {
       (provider.headers as () => Record<string, string>)();
 
     // ADR 0007 §6: Go reuses its prompt cache only when the session id stays the same for the
-    // whole Agent Session, and one Agent Session streams through one provider instance.
+    // whole Agent Run, and one Agent Run streams through one provider instance.
     it("keeps x-opencode-session stable across calls on one instance", () => {
       const provider = createOpencodeProvider();
       expect(typeof provider.headers).toBe("function");
@@ -237,7 +237,7 @@ describe("Built-in Providers & Registry", () => {
       expect(Object.keys(headers)).toContain("x-opencode-session");
     });
 
-    it("ignores OPENCODE_SESSION_ID, which would share one id between Agent Sessions", () => {
+    it("ignores OPENCODE_SESSION_ID, which would share one id between Agent Runs", () => {
       const originalSession = process.env.OPENCODE_SESSION_ID;
       try {
         process.env.OPENCODE_SESSION_ID = "custom-session-123";

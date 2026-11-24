@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { type OpenSessionConfig, openAgentSession, type RepoPath } from "../src/index.ts";
+import { type OpenRunConfig, openAgentRun, type RepoPath } from "../src/index.ts";
 import {
   abortIgnoringTool,
   createTestKit,
@@ -8,8 +8,8 @@ import {
   toolRegistry,
 } from "./kit/index.ts";
 
-describe("opening an Agent Session", () => {
-  it("returns a ready Agent Session that has emitted no Session Event", () => {
+describe("opening an Agent Run", () => {
+  it("returns a ready Agent Run that has emitted no Run Event", () => {
     const { config } = createTestKit({
       tools: [
         fakeTool({ name: "read" }),
@@ -19,12 +19,12 @@ describe("opening an Agent Session", () => {
       ],
     });
 
-    const opened = openAgentSession(config);
-    if (!opened.ok) throw new Error(`expected a session, got: ${opened.message}`);
+    const opened = openAgentRun(config);
+    if (!opened.ok) throw new Error(`expected a run, got: ${opened.message}`);
 
-    expect(opened.session.snapshot()).toEqual({
+    expect(opened.run.snapshot()).toEqual({
       phase: "ready",
-      sessionId: "session-1",
+      runId: "run-1",
       transcript: [],
       usage: { inputTokens: 0, outputTokens: 0 },
       counters: { modelTurns: 0, toolCalls: 0, consecutiveRecoverableFailures: 0 },
@@ -38,7 +38,7 @@ describe("opening an Agent Session", () => {
   it("accepts a Windows drive as the repository root", () => {
     const { config } = createTestKit();
 
-    const opened = openAgentSession({
+    const opened = openAgentRun({
       ...config,
       workspace: { ...config.workspace, repoRoot: "C:\\repo" as RepoPath },
     });
@@ -50,7 +50,7 @@ describe("opening an Agent Session", () => {
     const { config } = createTestKit();
     const read = fakeTool({ name: "read" });
 
-    const opened = openAgentSession({
+    const opened = openAgentRun({
       ...config,
       tools: { get: (name) => (name === "read" ? { ...read } : undefined), list: () => [read] },
     });
@@ -69,7 +69,7 @@ describe("opening an Agent Session", () => {
       },
     });
 
-    expect(openAgentSession(config).ok).toBe(true);
+    expect(openAgentRun(config).ok).toBe(true);
   });
 
   it("accepts a model that cancels in flight and cannot control parallel tool calls", () => {
@@ -80,18 +80,18 @@ describe("opening an Agent Session", () => {
     });
 
     expect(config.model.capabilities.cancellation).toBe("native_in_flight");
-    expect(openAgentSession(config).ok).toBe(true);
+    expect(openAgentRun(config).ok).toBe(true);
   });
 });
 
 describe("refusing an invalid configuration", () => {
-  type Change = (config: OpenSessionConfig) => object;
+  type Change = (config: OpenRunConfig) => object;
 
   const expectRefusal = (change: Change, field: string) => {
     const kit = createTestKit();
-    const config = { ...kit.config, ...change(kit.config) } as unknown as OpenSessionConfig;
+    const config = { ...kit.config, ...change(kit.config) } as unknown as OpenRunConfig;
 
-    const opened = openAgentSession(config);
+    const opened = openAgentRun(config);
 
     expect(opened).toEqual({
       ok: false,
@@ -103,7 +103,7 @@ describe("refusing an invalid configuration", () => {
   };
 
   it("refuses a configuration that is not an object, naming no field", () => {
-    const opened = openAgentSession(null as unknown as OpenSessionConfig);
+    const opened = openAgentRun(null as unknown as OpenRunConfig);
 
     expect(opened).toEqual({
       ok: false,
@@ -293,7 +293,7 @@ describe("refusing an invalid configuration", () => {
     ),
   );
 
-  it("refuses an id source that issues an empty session id, naming ids", () =>
+  it("refuses an id source that issues an empty run id, naming ids", () =>
     expectRefusal(() => ({ ids: { next: () => "" } }), "ids"));
 
   const fail = () => {

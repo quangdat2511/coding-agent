@@ -1,6 +1,6 @@
 import type { LimitKind } from "./events.ts";
-import type { Clock, SessionLimits } from "./ports.ts";
-import type { SessionCounters } from "./state.ts";
+import type { Clock, RunLimits } from "./ports.ts";
+import type { RunCounters } from "./state.ts";
 
 export interface LimitBreach {
   readonly kind: LimitKind;
@@ -14,13 +14,13 @@ export interface LimitGuard {
   elapsed(): number;
   remainingMs(): number;
   checkDuration(): LimitBreach | undefined;
-  checkBeforeModelTurn(counters: SessionCounters): LimitBreach | undefined;
-  checkBeforeToolExecution(counters: SessionCounters): LimitBreach | undefined;
+  checkBeforeModelTurn(counters: RunCounters): LimitBreach | undefined;
+  checkBeforeToolExecution(counters: RunCounters): LimitBreach | undefined;
   checkBeforeVerification(): LimitBreach | undefined;
-  checkAfterToolResult(counters: SessionCounters): LimitBreach | undefined;
+  checkAfterToolResult(counters: RunCounters): LimitBreach | undefined;
 }
 
-export function createLimitGuard(limits: SessionLimits, clock: Clock): LimitGuard {
+export function createLimitGuard(limits: RunLimits, clock: Clock): LimitGuard {
   let activeSince: number | undefined;
   let accumulatedMs = 0;
 

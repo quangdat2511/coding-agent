@@ -192,9 +192,9 @@ Quy ước của nhóm: nếu conflict nằm ở phần code của người khá
 | Mục | Nội dung |
 |-----|----------|
 | Tóm tắt | Trước, sau, vì sao, phần chưa làm, mã ticket (ví dụ `CDA-12`, GitHub tự chuyển thành link Jira). Mỗi dòng tối đa 2 câu. Chưa làm là chỗ duy nhất ghi việc để lại cho sau. Dòng Ticket ghi thêm ticket mà PR dựa trên và mở đường cho, nếu PR nằm trong một chuỗi ticket. Nếu acceptance criteria (AC) của ticket đã sửa trong lúc làm thì ghi AC nào đổi. |
-| Ví dụ | Hành vi mới qua một ví dụ cụ thể: output TUI/CLI, Tool Result, chuỗi Session Event, ... Nếu sửa hành vi có sẵn thì để cả trước và sau. PR không có hành vi mới thì ghi `Không có: <lý do>` |
+| Ví dụ | Hành vi mới qua một ví dụ cụ thể: output TUI/CLI, Tool Result, chuỗi Run Event, ... Nếu sửa hành vi có sẵn thì để cả trước và sau. PR không có hành vi mới thì ghi `Không có: <lý do>` |
 | Thay đổi | Bản đồ diff, thứ tự nên đọc, thay đổi interface giữa các package. Nếu docs, ADR hay CONTEXT.md bị ảnh hưởng mà không sửa thì ghi lý do. |
-| Flow | Sơ đồ Mermaid, bắt buộc khi PR thêm hoặc đổi luồng chạy qua từ 2 thành phần trở lên, thêm hoặc đổi trạng thái của Agent Session, hoặc có vấn đề về thứ tự xử lý, chạy đồng thời |
+| Flow | Sơ đồ Mermaid, bắt buộc khi PR thêm hoặc đổi luồng chạy qua từ 2 thành phần trở lên, thêm hoặc đổi trạng thái của Agent Run, hoặc có vấn đề về thứ tự xử lý, chạy đồng thời |
 | Quyết định thiết kế | Chỗ ticket/ADR không quy định sẵn: đã chọn gì, vì sao, phương án bị loại, nhược điểm còn lại |
 | Kiểm thử | Lệnh test riêng, kịch bản được bao phủ, phần chưa kiểm thử được (nếu có thay đổi code) |
 | Rủi ro | Rủi ro đã biết của phần được merge. Không chép lại việc để lại cho sau (đã ở Chưa làm) hay phần chưa kiểm thử (đã ở Kiểm thử). |

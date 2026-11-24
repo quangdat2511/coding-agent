@@ -1,10 +1,10 @@
 import { describe, expect, it } from "bun:test";
-import type { ExecutableTool, ExecuteContext, SessionEvent, ToolOutcome } from "../src/index.ts";
+import type { ExecutableTool, ExecuteContext, RunEvent, ToolOutcome } from "../src/index.ts";
 import {
   collect,
   fakeTool,
   type ManualClock,
-  openTestSession,
+  openTestRun,
   textTurn,
   toolCallTurn,
   waitForEvent,
@@ -26,9 +26,9 @@ function progressTool(script: Script, getClock: () => ManualClock): ExecutableTo
 }
 
 // Runs one Tool Call of a progress-reporting tool and returns the events that concern it.
-async function runWithProgress(script: Script): Promise<SessionEvent[]> {
+async function runWithProgress(script: Script): Promise<RunEvent[]> {
   let clock: ManualClock | undefined;
-  const opened = openTestSession({
+  const opened = openTestRun({
     approvalPolicy: "auto-approve",
     tools: [progressTool(script, () => clock as ManualClock)],
     model: {
@@ -36,9 +36,9 @@ async function runWithProgress(script: Script): Promise<SessionEvent[]> {
     },
   });
   clock = opened.clock;
-  await opened.session.dispatch({ type: "start", task });
-  await opened.session.result();
-  const events = await collect(opened.session.events());
+  await opened.run.dispatch({ type: "start", task });
+  await opened.run.result();
+  const events = await collect(opened.run.events());
   return events.filter((event) =>
     ["tool_execution_started", "tool_execution_progress", "tool_call_completed"].includes(
       event.type,
@@ -46,7 +46,7 @@ async function runWithProgress(script: Script): Promise<SessionEvent[]> {
   );
 }
 
-const shape = (events: readonly SessionEvent[]) =>
+const shape = (events: readonly RunEvent[]) =>
   events.map((event) =>
     event.type === "tool_execution_progress"
       ? { type: event.type, output: event.data.update.output }
@@ -64,7 +64,7 @@ describe("reporting Tool Progress", () => {
       { type: "tool_execution_progress", output: "compiling 1 of 3\n" },
       { type: "tool_call_completed" },
     ]);
-    const progress = events[1] as Extract<SessionEvent, { type: "tool_execution_progress" }>;
+    const progress = events[1] as Extract<RunEvent, { type: "tool_execution_progress" }>;
     expect(progress.data.toolCallId).toBe("tool_call-1");
   });
 
@@ -173,7 +173,7 @@ describe("reporting Tool Progress", () => {
 
   it("delivers no update after cancellation's grace period completes the Tool Call", async () => {
     // The tool ignores the abort, so the grace period expires while execute still runs and the
-    // session completes the call and settles without it. The tool then keeps reporting.
+    // run completes the call and settles without it. The tool then keeps reporting.
     let report: ExecuteContext["onProgress"] = () => {};
     const finished = Promise.withResolvers<ToolOutcome>();
     const stubborn: ExecutableTool = {
@@ -184,23 +184,23 @@ describe("reporting Tool Progress", () => {
         return finished.promise;
       },
     };
-    const { session, clock } = openTestSession({
+    const { run, clock } = openTestRun({
       approvalPolicy: "auto-approve",
       tools: [stubborn],
       limits: { cancellationGraceMs: 20 },
       model: { turns: [toolCallTurn({ toolCallId: "call-1", name: "build", input: {} })] },
     });
 
-    await session.dispatch({ type: "start", task });
-    await waitForEvent(session, "tool_execution_started");
-    await session.dispatch({ type: "cancel" });
+    await run.dispatch({ type: "start", task });
+    await waitForEvent(run, "tool_execution_started");
+    await run.dispatch({ type: "cancel" });
     clock.advance(300);
     report({ output: "line 1\nline 2\n" });
-    const result = await session.result();
+    const result = await run.result();
     clock.advance(300);
     report({ output: "line 1\nline 2\nline 3\n" });
     finished.resolve({ isError: false, content: "built" });
-    const events = await collect(session.events());
+    const events = await collect(run.events());
 
     expect(result.outcome).toBe("failed");
     expect(result.outcome === "failed" && result.failure.code).toBe("CANCELLATION_TIMEOUT");
@@ -210,7 +210,7 @@ describe("reporting Tool Progress", () => {
       { type: "tool_execution_progress", output: "line 1\n" },
       { type: "tool_call_completed" },
     ]);
-    expect(events.at(-1)?.type).toBe("session_settled");
-    expect(session.snapshot().lastSequence).toBe(result.lastSequence);
+    expect(events.at(-1)?.type).toBe("run_settled");
+    expect(run.snapshot().lastSequence).toBe(result.lastSequence);
   });
 });

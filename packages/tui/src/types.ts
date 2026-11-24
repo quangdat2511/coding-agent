@@ -1,7 +1,7 @@
 // Public types of the Full-screen TUI (ADR 0004 §5). This file imports nothing, so no public type
 // can name an Ink or React type.
 
-// tui owns TuiModel. Coding Agent's projection (CDA-82) builds it from Session Events. Later
+// tui owns TuiModel. Coding Agent's projection (CDA-82) builds it from Run Events. Later
 // tickets only add to it: new optional fields or new union members.
 export interface TuiModel {
   // Oldest first. Each id is unique across the transcript and stays the same across updates.
@@ -24,7 +24,7 @@ export interface PendingApproval {
 // Consumers derive this type with TuiModel["transcript"][number].
 //
 // Statuses mirror ADR 0002 §6 but are declared here, because tui imports no sibling package.
-// What ends an Agent Session (a cancellation, a limit, the settled Agent Result) is an entry too,
+// What ends an Agent Run (a cancellation, a limit, the settled Agent Result) is an entry too,
 // so the outcome of each Coding Task stays in the transcript after the next one starts.
 export type TranscriptEntry =
   | {
@@ -81,18 +81,18 @@ export type TranscriptEntry =
       readonly evidence?: readonly string[];
     }
   | {
-      // Something that happened to the Agent Session as a whole, such as a requested
+      // Something that happened to the Agent Run as a whole, such as a requested
       // cancellation or a limit reached. One line, written by the projection.
       readonly kind: "notice";
       readonly id: string;
       readonly text: string;
     }
   | {
-      // The settled Agent Result, the last entry of its Agent Session.
+      // The settled Agent Result, the last entry of its Agent Run.
       readonly kind: "outcome";
       readonly id: string;
       readonly status: "succeeded" | "failed" | "cancelled";
-      // The failure of a failed session. code is an Agent Failure code, kept as a plain string.
+      // The failure of a failed Agent Run. code is an Agent Failure code, kept as a plain string.
       readonly failure?: { readonly code: string; readonly message: string };
       readonly workspaceChanged: boolean;
       readonly partialChangesPossible: boolean;

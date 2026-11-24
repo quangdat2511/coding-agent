@@ -1,8 +1,8 @@
 import { describe, expect, it } from "bun:test";
 import {
-  type AgentSession,
+  type AgentRun,
   type ExecutableTool,
-  openAgentSession,
+  openAgentRun,
   type VerificationCancelled,
   type VerificationDecision,
 } from "../src/index.ts";
@@ -13,7 +13,7 @@ import {
   createTestKit,
   fakeTool,
   fakeWriteTool,
-  openTestSession,
+  openTestRun,
   streamOf,
   textMessage,
   textTurn,
@@ -24,9 +24,9 @@ import {
 
 const task = { objective: "Fix the failing test" };
 
-describe("Session Limits", () => {
+describe("Run Limits", () => {
   it("stops before starting a Model Turn beyond maxModelTurns", async () => {
-    const { session, model } = openTestSession({
+    const { run, model } = openTestRun({
       model: { turns: [textTurn("Try again."), textTurn("Done.")] },
       verification: [
         { outcome: "continue", evidence: [], feedback: { role: "user", content: "Try again." } },
@@ -34,9 +34,9 @@ describe("Session Limits", () => {
       limits: { maxModelTurns: 1 },
     });
 
-    await session.dispatch({ type: "start", task });
-    const result = await session.result();
-    const events = await collect(session.events());
+    await run.dispatch({ type: "start", task });
+    const result = await run.result();
+    const events = await collect(run.events());
 
     expect(model.requests).toHaveLength(1);
     expect(events.find((event) => event.type === "runtime_limit_reached")).toMatchObject({
@@ -50,7 +50,7 @@ describe("Session Limits", () => {
   });
 
   it("skips remaining Tool Calls in model order when maxToolCalls is reached", async () => {
-    const { session, portCalls } = openTestSession({
+    const { run, portCalls } = openTestRun({
       tools: [fakeTool()],
       model: {
         turns: [
@@ -67,9 +67,9 @@ describe("Session Limits", () => {
       limits: { maxToolCalls: 3 },
     });
 
-    await session.dispatch({ type: "start", task });
-    const result = await session.result();
-    const events = await collect(session.events());
+    await run.dispatch({ type: "start", task });
+    const result = await run.result();
+    const events = await collect(run.events());
     const completions = events.filter((event) => event.type === "tool_call_completed");
 
     expect(portCalls.filter((call) => call === "tool.execute(echo)")).toHaveLength(3);
@@ -87,7 +87,7 @@ describe("Session Limits", () => {
   });
 
   it("marks partial changes possible when a completed mutating call precedes a Tool Call limit", async () => {
-    const { session } = openTestSession({
+    const { run } = openTestRun({
       approvalPolicy: "auto-approve",
       tools: [fakeWriteTool(), fakeTool()],
       model: {
@@ -101,9 +101,9 @@ describe("Session Limits", () => {
       limits: { maxToolCalls: 1 },
     });
 
-    await session.dispatch({ type: "start", task });
-    const result = await session.result();
-    const events = await collect(session.events());
+    await run.dispatch({ type: "start", task });
+    const result = await run.result();
+    const events = await collect(run.events());
 
     expect(
       events
@@ -123,7 +123,7 @@ describe("Session Limits", () => {
 
   it("aborts a Model Turn when active duration expires", async () => {
     let releaseStream: (() => void) | undefined;
-    const { session, model, clock } = openTestSession({
+    const { run, model, clock } = openTestRun({
       model: {
         turns: [
           () =>
@@ -150,16 +150,16 @@ describe("Session Limits", () => {
       limits: { maxDurationMs: 10 },
     });
 
-    await session.dispatch({ type: "start", task });
-    await waitForEvent(session, "assistant_content_delta");
+    await run.dispatch({ type: "start", task });
+    await waitForEvent(run, "assistant_content_delta");
     const request = model.requests[0];
     if (request === undefined) throw new Error("expected the model request to start");
     const signal = request.signal;
     signal.addEventListener("abort", () => releaseStream?.(), { once: true });
     clock.advance(10);
 
-    const result = await session.result();
-    const events = await collect(session.events());
+    const result = await run.result();
+    const events = await collect(run.events());
 
     expect(signal.aborted).toBe(true);
     expect(events.find((event) => event.type === "runtime_limit_reached")).toMatchObject({
@@ -190,7 +190,7 @@ describe("Session Limits", () => {
         });
       },
     };
-    const { session, clock, portCalls } = openTestSession({
+    const { run, clock, portCalls } = openTestRun({
       tools: [slowPrepare],
       model: {
         turns: [toolCallTurn({ toolCallId: "call-1", name: "slow-prepare", input: {} })],
@@ -199,12 +199,12 @@ describe("Session Limits", () => {
       limits: { maxDurationMs: 10 },
     });
 
-    await session.dispatch({ type: "start", task });
+    await run.dispatch({ type: "start", task });
     await started;
     clock.advance(10);
     if (!prepareSignal?.aborted) finishPrepare?.();
-    const result = await session.result();
-    const events = await collect(session.events());
+    const result = await run.result();
+    const events = await collect(run.events());
 
     expect(prepareSignal?.aborted).toBe(true);
     expect(portCalls).not.toContain("tool.execute(slow-prepare)");
@@ -224,7 +224,7 @@ describe("Session Limits", () => {
         return stubborn.execute(prepared, context);
       },
     };
-    const { session, clock } = openTestSession({
+    const { run, clock } = openTestRun({
       tools: [tool],
       approvalPolicy: "auto-approve",
       model: {
@@ -233,18 +233,18 @@ describe("Session Limits", () => {
       limits: { maxDurationMs: 10, cancellationGraceMs: 25 },
     });
 
-    await session.dispatch({ type: "start", task });
-    await waitForEvent(session, "tool_execution_started");
+    await run.dispatch({ type: "start", task });
+    await waitForEvent(run, "tool_execution_started");
     clock.advance(10);
     expect(executionSignal?.aborted).toBe(true);
-    expect(session.snapshot().phase).toBe("executing_tool");
+    expect(run.snapshot().phase).toBe("executing_tool");
 
     clock.advance(25);
-    const settledAfterGrace = session.snapshot().phase === "failed";
+    const settledAfterGrace = run.snapshot().phase === "failed";
     if (!settledAfterGrace) stubborn.release();
-    const result = await session.result();
+    const result = await run.result();
     stubborn.release();
-    const events = await collect(session.events());
+    const events = await collect(run.events());
 
     expect(settledAfterGrace).toBe(true);
     expect(events.find((event) => event.type === "runtime_limit_reached")).toMatchObject({
@@ -255,7 +255,7 @@ describe("Session Limits", () => {
       failure: { code: "LIMIT_EXCEEDED" },
       partialChangesPossible: true,
     });
-    expect(events.at(-1)?.type).toBe("session_settled");
+    expect(events.at(-1)?.type).toBe("run_settled");
   });
 
   it("keeps a duration breach ahead of a cancellation requested while the effect quiesces", async () => {
@@ -266,7 +266,7 @@ describe("Session Limits", () => {
         return stubborn.execute(prepared, context);
       },
     };
-    const { session, clock } = openTestSession({
+    const { run, clock } = openTestRun({
       tools: [tool],
       approvalPolicy: "auto-approve",
       model: {
@@ -275,20 +275,20 @@ describe("Session Limits", () => {
       limits: { maxDurationMs: 10, cancellationGraceMs: 25 },
     });
 
-    await session.dispatch({ type: "start", task });
-    await waitForEvent(session, "tool_execution_started");
+    await run.dispatch({ type: "start", task });
+    await waitForEvent(run, "tool_execution_started");
     clock.advance(10);
-    const limitEvent = await waitForEvent(session, "runtime_limit_reached");
-    const cancellation = await session.dispatch({ type: "cancel", reason: "stop" });
+    const limitEvent = await waitForEvent(run, "runtime_limit_reached");
+    const cancellation = await run.dispatch({ type: "cancel", reason: "stop" });
 
     expect(cancellation).toEqual({ accepted: true, sequence: limitEvent.sequence });
-    expect(session.snapshot().phase).toBe("executing_tool");
+    expect(run.snapshot().phase).toBe("executing_tool");
 
     stubborn.release();
-    const result = await session.result();
-    const events = await collect(session.events());
+    const result = await run.result();
+    const events = await collect(run.events());
     const limitIndex = events.findIndex((event) => event.type === "runtime_limit_reached");
-    const settledIndex = events.findIndex((event) => event.type === "session_settled");
+    const settledIndex = events.findIndex((event) => event.type === "run_settled");
 
     expect(result).toMatchObject({
       outcome: "failed",
@@ -303,7 +303,7 @@ describe("Session Limits", () => {
   });
 
   it("checks duration before Verification when it expires between effects", async () => {
-    const { session, clock, config, model, verification } = openTestSession({
+    const { run, clock, config, model, verification } = openTestRun({
       model: { turns: [textTurn("Done.")] },
       limits: { maxDurationMs: 10 },
     });
@@ -315,9 +315,9 @@ describe("Session Limits", () => {
     };
     config.clock.setTimer = (delayMs, callback) => clock.setTimer(delayMs, callback);
 
-    await session.dispatch({ type: "start", task });
-    const result = await session.result();
-    const events = await collect(session.events());
+    await run.dispatch({ type: "start", task });
+    const result = await run.result();
+    const events = await collect(run.events());
 
     expect(model.requests).toHaveLength(1);
     expect(verification.candidates).toHaveLength(0);
@@ -335,12 +335,12 @@ describe("Session Limits", () => {
 
   it("excludes ready and awaiting_approval time from active duration", async () => {
     const write = fakeWriteTool();
-    const { session, clock: sessionClock } = openTestSession({
+    const { run, clock: runClock } = openTestRun({
       tools: [
         {
           ...write,
           async execute(prepared, context) {
-            sessionClock.advance(500);
+            runClock.advance(500);
             return write.execute(prepared, context);
           },
         },
@@ -353,33 +353,33 @@ describe("Session Limits", () => {
       },
       limits: { maxDurationMs: 1_000 },
     });
-    sessionClock.advance(60_000);
-    await session.dispatch({ type: "start", task });
-    await waitForEvent(session, "approval_requested");
-    expect(session.snapshot().activeDurationMs).toBe(0);
+    runClock.advance(60_000);
+    await run.dispatch({ type: "start", task });
+    await waitForEvent(run, "approval_requested");
+    expect(run.snapshot().activeDurationMs).toBe(0);
 
-    sessionClock.advance(60_000);
-    expect(session.snapshot().activeDurationMs).toBe(0);
-    await session.dispatch({
+    runClock.advance(60_000);
+    expect(run.snapshot().activeDurationMs).toBe(0);
+    await run.dispatch({
       type: "resolve_approval",
       approvalId: "approval-1",
       decision: "allow",
     });
-    const result = await session.result();
+    const result = await run.result();
 
     expect(result.outcome).toBe("succeeded");
-    expect(session.snapshot().activeDurationMs).toBe(500);
+    expect(run.snapshot().activeDurationMs).toBe(500);
   });
 
-  it("settles failed if the active clock cannot start after session_started", async () => {
-    const { session, clock, model } = openTestSession({ model: { turns: [textTurn("Done.")] } });
+  it("settles failed if the active clock cannot start after run_started", async () => {
+    const { run, clock, model } = openTestRun({ model: { turns: [textTurn("Done.")] } });
     clock.monotonicMs = () => {
       throw new Error("monotonic clock failed at startup");
     };
 
-    const start = await session.dispatch({ type: "start", task });
-    const result = await session.result();
-    const events = await collect(session.events());
+    const start = await run.dispatch({ type: "start", task });
+    const result = await run.result();
+    const events = await collect(run.events());
 
     expect(start.accepted).toBe(true);
     expect(model.requests).toHaveLength(0);
@@ -387,37 +387,37 @@ describe("Session Limits", () => {
       outcome: "failed",
       failure: { code: "INTERNAL_ERROR", message: "monotonic clock failed at startup" },
     });
-    expect(events.at(-1)?.type).toBe("session_settled");
+    expect(events.at(-1)?.type).toBe("run_settled");
   });
 
   it("settles failed without stranding the Tool Call if the clock cannot resume after Approval", async () => {
-    const { session, clock } = openTestSession({
+    const { run, clock } = openTestRun({
       tools: [fakeWriteTool()],
       model: {
         turns: [toolCallTurn({ toolCallId: "call-1", name: "write", input: { path: "src/a.ts" } })],
       },
     });
 
-    await session.dispatch({ type: "start", task });
-    await waitForEvent(session, "approval_requested");
+    await run.dispatch({ type: "start", task });
+    await waitForEvent(run, "approval_requested");
     clock.monotonicMs = () => {
       throw new Error("monotonic clock failed after Approval");
     };
 
-    const decision = await session.dispatch({
+    const decision = await run.dispatch({
       type: "resolve_approval",
       approvalId: "approval-1",
       decision: "allow",
     });
-    const result = await session.result();
-    const events = await collect(session.events());
+    const result = await run.result();
+    const events = await collect(run.events());
 
     expect(decision.accepted).toBe(true);
     expect(result).toMatchObject({
       outcome: "failed",
       failure: { code: "INTERNAL_ERROR", message: "monotonic clock failed after Approval" },
     });
-    expect(events.at(-1)?.type).toBe("session_settled");
+    expect(events.at(-1)?.type).toBe("run_settled");
   });
 
   it("aborts a mutating Tool Call on duration exhaustion and reports possible partial changes", async () => {
@@ -435,7 +435,7 @@ describe("Session Limits", () => {
         });
       },
     };
-    const { session, clock } = openTestSession({
+    const { run, clock } = openTestRun({
       approvalPolicy: "auto-approve",
       tools: [slowWriter],
       model: {
@@ -444,11 +444,11 @@ describe("Session Limits", () => {
       limits: { maxDurationMs: 10 },
     });
 
-    await session.dispatch({ type: "start", task });
-    await waitForEvent(session, "tool_execution_started");
+    await run.dispatch({ type: "start", task });
+    await waitForEvent(run, "tool_execution_started");
     clock.advance(10);
-    const result = await session.result();
-    const events = await collect(session.events());
+    const result = await run.result();
+    const events = await collect(run.events());
 
     expect(executionSignal?.aborted).toBe(true);
     expect(events.find((event) => event.type === "runtime_limit_reached")).toMatchObject({
@@ -467,7 +467,7 @@ describe("Session Limits", () => {
       model: { turns: [textTurn("Done.")] },
       limits: { maxDurationMs: 10 },
     });
-    const opened = openAgentSession({
+    const opened = openAgentRun({
       ...kit.config,
       verification: {
         verify(_candidate, { signal }) {
@@ -482,13 +482,13 @@ describe("Session Limits", () => {
         },
       },
     });
-    if (!opened.ok) throw new Error(`expected a session, got: ${opened.message}`);
+    if (!opened.ok) throw new Error(`expected a run, got: ${opened.message}`);
 
-    await opened.session.dispatch({ type: "start", task });
-    await waitForEvent(opened.session, "verification_started");
+    await opened.run.dispatch({ type: "start", task });
+    await waitForEvent(opened.run, "verification_started");
     kit.clock.advance(10);
-    const result = await opened.session.result();
-    const events = await collect(opened.session.events());
+    const result = await opened.run.result();
+    const events = await collect(opened.run.events());
 
     expect(verificationSignal?.aborted).toBe(true);
     expect(events.find((event) => event.type === "runtime_limit_reached")).toMatchObject({
@@ -498,13 +498,13 @@ describe("Session Limits", () => {
   });
 
   // The Verification Policy reports a run the signal ended as cancelled. When the deadline ended
-  // it, the breach decides the session, not the unrequested-cancellation INTERNAL_ERROR.
+  // it, the breach decides the run, not the unrequested-cancellation INTERNAL_ERROR.
   it("settles LIMIT_EXCEEDED when the policy reports the run the deadline aborted as cancelled", async () => {
     const kit = createTestKit({
       model: { turns: [textTurn("Done.")] },
       limits: { maxDurationMs: 10 },
     });
-    const opened = openAgentSession({
+    const opened = openAgentRun({
       ...kit.config,
       verification: {
         verify(_candidate, { signal }) {
@@ -516,20 +516,20 @@ describe("Session Limits", () => {
         },
       },
     });
-    if (!opened.ok) throw new Error(`expected a session, got: ${opened.message}`);
+    if (!opened.ok) throw new Error(`expected a run, got: ${opened.message}`);
 
-    await opened.session.dispatch({ type: "start", task });
-    await waitForEvent(opened.session, "verification_started");
+    await opened.run.dispatch({ type: "start", task });
+    await waitForEvent(opened.run, "verification_started");
     kit.clock.advance(10);
 
-    expect(await opened.session.result()).toMatchObject({
+    expect(await opened.run.result()).toMatchObject({
       outcome: "failed",
       failure: { code: "LIMIT_EXCEEDED" },
     });
   });
 
   it("ends after maxConsecutiveRecoverableFailures and skips the rest of the batch", async () => {
-    const { session } = openTestSession({
+    const { run } = openTestRun({
       tools: [throwingTool()],
       model: {
         turns: [
@@ -543,9 +543,9 @@ describe("Session Limits", () => {
       limits: { maxConsecutiveRecoverableFailures: 2 },
     });
 
-    await session.dispatch({ type: "start", task });
-    const result = await session.result();
-    const events = await collect(session.events());
+    await run.dispatch({ type: "start", task });
+    const result = await run.result();
+    const events = await collect(run.events());
 
     expect(events.find((event) => event.type === "runtime_limit_reached")).toMatchObject({
       data: { kind: "maxConsecutiveRecoverableFailures", limit: 2, observed: 2 },
@@ -563,16 +563,16 @@ describe("Session Limits", () => {
   });
 
   it("does not increase the failure counter when Verification continues", async () => {
-    let session!: AgentSession;
+    let run!: AgentRun;
     let failuresAtNextTurn = -1;
-    const testSession = openTestSession({
+    const testRun = openTestRun({
       tools: [throwingTool()],
       model: {
         turns: [
           toolCallTurn({ toolCallId: "call-1", name: "explode", input: {} }),
           textTurn("First candidate."),
           () => {
-            failuresAtNextTurn = session.snapshot().counters.consecutiveRecoverableFailures;
+            failuresAtNextTurn = run.snapshot().counters.consecutiveRecoverableFailures;
             return streamOf(async function* () {
               yield* textTurn("Second candidate.");
             });
@@ -582,18 +582,18 @@ describe("Session Limits", () => {
       verification: [continueWith("Try again."), { outcome: "succeeded", evidence: [] }],
       limits: { maxConsecutiveRecoverableFailures: 2 },
     });
-    session = testSession.session;
+    run = testRun.run;
 
-    await session.dispatch({ type: "start", task });
-    const result = await session.result();
+    await run.dispatch({ type: "start", task });
+    const result = await run.result();
 
     expect(failuresAtNextTurn).toBe(1);
-    expect(session.snapshot().counters.consecutiveRecoverableFailures).toBe(1);
+    expect(run.snapshot().counters.consecutiveRecoverableFailures).toBe(1);
     expect(result.outcome).toBe("succeeded");
   });
 
   it("allows multiple Verification continue cycles without a Verification-attempt limit", async () => {
-    const { session, model } = openTestSession({
+    const { run, model } = openTestRun({
       model: {
         turns: [
           textTurn("Candidate 1."),
@@ -614,9 +614,9 @@ describe("Session Limits", () => {
       limits: { maxModelTurns: 10 },
     });
 
-    await session.dispatch({ type: "start", task });
-    const result = await session.result();
-    const events = await collect(session.events());
+    await run.dispatch({ type: "start", task });
+    const result = await run.result();
+    const events = await collect(run.events());
 
     expect(model.requests).toHaveLength(6);
     expect(events.filter((event) => event.type === "verification_started")).toHaveLength(6);

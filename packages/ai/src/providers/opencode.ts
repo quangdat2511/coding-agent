@@ -21,13 +21,13 @@ export interface OpencodeProviderOptions extends BaseProviderOptions<OpencodeVar
  * The base URL is the documented Go root plus its OpenAI path, because the OpenAI SDK appends
  * `/chat/completions` itself. The session id is issued once per provider instance and sent as
  * `x-opencode-session` on every request: Go reuses its prompt cache only while that value stays
- * the same, and one Agent Session streams through one instance. The user agent comes from the
+ * the same, and one Agent Run streams through one instance. The user agent comes from the
  * caller, which knows its own version.
  */
 export function createOpencodeProvider(options?: OpencodeProviderOptions): Provider {
   const variant = options?.variant ?? "chat_completions";
   const defaultCaps = OPENCODE_VARIANT_CAPABILITIES[variant];
-  const sessionId = crypto.randomUUID();
+  const opencodeSession = crypto.randomUUID();
 
   return defineProvider({
     id: "opencode",
@@ -37,7 +37,7 @@ export function createOpencodeProvider(options?: OpencodeProviderOptions): Provi
     auth: {
       apiKey: apiKeyFromEnv("OpenCode API key", PROVIDER_CREDENTIAL_ENV_VARS_BY_PROVIDER.opencode),
     },
-    headers: () => ({ "x-opencode-session": sessionId }),
+    headers: () => ({ "x-opencode-session": opencodeSession }),
     models: applyCapabilities(OPENCODE_MODELS, defaultCaps, options?.modelOverrides),
     api: { stream },
   });

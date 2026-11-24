@@ -11,8 +11,8 @@ import type {
   AssistantMessageCompletedEvent,
   AssistantMessageStartedEvent,
   ModelTurnStartedEvent,
-  SessionEvent,
-  SessionEventType,
+  RunEvent,
+  RunEventType,
   SkipReason,
   ToolCallQueuedEvent,
   VerificationStartedEvent,
@@ -21,7 +21,7 @@ import { isRecord, messageOf } from "./guards.ts";
 import { createLimitGuard, type LimitBreach } from "./limit-guard.ts";
 import { readModelResponse } from "./model-response.ts";
 import type { AgentFailure, AgentResult, UsageTotals } from "./result.ts";
-import type { AgentSession, CommandResult, OpenSessionConfig, SessionCommand } from "./session.ts";
+import type { AgentRun, CommandResult, OpenRunConfig, RunCommand } from "./run.ts";
 import type {
   AgentPhase,
   AgentState,
@@ -32,7 +32,7 @@ import type {
   ModelTurnRef,
   NormalizedToolCall,
   ReadyState,
-  SessionCounters,
+  RunCounters,
   StreamingModelState,
 } from "./state.ts";
 import type { CodingTask } from "./task.ts";
@@ -52,18 +52,14 @@ const refuse = (code: Refusal["code"], message: string): Refusal => ({
 });
 
 type EventDraft = {
-  [T in SessionEventType]: Pick<Extract<SessionEvent, { type: T }>, "type" | "data">;
-}[SessionEventType];
+  [T in RunEventType]: Pick<Extract<RunEvent, { type: T }>, "type" | "data">;
+}[RunEventType];
 
 type StateWithoutPhase = Omit<ReadyState, "phase">;
 
-type SessionOutcomeFields =
-  | "usage"
-  | "workspaceChanged"
-  | "partialChangesPossible"
-  | "lastSequence";
+type RunOutcomeFields = "usage" | "workspaceChanged" | "partialChangesPossible" | "lastSequence";
 
-type Settlement<R = AgentResult> = R extends AgentResult ? Omit<R, SessionOutcomeFields> : never;
+type Settlement<R = AgentResult> = R extends AgentResult ? Omit<R, RunOutcomeFields> : never;
 
 interface Candidate extends AssistantMessageRef {
   readonly message: AssistantMessage;
@@ -130,7 +126,7 @@ const toolResultMessage = (providerId: string, { content, isError }: ToolResult)
 
 function withoutPhase(state: AgentState): StateWithoutPhase {
   return {
-    sessionId: state.sessionId,
+    runId: state.runId,
     ...(state.task === undefined ? {} : { task: state.task }),
     transcript: state.transcript,
     usage: state.usage,
@@ -142,7 +138,7 @@ function withoutPhase(state: AgentState): StateWithoutPhase {
   };
 }
 
-export function createAgentSession(config: OpenSessionConfig, initial: ReadyState): AgentSession {
+export function createAgentRun(config: OpenRunConfig, initial: ReadyState): AgentRun {
   const log = createEventLog();
   const guard = createLimitGuard(config.limits, config.clock);
   let state: AgentState = initial;
@@ -188,7 +184,7 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
         isCancellingOrTerminal() ||
         next.phase === "cancelling" ||
         next.phase === "failed" ||
-        event.type === "session_settled" ||
+        event.type === "run_settled" ||
         event.type === "runtime_limit_reached"
       ) {
         occurredAt = lastOccurredAt ?? SAFE_FALLBACK_TIMESTAMP;
@@ -198,7 +194,7 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
     }
     const sequence = log.lastSequence + 1;
     state = { ...next, lastSequence: sequence };
-    log.append({ sessionId: state.sessionId, sequence, occurredAt, ...event });
+    log.append({ runId: state.runId, sequence, occurredAt, ...event });
     return sequence;
   }
 
@@ -358,7 +354,7 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
     try {
       commit(
         { ...terminal(result), activeDurationMs, partialChangesPossible },
-        { type: "session_settled", data: { result } },
+        { type: "run_settled", data: { result } },
       );
     } finally {
       log.close();
@@ -573,7 +569,7 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
       kind: "failed",
       failure: {
         code: "LIMIT_EXCEEDED",
-        message: `session limit ${breach.kind} exhausted: observed ${breach.observed}, limit ${breach.limit}`,
+        message: `run limit ${breach.kind} exhausted: observed ${breach.observed}, limit ${breach.limit}`,
         details: { kind: breach.kind, limit: breach.limit, observed: breach.observed },
       },
     });
@@ -616,7 +612,7 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
     };
   }
 
-  const incremented = (counter: keyof SessionCounters): SessionCounters => ({
+  const incremented = (counter: keyof RunCounters): RunCounters => ({
     ...state.counters,
     [counter]: state.counters[counter] + 1,
   });
@@ -668,7 +664,7 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
     const breach = guard.checkBeforeToolExecution(state.counters);
     if (breach !== undefined) {
       breachLimit(breach);
-      return { decision: "deny", reason: "session limit reached" };
+      return { decision: "deny", reason: "run limit reached" };
     }
     const approvalId = config.ids.next("approval");
     const resolver = Promise.withResolvers<ApprovalDecision>();
@@ -864,7 +860,7 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
     // ADR 0002 permits progress only between tool_execution_started and tool_call_completed, so
     // the gate closes before the result is committed and later updates are ignored. The phase
     // check covers a Tool Call completed while execute still runs, as when cancellation's grace
-    // period expires: no update may follow its tool_call_completed or session_settled.
+    // period expires: no update may follow its tool_call_completed or run_settled.
     const progress = createProgressGate(config.clock, (output) => {
       if (
         breachedLimit !== undefined ||
@@ -1012,8 +1008,8 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
     return { modelTurnId, messageId, message };
   }
 
-  // A Verification Policy that throws or breaks its contract fails the session: neither is a
-  // decision the session can act on.
+  // A Verification Policy that throws or breaks its contract fails the Agent Run: neither is a
+  // decision the Agent Run can act on.
   function failInternal(message: string): "settled" {
     closeActiveWork({ kind: "failed", failure: { code: "INTERNAL_ERROR", message } });
     return "settled";
@@ -1136,13 +1132,13 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
   function start({ objective }: CodingTask): CommandResult {
     if (state.phase !== "ready" || state.task !== undefined) {
       return state.task !== undefined
-        ? refuse("ALREADY_STARTED", "the session has already started")
-        : refuse("INVALID_STATE", `the session is in ${state.phase}`);
+        ? refuse("ALREADY_STARTED", "the run has already started")
+        : refuse("INVALID_STATE", `the run is in ${state.phase}`);
     }
     const task: CodingTask = { objective };
     const sequence = commit(
       { ...state, task, transcript: [{ role: "user", content: objective }] },
-      { type: "session_started", data: { task } },
+      { type: "run_started", data: { task } },
     );
     try {
       guard.resume();
@@ -1170,7 +1166,7 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
   }
 
   function resolveApproval(
-    command: Extract<SessionCommand, { type: "resolve_approval" }>,
+    command: Extract<RunCommand, { type: "resolve_approval" }>,
   ): CommandResult {
     if (pendingApproval === undefined) {
       return refuse("INVALID_STATE", `no Approval is pending while ${state.phase}`);
@@ -1220,7 +1216,7 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
     return { accepted: true, sequence };
   }
 
-  function handle(command: SessionCommand): CommandResult {
+  function handle(command: RunCommand): CommandResult {
     switch (command.type) {
       case "start":
         return start(command.task);
@@ -1228,7 +1224,7 @@ export function createAgentSession(config: OpenSessionConfig, initial: ReadyStat
         return resolveApproval(command);
       case "cancel": {
         if (state.phase === "succeeded" || state.phase === "failed") {
-          return refuse("ALREADY_SETTLED", `the session has already ${state.phase}`);
+          return refuse("ALREADY_SETTLED", `the run has already ${state.phase}`);
         }
         if (
           breachedLimit !== undefined ||

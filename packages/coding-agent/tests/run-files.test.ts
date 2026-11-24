@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { join } from "node:path";
-import type { SessionEvent } from "@coding-agent/agent-core";
+import type { RunEvent } from "@coding-agent/agent-core";
 import { openRunFiles, type RunRecord } from "../src/run-files.ts";
 import { withTemporaryDirectory } from "./support/process.ts";
 
@@ -29,17 +29,17 @@ const run: RunRecord = {
   systemPrompt: "You are Coding Agent.",
 };
 
-function event(sequence: number, type: string, data: object): SessionEvent {
+function event(sequence: number, type: string, data: object): RunEvent {
   return {
-    sessionId: "session-1",
+    runId: "run-1",
     sequence,
     occurredAt: "2026-11-12T00:00:00.000Z",
     type,
     data,
-  } as unknown as SessionEvent;
+  } as unknown as RunEvent;
 }
 
-async function logged(events: readonly SessionEvent[]): Promise<string> {
+async function logged(events: readonly RunEvent[]): Promise<string> {
   return withTemporaryDirectory(async (directory) => {
     const files = await openRunFiles(directory, run, redact);
     await files.logEvents(
@@ -63,10 +63,10 @@ describe("the event log", () => {
     ]);
 
     expect(text.trimEnd().split("\n")).toEqual([
-      '{"schemaVersion":1,"sessionId":"session-1","sequence":1,' +
+      '{"schemaVersion":1,"runId":"run-1","sequence":1,' +
         '"occurredAt":"2026-11-12T00:00:00.000Z","type":"tool_execution_started",' +
         '"data":{"toolCallId":"call-1","mutation":"read_only"}}',
-      '{"schemaVersion":1,"sessionId":"session-1","sequence":5,' +
+      '{"schemaVersion":1,"runId":"run-1","sequence":5,' +
         '"occurredAt":"2026-11-12T00:00:00.000Z","type":"verification_started",' +
         '"data":{"verificationId":"v"}}',
     ]);

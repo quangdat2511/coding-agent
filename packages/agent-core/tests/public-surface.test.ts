@@ -5,7 +5,7 @@ import type {
   AgentFailure,
   AgentFailureCode,
   AgentResult,
-  AgentSession,
+  AgentRun,
   AgentState,
   ApprovalPolicy,
   Clock,
@@ -17,16 +17,16 @@ import type {
   ModelFailureDetails,
   ModelPort,
   NormalizedToolCall,
-  OpenSessionConfig,
-  OpenSessionResult,
+  OpenRunConfig,
+  OpenRunResult,
   PathResolution,
   PrepareContext,
   PreparedCall,
   PrepareOutcome,
   RepoPath,
-  SessionCommand,
-  SessionEvent,
-  SessionLimits,
+  RunCommand,
+  RunEvent,
+  RunLimits,
   ToolErrorCode,
   ToolOutcome,
   ToolRegistry,
@@ -221,7 +221,7 @@ describe("injected ports", () => {
 
   it("issues ids for exactly six kinds of thing", () => {
     const kinds = {
-      session: true,
+      run: true,
       model_turn: true,
       assistant_message: true,
       tool_call: true,
@@ -237,15 +237,15 @@ describe("injected ports", () => {
     expect(ids.next("tool_call")).toBe("tool_call-1");
   });
 
-  it("bounds a session by turns, tool calls, duration, failures and cancellation grace", () => {
-    const limits: SessionLimits = {
+  it("bounds a run by turns, tool calls, duration, failures and cancellation grace", () => {
+    const limits: RunLimits = {
       maxModelTurns: 20,
       maxToolCalls: 100,
       maxDurationMs: 600_000,
       maxConsecutiveRecoverableFailures: 3,
       cancellationGraceMs: 2_000,
     };
-    const withVerificationAttempts: SessionLimits = {
+    const withVerificationAttempts: RunLimits = {
       ...limits,
       // @ts-expect-error there is no separate verification-attempt limit
       maxVerificationAttempts: 3,
@@ -355,14 +355,14 @@ describe("verification port", () => {
   });
 });
 
-describe("agent session interface", () => {
+describe("agent run interface", () => {
   it("has four operations", () => {
     const operations = {
       dispatch: true,
       snapshot: true,
       events: true,
       result: true,
-    } satisfies Record<keyof AgentSession, true>;
+    } satisfies Record<keyof AgentRun, true>;
 
     expect(Object.keys(operations)).toHaveLength(4);
   });
@@ -372,14 +372,14 @@ describe("agent session interface", () => {
       start: true,
       resolve_approval: true,
       cancel: true,
-    } satisfies Record<SessionCommand["type"], true>;
-    const resolve: SessionCommand = {
+    } satisfies Record<RunCommand["type"], true>;
+    const resolve: RunCommand = {
       type: "resolve_approval",
       approvalId: "approval-1",
       decision: "allow",
     };
     // @ts-expect-error a decision is allow or deny
-    const approve: SessionCommand = { ...resolve, decision: "approve" };
+    const approve: RunCommand = { ...resolve, decision: "approve" };
 
     expect(Object.keys(commands)).toHaveLength(3);
     expect(approve.type).toBe("resolve_approval");
@@ -494,7 +494,7 @@ describe("agent result", () => {
   });
 });
 
-describe("session construction", () => {
+describe("run construction", () => {
   it("takes nine injected collaborators", () => {
     const fields = {
       model: true,
@@ -506,13 +506,13 @@ describe("session construction", () => {
       limits: true,
       clock: true,
       ids: true,
-    } satisfies Record<keyof OpenSessionConfig, true>;
+    } satisfies Record<keyof OpenRunConfig, true>;
 
     expect(Object.keys(fields)).toHaveLength(9);
   });
 
   it("refuses with a configuration error that names the field", () => {
-    const refused: OpenSessionResult = {
+    const refused: OpenRunResult = {
       ok: false,
       code: "INVALID_CONFIGURATION",
       message: "clock is required",
@@ -528,7 +528,7 @@ describe("session construction", () => {
 
 describe("agent state", () => {
   const common = {
-    sessionId: "session-1",
+    runId: "run-1",
     task: { objective: "fix the failing test" },
     transcript: [],
     usage: { inputTokens: 0, outputTokens: 0 },
@@ -685,18 +685,18 @@ describe("agent state", () => {
   });
 });
 
-describe("session events", () => {
-  type DataOf<T extends SessionEvent["type"]> = Extract<SessionEvent, { type: T }>["data"];
-  type EventData = { [T in SessionEvent["type"]]: DataOf<T> };
+describe("run events", () => {
+  type DataOf<T extends RunEvent["type"]> = Extract<RunEvent, { type: T }>["data"];
+  type EventData = { [T in RunEvent["type"]]: DataOf<T> };
 
   const usage = { inputTokens: 10, outputTokens: 5 };
   const toolCall: NormalizedToolCall = { id: "tool-1", name: "write", arguments: "{}" };
 
   const payloads = {
-    session_started: { task: { objective: "fix the failing test" } },
+    run_started: { task: { objective: "fix the failing test" } },
     cancellation_requested: { reason: "user", requestedFrom: "executing_tool" },
     runtime_limit_reached: { kind: "maxModelTurns", limit: 20, observed: 20 },
-    session_settled: {
+    run_settled: {
       result: {
         usage,
         workspaceChanged: true,
@@ -764,16 +764,16 @@ describe("session events", () => {
   });
 
   it("declares tool and verification progress as events", () => {
-    const progress: SessionEvent[] = [
+    const progress: RunEvent[] = [
       {
-        sessionId: "session-1",
+        runId: "run-1",
         sequence: 5,
         occurredAt: "2026-10-01T00:00:00.000Z",
         type: "tool_execution_progress",
         data: payloads.tool_execution_progress,
       },
       {
-        sessionId: "session-1",
+        runId: "run-1",
         sequence: 6,
         occurredAt: "2026-10-01T00:00:01.000Z",
         type: "verification_progress",
@@ -788,32 +788,32 @@ describe("session events", () => {
   });
 
   it("narrows an event's data on its type discriminant", () => {
-    const event: SessionEvent = {
-      sessionId: "session-1",
+    const event: RunEvent = {
+      runId: "run-1",
       sequence: 19,
       occurredAt: "2026-10-01T00:00:02.000Z",
-      type: "session_settled",
-      data: payloads.session_settled,
+      type: "run_settled",
+      data: payloads.run_settled,
     };
 
-    const outcome = event.type === "session_settled" ? event.data.result.outcome : undefined;
+    const outcome = event.type === "run_settled" ? event.data.result.outcome : undefined;
 
     expect(outcome).toBe("cancelled");
   });
 
   it("is immutable once emitted (compile-time)", () => {
-    const event: SessionEvent = {
-      sessionId: "session-1",
+    const event: RunEvent = {
+      runId: "run-1",
       sequence: 1,
       occurredAt: "2026-10-01T00:00:00.000Z",
-      type: "session_started",
-      data: payloads.session_started,
+      type: "run_started",
+      data: payloads.run_started,
     };
 
     // @ts-expect-error events are immutable
     event.sequence = 2;
 
-    expect(event.type).toBe("session_started");
+    expect(event.type).toBe("run_started");
   });
 
   it("records why a skipped tool call was skipped and gives it no tool result (compile-time)", () => {
@@ -835,28 +835,28 @@ describe("session events", () => {
   });
 
   it("lets a consumer read events after a snapshot sequence", async () => {
-    const settled: SessionEvent = {
-      sessionId: "session-1",
+    const settled: RunEvent = {
+      runId: "run-1",
       sequence: 2,
       occurredAt: "2026-10-01T00:00:02.000Z",
-      type: "session_settled",
-      data: payloads.session_settled,
+      type: "run_settled",
+      data: payloads.run_settled,
     };
-    const session: Pick<AgentSession, "events"> = {
+    const run: Pick<AgentRun, "events"> = {
       async *events(afterSequence = 0) {
         if (afterSequence < settled.sequence) yield settled;
       },
     };
 
     const seen: number[] = [];
-    for await (const event of session.events(1)) seen.push(event.sequence);
+    for await (const event of run.events(1)) seen.push(event.sequence);
 
     expect(seen).toEqual([2]);
   });
 });
 
 describe("public runtime surface", () => {
-  it("exports only openAgentSession, so the reducer and the tool call scheduler stay internal", () => {
-    expect(Object.keys(surface)).toEqual(["openAgentSession"]);
+  it("exports only openAgentRun, so the reducer and the tool call scheduler stay internal", () => {
+    expect(Object.keys(surface)).toEqual(["openAgentRun"]);
   });
 });

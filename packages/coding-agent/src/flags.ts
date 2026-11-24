@@ -15,27 +15,27 @@ export const providers = {
 } satisfies Record<ProviderId, true>;
 
 // The options that both command lines take: which model to talk to, and which repository.
-export interface SessionFlags {
+export interface AgentRunFlags {
   readonly provider: ProviderId;
   readonly model: string;
   readonly repoRoot: string;
 }
 
-export const sessionFlagOf = {
+export const agentRunFlagOf = {
   provider: "--provider",
   model: "--model",
   repoRoot: "--repo-root",
-} as const satisfies Record<keyof SessionFlags, `--${string}`>;
+} as const satisfies Record<keyof AgentRunFlags, `--${string}`>;
 
 // What each of those flags means, so that both usages say it in the same words.
-export const sessionFlagHelp = {
+export const agentRunFlagHelp = {
   provider: [
-    `${sessionFlagOf.provider} <provider>`,
+    `${agentRunFlagOf.provider} <provider>`,
     `required  ${Object.keys(providers).join(" | ")}`,
   ],
-  model: [`${sessionFlagOf.model} <model-id>`, "required  model identifier within that provider"],
-  repoRoot: [`${sessionFlagOf.repoRoot} <dir>`, "optional  defaults to the working directory"],
-} as const satisfies Record<keyof SessionFlags, readonly [string, string]>;
+  model: [`${agentRunFlagOf.model} <model-id>`, "required  model identifier within that provider"],
+  repoRoot: [`${agentRunFlagOf.repoRoot} <dir>`, "optional  defaults to the working directory"],
+} as const satisfies Record<keyof AgentRunFlags, readonly [string, string]>;
 
 // A usage's list of flags, each followed by its description, in aligned columns.
 export function flagTable(rows: readonly (readonly [flag: string, description: string])[]): string {

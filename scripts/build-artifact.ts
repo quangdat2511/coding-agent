@@ -130,7 +130,7 @@ export async function outDirProblem(outDir: string, root = repoRoot): Promise<st
     : `${outDir} is in the repository but git does not ignore it, so the next build would refuse the dirty tree; choose an ignored or outside directory`;
 }
 
-// An executable that read the .env would open an Agent Session and contact the provider, so a probe
+// An executable that read the .env would open an Agent Run and contact the provider, so a probe
 // that runs longer than this is killed.
 const PROBE_TIMEOUT_MS = 30_000;
 
@@ -210,7 +210,7 @@ async function checkVersion(executable: string, expected: string): Promise<void>
 }
 
 // A `.env` that sets the provider credential must not supply it, and the `bunfig.toml` preload must
-// not run. Exit 2 means that no Agent Session opened (ADR 0005 §3), and the error must name the
+// not run. Exit 2 means that no Agent Run opened (ADR 0005 §3), and the error must name the
 // variable, so the run stopped because the credential was missing.
 async function checkRunIgnoresDotenvAndBunfig(executable: string): Promise<void> {
   await withProbeDirectory(async (directory) => {

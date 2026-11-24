@@ -205,7 +205,7 @@ class RunTest(unittest.TestCase):
         tokens = shlex.split(environment.agent_exec().command)
         self.assertEqual(tokens[tokens.index("--output-dir") + 1], "/logs/agent-2/coding-agent")
 
-    def test_a_settled_agent_session_returns_normally(self) -> None:
+    def test_a_settled_agent_run_returns_normally(self) -> None:
         # 0 succeeded, 1 failed, 130 cancelled (ADR 0005 §3): the verifier scores each one.
         for code in (0, 1, 130):
             with self.subTest(exit_code=code):

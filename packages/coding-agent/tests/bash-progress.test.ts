@@ -4,8 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   type ModelPort,
-  openAgentSession,
-  type SessionEvent,
+  openAgentRun,
+  type RunEvent,
   type ToolRegistry,
 } from "@coding-agent/agent-core";
 import type {
@@ -98,7 +98,7 @@ function scriptedModel(command: string): ModelPort {
   };
 }
 
-describe("bash progress in an Agent Session", () => {
+describe("bash progress in an Agent Run", () => {
   it("reaches observers as bounded tool_execution_progress events, none after completion", async () => {
     const configured = createConfiguredChildLauncher();
     if (!configured.ok) throw new Error(configured.message);
@@ -112,7 +112,7 @@ describe("bash progress in an Agent Session", () => {
     // A burst of 4 KiB, a pause long enough for the held update to be delivered, then more.
     const command = "head -c 4096 /dev/zero | tr '\\0' a; echo; sleep 0.6; echo second";
 
-    const opened = openAgentSession({
+    const opened = openAgentRun({
       model: scriptedModel(command),
       systemPrompt: "Test.",
       tools,
@@ -142,14 +142,14 @@ describe("bash progress in an Agent Session", () => {
       ids: { next: (kind) => `${kind}-1` },
     });
     if (!opened.ok) throw new Error(opened.message);
-    const { session } = opened;
-    const events: SessionEvent[] = [];
+    const { run } = opened;
+    const events: RunEvent[] = [];
     const observed = (async () => {
-      for await (const event of session.events()) events.push(event);
+      for await (const event of run.events()) events.push(event);
     })();
 
-    await session.dispatch({ type: "start", task: { objective: "Run the build" } });
-    const result = await session.result();
+    await run.dispatch({ type: "start", task: { objective: "Run the build" } });
+    const result = await run.result();
     await observed;
 
     expect(result.outcome).toBe("succeeded");

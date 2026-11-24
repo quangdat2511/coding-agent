@@ -501,7 +501,7 @@ Properties that matter:
   or to leave the entry's existing `result.content` path untouched when there are no details. `tui`
   should accept a block type it owns, not a tool name, which keeps
   [ADR 0004 section 5](../../docs/adr/0004-package-apis-and-dependency-direction.md#L493-L503) intact ("no
-  knowledge of models, Model Providers, tools, or Session Events").
+  knowledge of models, Model Providers, tools, or Run Events").
 
 Two cheaper variants are worth naming for CDA-157:
 

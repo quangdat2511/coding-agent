@@ -33,7 +33,7 @@ def readable() -> list[Control]:
 
 
 def rejected() -> LauncherResult:
-    """A launcher that does not exec: the startup check refuses it before any session opens."""
+    """A launcher that does not exec: the startup check refuses it before any Agent Run opens."""
     return LauncherResult(exit_code=2, message_matched=True, server_requests=0)
 
 

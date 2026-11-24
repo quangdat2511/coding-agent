@@ -19,7 +19,7 @@ IMPORT_PATH = "coding_agent_terminalbench.agent:CodingAgent"
 # A made-up key. The tests put it in a patched os.environ, as if the host had exported it.
 PROVIDER_KEY = "test-provider-key"
 
-SESSION_ID = "session-1"
+RUN_ID = "run-1"
 
 OCCURRED_AT = "2026-11-12T00:00:00.000Z"
 
@@ -143,7 +143,7 @@ def run_record_data(**overrides: Any) -> dict[str, Any]:
 
 
 def agent_result(*, drop: tuple[str, ...] = (), **overrides: Any) -> dict[str, Any]:
-    """The `AgentResult` of a settled session, as `session_settled` and result.json carry it."""
+    """The `AgentResult` of a settled Agent Run, as `run_settled` and result.json carry it."""
     data: dict[str, Any] = {
         "outcome": "succeeded",
         "finalMessage": assistant_message([text_block(FINAL_TEXT)]),
@@ -176,7 +176,7 @@ def event(sequence: int, type: str, data: dict[str, Any]) -> dict[str, Any]:
     """One line of events.jsonl, in the envelope of ADR 0002 that `run-files.ts` writes."""
     return {
         "schemaVersion": 1,
-        "sessionId": SESSION_ID,
+        "runId": RUN_ID,
         "sequence": sequence,
         "occurredAt": OCCURRED_AT,
         "type": type,
@@ -213,8 +213,8 @@ def assistant_message(
     }
 
 
-def session_started() -> tuple[str, dict[str, Any]]:
-    return ("session_started", {"task": {"objective": OBJECTIVE}})
+def run_started() -> tuple[str, dict[str, Any]]:
+    return ("run_started", {"task": {"objective": OBJECTIVE}})
 
 
 def model_turn_started(model_turn_id: str, index: int) -> tuple[str, dict[str, Any]]:
@@ -335,14 +335,14 @@ def verification_completed(
     return ("verification_completed", data)
 
 
-def session_settled(result: dict[str, Any]) -> tuple[str, dict[str, Any]]:
-    return ("session_settled", {"result": result})
+def run_settled(result: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+    return ("run_settled", {"result": result})
 
 
 def complete_events() -> list[dict[str, Any]]:
-    """A settled session: two Model Turns, one read Tool Call, and Verification succeeding."""
+    """A settled Agent Run: two Model Turns, one read Tool Call, and Verification succeeding."""
     return events(
-        session_started(),
+        run_started(),
         model_turn_started(MODEL_TURN_1, 0),
         assistant_message_started(MODEL_TURN_1, MESSAGE_1),
         assistant_message_completed(
@@ -373,18 +373,18 @@ def complete_events() -> list[dict[str, Any]]:
         model_turn_completed(MODEL_TURN_2, {"inputTokens": 1_500, "outputTokens": 32}),
         verification_started(1, MODEL_TURN_2, MESSAGE_2),
         verification_completed(1, "succeeded"),
-        session_settled(agent_result()),
+        run_settled(agent_result()),
     )
 
 
 def truncated_events() -> list[dict[str, Any]]:
-    """The complete session, killed while its second Model Turn runs a write Tool Call.
+    """The complete Agent Run, killed while its second Model Turn runs a write Tool Call.
 
     The writer appends each event as it arrives (ADR 0005 §4), so a killed process loses the tail:
-    no Tool Result, no `model_turn_completed` for that turn, and no `session_settled`.
+    no Tool Result, no `model_turn_completed` for that turn, and no `run_settled`.
     """
     return events(
-        session_started(),
+        run_started(),
         model_turn_started(MODEL_TURN_1, 0),
         assistant_message_started(MODEL_TURN_1, MESSAGE_1),
         assistant_message_completed(
@@ -451,9 +451,9 @@ def truncated_events() -> list[dict[str, Any]]:
 
 
 def feedback_events() -> list[dict[str, Any]]:
-    """A session that Verification sends back once, with feedback, before it succeeds."""
+    """An Agent Run that Verification sends back once, with feedback, before it succeeds."""
     return events(
-        session_started(),
+        run_started(),
         model_turn_started(MODEL_TURN_1, 0),
         assistant_message_started(MODEL_TURN_1, MESSAGE_1),
         assistant_message_completed(MESSAGE_1, assistant_message([text_block("Fixed it.")])),
@@ -473,12 +473,12 @@ def feedback_events() -> list[dict[str, Any]]:
         model_turn_completed(MODEL_TURN_2, {"inputTokens": 1_500, "outputTokens": 32}),
         verification_started(2, MODEL_TURN_2, MESSAGE_2),
         verification_completed(2, "succeeded"),
-        session_settled(agent_result()),
+        run_settled(agent_result()),
     )
 
 
 def cancelled_events() -> list[dict[str, Any]]:
-    """A session cancelled while a Tool Call runs: the call ends with no Tool Result."""
+    """An Agent Run cancelled while a Tool Call runs: the call ends with no Tool Result."""
     result = agent_result(
         drop=("verification",),
         outcome="cancelled",
@@ -488,7 +488,7 @@ def cancelled_events() -> list[dict[str, Any]]:
         lastSequence=10,
     )
     return events(
-        session_started(),
+        run_started(),
         model_turn_started(MODEL_TURN_1, 0),
         assistant_message_started(MODEL_TURN_1, MESSAGE_1),
         assistant_message_completed(
@@ -516,12 +516,12 @@ def cancelled_events() -> list[dict[str, Any]]:
             {"inputTokens": 1_200, "outputTokens": 48, "cachedInputTokens": 1_000},
             outcome="cancelled",
         ),
-        session_settled(result),
+        run_settled(result),
     )
 
 
 def failed_events() -> list[dict[str, Any]]:
-    """A session whose first Model Turn fails: the Assistant Message records the failure."""
+    """An Agent Run whose first Model Turn fails: the Assistant Message records the failure."""
     failure = {"code": "MODEL_FAILURE", "message": "the provider returned 503"}
     result = agent_result(
         drop=("verification",),
@@ -532,7 +532,7 @@ def failed_events() -> list[dict[str, Any]]:
         lastSequence=6,
     )
     return events(
-        session_started(),
+        run_started(),
         model_turn_started(MODEL_TURN_1, 0),
         assistant_message_started(MODEL_TURN_1, MESSAGE_1),
         assistant_message_completed(
@@ -547,7 +547,7 @@ def failed_events() -> list[dict[str, Any]]:
             outcome="failed",
             failure=failure,
         ),
-        session_settled(result),
+        run_settled(result),
     )
 
 

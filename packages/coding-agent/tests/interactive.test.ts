@@ -4,9 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ChildProcessLauncher } from "@coding-agent/tools";
 import type { TuiModel } from "@coding-agent/tui";
+import type { AgentRunConfig } from "../src/agent-run-factory.ts";
 import { createConfiguredChildLauncher } from "../src/child-launcher.ts";
 import { type InteractiveOptions, runInteractive } from "../src/interactive.ts";
-import type { SessionConfig } from "../src/session-factory.ts";
 import { type FakeTui, fakeTui, waitFor } from "./support/fake-tui.ts";
 import {
   NAMED_TASK_FILE,
@@ -40,8 +40,8 @@ const tasks = (model: TuiModel) =>
 
 interface Setup {
   readonly tui?: FakeTui;
-  // Left out, the scripted agent opens the sessions; `undefined` leaves them to the real factory.
-  readonly openSession?: InteractiveOptions["openSession"];
+  // Left out, the scripted agent opens the Agent Runs; `undefined` leaves them to the real factory.
+  readonly openRun?: InteractiveOptions["openRun"];
   readonly isTerminal?: boolean;
   readonly now?: () => number;
   readonly env?: Record<string, string>;
@@ -52,7 +52,7 @@ interface Setup {
   readonly launcher?: ChildProcessLauncher;
 }
 
-// A scripted session starts no child, so it needs no launcher.
+// A scripted Agent Run starts no child, so it needs no launcher.
 const noLauncher = {} as ChildProcessLauncher;
 
 function realLauncher(): ChildProcessLauncher {
@@ -79,9 +79,7 @@ function start(setup: Setup = {}) {
     isTerminal: setup.isTerminal ?? true,
     launcher: setup.launcher ?? noLauncher,
     render: tui.render,
-    ...("openSession" in setup
-      ? { openSession: setup.openSession }
-      : { openSession: scriptedAgent() }),
+    ...("openRun" in setup ? { openRun: setup.openRun } : { openRun: scriptedAgent() }),
     ...(setup.now === undefined ? {} : { now: setup.now }),
     ...(setup.openGraceMs === undefined ? {} : { openGraceMs: setup.openGraceMs }),
   });
@@ -92,7 +90,7 @@ const awaitApproval = (tui: FakeTui) =>
   waitFor(() => tui.latest().pendingApproval !== undefined, "an Approval to be requested");
 
 const awaitOutcomes = (tui: FakeTui, count: number) =>
-  waitFor(() => outcomes(tui.latest()).length >= count, `${count} settled Agent Session(s)`);
+  waitFor(() => outcomes(tui.latest()).length >= count, `${count} settled Agent Run(s)`);
 
 const pendingId = (tui: FakeTui) => tui.latest().pendingApproval?.approvalId ?? "";
 
@@ -103,9 +101,9 @@ async function finish(run: ReturnType<typeof start>): Promise<void> {
 }
 
 describe("starting a Coding Task", () => {
-  it("opens one Agent Session under the ask policy and streams it into the transcript", async () => {
-    const configs: SessionConfig[] = [];
-    const run = start({ openSession: scriptedAgent({ configs }) });
+  it("opens one Agent Run under the ask policy and streams it into the transcript", async () => {
+    const configs: AgentRunConfig[] = [];
+    const run = start({ openRun: scriptedAgent({ configs }) });
     await waitFor(() => run.tui.mounted(), "the TUI");
 
     run.tui.handlers().onSubmit("Make the tests pass");
@@ -130,7 +128,7 @@ describe("starting a Coding Task", () => {
 
   it("subscribes after the snapshot's last sequence before it dispatches start", async () => {
     const calls: string[] = [];
-    const run = start({ openSession: scriptedAgent({ calls }) });
+    const run = start({ openRun: scriptedAgent({ calls }) });
     await waitFor(() => run.tui.mounted(), "the TUI");
 
     run.tui.handlers().onSubmit("Make the tests pass");
@@ -154,7 +152,7 @@ describe("starting a Coding Task", () => {
     await waitFor(() => tasks(run.tui.latest()).length === 2, "the second Coding Task");
 
     expect(tasks(run.tui.latest())).toEqual(["first", "second"]);
-    // The only notice is the first session's own cancellation, not a refusal.
+    // The only notice is the first Agent Run's own cancellation, not a refusal.
     expect(notices(run.tui.latest())).toEqual(["cancellation requested"]);
     await awaitApproval(run.tui);
     run.tui.handlers().onCancel();
@@ -166,7 +164,7 @@ describe("starting a Coding Task", () => {
     const working = scriptedAgent();
     let attempts = 0;
     const run = start({
-      openSession: async (config) =>
+      openRun: async (config) =>
         ++attempts === 1
           ? { ok: false, code: "INVALID_CONFIGURATION", message: "the repository is gone" }
           : working(config),
@@ -188,13 +186,13 @@ describe("starting a Coding Task", () => {
   });
 });
 
-describe("a submission while a session is active", () => {
-  it("is refused with a notice, and no second Agent Session opens", async () => {
-    const configs: SessionConfig[] = [];
-    const run = start({ openSession: scriptedAgent({ configs }) });
+describe("a submission while an Agent Run is active", () => {
+  it("is refused with a notice, and no second Agent Run opens", async () => {
+    const configs: AgentRunConfig[] = [];
+    const run = start({ openRun: scriptedAgent({ configs }) });
     await waitFor(() => run.tui.mounted(), "the TUI");
 
-    // The second arrives before the first session has opened.
+    // The second arrives before the first Agent Run has opened.
     run.tui.handlers().onSubmit("first");
     run.tui.handlers().onSubmit("second");
     await awaitApproval(run.tui);
@@ -239,7 +237,7 @@ describe("deciding an Approval", () => {
     await finish(run);
   });
 
-  it("says so when the session did not take a decision, and keeps the Approval that is pending", async () => {
+  it("says so when the Agent Run did not take a decision, and keeps the Approval that is pending", async () => {
     const run = start();
     await waitFor(() => run.tui.mounted(), "the TUI");
     run.tui.handlers().onSubmit("Make the tests pass");
@@ -258,7 +256,7 @@ describe("deciding an Approval", () => {
 });
 
 describe("cancelling", () => {
-  it("cancels the running session with the cancel key and keeps the TUI up", async () => {
+  it("cancels the running Agent Run with the cancel key and keeps the TUI up", async () => {
     const run = start();
     await waitFor(() => run.tui.mounted(), "the TUI");
     run.tui.handlers().onSubmit("Make the tests pass");
@@ -273,7 +271,7 @@ describe("cancelling", () => {
     await finish(run);
   });
 
-  it("cancels on a signal, waits for the session to settle, and only then unmounts", async () => {
+  it("cancels on a signal, waits for the Agent Run to settle, and only then unmounts", async () => {
     const run = start();
     await waitFor(() => run.tui.mounted(), "the TUI");
     run.tui.handlers().onSubmit("Make the tests pass");
@@ -296,11 +294,11 @@ describe("cancelling", () => {
     expect(run.tui.unmountedWith()).toBeDefined();
   });
 
-  it("cancels in place of starting when the signal comes while the session opens", async () => {
+  it("cancels in place of starting when the signal comes while the Agent Run opens", async () => {
     const calls: string[] = [];
     const opening = scriptedAgent({ calls });
     const run = start({
-      openSession: async (config) => {
+      openRun: async (config) => {
         run.controller.abort("SIGINT");
         return opening(config);
       },
@@ -316,11 +314,11 @@ describe("cancelling", () => {
     expect(atUnmount && outcomes(atUnmount)).toEqual(["cancelled"]);
   });
 
-  it("ends the run on a signal even when the session never finishes opening", async () => {
+  it("ends the run on a signal even when the Agent Run never finishes opening", async () => {
     let opened = 0;
     const run = start({
       // An open that never returns, and has no way to be cancelled.
-      openSession: () => {
+      openRun: () => {
         opened++;
         return new Promise(() => undefined);
       },
@@ -328,7 +326,7 @@ describe("cancelling", () => {
     });
     await waitFor(() => run.tui.mounted(), "the TUI");
     run.tui.handlers().onSubmit("Make the tests pass");
-    await waitFor(() => opened === 1, "the session to start opening");
+    await waitFor(() => opened === 1, "the Agent Run to start opening");
 
     run.controller.abort("SIGINT");
 
@@ -337,7 +335,7 @@ describe("cancelling", () => {
     expect(atUnmount && outcomes(atUnmount)).toEqual([]);
   });
 
-  it("refuses a submission while the run waits for the session to settle", async () => {
+  it("refuses a submission while the run waits for the Agent Run to settle", async () => {
     const run = start();
     await waitFor(() => run.tui.mounted(), "the TUI");
     run.tui.handlers().onSubmit("Make the tests pass");
@@ -419,16 +417,16 @@ describe("a consumer error", () => {
   it("loses only the event that could not be shown", async () => {
     const opening = scriptedAgent();
     const run = start({
-      openSession: async (config) => {
+      openRun: async (config) => {
         const opened = await opening(config);
         if (!opened.ok) return opened;
-        const { session } = opened;
+        const { run: agentRun } = opened;
         return {
           ...opened,
-          session: {
-            ...session,
+          run: {
+            ...agentRun,
             async *events(after) {
-              for await (const event of session.events(after)) {
+              for await (const event of agentRun.events(after)) {
                 // One event the projection cannot read.
                 yield event.type === "assistant_message_started"
                   ? ({ ...event, data: undefined } as unknown as typeof event)
@@ -451,18 +449,18 @@ describe("a consumer error", () => {
     await finish(run);
   });
 
-  it("keeps the session counted as running when the display can no longer follow it", async () => {
-    const configs: SessionConfig[] = [];
+  it("keeps the Agent Run counted as running when the display can no longer follow it", async () => {
+    const configs: AgentRunConfig[] = [];
     const opening = scriptedAgent({ configs });
     const run = start({
-      openSession: async (config) => {
+      openRun: async (config) => {
         const opened = await opening(config);
         if (!opened.ok) return opened;
         // An event stream that fails at once, which Agent Core itself never does.
         const events = () => {
           throw new Error("the stream broke");
         };
-        return { ...opened, session: { ...opened.session, events } };
+        return { ...opened, run: { ...opened.run, events } };
       },
     });
     await waitFor(() => run.tui.mounted(), "the TUI");
@@ -472,7 +470,7 @@ describe("a consumer error", () => {
       () => notices(run.tui.latest()).some((text) => text.includes("event stream failed")),
       "the notice that the stream failed",
     );
-    // The session was not settled by the failure, so a second Coding Task is still refused.
+    // The Agent Run was not settled by the failure, so a second Coding Task is still refused.
     run.tui.handlers().onSubmit("second");
     await waitFor(
       () => notices(run.tui.latest()).some((text) => text.includes("already running")),
@@ -480,19 +478,19 @@ describe("a consumer error", () => {
     );
     expect(configs).toHaveLength(1);
 
-    // Once the session settles, the next Coding Task opens a session of its own.
+    // Once the Agent Run settles, the next Coding Task opens an Agent Run of its own.
     run.tui.handlers().onCancel();
     await waitFor(() => {
       run.tui.handlers().onSubmit("third");
       return configs.length === 2;
-    }, "the session to settle");
+    }, "the Agent Run to settle");
     await finish(run);
   });
 });
 
 describe("the credential", () => {
   it("is replaced by [redacted] in everything the transcript shows", async () => {
-    const run = start({ openSession: scriptedAgent({ answer: `The key is ${secret}.` }) });
+    const run = start({ openRun: scriptedAgent({ answer: `The key is ${secret}.` }) });
     await waitFor(() => run.tui.mounted(), "the TUI");
     run.tui.handlers().onSubmit("Make the tests pass");
     await awaitApproval(run.tui);
@@ -536,14 +534,14 @@ describe("refusing to start", () => {
   });
 });
 
-describe("with the real session factory and a recorded provider", () => {
+describe("with the real Agent Run factory and a recorded provider", () => {
   it("runs the named task from the Prompt to a succeeded outcome", async () => {
     const repo = join(repoRoot, "repo");
     await cp(NAMED_TASK_REPO, repo, { recursive: true });
     const objective = await Bun.file(NAMED_TASK_FILE).text();
 
     await withProvider(replayInOrder(READ_ONLY_RUN.fixtures), async () => {
-      const run = start({ openSession: undefined, repoRoot: repo, launcher: realLauncher() });
+      const run = start({ openRun: undefined, repoRoot: repo, launcher: realLauncher() });
       await waitFor(() => run.tui.mounted(), "the TUI");
 
       run.tui.handlers().onSubmit(objective);
@@ -556,7 +554,7 @@ describe("with the real session factory and a recorded provider", () => {
   });
 });
 
-describe("with the four tools and the Verification Policy of a real session", () => {
+describe("with the four tools and the Verification Policy of a real Agent Run", () => {
   it("asks for an Approval before each change and finishes the named task once they are allowed", async () => {
     const repo = join(repoRoot, "repo");
     await cp(NAMED_TASK_REPO, repo, { recursive: true });
@@ -564,7 +562,7 @@ describe("with the four tools and the Verification Policy of a real session", ()
 
     await withProvider(replayInOrder(NAMED_TASK_RUN.fixtures), async () => {
       const run = start({
-        openSession: undefined,
+        openRun: undefined,
         repoRoot: repo,
         launcher: realLauncher(),
         env: {

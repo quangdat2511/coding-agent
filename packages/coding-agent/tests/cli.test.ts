@@ -34,8 +34,8 @@ const bin = join(packageRoot, declared);
 
 const replayProvider = join(import.meta.dir, "support", "replay-provider.ts");
 const hangProvider = join(import.meta.dir, "support", "hang-provider.ts");
-const failSessionFactory = join(import.meta.dir, "support", "fail-session-factory.ts");
-const hangSessionFactory = join(import.meta.dir, "support", "hang-session-factory.ts");
+const failAgentRunFactory = join(import.meta.dir, "support", "fail-agent-run-factory.ts");
+const hangAgentRunFactory = join(import.meta.dir, "support", "hang-agent-run-factory.ts");
 
 // Windows cannot start a file by its shebang or mode bits, so there the bin runs under this Bun.
 const command = onWindows ? [...bunLikeShebang, bin] : [bin];
@@ -388,7 +388,7 @@ describe("the coding-agent executable", () => {
           profile: "default",
           tools: ["read", "write", "edit", "bash"],
         });
-        expect(await lastEventType(outputDir)).toBe("session_settled");
+        expect(await lastEventType(outputDir)).toBe("run_settled");
         expect(await Bun.file(join(outputDir, "result.json")).json()).toMatchObject({
           schemaVersion: 1,
           exitCode: 0,
@@ -442,7 +442,7 @@ describe("the coding-agent executable", () => {
 
         const outputDir = join(directory, "out");
         expect((await readdir(outputDir)).sort()).toEqual(runFiles);
-        expect(await lastEventType(outputDir)).toBe("session_settled");
+        expect(await lastEventType(outputDir)).toBe("run_settled");
         expect(await Bun.file(join(outputDir, "result.json")).json()).toMatchObject({
           schemaVersion: 1,
           exitCode: 1,
@@ -514,12 +514,12 @@ describe("the coding-agent executable", () => {
   );
 
   it.skipIf(!cleanChain)(
-    "exits 70 without the credential or an output directory when the session factory throws",
+    "exits 70 without the credential or an output directory when the Agent Run factory throws",
     async () => {
       await withTemporaryDirectory(async (directory) => {
         await cp(NAMED_TASK_REPO, join(directory, "repo"), { recursive: true });
         const { exitCode, stdout, stderr } = await runProcess(
-          [...bunLikeShebang, "--preload", failSessionFactory, bin, ...namedTaskRun],
+          [...bunLikeShebang, "--preload", failAgentRunFactory, bin, ...namedTaskRun],
           { cwd: directory, env: { GOOGLE_API_KEY: secret } },
         );
 
@@ -580,7 +580,7 @@ describe("the coding-agent executable", () => {
         expect(exitCode).toBe(130);
         expect(stdout).toBe("");
         expect((await readdir(outputDir)).sort()).toEqual(runFiles);
-        expect(await lastEventType(outputDir)).toBe("session_settled");
+        expect(await lastEventType(outputDir)).toBe("run_settled");
         expect(await Bun.file(join(outputDir, "result.json")).json()).toMatchObject({
           schemaVersion: 1,
           exitCode: 130,
@@ -601,7 +601,7 @@ describe("the coding-agent executable", () => {
       await withHangingModelTurn("2000", async ({ run, outputDir }) => {
         run.signal("SIGINT");
         await untilLogged(outputDir, "cancellation_requested");
-        expect(await eventTypes(outputDir)).not.toContain("session_settled");
+        expect(await eventTypes(outputDir)).not.toContain("run_settled");
         run.signal("SIGTERM");
         const { exitCode, killedBy, stderr } = await run.finished;
 
@@ -611,7 +611,7 @@ describe("the coding-agent executable", () => {
         expect((await readdir(outputDir)).sort()).toEqual(runFiles);
         const types = await eventTypes(outputDir);
         expect(types.filter((type) => type === "cancellation_requested")).toHaveLength(1);
-        expect(types.at(-1)).toBe("session_settled");
+        expect(types.at(-1)).toBe("run_settled");
         expect(await Bun.file(join(outputDir, "result.json")).json()).toMatchObject({
           exitCode: 130,
           result: { outcome: "cancelled", cancellation: { reason: "SIGINT" } },
@@ -624,16 +624,16 @@ describe("the coding-agent executable", () => {
     ["SIGINT", "SIGTERM"],
     ["SIGTERM", "SIGINT"],
   ] as const)(
-    "ignores %s and is ended by %s when no Agent Session has opened",
+    "ignores %s and is ended by %s when no Agent Run has opened",
     async (first, second) => {
       await withTemporaryDirectory(async (directory) => {
         await cp(NAMED_TASK_REPO, join(directory, "repo"), { recursive: true });
         const run = startProcess(
-          [...bunLikeShebang, "--preload", hangSessionFactory, bin, ...namedTaskRun],
+          [...bunLikeShebang, "--preload", hangAgentRunFactory, bin, ...namedTaskRun],
           { cwd: directory, env: { GOOGLE_API_KEY: secret } },
         );
         try {
-          // The output directory exists once the configuration resolves, just before openSession.
+          // The output directory exists once the configuration resolves, just before openRun.
           await untilExists(join(directory, "out"));
           run.signal(first);
           const outcome = await Promise.race([run.finished, Bun.sleep(300).then(() => "running")]);
@@ -664,7 +664,7 @@ describe("the coding-agent executable", () => {
         expect(killedBy).toBeNull();
         expect(exitCode).toBe(1);
         expect((await readdir(outputDir)).sort()).toEqual(runFiles);
-        expect(await lastEventType(outputDir)).toBe("session_settled");
+        expect(await lastEventType(outputDir)).toBe("run_settled");
         expect(await Bun.file(join(outputDir, "result.json")).json()).toMatchObject({
           schemaVersion: 1,
           exitCode: 1,

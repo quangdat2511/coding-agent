@@ -60,7 +60,7 @@ describe("checking a recording of the interactive path", () => {
     ["the overlay", "y allow", /Approval overlay/],
     ["a Tool Call after the overlay", "[executing]", /Tool Call running/],
     ["the cancellation request", "cancellation requested", /Cancellation being requested/],
-    ["the cancelled session", "session [cancelled]", /cancelled session settling/],
+    ["the cancelled Agent Run", "session [cancelled]", /cancelled Agent Run settling/],
     ["the workspace report", "workspace changed, partial changes possible", /workspace changed/],
   ])("rejects a run without %s", (_name, text, problem) => {
     const run = GOOD_RUN.map((output) => output.replace(text, "…"));

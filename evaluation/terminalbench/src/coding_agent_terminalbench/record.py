@@ -561,7 +561,7 @@ def run_problems(jobs: Sequence[tuple[HarborJob, str]]) -> list[str]:
             )
         if json.dumps(run.limits, sort_keys=True) != values["limits"]:
             problems.append(
-                f"{label} trial {trial.name} ran SessionLimits that differ from the job's"
+                f"{label} trial {trial.name} ran RunLimits that differ from the job's"
             )
     if values["profile"] != TERMINALBENCH_PROFILE:
         problems.append(
@@ -838,7 +838,7 @@ def task_outcomes(recorded: HarborJob, rerun: HarborJob | None) -> tuple[TaskOut
     return tuple(outcomes)
 
 
-def session_bound_seconds(recorded: HarborJob) -> int | None:
+def run_bound_seconds(recorded: HarborJob) -> int | None:
     """The maxDurationMs of the profile the job ran, in seconds (ADR 0005 §5)."""
     for trial in recorded.trials:
         limits = trial.run.limits if trial.run is not None else {}
@@ -852,7 +852,7 @@ def dataset_properties(
     dataset: DatasetRecord, recorded: HarborJob
 ) -> tuple[Mapping[str, Any], ...]:
     """The evidence for each ADR 0008 §3 property, with the job's own checks of it."""
-    bound = session_bound_seconds(recorded)
+    bound = run_bound_seconds(recorded)
     entries: list[Mapping[str, Any]] = []
     for property_evidence in dataset.properties:
         problems = dataset_property_problems(property_evidence.name, dataset, recorded, bound)

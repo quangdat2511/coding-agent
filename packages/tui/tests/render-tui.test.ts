@@ -186,7 +186,7 @@ describe("renderTui", () => {
     expect(terminal.screen()).toEqual(screenOf("bash bun test [succeeded]", "  8 pass"));
   });
 
-  it("shows Verification, notices and the settled outcome of a session", async () => {
+  it("shows Verification, notices and the settled outcome of an Agent Run", async () => {
     const { tui, terminal } = mount([
       { kind: "verification", id: "v-1", status: "running" },
       {

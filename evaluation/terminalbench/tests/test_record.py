@@ -1898,7 +1898,7 @@ class ConfigCheckTest(RecordTestCase):
         self.write_rerun()
         self.refused("task_names")
 
-    def test_a_rerun_run_with_other_session_limits_is_refused(self) -> None:
+    def test_a_rerun_run_with_other_run_limits_is_refused(self) -> None:
         self.write_recorded()
         self.write_smoke()
         self.write_rerun(
@@ -1910,7 +1910,7 @@ class ConfigCheckTest(RecordTestCase):
         )
         code, _, stderr = self.run_main()
         self.assertEqual(code, 1)
-        self.assertIn("SessionLimits", stderr)
+        self.assertIn("RunLimits", stderr)
         self.assertFalse(self.output.exists())
 
     def test_a_failed_write_keeps_a_record_that_was_already_there(self) -> None:

@@ -19,15 +19,15 @@ container and records Harbor's own rewards. Earlier decisions constrain the prot
 - The [tool-contract and safety decision](./0001-tool-contracts-and-safety-policy.md) reserves the
   `"auto-approve"` Approval Policy for isolated execution harnesses (§4) and caps `bash` at
   120,000 ms (§3).
-- The [MVP context, planning, verification, and session memory decision](./0003-mvp-context-planning-verification-and-session-memory.md)
+- The [MVP context, planning, verification, and run memory decision](./0003-mvp-context-planning-verification-and-session-memory.md)
   makes Verification a non-gating `succeeded` when no verification command is configured (§3) and
-  sets the MVP `SessionLimits` defaults (§4).
+  sets the MVP `RunLimits` defaults (§4).
 - The [package API decision](./0004-package-apis-and-dependency-direction.md) makes the command
   line, exit codes, and files written the external contract of `@coding-agent/coding-agent`, and
   leaves this decision to pin the invocation and to place the ATIF trajectory writer and any
-  persisted Session Events (§6). The
-  [Agent Session state-machine decision](./0002-agent-session-state-machine-and-event-protocol.md)
-  requires a schema version once Session Events become persistent data (§7).
+  persisted Run Events (§6). The
+  [Agent Run state-machine decision](./0002-agent-session-state-machine-and-event-protocol.md)
+  requires a schema version once Run Events become persistent data (§7).
 
 This decision was checked against Harbor at `1e5c5c6` and Terminal-Bench at `452bf30` (4.0.0). The
 dataset is a job parameter, not a pin of this protocol
@@ -169,7 +169,7 @@ the branch `prototype/cda-121-drop-ptrace`, pushed to the same remote as this ch
 - In the eleven Compose tasks, the process starting in the main image's `WORKDIR` follows Docker
   Compose semantics; Harbor's Docker-in-Docker code on Modal was not read.
 - What happens to the Coding Agent process after Harbor cancels `run()` on timeout was not traced.
-  §5 keeps sessions well inside the task timeout so that the protocol does not depend on it.
+  §5 keeps Agent Runs well inside the task timeout so that the protocol does not depend on it.
 - The §6 ATIF mapping has not produced a `trajectory.json` that validates.
 - A job directory's size is unknown; §8 handles any size.
 
@@ -213,7 +213,7 @@ scan, and the note under Dependencies records that CDA-83 carries the status for
 On 2026-11-17, [CDA-114](https://datn-fit-hcmus.atlassian.net/browse/CDA-114) amended this record:
 the dataset became a job parameter and the default pin moved from 4.0.0 to 4.1.0, following
 [ADR 0008](./0008-evaluation-dataset-as-a-job-parameter.md). §1's dataset row names a default
-rather than one dataset for every job; §5 states the session bound in terms of an admissible
+rather than one dataset for every job; §5 states the run bound in terms of an admissible
 dataset; §7's two commands take `<dataset>`, its isolation precondition names the job dataset's
 images, and its validity rule includes ADR 0008 §3's properties; §8 derives `N` from the job's task
 list; and the Consequences follow the job's task list. The task count and smoke task names left this
@@ -293,6 +293,14 @@ that run further: Modal therefore stays uncleared for a non-root agent. CDA-97 s
 publishes this record. The runs that started before §9 criterion 4 held do not count, and their
 credential is subject to revocation under §9; the ticket tracks the owner's confirmation.
 
+On 2026-11-24, [CDA-147](https://datn-fit-hcmus.atlassian.net/browse/CDA-147) amended this record:
+the event log of §4 follows ADR 0002's rename of Agent Session to Agent Run. In `events.jsonl` the
+envelope's id is `runId`, formerly `sessionId`, and its value starts with `run-`; the first and last
+events are `run_started` and `run_settled`, formerly `session_started` and `session_settled`.
+`schemaVersion` stays 1. The MVP job's committed records keep the old names, and the adapter reads
+only the new ones, so it refuses a log written before this change as lacking the Run Event
+envelope.
+
 ### 2. Coding Agent artifact
 
 A recorded job evaluates a standalone executable, not a source checkout. It is built from a commit
@@ -351,8 +359,8 @@ drift between invocations.
 | 0 | Agent Result `succeeded` | `run.json`, `events.jsonl`, `result.json` |
 | 1 | Agent Result `failed` | `run.json`, `events.jsonl`, `result.json` |
 | 130 | Agent Result `cancelled` | `run.json`, `events.jsonl`, `result.json` |
-| 2 | invalid invocation or configuration; no Agent Session was opened | possibly none |
-| 70 | internal Coding Agent error outside the Agent Session | possibly incomplete |
+| 2 | invalid invocation or configuration; no Agent Run was opened | possibly none |
+| 70 | internal Coding Agent error outside the Agent Run | possibly incomplete |
 
 Coding Agent maps `SIGINT` and `SIGTERM` to the `cancel` command (ADR 0004 §3), so a signalled run
 settles as `cancelled`, or as `failed` with `CANCELLATION_TIMEOUT`. Standard output and standard
@@ -360,27 +368,27 @@ error are diagnostic only and are not part of the contract.
 
 ### 4. Files written
 
-Each of the three files carries `"schemaVersion": 1`. Writing Session Events to disk is the point
+Each of the three files carries `"schemaVersion": 1`. Writing Run Events to disk is the point
 at which ADR 0002 §7 requires a schema version.
 
 - **`run.json`** is written before `start` is dispatched. It records the Coding Agent version and
   commit, provider and model, the sampling settings bound into the `ModelPort`, the transport
   retry bound (ADR 0004 §2), the resolved `repoRoot`, the profile name and its resolved
-  `SessionLimits`, the Approval Policy, the Verification configuration, the registered tool names,
+  `RunLimits`, the Approval Policy, the Verification configuration, the registered tool names,
   and the assembled system prompt. It never contains a credential value.
-- **`events.jsonl`** holds one Session Event per line, in ADR 0002's envelope, appended as the
+- **`events.jsonl`** holds one Run Event per line, in ADR 0002's envelope, appended as the
   writer receives them. `assistant_content_delta`, `tool_execution_progress`, and
   `verification_progress` are omitted: the completion events carry the final message, Tool Result,
   and evidence, and deltas would dominate the file. Written events keep their `sequence`, so
   omissions appear as gaps. The writer is an ordinary consumer that the producer never awaits
   (ADR 0002 §7), so a killed process can lose the unwritten tail. A reader treats a log that does
-  not end with `session_settled` as truncated.
-- **`result.json`** is written after `session_settled`. It records the exit code, the Agent Result,
+  not end with `run_settled` as truncated.
+- **`result.json`** is written after `run_settled`. It records the exit code, the Agent Result,
   and the finish time.
 
 ### 5. Evaluation Profile and task conditions
 
-`--profile terminalbench` changes only `SessionLimits`. The system prompt, Project Instructions
+`--profile terminalbench` changes only `RunLimits`. The system prompt, Project Instructions
 discovery, the Scratchpad convention, the tools, and the model settings are the same as under
 `default`, so the evaluated agent is the MVP with a larger budget.
 
@@ -394,9 +402,9 @@ discovery, the Scratchpad convention, the tools, and the model settings are the 
 
 Under the defaults most tasks would end with `LIMIT_EXCEEDED` before meaningful work: each task in
 the default pin allows 28,800 s, and ADR 0008 requires every admissible dataset to give each task
-at least the 3,600,000 ms session, while an ordinary `grep` that finds nothing returns a
+at least the 3,600,000 ms Agent Run, while an ordinary `grep` that finds nothing returns a
 `NON_ZERO_EXIT` error Tool Result, which advances the consecutive-failure counter. A 3,600,000 ms
-session ends well inside Harbor's timeout, so the CLI settles and writes `result.json` itself
+Agent Run ends well inside Harbor's timeout, so the CLI settles and writes `result.json` itself
 instead of being cancelled from outside; Harbor's timeout is left unchanged. The turn and Tool Call
 limits bound model cost per trial. Both profiles are Coding Agent configuration, which ADR 0003 §4
 makes the owner of concrete limit values, and `default` remains the MVP default.
@@ -411,14 +419,14 @@ Inside a task container:
 - No verification command is configured, because the agent has no tests to run: Harbor builds the
   separate verifier environment from the task's tests after the agent phase, and the task
   guidelines forbid copying tests into the agent image.
-- `openAgentSession` still requires a `VerificationPolicy` (ADR 0004 §3). The headless path passes
+- `openAgentRun` still requires a `VerificationPolicy` (ADR 0004 §3). The headless path passes
   the same Verification Policy implementation as the interactive path (ADR 0004 §7), constructed
   without a command; it is not a separate no-op policy. At each Candidate Completion, Agent Core
   enters `verifying` and emits `verification_started`. The policy returns `succeeded` with
   `{ type: "no_command_configured", workspaceChanged }` evidence (ADR 0003 §3), and Agent Core
   emits `verification_completed` and moves to `succeeded` (ADR 0002 §2). The policy never returns
   `continue`, so Verification adds no Model Turn, and the first Candidate Completion ends the Agent
-  Session. A model that stops early ends its trial early. The Harbor reward is the only success
+  Run. A model that stops early ends its trial early. The Harbor reward is the only success
   measure; the Agent Result is diagnostic.
 - The Coding Task objective is Harbor's instruction, verbatim. No prompt template, extra
   instruction, skill, or MCP configuration is passed, and task-declared MCP servers and skills
@@ -464,11 +472,11 @@ and declares `AgentCapabilities(atif=True)`.
    [ADR 0001 §8](./0001-tool-contracts-and-safety-policy.md)'s `"auto-approve"` launch contract:
    Harbor's launcher shell is replaced rather than left alive holding the key, and no `tee`/`grep`
    sibling retains it. Coding Agent's own startup ancestor check (ADR 0001 §8) then confirms no
-   ancestor holds the key before it opens the Agent Session, so an adapter that failed to `exec`
+   ancestor holds the key before it opens the Agent Run, so an adapter that failed to `exec`
    would abort the trial rather than leak. No job may run until that key is unreachable from Tool
    Call processes (§7).
 3. Calls `environment.exec` directly rather than `exec_as_agent`, then maps the exit code. For 0,
-   1, and 130 the Agent Session settled, so `run()` returns normally and a failed or cancelled Agent
+   1, and 130 the Agent Run settled, so `run()` returns normally and a failed or cancelled Agent
    Result is scored like any other outcome, not recorded as a harness exception. For any other code
    `run()` raises the `NonZeroAgentExitCodeError` subclass that `exec_as_agent` would have raised,
    which Harbor records while still running the verifier.
@@ -493,7 +501,7 @@ agents convert their native logs to ATIF the same way.
 | Source | ATIF representation |
 | --- | --- |
 | `run.json` system prompt | `system` step |
-| `session_started` Coding Task | `user` step |
+| `run_started` Coding Task | `user` step |
 | `assistant_message_completed` | `agent` step with text, displayable reasoning, and Tool Calls keyed by Agent Core Tool Call IDs; a failed or cancelled message records its outcome in `extra` |
 | `tool_call_completed` | observation result on the step that issued the call; a call without a Tool Result records its outcome in `extra` |
 | `model_turn_completed` usage | `metrics` of that turn's step |
@@ -610,8 +618,8 @@ A trial is **rerun-eligible** when either condition holds:
 
 - Its `result.json` has no verifier reward. Harbor still verifies after `AgentTimeoutError` and
   `NonZeroAgentExitCodeError`, the only errors that the adapter's `run()` raises (§6). The
-  adapter's `install()` raises `ArtifactInstallError`, which fails setup before the Agent Session
-  starts. So a missing reward means the trial failed outside the Agent Session: while building or
+  adapter's `install()` raises `ArtifactInstallError`, which fails setup before the Agent Run
+  starts. So a missing reward means the trial failed outside the Agent Run: while building or
   starting the environment, installing or launching the agent, or running the verifier.
 - Its Agent Result failed with `MODEL_FAILURE` and the failure details record an HTTP 401, 403, 429,
   or 5xx response from the provider. This condition depends on a decision outside this record; see

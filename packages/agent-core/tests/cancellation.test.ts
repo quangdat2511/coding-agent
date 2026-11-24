@@ -1,11 +1,11 @@
 import { describe, expect, it } from "bun:test";
-import type { AgentPhase, AgentSession, ExecutableTool } from "../src/index.ts";
+import type { AgentPhase, AgentRun, ExecutableTool } from "../src/index.ts";
 import {
   abortIgnoringTool,
   collect,
   fakeTool,
   fakeWriteTool,
-  openTestSession,
+  openTestRun,
   streamOf,
   textMessage,
   textTurn,
@@ -13,7 +13,7 @@ import {
   waitForEvent,
 } from "./kit/index.ts";
 
-const task = { objective: "Cancel session test task" };
+const task = { objective: "Cancel run test task" };
 
 function waitForAbort(signal: AbortSignal): Promise<void> {
   return new Promise<void>((resolve) => {
@@ -25,27 +25,27 @@ function waitForAbort(signal: AbortSignal): Promise<void> {
   });
 }
 
-async function waitForPhase(session: AgentSession, targetPhase: AgentPhase): Promise<void> {
-  if (session.snapshot().phase === targetPhase) return;
-  for await (const _event of session.events()) {
-    if (session.snapshot().phase === targetPhase) return;
+async function waitForPhase(run: AgentRun, targetPhase: AgentPhase): Promise<void> {
+  if (run.snapshot().phase === targetPhase) return;
+  for await (const _event of run.events()) {
+    if (run.snapshot().phase === targetPhase) return;
   }
 }
 
-describe("cancelling an Agent Session", () => {
+describe("cancelling an Agent Run", () => {
   describe("Cancellation from ready state", () => {
-    it("settles as cancelled synchronously with cancellation_requested and session_settled events", async () => {
-      const { session } = openTestSession();
+    it("settles as cancelled synchronously with cancellation_requested and run_settled events", async () => {
+      const { run } = openTestRun();
 
-      expect(session.snapshot().phase).toBe("ready");
+      expect(run.snapshot().phase).toBe("ready");
 
-      const dispatchResult = await session.dispatch({
+      const dispatchResult = await run.dispatch({
         type: "cancel",
         reason: "user decided to stop",
       });
       expect(dispatchResult.accepted).toBe(true);
 
-      const state = session.snapshot();
+      const state = run.snapshot();
       expect(state.phase).toBe("cancelled");
       if (state.phase === "cancelled") {
         expect(state.result.outcome).toBe("cancelled");
@@ -54,14 +54,14 @@ describe("cancelling an Agent Session", () => {
         expect(state.result.partialChangesPossible).toBe(false);
       }
 
-      const result = await session.result();
+      const result = await run.result();
       expect(result.outcome).toBe("cancelled");
       if (result.outcome === "cancelled") {
         expect(result.cancellation.reason).toBe("user decided to stop");
       }
 
-      const events = await collect(session.events());
-      expect(events.map((e) => e.type)).toEqual(["cancellation_requested", "session_settled"]);
+      const events = await collect(run.events());
+      expect(events.map((e) => e.type)).toEqual(["cancellation_requested", "run_settled"]);
       expect(events[0]?.data).toEqual({
         requestedFrom: "ready",
         reason: "user decided to stop",
@@ -75,7 +75,7 @@ describe("cancelling an Agent Session", () => {
   describe("Cancellation from streaming_model state", () => {
     it("aborts the active model stream, completes the partial assistant message and turn as cancelled, and settles", async () => {
       let aborted = false;
-      const { session } = openTestSession({
+      const { run } = openTestRun({
         model: {
           turns: [
             () =>
@@ -91,7 +91,7 @@ describe("cancelling an Agent Session", () => {
                   index: 0,
                   delta: { type: "text_delta", text: "Working on it..." },
                 };
-                await waitForPhase(session, "cancelling");
+                await waitForPhase(run, "cancelling");
                 aborted = true;
                 yield { type: "content_block_stop", index: 0 };
                 throw new Error("model stream aborted");
@@ -100,20 +100,20 @@ describe("cancelling an Agent Session", () => {
         },
       });
 
-      await session.dispatch({ type: "start", task });
-      await waitForEvent(session, "assistant_content_delta");
-      expect(session.snapshot().phase).toBe("streaming_model");
+      await run.dispatch({ type: "start", task });
+      await waitForEvent(run, "assistant_content_delta");
+      expect(run.snapshot().phase).toBe("streaming_model");
 
-      const cancelPromise = session.dispatch({ type: "cancel", reason: "taking too long" });
+      const cancelPromise = run.dispatch({ type: "cancel", reason: "taking too long" });
       const cancelResult = await cancelPromise;
       expect(cancelResult.accepted).toBe(true);
 
-      const terminalResult = await session.result();
+      const terminalResult = await run.result();
       expect(terminalResult.outcome).toBe("cancelled");
       expect(aborted).toBe(true);
-      expect(session.snapshot().phase).toBe("cancelled");
+      expect(run.snapshot().phase).toBe("cancelled");
 
-      const events = await collect(session.events());
+      const events = await collect(run.events());
       const cancelReq = events.find((e) => e.type === "cancellation_requested");
       expect(cancelReq?.data).toEqual({
         requestedFrom: "streaming_model",
@@ -136,7 +136,7 @@ describe("cancelling an Agent Session", () => {
     });
 
     it("drops content delta arriving after cancellation and settles as cancelled", async () => {
-      const { session } = openTestSession({
+      const { run } = openTestRun({
         model: {
           turns: [
             () =>
@@ -152,7 +152,7 @@ describe("cancelling an Agent Session", () => {
                   index: 0,
                   delta: { type: "text_delta", text: "Part 1" },
                 };
-                await waitForPhase(session, "cancelling");
+                await waitForPhase(run, "cancelling");
                 yield {
                   type: "content_block_delta",
                   index: 0,
@@ -165,16 +165,16 @@ describe("cancelling an Agent Session", () => {
         },
       });
 
-      await session.dispatch({ type: "start", task });
-      await waitForEvent(session, "assistant_content_delta");
-      const cancelResult = await session.dispatch({ type: "cancel" });
+      await run.dispatch({ type: "start", task });
+      await waitForEvent(run, "assistant_content_delta");
+      const cancelResult = await run.dispatch({ type: "cancel" });
       expect(cancelResult.accepted).toBe(true);
 
-      const result = await session.result();
+      const result = await run.result();
       expect(result.outcome).toBe("cancelled");
-      expect(session.snapshot().phase).toBe("cancelled");
+      expect(run.snapshot().phase).toBe("cancelled");
 
-      const events = await collect(session.events());
+      const events = await collect(run.events());
       const deltas = events.filter((e) => e.type === "assistant_content_delta");
       expect(deltas).toHaveLength(1);
       expect(deltas[0]?.data.delta).toBe("Part 1");
@@ -185,10 +185,10 @@ describe("cancelling an Agent Session", () => {
       expect(textBlock?.text).toBe("Part 1");
     });
 
-    it("drops content delta arriving after cancellation grace period expires and does not emit after session_settled", async () => {
+    it("drops content delta arriving after cancellation grace period expires and does not emit after run_settled", async () => {
       const finished = Promise.withResolvers<void>();
       let pushDelta: ((text: string) => void) | undefined;
-      const { session, clock } = openTestSession({
+      const { run, clock } = openTestRun({
         limits: { cancellationGraceMs: 20 },
         model: {
           turns: [
@@ -236,24 +236,24 @@ describe("cancelling an Agent Session", () => {
         },
       });
 
-      await session.dispatch({ type: "start", task });
-      await waitForEvent(session, "assistant_content_delta");
-      await session.dispatch({ type: "cancel" });
+      await run.dispatch({ type: "start", task });
+      await waitForEvent(run, "assistant_content_delta");
+      await run.dispatch({ type: "cancel" });
 
       clock.advance(300);
-      const result = await session.result();
+      const result = await run.result();
       expect(result.outcome).toBe("failed");
       expect(result.outcome === "failed" && result.failure.code).toBe("CANCELLATION_TIMEOUT");
-      expect(session.snapshot().phase).toBe("failed");
+      expect(run.snapshot().phase).toBe("failed");
 
       pushDelta?.("Late delta after grace expired");
       clock.advance(100);
       finished.resolve();
 
-      const events = await collect(session.events());
-      const settledIndex = events.findIndex((e) => e.type === "session_settled");
+      const events = await collect(run.events());
+      const settledIndex = events.findIndex((e) => e.type === "run_settled");
       expect(settledIndex).toBe(events.length - 1);
-      const settledCount = events.filter((e) => e.type === "session_settled").length;
+      const settledCount = events.filter((e) => e.type === "run_settled").length;
       expect(settledCount).toBe(1);
 
       const deltas = events.filter((e) => e.type === "assistant_content_delta");
@@ -264,7 +264,7 @@ describe("cancelling an Agent Session", () => {
 
   describe("Cancellation from awaiting_approval state", () => {
     it("resolves the pending approval as cancelled with decidedBy user, skips the tool call and remaining queue, and completes model turn as cancelled", async () => {
-      const { session } = openTestSession({
+      const { run } = openTestRun({
         tools: [fakeWriteTool()],
         approvalPolicy: "ask",
         model: {
@@ -277,22 +277,22 @@ describe("cancelling an Agent Session", () => {
         },
       });
 
-      await session.dispatch({ type: "start", task });
-      await waitForEvent(session, "approval_requested");
-      expect(session.snapshot().phase).toBe("awaiting_approval");
+      await run.dispatch({ type: "start", task });
+      await waitForEvent(run, "approval_requested");
+      expect(run.snapshot().phase).toBe("awaiting_approval");
 
-      const cancelResult = await session.dispatch({
+      const cancelResult = await run.dispatch({
         type: "cancel",
         reason: "stop before writing",
       });
       expect(cancelResult.accepted).toBe(true);
 
-      const terminalResult = await session.result();
+      const terminalResult = await run.result();
       expect(terminalResult.outcome).toBe("cancelled");
       expect(terminalResult.workspaceChanged).toBe(false);
       expect(terminalResult.partialChangesPossible).toBe(false);
 
-      const events = await collect(session.events());
+      const events = await collect(run.events());
 
       const approvalResolved = events.find((e) => e.type === "approval_resolved");
       expect(approvalResolved?.data).toMatchObject({
@@ -339,7 +339,7 @@ describe("cancelling an Agent Session", () => {
         },
       };
 
-      const { session } = openTestSession({
+      const { run } = openTestRun({
         tools: [stubbornTool],
         approvalPolicy: "auto-approve",
         model: {
@@ -352,23 +352,23 @@ describe("cancelling an Agent Session", () => {
         },
       });
 
-      await session.dispatch({ type: "start", task });
-      await waitForEvent(session, "tool_execution_started");
-      expect(session.snapshot().phase).toBe("executing_tool");
+      await run.dispatch({ type: "start", task });
+      await waitForEvent(run, "tool_execution_started");
+      expect(run.snapshot().phase).toBe("executing_tool");
 
-      const cancelResult = await session.dispatch({
+      const cancelResult = await run.dispatch({
         type: "cancel",
         reason: "aborted by developer",
       });
       expect(cancelResult.accepted).toBe(true);
 
-      const terminalResult = await session.result();
+      const terminalResult = await run.result();
       expect(terminalResult.outcome).toBe("cancelled");
       expect(toolAborted).toBe(true);
       expect(terminalResult.workspaceChanged).toBe(true);
       expect(terminalResult.partialChangesPossible).toBe(true);
 
-      const events = await collect(session.events());
+      const events = await collect(run.events());
       const toolCompletions = events.filter((e) => e.type === "tool_call_completed");
       expect(toolCompletions).toHaveLength(2);
       expect(toolCompletions[0]?.data).toMatchObject({
@@ -398,7 +398,7 @@ describe("cancelling an Agent Session", () => {
         },
       };
 
-      const { session } = openTestSession({
+      const { run } = openTestRun({
         tools: [rejectingTool],
         approvalPolicy: "auto-approve",
         model: {
@@ -411,21 +411,21 @@ describe("cancelling an Agent Session", () => {
         },
       });
 
-      await session.dispatch({ type: "start", task });
-      await waitForEvent(session, "tool_execution_started");
-      expect(session.snapshot().phase).toBe("executing_tool");
+      await run.dispatch({ type: "start", task });
+      await waitForEvent(run, "tool_execution_started");
+      expect(run.snapshot().phase).toBe("executing_tool");
 
-      const cancelResult = await session.dispatch({
+      const cancelResult = await run.dispatch({
         type: "cancel",
         reason: "aborted by developer",
       });
       expect(cancelResult.accepted).toBe(true);
 
-      const terminalResult = await session.result();
+      const terminalResult = await run.result();
       expect(terminalResult.outcome).toBe("cancelled");
       expect(toolAborted).toBe(true);
 
-      const events = await collect(session.events());
+      const events = await collect(run.events());
       const toolCompletions = events.filter((e) => e.type === "tool_call_completed");
       expect(toolCompletions).toHaveLength(2);
       expect(toolCompletions[0]?.data).toEqual({
@@ -452,22 +452,22 @@ describe("cancelling an Agent Session", () => {
         },
       };
 
-      const { session } = openTestSession({
+      const { run } = openTestRun({
         tools: [slowPreflightTool],
         model: {
           turns: [toolCallTurn({ toolCallId: "call-1", name: "slow_prepare", input: {} })],
         },
       });
 
-      await session.dispatch({ type: "start", task });
+      await run.dispatch({ type: "start", task });
       await prepareStarted.promise;
 
-      await session.dispatch({ type: "cancel", reason: "cancelled during prepare" });
-      const terminalResult = await session.result();
+      await run.dispatch({ type: "cancel", reason: "cancelled during prepare" });
+      const terminalResult = await run.result();
       expect(terminalResult.outcome).toBe("cancelled");
       expect(prepareSignalAborted).toBe(true);
 
-      const events = await collect(session.events());
+      const events = await collect(run.events());
       expect(events.some((e) => e.type === "tool_execution_started")).toBe(false);
 
       const toolCompleted = events.find((e) => e.type === "tool_call_completed");
@@ -482,10 +482,10 @@ describe("cancelling an Agent Session", () => {
   describe("Cancellation from verifying state", () => {
     it("aborts active verification, completes verification run with cancelled, and settles as cancelled", async () => {
       let verificationAborted = false;
-      const { session } = openTestSession({
+      const { run } = openTestRun({
         verification: [
           async (_candidate) => {
-            await waitForPhase(session, "cancelling");
+            await waitForPhase(run, "cancelling");
             verificationAborted = true;
             return { outcome: "succeeded", evidence: [] };
           },
@@ -495,21 +495,21 @@ describe("cancelling an Agent Session", () => {
         },
       });
 
-      await session.dispatch({ type: "start", task });
-      await waitForEvent(session, "verification_started");
-      expect(session.snapshot().phase).toBe("verifying");
+      await run.dispatch({ type: "start", task });
+      await waitForEvent(run, "verification_started");
+      expect(run.snapshot().phase).toBe("verifying");
 
-      const cancelResult = await session.dispatch({
+      const cancelResult = await run.dispatch({
         type: "cancel",
         reason: "verification not needed",
       });
       expect(cancelResult.accepted).toBe(true);
 
-      const terminalResult = await session.result();
+      const terminalResult = await run.result();
       expect(terminalResult.outcome).toBe("cancelled");
       expect(verificationAborted).toBe(true);
 
-      const events = await collect(session.events());
+      const events = await collect(run.events());
       const verCompleted = events.find((e) => e.type === "verification_completed");
       expect(verCompleted?.data).toEqual({
         verificationId: "verification-1",
@@ -519,22 +519,22 @@ describe("cancelling an Agent Session", () => {
     });
 
     it("settles as cancelled when the policy reports the aborted run as cancelled", async () => {
-      const { session } = openTestSession({
+      const { run } = openTestRun({
         verification: [
           async () => {
-            await waitForPhase(session, "cancelling");
+            await waitForPhase(run, "cancelling");
             return { outcome: "cancelled" };
           },
         ],
         model: { turns: [textTurn("Done with code change")] },
       });
 
-      await session.dispatch({ type: "start", task });
-      await waitForEvent(session, "verification_started");
-      await session.dispatch({ type: "cancel" });
+      await run.dispatch({ type: "start", task });
+      await waitForEvent(run, "verification_started");
+      await run.dispatch({ type: "cancel" });
 
-      expect((await session.result()).outcome).toBe("cancelled");
-      const events = await collect(session.events());
+      expect((await run.result()).outcome).toBe("cancelled");
+      const events = await collect(run.events());
       expect(events.filter((e) => e.type === "verification_completed")).toMatchObject([
         { data: { verificationId: "verification-1", outcome: "cancelled", evidence: [] } },
       ]);
@@ -546,17 +546,17 @@ describe("cancelling an Agent Session", () => {
       let turn2Started = false;
       let tool1Executed = false;
 
-      let sessionRef: AgentSession | undefined;
+      let runRef: AgentRun | undefined;
       const tool: ExecutableTool = {
         ...fakeTool({ name: "step_one" }),
         async execute() {
           tool1Executed = true;
-          void sessionRef?.dispatch({ type: "cancel", reason: "stop after step 1" });
+          void runRef?.dispatch({ type: "cancel", reason: "stop after step 1" });
           return { isError: false, content: "step 1 complete" };
         },
       };
 
-      const { session } = openTestSession({
+      const { run } = openTestRun({
         tools: [tool],
         approvalPolicy: "auto-approve",
         model: {
@@ -571,32 +571,32 @@ describe("cancelling an Agent Session", () => {
           ],
         },
       });
-      sessionRef = session;
+      runRef = run;
 
-      await session.dispatch({ type: "start", task });
+      await run.dispatch({ type: "start", task });
 
-      const terminalResult = await session.result();
+      const terminalResult = await run.result();
       expect(terminalResult.outcome).toBe("cancelled");
       expect(tool1Executed).toBe(true);
       expect(turn2Started).toBe(false);
 
-      const events = await collect(session.events());
+      const events = await collect(run.events());
       const modelTurnsStarted = events.filter((e) => e.type === "model_turn_started");
       expect(modelTurnsStarted).toHaveLength(1);
 
       const assistantStarted = events.filter((e) => e.type === "assistant_message_started");
       expect(assistantStarted).toHaveLength(1);
 
-      const settled = events.find((e) => e.type === "session_settled");
+      const settled = events.find((e) => e.type === "run_settled");
       expect(settled).toBeDefined();
-      expect(session.snapshot().phase).toBe("cancelled");
+      expect(run.snapshot().phase).toBe("cancelled");
     });
 
     it("quiesces cleanly and does not schedule a new model turn when cancellation occurs after verification continues", async () => {
       let turn2Started = false;
-      let sessionRef: AgentSession | undefined;
+      let runRef: AgentRun | undefined;
 
-      const { session } = openTestSession({
+      const { run } = openTestRun({
         model: {
           turns: [
             textTurn("Candidate answer"),
@@ -610,7 +610,7 @@ describe("cancelling an Agent Session", () => {
         },
         verification: [
           async () => {
-            void sessionRef?.dispatch({
+            void runRef?.dispatch({
               type: "cancel",
               reason: "stop after verification continue",
             });
@@ -622,25 +622,25 @@ describe("cancelling an Agent Session", () => {
           },
         ],
       });
-      sessionRef = session;
+      runRef = run;
 
-      await session.dispatch({ type: "start", task });
+      await run.dispatch({ type: "start", task });
 
-      const terminalResult = await session.result();
+      const terminalResult = await run.result();
       expect(terminalResult.outcome).toBe("cancelled");
       expect(turn2Started).toBe(false);
 
-      const events = await collect(session.events());
+      const events = await collect(run.events());
       const modelTurnsStarted = events.filter((e) => e.type === "model_turn_started");
       expect(modelTurnsStarted).toHaveLength(1);
-      expect(session.snapshot().phase).toBe("cancelled");
+      expect(run.snapshot().phase).toBe("cancelled");
     });
   });
 
   describe("Cancellation grace period expiration", () => {
     it("settles as failed with CANCELLATION_TIMEOUT when an adapter ignores abort past cancellationGraceMs", async () => {
       const stubborn = abortIgnoringTool();
-      const { session, clock } = openTestSession({
+      const { run, clock } = openTestRun({
         tools: [stubborn],
         approvalPolicy: "auto-approve",
         limits: {
@@ -651,13 +651,13 @@ describe("cancelling an Agent Session", () => {
         },
       });
 
-      await session.dispatch({ type: "start", task });
-      await waitForEvent(session, "tool_execution_started");
+      await run.dispatch({ type: "start", task });
+      await waitForEvent(run, "tool_execution_started");
 
-      await session.dispatch({ type: "cancel", reason: "timed out cancellation" });
+      await run.dispatch({ type: "cancel", reason: "timed out cancellation" });
       clock.advance(25);
 
-      const terminalResult = await session.result();
+      const terminalResult = await run.result();
       expect(terminalResult.outcome).toBe("failed");
       if (terminalResult.outcome === "failed") {
         expect(terminalResult.failure.code).toBe("CANCELLATION_TIMEOUT");
@@ -665,15 +665,15 @@ describe("cancelling an Agent Session", () => {
       }
 
       stubborn.release();
-      expect(session.snapshot().phase).toBe("failed");
-      const events = await collect(session.events());
-      const settledEvents = events.filter((e) => e.type === "session_settled");
+      expect(run.snapshot().phase).toBe("failed");
+      const events = await collect(run.events());
+      const settledEvents = events.filter((e) => e.type === "run_settled");
       expect(settledEvents).toHaveLength(1);
     });
 
     it("settles as failed with CANCELLATION_TIMEOUT when verification ignores abort past cancellationGraceMs", async () => {
       const release = Promise.withResolvers<void>();
-      const { session, clock } = openTestSession({
+      const { run, clock } = openTestRun({
         limits: { cancellationGraceMs: 25 },
         model: { turns: [textTurn("Candidate message")] },
         verification: [
@@ -698,96 +698,96 @@ describe("cancelling an Agent Session", () => {
         ],
       });
 
-      await session.dispatch({ type: "start", task });
-      await waitForEvent(session, "verification_started");
+      await run.dispatch({ type: "start", task });
+      await waitForEvent(run, "verification_started");
 
-      await session.dispatch({ type: "cancel" });
-      expect(session.snapshot().phase).toBe("cancelling");
+      await run.dispatch({ type: "cancel" });
+      expect(run.snapshot().phase).toBe("cancelling");
 
       clock.advance(50);
-      const result = await session.result();
+      const result = await run.result();
       expect(result.outcome).toBe("failed");
       if (result.outcome === "failed") {
         expect(result.failure.code).toBe("CANCELLATION_TIMEOUT");
         expect(result.failure.message).toContain("cancellation grace period");
       }
-      expect(session.snapshot().phase).toBe("failed");
+      expect(run.snapshot().phase).toBe("failed");
 
       release.resolve();
-      const events = await collect(session.events());
-      const settledEvents = events.filter((e) => e.type === "session_settled");
+      const events = await collect(run.events());
+      const settledEvents = events.filter((e) => e.type === "run_settled");
       expect(settledEvents).toHaveLength(1);
-      expect(events.at(-1)?.type).toBe("session_settled");
+      expect(events.at(-1)?.type).toBe("run_settled");
     });
   });
 
   describe("Repeated cancellation and terminal state rules", () => {
-    it("returns accepted: true with current sequence when cancelling an already cancelling or cancelled session", async () => {
+    it("returns accepted: true with current sequence when cancelling an already cancelling or cancelled run", async () => {
       // 1. Cancelled from ready (synchronous -> cancelled phase)
-      const { session: syncSession } = openTestSession();
+      const { run: syncRun } = openTestRun();
 
-      const firstCancel = await syncSession.dispatch({ type: "cancel", reason: "first" });
+      const firstCancel = await syncRun.dispatch({ type: "cancel", reason: "first" });
       expect(firstCancel.accepted).toBe(true);
-      expect(syncSession.snapshot().phase).toBe("cancelled");
+      expect(syncRun.snapshot().phase).toBe("cancelled");
 
-      const secondCancel = await syncSession.dispatch({ type: "cancel", reason: "second" });
+      const secondCancel = await syncRun.dispatch({ type: "cancel", reason: "second" });
       expect(secondCancel.accepted).toBe(true);
       if (secondCancel.accepted) {
-        expect(secondCancel.sequence).toBe(syncSession.snapshot().lastSequence);
+        expect(secondCancel.sequence).toBe(syncRun.snapshot().lastSequence);
       }
 
       // 2. Cancel while in cancelling phase (async work in flight)
       const stubborn = abortIgnoringTool();
-      const { session: asyncSession } = openTestSession({
+      const { run: asyncRun } = openTestRun({
         tools: [stubborn],
         approvalPolicy: "auto-approve",
         model: { turns: [toolCallTurn({ toolCallId: "call-1", name: "stubborn", input: {} })] },
       });
 
-      await asyncSession.dispatch({ type: "start", task });
-      await waitForEvent(asyncSession, "tool_execution_started");
+      await asyncRun.dispatch({ type: "start", task });
+      await waitForEvent(asyncRun, "tool_execution_started");
 
-      const firstAsyncCancel = await asyncSession.dispatch({
+      const firstAsyncCancel = await asyncRun.dispatch({
         type: "cancel",
         reason: "cancelling first",
       });
       expect(firstAsyncCancel.accepted).toBe(true);
-      expect(asyncSession.snapshot().phase).toBe("cancelling");
+      expect(asyncRun.snapshot().phase).toBe("cancelling");
 
-      const secondAsyncCancel = await asyncSession.dispatch({
+      const secondAsyncCancel = await asyncRun.dispatch({
         type: "cancel",
         reason: "cancelling second",
       });
       expect(secondAsyncCancel.accepted).toBe(true);
       if (secondAsyncCancel.accepted) {
-        expect(secondAsyncCancel.sequence).toBe(asyncSession.snapshot().lastSequence);
+        expect(secondAsyncCancel.sequence).toBe(asyncRun.snapshot().lastSequence);
       }
 
       stubborn.release();
-      const asyncResult = await asyncSession.result();
+      const asyncResult = await asyncRun.result();
       expect(asyncResult.outcome).toBe("cancelled");
-      expect(asyncSession.snapshot().phase).toBe("cancelled");
+      expect(asyncRun.snapshot().phase).toBe("cancelled");
     });
 
     it("returns ALREADY_SETTLED when cancelling after succeeded or failed", async () => {
       // 1. After succeeded
-      const { session: succeededSession } = openTestSession({
+      const { run: succeededRun } = openTestRun({
         model: { turns: [textTurn("All done")] },
       });
 
-      await succeededSession.dispatch({ type: "start", task });
-      const succeededResult = await succeededSession.result();
+      await succeededRun.dispatch({ type: "start", task });
+      const succeededResult = await succeededRun.result();
       expect(succeededResult.outcome).toBe("succeeded");
 
-      const cancelSucceeded = await succeededSession.dispatch({ type: "cancel" });
+      const cancelSucceeded = await succeededRun.dispatch({ type: "cancel" });
       expect(cancelSucceeded).toEqual({
         accepted: false,
         code: "ALREADY_SETTLED",
-        message: "the session has already succeeded",
+        message: "the run has already succeeded",
       });
 
       // 2. After failed
-      const { session: failedSession } = openTestSession({
+      const { run: failedRun } = openTestRun({
         model: {
           turns: [
             () => {
@@ -797,23 +797,23 @@ describe("cancelling an Agent Session", () => {
         },
       });
 
-      await failedSession.dispatch({ type: "start", task });
-      const failedResult = await failedSession.result();
+      await failedRun.dispatch({ type: "start", task });
+      const failedResult = await failedRun.result();
       expect(failedResult.outcome).toBe("failed");
 
-      const cancelFailed = await failedSession.dispatch({ type: "cancel" });
+      const cancelFailed = await failedRun.dispatch({ type: "cancel" });
       expect(cancelFailed).toEqual({
         accepted: false,
         code: "ALREADY_SETTLED",
-        message: "the session has already failed",
+        message: "the run has already failed",
       });
     });
   });
 
   describe("safety net hardening during cancellation and settlement", () => {
-    it("guarantees session_settled and result resolution even when clock.now throws during cancellation", async () => {
+    it("guarantees run_settled and result resolution even when clock.now throws during cancellation", async () => {
       let throwClock = false;
-      const { session, clock } = openTestSession();
+      const { run, clock } = openTestRun();
 
       const originalNow = clock.now;
       clock.now = () => {
@@ -824,27 +824,27 @@ describe("cancelling an Agent Session", () => {
       };
 
       throwClock = true;
-      const cancelResult = await session.dispatch({ type: "cancel" });
+      const cancelResult = await run.dispatch({ type: "cancel" });
       expect(cancelResult.accepted).toBe(true);
 
-      const result = await session.result();
+      const result = await run.result();
       expect(result.outcome).toBe("cancelled");
     });
 
-    it("guarantees session_settled even when clock.now throws from startup before any timestamp is recorded", async () => {
-      const { session, clock } = openTestSession();
+    it("guarantees run_settled even when clock.now throws from startup before any timestamp is recorded", async () => {
+      const { run, clock } = openTestRun();
       clock.now = () => {
         throw new Error("clock hardware failure at startup");
       };
 
-      const cancelResult = await session.dispatch({ type: "cancel" });
+      const cancelResult = await run.dispatch({ type: "cancel" });
       expect(cancelResult.accepted).toBe(true);
 
-      const result = await session.result();
+      const result = await run.result();
       expect(result.outcome).toBe("cancelled");
 
-      const events = await collect(session.events());
-      const settled = events.find((e) => e.type === "session_settled");
+      const events = await collect(run.events());
+      const settled = events.find((e) => e.type === "run_settled");
       expect(settled).toBeDefined();
       expect(settled?.occurredAt).toBe("1970-01-01T00:00:00.000Z");
     });

@@ -192,7 +192,7 @@ def evaluate(observed: Observations) -> Report:
             )
         )
     # Exit 2 alone does not show that the startup check refused the launcher: every configuration
-    # error exits with 2. The message names the cause, and no request shows no session opened.
+    # error exits with 2. The message names the cause, and no request shows no Agent Run opened.
     if launcher.exit_code != 2:
         failures.append(_launcher_failure(f"it ended with exit code {launcher.exit_code}, not 2"))
     elif not launcher.message_matched:
@@ -202,7 +202,7 @@ def evaluate(observed: Observations) -> Report:
     elif launcher.server_requests != 0:
         failures.append(
             _launcher_failure(
-                f"the model server got {launcher.server_requests} requests, so a session opened"
+                f"the model server got {launcher.server_requests} requests, so an Agent Run opened"
             )
         )
     return Report(passed=not failures, failures=failures)

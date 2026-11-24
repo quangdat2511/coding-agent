@@ -3,9 +3,9 @@ import { join } from "node:path";
 import type {
   AgentResult,
   ApprovalPolicy,
-  SessionEvent,
-  SessionEventType,
-  SessionLimits,
+  RunEvent,
+  RunEventType,
+  RunLimits,
 } from "@coding-agent/agent-core";
 import type { BuildInfo } from "./build-info.ts";
 import type { Profile } from "./run-args.ts";
@@ -21,7 +21,7 @@ export interface RunRecord {
   readonly transportRetryBound: number;
   readonly repoRoot: string;
   readonly profile: Profile;
-  readonly limits: SessionLimits;
+  readonly limits: RunLimits;
   readonly approvalPolicy: ApprovalPolicy;
   readonly verification: VerificationConfig;
   readonly tools: readonly string[];
@@ -34,14 +34,14 @@ export interface ResultRecord {
   readonly finishedAt: string;
 }
 
-const OMITTED_EVENTS: ReadonlySet<SessionEventType> = new Set<SessionEventType>([
+const OMITTED_EVENTS: ReadonlySet<RunEventType> = new Set<RunEventType>([
   "assistant_content_delta",
   "tool_execution_progress",
   "verification_progress",
 ]);
 
 export interface RunFiles {
-  logEvents(events: AsyncIterable<SessionEvent>): Promise<void>;
+  logEvents(events: AsyncIterable<RunEvent>): Promise<void>;
   writeResult(result: ResultRecord): Promise<void>;
   close(): Promise<void>;
   discard(): Promise<void>;

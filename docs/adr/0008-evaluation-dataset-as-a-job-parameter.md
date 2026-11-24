@@ -123,9 +123,9 @@ manifest records the evidence for each, and a job that cannot show one is not va
    from the task's tests. ADR 0005 §5 configures no verification command for the agent, so this is
    the only grading path; a shared verifier environment would expose tests to the agent and change
    the trial.
-4. **A per-task agent timeout at least as large as the session.** Every task's declared agent
+4. **A per-task agent timeout at least as large as the run bound.** Every task's declared agent
    timeout is at least the `terminalbench` profile's 3,600,000 ms `maxDurationMs`, so Coding Agent
-   settles inside its own session and writes `result.json` instead of being cancelled by Harbor
+   settles inside its own limit and writes `result.json` instead of being cancelled by Harbor
    from outside.
 5. **A smoke set.** The dataset contains at least three CPU-only, single-container tasks with small
    resource requests, so the smoke job of ADR 0005 §7 can run before any credential-carrying job.
@@ -175,7 +175,7 @@ such row reports that no task declared one.
 This decision amends, with dated notes:
 
 - [ADR 0005](./0005-terminalbench-evaluation-protocol.md) §1, whose dataset row now names a job
-  parameter and a default rather than one dataset for every job; §5, which states the session bound
+  parameter and a default rather than one dataset for every job; §5, which states the run bound
   in terms of an admissible dataset; §7, whose two commands take `<dataset>`, whose smoke set is
   dataset data, and whose validity rule includes this record's §3 properties; §8, whose manifest
   records the dataset and whose mean derives `N`; and its Consequences, whose per-job compute count
@@ -252,3 +252,10 @@ resolved dataset.
   comparing two jobs compares their manifests, including the dataset identifier and release commit.
 - A dataset whose source repository or release tag cannot be resolved for the release commit cannot
   be recorded under this protocol, because the manifest requires that commit.
+
+## Amendments
+
+On 2026-11-24, [CDA-147](https://datn-fit-hcmus.atlassian.net/browse/CDA-147) amended this record:
+
+- **Terminology**: Agent Session is renamed Agent Run, following ADR 0002 §8, so §3 and §5 call
+  the profile's `maxDurationMs` the run bound. Behavior is unchanged.

@@ -1,8 +1,8 @@
 #!/usr/bin/env -S bun --no-env-file --config=/dev/null
-// Exit 2 means no Agent Session was opened (ADR 0005 §3). Usage errors are decided before any file
-// or environment access, and configuration errors before any Agent Session opens; a run that opens
+// Exit 2 means no Agent Run was opened (ADR 0005 §3). Usage errors are decided before any file
+// or environment access, and configuration errors before any Agent Run opens; a run that opens
 // none removes the output directory it created. `coding-agent run` is the headless path; a command
-// line of flags alone is the interactive path, which opens one Agent Session per Coding Task.
+// line of flags alone is the interactive path, which opens one Agent Run per Coding Task.
 import { checkAncestorCredentials } from "./ancestor-credentials.ts";
 import { BUILD_INFO, formatVersion } from "./build-info.ts";
 import { createConfiguredChildLauncher } from "./child-launcher.ts";
@@ -35,17 +35,17 @@ const stderr = trackedWriter(process.stderr);
 
 type CancellingSignal = "SIGINT" | "SIGTERM";
 
-// A first signal cancels, as soon as an Agent Session can take `cancel`. A repeated one while none
-// can ends the process, so a run stuck before its Agent Session opens can still be stopped.
+// A first signal cancels, as soon as an Agent Run can take `cancel`. A repeated one while none
+// can ends the process, so a run stuck before its Agent Run opens can still be stopped.
 function listenForCancellation() {
   const cancellation = new AbortController();
-  let sessionOpened = false;
+  let runOpened = false;
   const stopListening = () => {
     process.off("SIGINT", onSignal);
     process.off("SIGTERM", onSignal);
   };
   function onSignal(signal: CancellingSignal) {
-    if (cancellation.signal.aborted && !sessionOpened) {
+    if (cancellation.signal.aborted && !runOpened) {
       stopListening();
       process.kill(process.pid, signal);
       return;
@@ -56,8 +56,8 @@ function listenForCancellation() {
   process.on("SIGTERM", onSignal);
   return {
     signal: cancellation.signal,
-    onSessionOpened: () => {
-      sessionOpened = true;
+    onRunOpened: () => {
+      runOpened = true;
     },
     stopListening,
   };
@@ -69,7 +69,7 @@ async function main(
   env: Readonly<Record<string, string | undefined>>,
 ): Promise<number> {
   // The Harbor adapter compares this line with artifact-manifest.json (ADR 0005 §6). It opens no
-  // Agent Session and starts no child, so it needs no hardening.
+  // Agent Run and starts no child, so it needs no hardening.
   if (argv.length === 1 && argv[0] === "--version") {
     stdout.write(`${formatVersion(BUILD_INFO)}\n`);
     return 0;
@@ -101,7 +101,7 @@ async function main(
     // ancestor's environment as this process can, and with CAP_SYS_PTRACE still held that includes a
     // root launcher that holds the capability itself. After the drop it would read as a child can,
     // and on Modal it would pass such a launcher over, so the launch contract would go unchecked.
-    // Before configuration, so that a refused launch writes nothing, and before any Agent Session
+    // Before configuration, so that a refused launch writes nothing, and before any Agent Run
     // opens. It does nothing unless the platform is Linux.
     const ancestors = await checkAncestorCredentials();
     if (!ancestors.ok) {
@@ -139,7 +139,7 @@ async function main(
         launcher: children.launcher,
         signal: cancellation.signal,
         isTerminal: Boolean(process.stdin.isTTY && process.stdout.isTTY),
-        onReady: cancellation.onSessionOpened,
+        onReady: cancellation.onRunOpened,
       });
     }
     const { exitCode } = await runHeadless({
@@ -150,7 +150,7 @@ async function main(
       stderr: stderr.write,
       launcher: children.launcher,
       signal: cancellation.signal,
-      onSessionOpened: cancellation.onSessionOpened,
+      onRunOpened: cancellation.onRunOpened,
     });
     return exitCode;
   } finally {

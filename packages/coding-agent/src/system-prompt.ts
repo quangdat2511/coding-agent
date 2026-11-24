@@ -1,4 +1,4 @@
-// The system prompt every Agent Session starts from (ADR 0003 §1 and §2). Agent Core takes it as a
+// The system prompt every Agent Run starts from (ADR 0003 §1 and §2). Agent Core takes it as a
 // string, because reading the Project Instructions is filesystem I/O that it excludes (ADR 0004 §7).
 // Nothing else about the repository is read here: the model discovers its structure on demand
 // through its tools, and an eager scan is rejected by ADR 0003 §1.
@@ -6,7 +6,7 @@ import * as nodeFs from "node:fs/promises";
 import { join, relative, sep } from "node:path";
 import type {
   ExecutableTool,
-  OpenSessionResult,
+  OpenRunResult,
   PathResolution,
   RepoPath,
   ToolRegistry,
@@ -35,16 +35,16 @@ export interface ProjectInstructions {
   readonly truncated: boolean;
 }
 
-// A candidate that exists but was passed over, with the reason, so the session factory can report
+// A candidate that exists but was passed over, with the reason, so the Agent Run factory can report
 // it instead of dropping the file without a word.
 export interface SkippedProjectInstructions {
   readonly path: ProjectInstructionsFile;
   readonly reason: string;
 }
 
-// The same failure shape openAgentSession reports, so the session factory can refuse to open an
-// Agent Session with one exit code for every construction failure.
-export type SystemPromptFailure = Extract<OpenSessionResult, { ok: false }> & {
+// The same failure shape openAgentRun reports, so the Agent Run factory can refuse to open an
+// Agent Run with one exit code for every construction failure.
+export type SystemPromptFailure = Extract<OpenRunResult, { ok: false }> & {
   readonly field: "systemPrompt";
 };
 
@@ -130,7 +130,7 @@ export function discoverProjectInstructions(
 // A candidate counts as found when it is a regular file that the Path Jail lets the read tool
 // open, or a link to one. A missing candidate is passed over silently. A directory, an empty file,
 // or a link that leads nowhere usable is passed over with a note in `skipped`. A file that is found
-// but cannot be read ends discovery with a failure, because the Agent Session could not follow its
+// but cannot be read ends discovery with a failure, because the Agent Run could not follow its
 // conventions.
 export async function discoverProjectInstructionsWith(
   workspace: WorkspaceResolver,
@@ -432,8 +432,8 @@ export interface SystemPromptSources {
   readonly platform: string;
 }
 
-// The one entry point the session factory calls: discovers the Project Instructions and builds the
-// prompt around the registered tools.
+// The one entry point the Agent Run factory calls: discovers the Project Instructions and builds
+// the prompt around the registered tools.
 export async function assembleSystemPrompt({
   workspace,
   tools,
