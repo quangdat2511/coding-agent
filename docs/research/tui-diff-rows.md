@@ -70,8 +70,11 @@ export interface TranscriptRow {
 }
 ```
 
-([rows.ts L4-L10](../../packages/tui/src/rows.ts#L4-L10)). `offset` counts the rows of its entry from 0,
-so an entry id plus an offset names the same text at any terminal width.
+([rows.ts L4-L10](../../packages/tui/src/rows.ts#L4-L10)). `offset` counts the rows of its entry from 0
+after wrapping, so an entry id plus an offset does not name the same characters at every width: for
+entry `0123456789`, offset 1 is `4567` at width 4 and `89` at width 8. On resize the viewport keeps
+the entry and reuses the offset when it is still valid; the text at that offset depends on the
+current width.
 
 `transcriptRows(transcript, columns)` lays out the whole transcript and appends one blank row to every
 entry but the last ([rows.ts L30-L45](../../packages/tui/src/rows.ts#L30-L45)). `layoutEntry` switches on
@@ -156,11 +159,15 @@ What it costs:
    level ([chalk index.js L169](https://github.com/chalk/chalk/blob/v5.6.2/source/index.js#L169)). A raw
    SGR string is emitted whatever the level is, so `NO_COLOR`, `--no-color` and a piped stdout would
    all still print color.
-2. **Every row must close its own styles.** Rows are separate `<Text>` nodes and Ink writes them line by
-   line; a style left open on one row bleeds into every row after it. Pi avoids this because its
-   `Text` wraps one multi-line string and carries ANSI state across lines
+2. **A style opened outside the wrap path needs its own reset.** `wrap-ansi` 10.0.2 closes and reopens
+   SGR at every line break, so a colored run inside one wrapped string is safe (probe: `abcdef` red at
+   width 3 yields `abc` and `def` with separate open/close codes). The risk is a pre-styled source
+   string that the row model then splits into separate `<Text>` rows outside that path: rows are
+   separate `<Text>` nodes, Ink writes them line by line, and a style left open on one row bleeds into
+   the next. Pi avoids this because its `Text` wraps one multi-line string and carries ANSI state
+   across lines
    ([pi-tui `utils.ts` L1037-L1060](https://github.com/earendil-works/pi/blob/8209929fb553e7a8c91dc0894569f9ec43dd201f/packages/tui/src/utils.ts#L1037-L1060));
-   this row model cannot.
+   this row model cannot when it hand-slices a style.
 3. **Tone becomes invisible to tests.** A screen assertion still passes (the characters are the same),
    but the only way to check a diff's colors would be to assert on escape bytes, which depend on the
    environment of the test process.
@@ -211,11 +218,13 @@ settled the direction: "rows carry structured tone data, not ANSI, with a protot
   `widest-line` 6 measures each line with `string-width`
   ([widest-line index.js L1-L10](https://unpkg.com/widest-line@6.0.0/index.js#L1-L10)). Rows are
   pre-wrapped here, so this is normally a no-op guard.
-- **Span wrapping must be measured once.** With tone spans, run the existing `wrapAnsi` on the
-  concatenated plain text and then cut the spans at the same character offsets. Because `trim: false`
-  never drops characters, every wrapped line is a contiguous slice of the input, so the offsets are
-  exact. Wrapping each span separately instead would let a span boundary become a line break and would
-  re-wrap long words twice.
+- **Span wrapping must be measured once, on the NFC-normalized string.** With tone spans, run the
+  existing `wrapAnsi` on the concatenated plain text and cut the spans against the NFC-normalized
+  text that `wrapAnsi` measured, not against the pre-wrap input. `wrap-ansi` normalizes to NFC
+  internally, so its line lengths can differ from the input: `wrap("e\u0301a", 1)` returns
+  `["é", "a"]`, and slicing the original with those lengths yields `["e", "\u0301"]`, losing the
+  `a`. A span boundary inside a combining sequence has the same hazard. Wrapping each span separately
+  instead would let a span boundary become a line break and would re-wrap long words twice.
 
 ---
 
@@ -254,6 +263,12 @@ chalk 5.6.2 vendors `supports-color`; the default instance takes its level from 
 | `CI` set, plus Travis, AppVeyor, GitLab, Buildkite, Drone or CodeShip | 1 | [L122-L125](https://github.com/chalk/chalk/blob/v5.6.2/source/vendor/supports-color/index.js#L122-L125) |
 | `CI` set otherwise | force level, else 0 | [L123](https://github.com/chalk/chalk/blob/v5.6.2/source/vendor/supports-color/index.js#L123) |
 | `COLORTERM=truecolor` | 3 | [L130-L132](https://github.com/chalk/chalk/blob/v5.6.2/source/vendor/supports-color/index.js#L130-L132) |
+
+Measured on macOS with chalk 5.6.2: `CI=1 GITHUB_ACTIONS=1` returns level 3 while stdout is a TTY
+and level 0 when stdout is a pipe; `FORCE_COLOR=1 TERM=xterm-256color` with a TTY can return level 2.
+The checks run in this order: argv `--color` flags, `FORCE_COLOR`, `TERM=dumb`, the stdout TTY
+check, CI vendor detection, then `COLORTERM`. CDA-157's tests should set `FORCE_COLOR` explicitly
+instead of relying on the runner's TTY.
 
 **`NO_COLOR` is not read anywhere in chalk 5.6.2.** The string does not appear in the published
 package, and a direct probe of the vendored detector confirms it: with `TERM=xterm-256color` and a TTY,
@@ -388,7 +403,7 @@ with `PI_TRUE_COLOR`
 | Pi | This repo | Note |
 | :--- | :--- | :--- |
 | `+123 content` display lines | A tool `details` payload carrying the same lines, or structured lines | The TUI must not parse tool JSON itself; CDA-155 decides the transport |
-| Global gutter width | Computed in `tui` from the block's line count | Width-independent, so it can live in `rows.ts` |
+| Global gutter width | Computed in `tui` from the largest line number displayed in the block (a five-line block around 1200 still needs four digits); `...` leaves the number column blank at the same width | Width-independent, so it can live in `rows.ts` |
 | Marker and number colored with the line | One tone per diff row | `added`, `removed`, `context` |
 | Intra-line `inverse` | A second span with an `inverse` flag | Only if the prototype wants it |
 | Tabs to 3 spaces | Tabs to 4 spaces already | Keep one number for the whole path |
@@ -445,11 +460,15 @@ Properties that matter:
     meta: { dimColor: true },
   } as const;
 
+  // One gate turns off color, dimColor and inverse together.
+  const toneProps = (span: RowSpan, colorEnabled: boolean) =>
+    colorEnabled ? { ...(span.tone ? TONE[span.tone] : {}), inverse: span.inverse } : {};
+
   <Text wrap="truncate-end">
     {row.spans.length === 0
       ? " "
       : row.spans.map((span, index) => (
-          <Text key={index} {...(span.tone ? TONE[span.tone] : {})} inverse={span.inverse}>
+          <Text key={index} {...toneProps(span, colorEnabled)}>
             {span.text}
           </Text>
         ))}
@@ -509,9 +528,15 @@ Two cheaper variants are worth naming for CDA-157:
   are untouched by this work ([frame.tsx L9-L41](../../packages/tui/src/frame.tsx#L9-L41)). Group 3
   changes the footer height, and the golden tests adapt through `FOOTER_HEIGHT`
   ([render-tui.test.ts L2-L31](../../packages/tui/tests/render-tui.test.ts#L2-L31),
-  [support/tui.ts L58-L66](../../packages/tui/tests/support/tui.ts#L58-L66)), except `approval.test.ts`,
-  which hard-codes the two footer rows
-  ([L15-L20](../../packages/tui/tests/approval.test.ts#L15-L20)).
+  [support/tui.ts L58-L66](../../packages/tui/tests/support/tui.ts#L58-L66)), except
+  `approval.test.ts`, which hard-codes the two footer rows
+  ([L15-L20](../../packages/tui/tests/approval.test.ts#L15-L20)), and `prompt.test.ts`, which
+  hard-codes `PROMPT_ROW = SCREEN_ROWS - 2` at line 23 and uses it in cursor assertions at lines 71
+  and 80
+  ([prompt.test.ts L23](../../packages/tui/tests/prompt.test.ts#L23),
+  [L71](../../packages/tui/tests/prompt.test.ts#L71),
+  [L80](../../packages/tui/tests/prompt.test.ts#L80)).
+  Group 3 must review both when the footer height changes.
 - **Land the row interface first.** If the footer lands a private color convention before the row model
   exists, the diff work either duplicates it or migrates it. The map says as much: "Group 3 owns TUI
   footer/status work and may also want styled rows, so agree the row interface before landing it"
