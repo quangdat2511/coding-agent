@@ -63,9 +63,10 @@ which error messages the model sees.
   and all three cap the joined text at **50 KB** (`DEFAULT_MAX_BYTES = 50 * 1024`). `grep` also
   truncates each output line to **500** characters.
 - **Notices.** Caps and byte truncation append `\n\n[...]` to the content (the model sees them) and
-  set typed fields on `details` (the TUI reads them). A cap is reported only when something was
-  actually cut off: `grep` waits for proof of one more match, `find` asks fd for `limit + 1`,
-  `ls` checks for one more entry.
+  set typed fields on `details` (the TUI reads them). A cap is reported when Pi has evidence of one
+  more item: `grep` waits for proof of one more match, `find` asks fd for `limit + 1`, and `ls`
+  stops before stat-ing an entry it has not examined — so a broken symlink still raises the ls
+  notice even though it would have been skipped.
 - **Arguments.** `rg`: `--no-config --json --line-number --color=never --hidden`, then
   `--ignore-case`, `--fixed-strings`, `--glob`, `--context`, then `-- <pattern> .` with cwd set
   to the search root. `fd`: `--color=never --hidden`, `--no-require-git` when no `.git` exists at
@@ -214,8 +215,10 @@ src/b.ts
 - Absolute results are relativised with `path.relative(searchPath, resultPath)`; already-relative
   results pass through. Separators are normalised to `/` on every platform.
 - Each stdout line is trimmed before relativisation, so a file named `report.txt ` (with a trailing
-  space) comes back as `report.txt`; fd's output cannot preserve trailing whitespace in a name
-  ([L279-L283](https://github.com/earendil-works/pi/blob/8209929fb553e7a8c91dc0894569f9ec43dd201f/packages/coding-agent/src/core/tools/find.ts#L279-L283)).
+  space) comes back as `report.txt`. fd preserves the trailing space when writing to a pipe on Unix;
+  the loss comes from Pi's `.trim()`, not fd
+  ([fd output.rs L202-L215](https://github.com/sharkdp/fd/blob/v10.5.2/src/output.rs#L202-L215),
+  [Pi find.ts L279-L283](https://github.com/earendil-works/pi/blob/8209929fb553e7a8c91dc0894569f9ec43dd201f/packages/coding-agent/src/core/tools/find.ts#L279-L283)).
 - A trailing separator fd printed is preserved and re-attached after normalisation, so a directory
   result that fd printed as `dir/` stays `dir/`
   ([L19-L23](https://github.com/earendil-works/pi/blob/8209929fb553e7a8c91dc0894569f9ec43dd201f/packages/coding-agent/src/core/tools/find.ts#L19-L23)).
@@ -467,12 +470,16 @@ not use it.)
 
 ### Binary files
 
-`grep` leaves ripgrep in its default binary mode, and the two search shapes behave differently when
-a NUL appears:
-- With a directory search, ripgrep can keep matches it already emitted before it detects the NUL and
-  stops that file; later matches in the file are suppressed.
-- With a direct file path, it can find matches after the NUL, because the binary check follows
-  directory traversal rather than the file's content alone.
+`grep` leaves ripgrep in its default binary mode. ripgrep applies two NUL modes depending on how the
+path arrives:
+- With a directory search, it may emit matches from a file before it detects a NUL and then stop
+  that file; later matches are suppressed.
+- With a direct file path, it can find matches after the NUL, because the check follows directory
+  traversal rather than the file's content alone.
+In `--json` output, the `end` event can carry `binary_offset` when a NUL is found, but Pi's parser
+handles only `match` and `context`, so it never reads that field
+([ripgrep JSON test L891-L917](https://github.com/BurntSushi/ripgrep/blob/14.1.1/crates/printer/src/json.rs#L891-L917),
+[Pi grep.ts L238-L251](https://github.com/earendil-works/pi/blob/8209929fb553e7a8c91dc0894569f9ec43dd201f/packages/coding-agent/src/core/tools/grep.ts#L238-L251)).
 The warning on stderr is not guaranteed; the GUIDE describes the mode, not a per-file warning
 ([GUIDE L735-L758](https://github.com/BurntSushi/ripgrep/blob/14.1.1/GUIDE.md#L735-L758)).
 Pi captures stderr but only uses it when rg exits non-zero, so any binary-suppression warning never
@@ -762,11 +769,12 @@ Sources: [grep](https://github.com/earendil-works/pi/blob/8209929fb553e7a8c91dc0
 
 Two consequences:
 
-- **stderr surfaces only on a failed `grep`, not on a successful one.** For `grep`, Pi reports the
-  child's `stderr.trim()` (when non-empty) or `ripgrep exited with code <n>` whenever rg exits with
-  a code other than 0 or 1 and Pi did not kill it for the match limit, even if the search already
-  produced matches. The "zero results" condition belongs to `find`: fd's non-empty stderr or exit
-  code is reported only when fd returns no results.
+- **stderr surfaces only on a failed search.** For `grep`, Pi reports the child's `stderr.trim()`
+  (when non-empty) or `ripgrep exited with code <n>` whenever rg exits with a code other than 0 or 1
+  and Pi did not kill it for the match limit, even if the search already produced matches. For
+  `find`, both conditions are required: fd must exit non-zero **and** Pi must have read no results.
+  If fd exits 0 with an empty result set, Pi returns success even when stderr has content
+  ([find.ts L300-L319](https://github.com/earendil-works/pi/blob/8209929fb553e7a8c91dc0894569f9ec43dd201f/packages/coding-agent/src/core/tools/find.ts#L300-L319)).
 - **The error message carries no remedy.** It is the child's text or a fixed sentence; there is no
   hint to change `path`, install `rg`, or narrow `glob`.
 
