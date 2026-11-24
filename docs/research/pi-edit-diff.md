@@ -32,8 +32,10 @@ preview and colours, and what the model sees compared with what the UI sees.
 
 - **Contract.** One call takes `path` plus a non-empty `edits` array of `{oldText, newText}`.
   Every `oldText` is matched against the **original** file, never incrementally; each must be
-  unique and edits must not overlap; the whole call either applies or leaves the file untouched
-  ([schema](https://github.com/earendil-works/pi/blob/8209929fb553e7a8c91dc0894569f9ec43dd201f/packages/coding-agent/src/core/tools/edit.ts#L29-L38), [`applyEditsToNormalizedContent`](https://github.com/earendil-works/pi/blob/8209929fb553e7a8c91dc0894569f9ec43dd201f/packages/coding-agent/src/core/tools/edit-diff.ts#L334-L342)).
+  unique and edits must not overlap. Matching and diff failures leave the file untouched because
+  they occur before the write, but Pi checks abort again after `writeFile`, so an abort after the
+  write can still fail the call with the file changed
+  ([schema](https://github.com/earendil-works/pi/blob/8209929fb553e7a8c91dc0894569f9ec43dd201f/packages/coding-agent/src/core/tools/edit.ts#L29-L38), [`execute`](https://github.com/earendil-works/pi/blob/8209929fb553e7a8c91dc0894569f9ec43dd201f/packages/coding-agent/src/core/tools/edit.ts#L154-L214), [`applyEditsToNormalizedContent`](https://github.com/earendil-works/pi/blob/8209929fb553e7a8c91dc0894569f9ec43dd201f/packages/coding-agent/src/core/tools/edit-diff.ts#L334-L342)).
 - **Argument repair.** `prepareArguments` runs before schema validation. It accepts `edits` as a
   JSON string or as a single object, and folds a legacy top-level `oldText`/`newText` pair into the
   array ([legacy tests](https://github.com/earendil-works/pi/blob/8209929fb553e7a8c91dc0894569f9ec43dd201f/packages/coding-agent/test/edit-tool-legacy-input.test.ts#L92-L116), [why](https://github.com/earendil-works/pi/blob/8209929fb553e7a8c91dc0894569f9ec43dd201f/packages/coding-agent/docs/extensions.md#L2318-L2320)).
@@ -61,7 +63,7 @@ preview and colours, and what the model sees compared with what the UI sees.
   `details` = `{diff, patch, firstChangedLine?}` for the UI. `details` is stored in the session
   and passed to `renderResult`; it is not sent to the model ([`EditToolDetails`](https://github.com/earendil-works/pi/blob/8209929fb553e7a8c91dc0894569f9ec43dd201f/packages/coding-agent/src/core/tools/edit.ts#L65-L72),
   [`convertToolResult`](https://github.com/earendil-works/pi/blob/8209929fb553e7a8c91dc0894569f9ec43dd201f/packages/ai/src/api/anthropic-messages.ts#L1603-L1610)).
-- **Renderer.** The TUI previews a diff while the call arguments are still arriving
+- **Renderer.** The TUI starts a diff preview once the call arguments are complete
   (`computeEditsDiff`, when `argsComplete`), then reuses the settled `details.diff` so the preview
   does not redraw; `renderDiff` colours context/removals/additions and inverse-highlights changed
   words when exactly one line is removed and one added ([`renderers/edit.ts`](https://github.com/earendil-works/pi/blob/8209929fb553e7a8c91dc0894569f9ec43dd201f/packages/coding-agent/src/core/tools/renderers/edit.ts#L173-L251),
@@ -137,7 +139,9 @@ shape while the executed call uses the repaired one. `file_path` is never repair
 renderer accepts it as an alias, but the tool schema does not
 ([`getRenderablePreviewInput`](https://github.com/earendil-works/pi/blob/8209929fb553e7a8c91dc0894569f9ec43dd201f/packages/coding-agent/src/core/tools/renderers/edit.ts#L59-L82)).
 
-After repair, a missing or empty `edits` array is rejected inside `execute`:
+After repair, two different failures are possible. If `edits` is missing entirely, the required
+field fails Schema Validation in the agent loop before `execute` runs. If `edits` is present but
+empty (`[]`), the schema accepts the array and `execute` throws
 "Edit tool input is invalid. edits must contain at least one replacement."
 ([`validateEditInput`](https://github.com/earendil-works/pi/blob/8209929fb553e7a8c91dc0894569f9ec43dd201f/packages/coding-agent/src/core/tools/edit.ts#L131-L136), [test](https://github.com/earendil-works/pi/blob/8209929fb553e7a8c91dc0894569f9ec43dd201f/packages/coding-agent/test/tools.test.ts#L447-L457)).
 
@@ -159,18 +163,26 @@ After repair, a missing or empty `edits` array is rejected inside `execute`:
    ([`countOccurrences`](https://github.com/earendil-works/pi/blob/8209929fb553e7a8c91dc0894569f9ec43dd201f/packages/coding-agent/src/core/tools/edit-diff.ts#L371-L374)).
 6. Sort matches by index and reject any pair whose ranges overlap
    ([`overlap check`](https://github.com/earendil-works/pi/blob/8209929fb553e7a8c91dc0894569f9ec43dd201f/packages/coding-agent/src/core/tools/edit-diff.ts#L384-L393)).
-7. Build replacements: exact matches are used as-is; fuzzy matches are widened to whole lines
+7. Build replacements: if any edit used fuzzy matching, **every** replacement is widened to the
+   whole lines it touches in the normalized base, including edits that matched exactly there;
+   otherwise exact matches keep their exact ranges
    ([`widenReplacementsToLines`](https://github.com/earendil-works/pi/blob/8209929fb553e7a8c91dc0894569f9ec43dd201f/packages/coding-agent/src/core/tools/edit-diff.ts#L395-L398)).
-8. Apply replacements in reverse offset order to the LF base; if the result equals the base, throw
-   "no change" ([`applyReplacements`](https://github.com/earendil-works/pi/blob/8209929fb553e7a8c91dc0894569f9ec43dd201f/packages/coding-agent/src/core/tools/edit-diff.ts#L155-L164), [`no change`](https://github.com/earendil-works/pi/blob/8209929fb553e7a8c91dc0894569f9ec43dd201f/packages/coding-agent/src/core/tools/edit-diff.ts#L401-L403)).
+8. Apply replacements in reverse offset order, then compare the result with the original content
+   normalized to LF (not with the fuzzy base); if they are equal, throw "no change"
+   ([`applyReplacements`](https://github.com/earendil-works/pi/blob/8209929fb553e7a8c91dc0894569f9ec43dd201f/packages/coding-agent/src/core/tools/edit-diff.ts#L155-L164), [`no change`](https://github.com/earendil-works/pi/blob/8209929fb553e7a8c91dc0894569f9ec43dd201f/packages/coding-agent/src/core/tools/edit-diff.ts#L401-L403)).
 
 ### Exact, then fuzzy
 
 `fuzzyFindText` returns the exact offset and `oldText.length` when `content.indexOf(oldText)` hits;
 otherwise it searches `normalizeForFuzzyMatch(content).indexOf(normalizeForFuzzyMatch(oldText))` and
 reports `usedFuzzyMatch: true` plus the normalized content for replacement
-([`fuzzyFindText`](https://github.com/earendil-works/pi/blob/8209929fb553e7a8c91dc0894569f9ec43dd201f/packages/coding-agent/src/core/tools/edit-diff.ts#L250-L288)). The exact path is preferred, so a file that contains both
-an exact and a fuzzy-only match uses the exact one ([test](https://github.com/earendil-works/pi/blob/8209929fb553e7a8c91dc0894569f9ec43dd201f/packages/coding-agent/test/tools.test.ts#L1673-L1686)).
+([`fuzzyFindText`](https://github.com/earendil-works/pi/blob/8209929fb553e7a8c91dc0894569f9ec43dd201f/packages/coding-agent/src/core/tools/edit-diff.ts#L250-L288)).
+The exact path only decides the offset: uniqueness is still counted on the normalized text, so a
+file with `‘x’` on one line and `'x'` on another reports two occurrences for a pattern that matches
+`x` in both, even though one line matches exactly
+([`countOccurrences`](https://github.com/earendil-works/pi/blob/8209929fb553e7a8c91dc0894569f9ec43dd201f/packages/coding-agent/src/core/tools/edit-diff.ts#L290-L294)).
+The cited test only covers a single line that matches `oldText`, so it does not exercise this case
+([test](https://github.com/earendil-works/pi/blob/8209929fb553e7a8c91dc0894569f9ec43dd201f/packages/coding-agent/test/tools.test.ts#L1673-L1686)).
 
 `normalizeForFuzzyMatch` applies, in order ([`edit-diff.ts`](https://github.com/earendil-works/pi/blob/8209929fb553e7a8c91dc0894569f9ec43dd201f/packages/coding-agent/src/core/tools/edit-diff.ts#L77-L98)):
 
@@ -239,8 +251,11 @@ Built by four helpers, which pick a single-edit or multi-edit wording
 | duplicate | `Found {n} occurrences of the text in {path}. The text must be unique. Please provide more context to make it unique.` | `Found {n} occurrences of edits[{i}] in {path}. Each oldText must be unique. Please provide more context to make it unique.` |
 | no change | `No changes made to {path}. The replacement produced identical content. This might indicate an issue with special characters or the text not existing as expected.` | `No changes made to {path}. The replacements produced identical content.` |
 | overlap | — | `edits[{i}] and edits[{j}] overlap in {path}. Merge them into one edit or target disjoint regions.` |
-| bad call | `Edit tool input is invalid. edits must contain at least one replacement.` | same |
+| empty `edits` | `Edit tool input is invalid. edits must contain at least one replacement.` | same |
 | file access | `Could not edit file: {path}. {Error code: CODE}` or `... {String(error)}.` | same |
+
+A missing `edits` field never reaches these strings: the required field fails Schema Validation in
+the agent loop before `execute`; only `edits: []` reaches this wording.
 
 The single-edit "not found" wording still says "exact" even though fuzzy matching was attempted, and
 single-edit errors use "old text" where multi-edit errors use `oldText`; these strings are
@@ -249,15 +264,22 @@ each case.
 
 ### Fuzzy widening
 
-A fuzzy match's offsets are in normalized space. Pi then widens each replacement to the whole lines
-it touches in the normalized base, groups replacements whose line ranges touch, rewrites only those
-lines from the normalized base, and leaves every other line alone
-([`widenReplacementsToLines`](https://github.com/earendil-works/pi/blob/8209929fb553e7a8c91dc0894569f9ec43dd201f/packages/coding-agent/src/core/tools/edit-diff.ts#L166-L214)). It refuses to do so if the original and fuzzy
-base disagree on line count ("Cannot preserve unchanged lines because the base content has a
-different line count."), which normalization cannot normally cause because it preserves `\n`
+When at least one edit needed fuzzy matching, the base for the whole call is
+`normalizeForFuzzyMatch(content)`, and Pi widens **every** replacement to the whole lines it touches
+in that base, including edits that matched exactly there. It groups replacements whose line ranges
+touch, rewrites only those lines from the normalized base, and leaves every other line alone
+([`widenReplacementsToLines`](https://github.com/earendil-works/pi/blob/8209929fb553e7a8c91dc0894569f9ec43dd201f/packages/coding-agent/src/core/tools/edit-diff.ts#L166-L214)).
+
+For example, in `a   \nb“c”\n`, an edit `a → A` matches exactly while `b"c" → B` needs fuzzy
+matching. Because one edit needed the fallback, both are widened to lines; the result is
+`A\nB\n`, so the trailing spaces and the smart quotes disappear as well
+([test](https://github.com/earendil-works/pi/blob/8209929fb553e7a8c91dc0894569f9ec43dd201f/packages/coding-agent/test/tools.test.ts#L1743-L1777)).
+
+It refuses to widen if the original and fuzzy base disagree on line count ("Cannot preserve unchanged
+lines because the base content has a different line count."), which normalization cannot normally
+cause because it preserves `\n`
 ([guard](https://github.com/earendil-works/pi/blob/8209929fb553e7a8c91dc0894569f9ec43dd201f/packages/coding-agent/src/core/tools/edit-diff.ts#L183-L185)). The widened replacement's `newText` is built from the normalized
-base, so the diff and the written text agree on everything the edit replaced
-([tests](https://github.com/earendil-works/pi/blob/8209929fb553e7a8c91dc0894569f9ec43dd201f/packages/coding-agent/test/tools.test.ts#L1743-L1777)).
+base, so the diff and the written text agree on everything the edit replaced.
 
 ## 3. File handling
 
@@ -462,9 +484,16 @@ interface EditToolDetails {
 
 ([`EditToolDetails`](https://github.com/earendil-works/pi/blob/8209929fb553e7a8c91dc0894569f9ec43dd201f/packages/coding-agent/src/core/tools/edit.ts#L65-L72)). The value `execute` actually returns is `EditDiff`, which
 has the same three fields with `firstChangedLine: number | undefined`
-([`EditDiff`](https://github.com/earendil-works/pi/blob/8209929fb553e7a8c91dc0894569f9ec43dd201f/packages/coding-agent/src/core/tools/edit-diff.ts#L571-L576), [return](https://github.com/earendil-works/pi/blob/8209929fb553e7a8c91dc0894569f9ec43dd201f/packages/coding-agent/src/core/tools/edit.ts#L204-L212)). Nothing in the coding-agent source
-reads `details.patch` at this commit; its consumers are tests that apply it with `applyPatch` to prove
-the written file equals the diffed file ([`tools.test.ts`](https://github.com/earendil-works/pi/blob/8209929fb553e7a8c91dc0894569f9ec43dd201f/packages/coding-agent/test/tools.test.ts#L1740), [`1776`](https://github.com/earendil-works/pi/blob/8209929fb553e7a8c91dc0894569f9ec43dd201f/packages/coding-agent/test/tools.test.ts#L1776)).
+([`EditDiff`](https://github.com/earendil-works/pi/blob/8209929fb553e7a8c91dc0894569f9ec43dd201f/packages/coding-agent/src/core/tools/edit-diff.ts#L571-L576), [return](https://github.com/earendil-works/pi/blob/8209929fb553e7a8c91dc0894569f9ec43dd201f/packages/coding-agent/src/core/tools/edit.ts#L204-L212)).
+
+The patch and the diff are generated from the **BOM-stripped, LF-normalized** text, not from the
+bytes written back. For a file with a BOM or CRLF, the patch's context and additions assume LF while
+`writeFile` restores the BOM and the original line endings; the mixed-line-endings test applies the
+patch to the LF string and checks the written bytes separately
+([`tools.test.ts`](https://github.com/earendil-works/pi/blob/8209929fb553e7a8c91dc0894569f9ec43dd201f/packages/coding-agent/test/tools.test.ts#L1740), [`1776`](https://github.com/earendil-works/pi/blob/8209929fb553e7a8c91dc0894569f9ec43dd201f/packages/coding-agent/test/tools.test.ts#L1776)).
+Nothing in the coding-agent source reads `details.patch` at this commit; its consumers are those
+tests that apply it with `applyPatch` to prove the diffed LF text matches the written file's
+normalized content.
 
 On success the model-facing `content` is exactly
 `Successfully replaced {edits.length} block(s) in {path}.` — the count is the number of edits, not
@@ -518,10 +547,10 @@ The renderer computes a dry-run diff while the call is being drawn, before execu
 
 When the result settles, `renderResult` feeds `details.diff` into the same preview state
 ([`setEditPreview`](https://github.com/earendil-works/pi/blob/8209929fb553e7a8c91dc0894569f9ec43dd201f/packages/coding-agent/src/core/tools/renderers/edit.ts#L153-L171), [`renderResult`](https://github.com/earendil-works/pi/blob/8209929fb553e7a8c91dc0894569f9ec43dd201f/packages/coding-agent/src/core/tools/renderers/edit.ts#L210-L219)), so a
-successful edit does not redraw and a replayed session (no `argsComplete`, no file) still shows the
-diff ([test](https://github.com/earendil-works/pi/blob/8209929fb553e7a8c91dc0894569f9ec43dd201f/packages/coding-agent/test/edit-tool-no-full-redraw.test.ts#L153-L200)). The result diff is rendered in a separate result region
-only when there is no call component to hold it, for example a replayed transcript; the success
-sentence is not rendered in either case
+successful edit does not redraw ([test](https://github.com/earendil-works/pi/blob/8209929fb553e7a8c91dc0894569f9ec43dd201f/packages/coding-agent/test/edit-tool-no-full-redraw.test.ts#L153-L200)). When a session is
+reopened, Pi rebuilds the tool call frame and attaches the stored result to it, so the diff still
+appears in the call component. The result diff is rendered in a separate result region only when
+there is no call component to hold it; the success sentence is not rendered in either case
 ([`formatEditResult`](https://github.com/earendil-works/pi/blob/8209929fb553e7a8c91dc0894569f9ec43dd201f/packages/coding-agent/src/core/tools/renderers/edit.ts#L87-L114), [test](https://github.com/earendil-works/pi/blob/8209929fb553e7a8c91dc0894569f9ec43dd201f/packages/coding-agent/test/edit-tool-no-full-redraw.test.ts#L80-L151)). On error, the error
 text is shown in red unless it is identical to the preview's error, in which case only the preview
 shows it ([`formatEditResult`](https://github.com/earendil-works/pi/blob/8209929fb553e7a8c91dc0894569f9ec43dd201f/packages/coding-agent/src/core/tools/renderers/edit.ts#L97-L106), [error preview test](https://github.com/earendil-works/pi/blob/8209929fb553e7a8c91dc0894569f9ec43dd201f/packages/coding-agent/test/edit-tool-no-full-redraw.test.ts#L202-L235)).
@@ -580,12 +609,16 @@ The suite pins behaviour that the prose above only summarises:
 
 These are questions, not decisions; each names the current behaviour it would touch.
 
-1. **Where does a diff live in a Tool Outcome?** This repo's `ToolOutcome` carries `content`,
-   `isError`, `error`, and an optional `truncated`, but no details channel
-   (`packages/agent-core/src/tool.ts:27-34`), and `success()`
-   only takes a string (`packages/tools/src/tool-outcome.ts:5-13`). Pi keeps a separate `details`
-   channel that the session and renderer read but the model does not. Does adding a details/metadata
-   channel belong in Agent Core, or should the diff be carried outside the Tool Result?
+1. **Where does a diff live: Tool Outcome or Tool Result?** `ToolOutcome` is the raw value
+   `ExecutableTool.execute` returns: `content`, `isError`, `error`, and an optional `truncated`
+   (`packages/agent-core/src/tool.ts:27-34`); `success()` only takes a string
+   (`packages/tools/src/tool-outcome.ts:5-13`). `ToolResult` is the normalized value Agent Core
+   records, with `toolCallId`, `toolName`, `content`, `isError`, optional `error`, and
+   `metadata: { durationMs, approval?, truncated? }`
+   (`packages/agent-core/src/tool-result.ts:25-40`). Pi keeps a separate `details` channel that the
+   session and renderer read but the model does not. Should `details` start on `ToolOutcome`, on
+   `ToolResult.metadata`, or outside both, and which layers forward it to the TUI? This is the
+   question CDA-155 has to answer.
 2. **Single target versus `edits[]`.** The current schema is `path`, `targetContent`,
    `replacementContent` with `minLength: 1` (`packages/tools/src/edit.ts:17-28`). Adopting
    multi-edit changes the declared shape, the Approval summary (`edit.ts:65-74`), and the success
@@ -617,11 +650,11 @@ These are questions, not decisions; each names the current behaviour it would to
 8. **Display numbering.** Pi numbers context and removed lines from the old file and added lines from
    the new file, so after an insertion the context numbers do not match the new file. Is that quirk
    part of what we want to reproduce, or do we want one consistent numbering?
-9. **Where the diff is shown when there is no preview.** This repo shows the diff after execution
-   only. Pi's renderer suppresses the result-region diff when a preview exists
+9. **Where the diff is shown when there is no preview.** `edit` currently returns a message with the
+   replacement count and bytes written. Which TUI component should display the diff after an edit
+   completes? Pi's renderer suppresses the result-region diff when a preview exists
    (`packages/coding-agent/src/core/tools/renderers/edit.ts:108-111`), so its post-execution path is
-   the one without a call component. Which component owns the diff once execution settles, and does
-   the Approval summary (`prepare`) stay diff-free?
+   the one without a call component. Does the Approval summary (`prepare`) stay diff-free?
 10. **Atomic write versus in-place write.** Pi writes with `writeFile` on the target and computes the
     diff before writing; this repo writes through a temporary file and rename
     (`packages/tools/src/edit.ts:85-89`, `packages/tools/src/atomic-write.ts`). If the diff is
