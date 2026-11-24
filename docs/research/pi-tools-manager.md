@@ -25,13 +25,13 @@ CI or evaluation images must preinstall the binaries, and how the resolved path 
 - **Assets are `<name>-<version>-<target>`.** `fd-v<version>-…` from `sharkdp/fd` and
   `ripgrep-<version>-…` from `BurntSushi/ripgrep`; darwin `.tar.gz`, Linux `unknown-linux-musl`
   `.tar.gz`, Windows `pc-windows-msvc` `.zip`. Only `x64` and `arm64` are mapped.
-- **Downloads are unverified and the retry is narrow.** HTTPS, a 120 s budget and up to three
-  immediate attempts cover only the HTTP response: `fetchWithRetry` returns once headers arrive,
-  while streaming the body to disk runs outside the loop, so a connection dropped mid-body or a
-  write failure ends that install attempt without a retry. There is no checksum, signature, size cap
-  or content-length check. ripgrep publishes a `.sha256` per asset; fd's release-asset metadata
-  carries SHA-256 digests and its release workflow produces provenance attestations, but Pi uses
-  neither.
+- **Downloads are unverified and the retry is narrow.** Up to three immediate attempts cover only
+  the request/response: `fetchWithRetry` returns the `Response` once headers arrive. The body is
+  then streamed to disk outside the retry loop under the same 120 s `AbortSignal`, so the budget can
+  still abort the read after the headers (a `TimeoutError`); neither that nor a write failure
+  triggers a retry, and the install attempt ends. There is no checksum, signature, size cap or
+  content-length check. ripgrep publishes a `.sha256` per asset; fd's release-asset metadata carries
+  SHA-256 digests and its release workflow produces provenance attestations, but Pi uses neither.
 - **Two hard-coded exceptions.** `fd` is pinned to `10.3.0` on darwin/x64 because fd 10.4.2
   dropped `x86_64-apple-darwin`, and Android/Termux is answered with `pkg install fd`/`pkg install
   ripgrep` instead of a download.
@@ -232,8 +232,9 @@ pi now downloads" (CHANGELOG line 182 in [packages/coding-agent/CHANGELOG.md 182
    `pipeline(Readable.fromWeb(response.body), createWriteStream(dest))`
    ([packages/coding-agent/src/utils/tools-manager.ts 129-143](https://github.com/earendil-works/pi/blob/8209929fb553e7a8c91dc0894569f9ec43dd201f/packages/coding-agent/src/utils/tools-manager.ts#L129-L143)).
    `fetchWithRetry` returns once it has a response; the pipeline runs after it, outside the retry
-   loop. A connection that drops mid-body or a write error rejects `downloadFile`, so that install
-   attempt ends and Pi does not request the archive again.
+   loop, but under the same 120 s `AbortSignal`, so the budget can still abort the body read after
+   the headers. A mid-body disconnect, a timeout during the read, or a write error rejects
+   `downloadFile`, so that install attempt ends and Pi does not request the archive again.
 4. Create `extract_tmp_<binary>_<pid>_<Date.now()>_<8 random base36 chars>` inside `TOOLS_DIR`
    because "fd and rg downloads can run concurrently during startup"
    ([packages/coding-agent/src/utils/tools-manager.ts 274-280](https://github.com/earendil-works/pi/blob/8209929fb553e7a8c91dc0894569f9ec43dd201f/packages/coding-agent/src/utils/tools-manager.ts#L274-L280)).
@@ -241,10 +242,10 @@ pi now downloads" (CHANGELOG line 182 in [packages/coding-agent/CHANGELOG.md 182
    ([packages/coding-agent/src/utils/tools-manager.ts 282-289](https://github.com/earendil-works/pi/blob/8209929fb553e7a8c91dc0894569f9ec43dd201f/packages/coding-agent/src/utils/tools-manager.ts#L282-L289)):
    - `.tar.gz` → `tar xzf <archive> -C <dir>`
      ([packages/coding-agent/src/utils/tools-manager.ts 190-195](https://github.com/earendil-works/pi/blob/8209929fb553e7a8c91dc0894569f9ec43dd201f/packages/coding-agent/src/utils/tools-manager.ts#L190-L195)).
-   - `.zip` on Windows → `%SystemRoot%\System32\tar.exe xf <archive> -C <dir>`, then a
-     `powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command` call whose
-     script block runs `Expand-Archive -LiteralPath $archive -DestinationPath $destination -Force`
-     with `$ErrorActionPreference = "Stop"`
+   - `.zip` on Windows → `%SystemRoot%\System32\tar.exe` if present, otherwise `tar.exe` on `PATH`;
+     a `powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command` call
+     with `Expand-Archive -LiteralPath $archive -DestinationPath $destination -Force` and
+     `$ErrorActionPreference = "Stop"` runs only if the chosen tar command fails
      ([packages/coding-agent/src/utils/tools-manager.ts 197-244](https://github.com/earendil-works/pi/blob/8209929fb553e7a8c91dc0894569f9ec43dd201f/packages/coding-agent/src/utils/tools-manager.ts#L197-L244)).
    - `.zip` elsewhere → `unzip -q <archive> -d <dir>`, then `tar xf <archive> -C <dir>`.
    - Anything else → `Unsupported archive format: <assetName>`.
@@ -285,8 +286,9 @@ Edge cases visible in the code:
   ([packages/coding-agent/src/utils/management-http.ts 3](https://github.com/earendil-works/pi/blob/8209929fb553e7a8c91dc0894569f9ec43dd201f/packages/coding-agent/src/utils/management-http.ts#L3)).
 - Retries are immediate — no backoff, no jitter, no `Retry-After` handling.
 - `timeoutMs` is one `AbortSignal.timeout` created **before** the loop, so it is an overall budget
-  shared by every attempt; `attemptTimeoutMs` would be per-attempt, and `tools-manager` does not use
-  it. A hung connection can therefore consume the full budget
+  shared by every attempt and by the body read after `fetchWithRetry` returns; `attemptTimeoutMs`
+  would be per-attempt, and `tools-manager` does not use it. A hung connection can therefore consume
+  the full budget, and the same signal can abort the read after the headers
   ([packages/coding-agent/src/utils/management-http.ts 38-50](https://github.com/earendil-works/pi/blob/8209929fb553e7a8c91dc0894569f9ec43dd201f/packages/coding-agent/src/utils/management-http.ts#L38-L50)).
 - Caller cancellation and the overall timeout are terminal; transport failures and transient statuses
   are retried.
