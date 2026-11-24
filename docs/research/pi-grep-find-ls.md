@@ -213,6 +213,9 @@ src/b.ts
 
 - Absolute results are relativised with `path.relative(searchPath, resultPath)`; already-relative
   results pass through. Separators are normalised to `/` on every platform.
+- Each stdout line is trimmed before relativisation, so a file named `report.txt ` (with a trailing
+  space) comes back as `report.txt`; fd's output cannot preserve trailing whitespace in a name
+  ([L279-L283](https://github.com/earendil-works/pi/blob/8209929fb553e7a8c91dc0894569f9ec43dd201f/packages/coding-agent/src/core/tools/find.ts#L279-L283)).
 - A trailing separator fd printed is preserved and re-attached after normalisation, so a directory
   result that fd printed as `dir/` stays `dir/`
   ([L19-L23](https://github.com/earendil-works/pi/blob/8209929fb553e7a8c91dc0894569f9ec43dd201f/packages/coding-agent/src/core/tools/find.ts#L19-L23)).
@@ -290,8 +293,10 @@ are floored (`1.9` → 1). Tests pin this for `find` and `ls`
 
 ### How each cap is proven, not guessed
 
-A limit notice is only emitted when there is evidence of one more item, so "exactly N" never looks
-truncated.
+A limit notice is emitted only when Pi has evidence of at least one more item. For `grep` and
+`find` that evidence is a received or counted item, so "exactly N" never looks truncated; for `ls`
+it is an entry Pi has not stat-ed yet, so the notice means one entry was left unexamined, not that
+it would have been listable.
 
 - **`grep`** counts matches as events arrive. The Nth match sets `limitHit`; Pi keeps reading the
   same match's trailing context (up to `lineNumber + context`), prints any match that falls inside
@@ -308,9 +313,11 @@ truncated.
   In the Windows path-pattern branch there is no `--max-results`, so Pi counts results itself and
   stops the child at the first result past the limit
   ([L283-L288](https://github.com/earendil-works/pi/blob/8209929fb553e7a8c91dc0894569f9ec43dd201f/packages/coding-agent/src/core/tools/find.ts#L283-L288)).
-- **`ls`** iterates the sorted entries and checks `results.length >= effectiveLimit` before adding
-  the next one, setting `entryLimitReached` only if an entry remains
-  ([L111-L118](https://github.com/earendil-works/pi/blob/8209929fb553e7a8c91dc0894569f9ec43dd201f/packages/coding-agent/src/core/tools/ls.ts#L111-L118)).
+- **`ls`** iterates the sorted entries and checks `results.length >= effectiveLimit` before
+  stat-ing the next one, setting `entryLimitReached` and stopping. With `limit: 1`, a valid entry
+  followed by a broken symlink still sets the flag even though the symlink would have been skipped;
+  the notice confirms an entry remains, not that it is listable
+  ([L111-L129](https://github.com/earendil-works/pi/blob/8209929fb553e7a8c91dc0894569f9ec43dd201f/packages/coding-agent/src/core/tools/ls.ts#L111-L129)).
 
 ### Byte cap
 
@@ -460,12 +467,16 @@ not use it.)
 
 ### Binary files
 
-`grep` leaves ripgrep in its default binary mode. When a NUL byte is found, ripgrep stops that file
-and suppresses its matches, emitting a warning on stderr
-([rg docs](https://github.com/BurntSushi/ripgrep/blob/4649aa9700619f94cf9c66876e9549d83420e16c/crates/core/flags/defs.rs#L440-L480),
-[GUIDE](https://github.com/BurntSushi/ripgrep/blob/4649aa9700619f94cf9c66876e9549d83420e16c/GUIDE.md#L191-L200)).
-Pi captures stderr but only uses it when rg exits non-zero, so binary-suppression warnings never
-reach the model on a successful search
+`grep` leaves ripgrep in its default binary mode, and the two search shapes behave differently when
+a NUL appears:
+- With a directory search, ripgrep can keep matches it already emitted before it detects the NUL and
+  stops that file; later matches in the file are suppressed.
+- With a direct file path, it can find matches after the NUL, because the binary check follows
+  directory traversal rather than the file's content alone.
+The warning on stderr is not guaranteed; the GUIDE describes the mode, not a per-file warning
+([GUIDE L735-L758](https://github.com/BurntSushi/ripgrep/blob/14.1.1/GUIDE.md#L735-L758)).
+Pi captures stderr but only uses it when rg exits non-zero, so any binary-suppression warning never
+reaches the model on a successful search
 ([L274-L284](https://github.com/earendil-works/pi/blob/8209929fb553e7a8c91dc0894569f9ec43dd201f/packages/coding-agent/src/core/tools/grep.ts#L274-L284)).
 `find` and `ls` only handle names and never read file contents.
 
@@ -751,8 +762,11 @@ Sources: [grep](https://github.com/earendil-works/pi/blob/8209929fb553e7a8c91dc0
 
 Two consequences:
 
-- **stderr is invisible on success.** Binary-file warnings, permission warnings and other
-  ripgrep/fd diagnostics never reach the model unless the child exits non-zero with no results.
+- **stderr surfaces only on a failed `grep`, not on a successful one.** For `grep`, Pi reports the
+  child's `stderr.trim()` (when non-empty) or `ripgrep exited with code <n>` whenever rg exits with
+  a code other than 0 or 1 and Pi did not kill it for the match limit, even if the search already
+  produced matches. The "zero results" condition belongs to `find`: fd's non-empty stderr or exit
+  code is reported only when fd returns no results.
 - **The error message carries no remedy.** It is the child's text or a fixed sentence; there is no
   hint to change `path`, install `rg`, or narrow `glob`.
 
@@ -797,14 +811,17 @@ Two consequences:
 
 These are decisions this note cannot make. Each names Pi's precedent and where the answer would live.
 
-1. **Budgets and notices.** Pi caps joined output at 50 KiB and appends a `[...]` notice to the
-   content; only `grep` has a per-line rule (500 UTF-16 units). This repo uses 40 KiB and a
-   `[...output truncated...]` marker for every tool (`packages/tools/src/output-budget.ts` L3-L9,
-   L21-L35). Does the 40 KiB budget apply here, and do Pi's notices survive beside the marker?
+1. **Budgets and notices.** This repo's current limit is 40 KiB for every tool, inclusive of the
+   `[...output truncated...]` marker
+   ([ADR 0001 §3, amendment L145-L149](../../docs/adr/0001-tool-contracts-and-safety-policy.md#L145-L149);
+   `packages/tools/src/output-budget.ts` L3-L9, L21-L35). Pi caps joined output at 50 KiB and appends
+   a `[...]` notice to the content; only `grep` has a per-line rule (500 UTF-16 units). How should
+   Pi-style notices fit inside the 40 KiB budget?
 2. **Root bounding.** Pi accepts any absolute path or `..` (`docs/security.md` L19). This repo's
    `WorkspaceResolver` jails inputs to the canonical root and refuses symlinks
-   (`packages/tools/src/workspace.ts` L70-L102). What happens to an escaping `path`, and how is the
-   bound enforced when `rg`/`fd` are handed a directory rather than per-file opens?
+   (`packages/tools/src/workspace.ts` L70-L102), so an escaping `path` must fail with
+   `PATH_OUTSIDE_REPO` (ADR 0001 §2). The open question is how the bound is enforced while
+   `rg`/`fd` traverse a directory rather than per-file opens.
 3. **Required binaries.** Pi downloads `rg`/`fd` on first use and has a distinct error per failure
    (`tools-manager.ts` L337-L397). If this repo requires them, what floor is promised (Pi's Windows
    workaround exists because fd <10.5.1 is broken, `find.ts` L219-L233), how are they found on
@@ -816,8 +833,11 @@ These are decisions this note cannot make. Each names Pi's precedent and where t
    honours `.gitignore` only inside a repo while `find` honours it everywhere. Should this repo add
    `--glob '!.git/**'` (and the fd equivalent), and should both tools agree on `--no-require-git`?
 6. **Output and details shape.** Does this repo copy `path:line: text` / `path-line- text` (ambiguous
-   for paths containing `:` or `-`)? And does it adopt Pi's per-tool details
-   (`matchLimitReached`, `truncation`, ...) or the shared `packages/tools/src/tool-outcome.ts`?
+   for paths containing `:` or `-`)? Pi also carries per-tool metadata (`matchLimitReached`,
+   `truncation`, ...) in `details`; putting that metadata into `ToolOutcome` would extend the shared
+   contract between Tools and Agent Core
+   ([ADR 0004](../../docs/adr/0004-package-apis-and-dependency-direction.md#L316-L328)), so it
+   needs its own decision rather than riding along with the output format.
 7. **Empty success vs error.** Pi returns `No matches found`, `No files found matching pattern` and
    `(empty directory)` as successful text, reserving errors for missing paths and process failures;
    this repo's `read` errors on a missing file. Which convention do the three read-only tools follow?
@@ -849,8 +869,9 @@ Pi, pinned at `8209929fb553e7a8c91dc0894569f9ec43dd201f`:
 - [`docs/settings.md`](https://github.com/earendil-works/pi/blob/8209929fb553e7a8c91dc0894569f9ec43dd201f/packages/coding-agent/docs/settings.md)
 - [`docs/security.md`](https://github.com/earendil-works/pi/blob/8209929fb553e7a8c91dc0894569f9ec43dd201f/packages/coding-agent/docs/security.md)
 
-ripgrep, pinned at 14.1.1 (`4649aa9700619f94cf9c66876e9549d83420e16c`) — the version current at
-this snapshot; Pi runs whichever version `ensureTool` finds:
+ripgrep, pinned at 14.1.1 (`4649aa9700619f94cf9c66876e9549d83420e16c`) as the source for the cited
+semantics; 15.2.0 was released before this snapshot, and Pi runs whichever version `ensureTool`
+finds:
 
 - [`crates/core/flags/defs.rs`](https://github.com/BurntSushi/ripgrep/blob/4649aa9700619f94cf9c66876e9549d83420e16c/crates/core/flags/defs.rs)
 - [`GUIDE.md`](https://github.com/BurntSushi/ripgrep/blob/4649aa9700619f94cf9c66876e9549d83420e16c/GUIDE.md)
