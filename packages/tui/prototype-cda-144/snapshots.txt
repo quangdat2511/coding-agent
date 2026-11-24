@@ -84,7 +84,7 @@
 
 === Run active, 2 Steers and 2 Follow-ups waiting · variant D (Framed) · ::running ===
    PROTOTYPE CDA-144 · D Framed · macOS/Linux keys · run turn 1/4 · time paused (::play) · Tab va…
-  ╭─ add rate limiting to /api/login · ~/shop ──────────────────────────── ⠇ running · turn 1/4 ─╮
+  ╭─ add rate limiting to /api/login · ~/shop ──────────────────────────── ⠦ running · turn 1/4 ─╮
 . │                                                                                              │
   │ verification [succeeded]                                                                     │
 . │                                                                                              │
@@ -196,7 +196,7 @@
 
 === Queue selection mode, entered from the Prompt · variant D (Framed) · ::running ===
    PROTOTYPE CDA-144 · D Framed · macOS/Linux keys · run turn 1/4 · time paused (::play) · Tab va…
-  ╭─ add rate limiting to /api/login · ~/shop ──────────────────────────── ⠏ running · turn 1/4 ─╮
+  ╭─ add rate limiting to /api/login · ~/shop ──────────────────────────── ⠧ running · turn 1/4 ─╮
 . │                                                                                              │
   │ verification [succeeded]                                                                     │
 . │                                                                                              │
@@ -220,7 +220,7 @@
 # │ NEXT  update the API section of the README                                                   │
 . ├──────────────────────────────────────────────────────────────────────────────────────────────┤
 . │ ›                                                                                            │
-. ╰─ ⏎ send now · e edit · d delete · ↑↓ move · esc back · ^C cancel run ───── 2 steer · 2 next ─╯
+. ╰─ ⏎ send now · e edit · d delete · ↑↓ move · esc back · ⌃C cancel run ───── 2 steer · 2 next ─╯
 
 === Send now on the second Follow-up during a run (after the key) · variant A (Rows) · ::sendnow ===
    PROTOTYPE CDA-144 · A Rows · macOS/Linux keys · run turn 1/4 · time paused (::play) · Tab vari…
@@ -308,7 +308,7 @@
 
 === Send now on the second Follow-up during a run (after the key) · variant D (Framed) · ::sendnow ===
    PROTOTYPE CDA-144 · D Framed · macOS/Linux keys · run turn 1/4 · time paused (::play) · Tab va…
-  ╭─ add rate limiting to /api/login · ~/shop ──────────────────────────── ⠋ running · turn 1/4 ─╮
+  ╭─ add rate limiting to /api/login · ~/shop ──────────────────────────── ⠇ running · turn 1/4 ─╮
 . │                                                                                              │
   │ verification [succeeded]                                                                     │
 . │                                                                                              │
@@ -420,7 +420,7 @@
 
 === The first Follow-up in edit while the run goes on · variant D (Framed) · ::editing ===
    PROTOTYPE CDA-144 · D Framed · macOS/Linux keys · run turn 1/4 · time paused (::play) · Tab va…
-  ╭─ add rate limiting to /api/login · ~/shop ──────────────────────────── ⠙ running · turn 1/4 ─╮
+  ╭─ add rate limiting to /api/login · ~/shop ──────────────────────────── ⠏ running · turn 1/4 ─╮
 . │                                                                                              │
   │ verification [succeeded]                                                                     │
 . │                                                                                              │
@@ -556,7 +556,7 @@
   │ WAIT  add tests for the per-route limits                                                     │
 . ├──────────────────────────────────────────────────────────────────────────────────────────────┤
   │ ›                                                                                            │
-. ╰─ ⏎ run · ⇧↑ queue · ^R resume · ^N new · esc esc quit ──────────────────── 0 steer · 2 next ─╯
+. ╰─ ⏎ run · ⇧↑ queue · ⌃R resume · ⌃N new · esc esc quit ──────────────────── 0 steer · 2 next ─╯
 
 === After Esc cancelled the run · variant A (Rows) · ::cancelled ===
    PROTOTYPE CDA-144 · A Rows · macOS/Linux keys · no run · time paused (::play) · Tab variant · …
@@ -668,7 +668,7 @@
   │ WAIT  update the API section of the README                                                   │
 . ├──────────────────────────────────────────────────────────────────────────────────────────────┤
   │ ›                                                                                            │
-. ╰─ ⏎ run · ⇧↑ queue · ^R resume · ^N new · esc esc quit ──────────────────── 0 steer · 4 next ─╯
+. ╰─ ⏎ run · ⇧↑ queue · ⌃R resume · ⌃N new · esc esc quit ──────────────────── 0 steer · 4 next ─╯
 
 === Nine items, selection mode · variant A (Rows) · ::long ===
    PROTOTYPE CDA-144 · A Rows · macOS/Linux keys · run turn 1/4 · time paused (::play) · Tab vari…
@@ -756,7 +756,7 @@
 
 === Nine items, selection mode · variant D (Framed) · ::long ===
    PROTOTYPE CDA-144 · D Framed · macOS/Linux keys · run turn 1/4 · time paused (::play) · Tab va…
-  ╭─ add rate limiting to /api/login · ~/shop ──────────────────────────── ⠸ running · turn 1/4 ─╮
+  ╭─ add rate limiting to /api/login · ~/shop ──────────────────────────── ⠙ running · turn 1/4 ─╮
   │ assistant [completed]                                                                        │
   │ Done.                                                                                        │
 . │                                                                                              │
@@ -780,7 +780,7 @@
 # │ NEXT  open a draft PR                                                                        │
 . ├──────────────────────────────────────────────────────────────────────────────────────────────┤
 . │ ›                                                                                            │
-. ╰─ ⏎ send now · e edit · d delete · ↑↓ move · esc back · ^C cancel run ───── 3 steer · 7 next ─╯
+. ╰─ ⏎ send now · e edit · d delete · ↑↓ move · esc back · ⌃C cancel run ───── 3 steer · 7 next ─╯
 
 === Resume list · variant A (Rows) · ::picker ===
    PROTOTYPE CDA-144 · A Rows · macOS/Linux keys · no run · time paused (::play) · Tab variant · …
@@ -1340,7 +1340,7 @@
   │ Another Coding Agent is running in ~/shop (PID 4242, Session "fix login redirect loop").     │
 . ├──────────────────────────────────────────────────────────────────────────────────────────────┤
   │ ›                                                                                            │
-. ╰─ ⏎ run · ^R resume · ^N new · esc esc quit ─────────────────────────────── 0 steer · 0 next ─╯
+. ╰─ ⏎ run · ⇧↑ queue · ⌃R resume · ⌃N new · esc esc quit ──────────────────── 0 steer · 0 next ─╯
 
 === Startup notice: a new worktree · variant A (Rows) · ::worktree ===
    PROTOTYPE CDA-144 · A Rows · macOS/Linux keys · no run · time paused (::play) · Tab variant · …
@@ -1452,4 +1452,4 @@
   │   Copied from .worktreeinclude: .env, .env.local                                             │
 . ├──────────────────────────────────────────────────────────────────────────────────────────────┤
   │ ›                                                                                            │
-. ╰─ ⏎ run · ^R resume · ^N new · esc esc quit ─────────────────────────────── 0 steer · 0 next ─╯
+. ╰─ ⏎ run · ⇧↑ queue · ⌃R resume · ⌃N new · esc esc quit ──────────────────── 0 steer · 0 next ─╯

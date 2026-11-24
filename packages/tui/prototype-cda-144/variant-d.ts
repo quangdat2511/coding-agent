@@ -44,7 +44,7 @@ export function keyLabel(text: string, symbols: boolean): string {
     .replace(/Alt\+Enter/g, "⌥⏎")
     .replace(/Shift\+Up/g, "⇧↑")
     .replace(/Alt\+Up/g, "⌥↑")
-    .replace(/Ctrl\+([A-Z])/g, "^$1")
+    .replace(/Ctrl\+([A-Z])/g, "⌃$1")
     .replace(/Up\/Down/g, "↑↓")
     .replace(/Enter/g, "⏎")
     .replace(/Esc/g, "esc");
@@ -55,7 +55,7 @@ function followUpKey(platform: Platform) {
 }
 
 export function hintD(ui: Ui, host: FakeCodingAgent): string {
-  const queued = host.items().length > 0 ? " · Shift+Up queue" : "";
+  const queued = " · Shift+Up queue";
   let text: string;
   switch (ui.mode) {
     case "picker":
