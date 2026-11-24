@@ -25,18 +25,22 @@ CI or evaluation images must preinstall the binaries, and how the resolved path 
 - **Assets are `<name>-<version>-<target>`.** `fd-v<version>-…` from `sharkdp/fd` and
   `ripgrep-<version>-…` from `BurntSushi/ripgrep`; darwin `.tar.gz`, Linux `unknown-linux-musl`
   `.tar.gz`, Windows `pc-windows-msvc` `.zip`. Only `x64` and `arm64` are mapped.
-- **Downloads are unverified.** HTTPS, a 120 s budget shared by up to three immediate attempts, and
-  no checksum, signature, size cap or content-length check. ripgrep publishes a `.sha256` per
-  asset and fd does not; Pi fetches neither.
+- **Downloads are unverified and the retry is narrow.** HTTPS, a 120 s budget and up to three
+  immediate attempts cover only the HTTP response: `fetchWithRetry` returns once headers arrive,
+  while streaming the body to disk runs outside the loop, so a connection dropped mid-body or a
+  write failure ends that install attempt without a retry. There is no checksum, signature, size cap
+  or content-length check. ripgrep publishes a `.sha256` per asset; fd's release-asset metadata
+  carries SHA-256 digests and its release workflow produces provenance attestations, but Pi uses
+  neither.
 - **Two hard-coded exceptions.** `fd` is pinned to `10.3.0` on darwin/x64 because fd 10.4.2
   dropped `x86_64-apple-darwin`, and Android/Termux is answered with `pkg install fd`/`pkg install
   ripgrep` instead of a download.
 - **Failure is soft.** `ensureTool` returns `undefined` after a `warning` status that joins the
   error cause chain (depth 5); the `grep` and `find` tools then reject with a fixed message.
-- **Extraction shells out.** `tar xzf` on Unix, and on Windows `%SystemRoot%\System32\tar.exe`
-  (bsdtar) with a PowerShell `Expand-Archive` fallback; `unzip` then `tar` on Unix for zips.
-  The binary is `chmod 0755` on Unix, `rename`d into place, and the archive and temp directory
-  are removed in a `finally`.
+- **Extraction shells out.** `tar xzf` on Unix; on Windows `%SystemRoot%\System32\tar.exe`
+  (bsdtar), then `tar.exe` on `PATH`, and only if the chosen tar fails PowerShell
+  `Expand-Archive`; `unzip` then `tar` on Unix for zips. The binary is `chmod 0755` on Unix,
+  `rename`d into place, and the archive and temp directory are removed in a `finally`.
 - **Pi's coding-agent CI preinstalls on Ubuntu only.** `ci.yml`'s test jobs are all
   `ubuntu-latest` and `apt-get install` `fd-find ripgrep` with a `fdfind → fd` symlink. Pi's
   Windows runners belong to `packages/env` tests and release-binary smoke tests, so the `.exe`,
@@ -227,6 +231,9 @@ pi now downloads" (CHANGELOG line 182 in [packages/coding-agent/CHANGELOG.md 182
    `No response body`; the body is piped with
    `pipeline(Readable.fromWeb(response.body), createWriteStream(dest))`
    ([packages/coding-agent/src/utils/tools-manager.ts 129-143](https://github.com/earendil-works/pi/blob/8209929fb553e7a8c91dc0894569f9ec43dd201f/packages/coding-agent/src/utils/tools-manager.ts#L129-L143)).
+   `fetchWithRetry` returns once it has a response; the pipeline runs after it, outside the retry
+   loop. A connection that drops mid-body or a write error rejects `downloadFile`, so that install
+   attempt ends and Pi does not request the archive again.
 4. Create `extract_tmp_<binary>_<pid>_<Date.now()>_<8 random base36 chars>` inside `TOOLS_DIR`
    because "fd and rg downloads can run concurrently during startup"
    ([packages/coding-agent/src/utils/tools-manager.ts 274-280](https://github.com/earendil-works/pi/blob/8209929fb553e7a8c91dc0894569f9ec43dd201f/packages/coding-agent/src/utils/tools-manager.ts#L274-L280)).
@@ -338,8 +345,12 @@ warning into the chat instead (`Warning: ` prefix, warning colour) through
 - **No integrity verification.** `tools-manager.ts` contains no `sha256`, `checksum` or
   `signature` reference (the strings do not appear in the file). ripgrep's releases publish a
   `<asset>.sha256` beside every archive — the 16.0.0 listing includes
-  `ripgrep-16.0.0-x86_64-pc-windows-msvc.zip.sha256` — and fd's releases publish none. Pi fetches
-  neither, so integrity rests on TLS and GitHub's storage.
+  `ripgrep-16.0.0-x86_64-pc-windows-msvc.zip.sha256`. fd has no sibling `.sha256` file, but each
+  release asset's metadata carries a SHA-256 digest and the release workflow produces provenance
+  attestations for the archives
+  ([fd v10.5.2 assets](https://github.com/sharkdp/fd/releases/expanded_assets/v10.5.2),
+  [CICD workflow L271-L285](https://github.com/sharkdp/fd/blob/v10.5.2/.github/workflows/CICD.yml#L271-L285)).
+  Pi fetches none of these, so integrity rests on TLS and GitHub's storage.
 - **Redirects.** The version request uses `redirect: "manual"` and reads `Location` itself; the
   archive download uses default redirect handling, so it follows GitHub's redirect to its asset
   host. Neither checks the final host of the download.
@@ -359,7 +370,8 @@ warning into the chat instead (`Warning: ` prefix, warning colour) through
   archive request carries whatever the runtime's fetch sends by default — no `pi` identity and no
   authentication, so any GitHub-side limit applies per IP.
 - **No resume, no conditional request, no caching headers.** A dropped download restarts from zero
-  on the next attempt or launch.
+  on the next launch. Within one install, the body stream is outside `fetchWithRetry`, so a
+  mid-body disconnect or a write error ends that attempt without a retry.
 
 ### 8. Windows specifics
 
@@ -370,8 +382,9 @@ warning into the chat instead (`Warning: ` prefix, warning colour) through
 - Windows assets are `pc-windows-msvc` `.zip` (arm64 and x64) (§4).
 - Extraction prefers `%SystemRoot%\System32\tar.exe` because Windows ships bsdtar, "which supports
   zip files. Prefer the System32 binary over Git Bash's GNU tar, which does not handle zip
-  archives"; if that fails it falls back to PowerShell `Expand-Archive … -Force`
-  ([packages/coding-agent/src/utils/tools-manager.ts 197-232](https://github.com/earendil-works/pi/blob/8209929fb553e7a8c91dc0894569f9ec43dd201f/packages/coding-agent/src/utils/tools-manager.ts#L197-L232)). This replaced `unzip`,
+  archives". If System32 `tar.exe` is missing, Pi tries `tar.exe` on `PATH`; PowerShell
+  `Expand-Archive … -Force` runs only if the chosen tar command fails
+  ([packages/coding-agent/src/utils/tools-manager.ts 197-220](https://github.com/earendil-works/pi/blob/8209929fb553e7a8c91dc0894569f9ec43dd201f/packages/coding-agent/src/utils/tools-manager.ts#L197-L220)). This replaced `unzip`,
   which Windows does not ship
   ([82caf064](https://github.com/earendil-works/pi/commit/82caf064e0eed2a848ede1f51f16a6f96483034b)).
 - No `chmod` runs on Windows ([packages/coding-agent/src/utils/tools-manager.ts 308-311](https://github.com/earendil-works/pi/blob/8209929fb553e7a8c91dc0894569f9ec43dd201f/packages/coding-agent/src/utils/tools-manager.ts#L308-L311)).
@@ -458,7 +471,11 @@ tool behaviour. The download path itself has no end-to-end test.
 The compiled evaluation binary is built for `bun-linux-x64-baseline`/`bun-linux-arm64` and runs
 inside the task container (`docs/adr/0005-terminalbench-evaluation-protocol.md:301-314`,
 `:404-410`), so a Pi-style downloader would be the only source of `rg`/`fd` in a trial unless the
-adapter or the task image provides them.
+adapter or the task image provides them. If trials do not download, the container must ship `rg` and
+`fd`/`fdfind` for its architecture in a location the agent searches. Installing them through the
+adapter would amend ADR 0005 §6, which today guarantees only `bash`
+([§6](https://github.com/quangdat2511/coding-agent/blob/adb7a73/docs/adr/0005-terminalbench-evaluation-protocol.md#L436-L445));
+the concrete provisioning choice belongs to CDA-160.
 
 ## Open questions for this repo
 
@@ -472,9 +489,10 @@ adapter or the task image provides them.
 3. **Pin or track latest?** Pi's "latest at first download, never updated" produces stale, silently
    different versions across machines, and its one pin exists because upstream dropped a target.
    Should this repository record versions in a lockfile, pin per platform, or check for updates?
-4. **Do we need integrity checks?** ripgrep publishes `.sha256` per asset; fd publishes none. A
-   checksum requirement therefore means either a maintained manifest (versions + hashes per
-   platform) or vendored binaries.
+4. **Do we need integrity checks?** ripgrep publishes `.sha256` per asset; fd's release-asset
+   metadata carries SHA-256 digests and its release workflow produces provenance attestations,
+   though there is no sibling `.sha256` file. Options are a maintained manifest (versions + hashes
+   per platform), verifying fd's asset metadata or attestation, or vendored binaries; Pi uses none.
 5. **Concurrency.** Should two sessions downloading at once share one lock and one archive path, or
    is Pi's per-process temp directory plus shared archive path acceptable?
 6. **Windows CI.** Pi's coding-agent suite does not run on Windows. This repository does; will
@@ -527,11 +545,13 @@ Deliberately out of scope for the subset: update checking, checksums, locking, p
 
 - **Cache directory and permissions.** `<repo-local>`, `$XDG_CACHE_HOME`, or a new per-user
   `coding-agent` directory; `0700` or default umask; whether evaluation containers get a writable
-  copy or must find the binaries preinstalled.
+  copy or must find the binaries preinstalled. A preinstalled path means `rg` and `fd`/`fdfind` for
+  the container's architecture where the agent searches; providing them through the adapter would
+  amend ADR 0005 §6, and the choice is CDA-160's.
 - **Pinning.** Always latest, latest with per-platform fallbacks (Pi's fd/macOS pin), or a
   committed manifest of exact versions and hashes.
-- **Checksums.** Require them (and then solve fd, which publishes none), accept TLS-only as Pi
-  does, or vendor the binaries.
+- **Checksums.** Require them (ripgrep's `.sha256`, fd's asset metadata or provenance attestation),
+  accept TLS-only as Pi does, or vendor the binaries.
 - **Concurrency and atomicity.** A lock file, a per-process archive name, or Pi's shared archive
   path.
 - **Failure surface.** Warnings on a status channel, a tool error code, or a setup command that
