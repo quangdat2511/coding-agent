@@ -49,3 +49,9 @@ The person's own ending of the Full-screen TUI, made while no run is active by p
 key twice: Esc or Ctrl+C at the Prompt, Ctrl+C in a mode. The first press asks for confirmation and
 gives the number of waiting Follow-ups it discards. A signal is not a Quit.
 _Avoid_: Exit, close, abort, cancel
+
+**Run Usage**:
+The tokens and cost of every Model Turn since the Full-screen TUI started, summed across all the
+Agent Sessions it has run. Its cost is unknown, not zero, once a Model Turn used tokens without a
+known Usage Cost.
+_Avoid_: Session usage, session cost
