@@ -1,0 +1,1091 @@
+=== Run active, 2 Steers and 2 Follow-ups waiting · variant A (Rows) · ::running ===
+   PROTOTYPE CDA-144 · A Rows · macOS/Linux keys · run turn 1/4 · time paused (::play) · Tab vari…
+  
+  bash bun test [succeeded]
+    14 pass, 0 fail
+  
+  verification [succeeded]
+  
+  assistant [completed]
+  Done.
+  
+  session [succeeded]
+    workspace changed
+  
+  > use a sliding window instead of a fixed one
+  
+  assistant [completed]
+  Reading the handler first.
+  
+  read src/api/login.ts [succeeded]
+    export async function login(req: Request) {
+. Steering: reuse the existing redis client, not a new connection                                 
+. Steering: keep the 429 message short                                                            
+. Follow-up: add tests for the limiter, including the window edge                                 
+. Follow-up: update the API section of the README                                                 
+  >
+. Enter steer · Alt+Enter follow-up · Up queue · Esc cancel run · Shift+Enter/Ctrl+J new line     
+
+=== Run active, 2 Steers and 2 Follow-ups waiting · variant B (Summary + panel) · ::running ===
+   PROTOTYPE CDA-144 · B Summary + panel · macOS/Linux keys · run turn 1/4 · time paused (::play)…
+  edit src/api/login.ts (+12 -2) [succeeded]
+    applied 1 edit
+  
+  bash bun test [succeeded]
+    14 pass, 0 fail
+  
+  verification [succeeded]
+  
+  assistant [completed]
+  Done.
+  
+  session [succeeded]
+    workspace changed
+  
+  > use a sliding window instead of a fixed one
+  
+  assistant [completed]
+  Reading the handler first.
+  
+  read src/api/login.ts [succeeded]
+    export async function login(req: Request) {
+. Steering (2): reuse the existing redis client, not a new connection  (+1)                       
+. Follow-ups (2): add tests for the limiter, including the window edge  (+1)                      
+  >
+. Enter steer · Alt+Enter follow-up · Shift+Up queue · Esc cancel run · Shift+Enter/Ctrl+J new li…
+
+=== Run active, 2 Steers and 2 Follow-ups waiting · variant C (Prompt recall) · ::running ===
+   PROTOTYPE CDA-144 · C Prompt recall · macOS/Linux keys · run turn 1/4 · time paused (::play) ·…
+  
+  edit src/api/login.ts (+12 -2) [succeeded]
+    applied 1 edit
+  
+  bash bun test [succeeded]
+    14 pass, 0 fail
+  
+  verification [succeeded]
+  
+  assistant [completed]
+  Done.
+  
+  session [succeeded]
+    workspace changed
+  
+  > use a sliding window instead of a fixed one
+  
+  assistant [completed]
+  Reading the handler first.
+  
+  read src/api/login.ts [succeeded]
+    export async function login(req: Request) {
+. ── Prompt Queue: 2 Steering · 2 Follow-ups · Up recalls ────────────────────────────────────────
+  >
+. Enter steer · Alt+Enter follow-up · Up queue · Esc cancel run · Shift+Enter/Ctrl+J new line     
+
+=== Queue selection mode, entered from the Prompt · variant A (Rows) · ::running ===
+   PROTOTYPE CDA-144 · A Rows · macOS/Linux keys · run turn 1/4 · time paused (::play) · Tab vari…
+  
+  bash bun test [succeeded]
+    14 pass, 0 fail
+  
+  verification [succeeded]
+  
+  assistant [completed]
+  Done.
+  
+  session [succeeded]
+    workspace changed
+  
+  > use a sliding window instead of a fixed one
+  
+  assistant [completed]
+  Reading the handler first.
+  
+  read src/api/login.ts [succeeded]
+    export async function login(req: Request) {
+. Steering: reuse the existing redis client, not a new connection                                 
+. Steering: keep the 429 message short                                                            
+. Follow-up: add tests for the limiter, including the window edge                                 
+# Follow-up: update the API section of the README                                                 
+. >                                                                                               
+. Enter send now · e edit · d delete · Up/Down move · Esc back to Prompt                          
+
+=== Queue selection mode, entered from the Prompt · variant B (Summary + panel) · ::running ===
+   PROTOTYPE CDA-144 · B Summary + panel · macOS/Linux keys · run turn 1/4 · time paused (::play)…
+  edit src/api/login.ts (+12 -2) [succeeded]
+    applied 1 edit
+  
+  bash bun test [succeeded]
+    14 pass, 0 fail
+  
+  verification [succeeded]
+  
+  assistant [completed]
+  Done.
+  
+  ╭─ Prompt Queue ───────────────────────────────────────────────────────────────────────────────╮
+  │ Steering · the run takes one before each Model Turn                                          │
+  │  1  reuse the existing redis client, not a new connection                                    │
+  │  2  keep the 429 message short                                                               │
+  │ Follow-ups · the next starts after a run succeeds                                            │
+  │  3  add tests for the limiter, including the window edge                                     │
+# │  4  update the API section of the README                                                     │
+  │ ──────────────────────────────────────────────────────────────────────────────────────────── │
+  │ update the API section of the README                                                         │
+  ╰──────────────────────────────────────────────────────────────────────────────────────────────╯
+. Steering (2): reuse the existing redis client, not a new connection  (+1)                       
+. Follow-ups (2): add tests for the limiter, including the window edge  (+1)                      
+. >                                                                                               
+. Enter send now · e edit · d delete · Up/Down move · Esc back to Prompt                          
+
+=== Queue selection mode, entered from the Prompt · variant C (Prompt recall) · ::running ===
+   PROTOTYPE CDA-144 · C Prompt recall · macOS/Linux keys · run turn 1/4 · time paused (::play) ·…
+  
+  edit src/api/login.ts (+12 -2) [succeeded]
+    applied 1 edit
+  
+  bash bun test [succeeded]
+    14 pass, 0 fail
+  
+  verification [succeeded]
+  
+  assistant [completed]
+  Done.
+  
+  session [succeeded]
+    workspace changed
+  
+  > use a sliding window instead of a fixed one
+  
+  assistant [completed]
+  Reading the handler first.
+  
+  read src/api/login.ts [succeeded]
+    export async function login(req: Request) {
+. ── Follow-up 4 of 4 is in the Prompt; nothing takes it while it is shown ───────────────────────
+  Follow-up 4/4> update the API section of the README
+. Up/Down next item · type to edit · Enter save · Alt+Enter send now · Ctrl+D delete · Esc back t…
+
+=== Send now on the second Follow-up during a run (after the key) · variant A (Rows) · ::sendnow ===
+   PROTOTYPE CDA-144 · A Rows · macOS/Linux keys · run turn 1/4 · time paused (::play) · Tab vari…
+  
+  bash bun test [succeeded]
+    14 pass, 0 fail
+  
+  verification [succeeded]
+  
+  assistant [completed]
+  Done.
+  
+  session [succeeded]
+    workspace changed
+  
+  > use a sliding window instead of a fixed one
+  
+  assistant [completed]
+  Reading the handler first.
+  
+  read src/api/login.ts [succeeded]
+    export async function login(req: Request) {
+. Steering: reuse the existing redis client, not a new connection                                 
+. Steering: keep the 429 message short                                                            
+# Steering: update the API section of the README                                                  
+. Follow-up: add tests for the limiter, including the window edge                                 
+. >                                                                                               
+  Sent now: a Steer after 2 earlier Steer(s)                                                      
+
+=== Send now on the second Follow-up during a run (after the key) · variant B (Summary + panel) · ::sendnow ===
+   PROTOTYPE CDA-144 · B Summary + panel · macOS/Linux keys · run turn 1/4 · time paused (::play)…
+  edit src/api/login.ts (+12 -2) [succeeded]
+    applied 1 edit
+  
+  bash bun test [succeeded]
+    14 pass, 0 fail
+  
+  verification [succeeded]
+  
+  assistant [completed]
+  Done.
+  
+  ╭─ Prompt Queue ───────────────────────────────────────────────────────────────────────────────╮
+  │ Steering · the run takes one before each Model Turn                                          │
+  │  1  reuse the existing redis client, not a new connection                                    │
+  │  2  keep the 429 message short                                                               │
+# │  3  update the API section of the README                                                     │
+  │ Follow-ups · the next starts after a run succeeds                                            │
+  │  4  add tests for the limiter, including the window edge                                     │
+  │ ──────────────────────────────────────────────────────────────────────────────────────────── │
+  │ update the API section of the README                                                         │
+  ╰──────────────────────────────────────────────────────────────────────────────────────────────╯
+. Steering (3): reuse the existing redis client, not a new connection  (+2)                       
+. Follow-ups (1): add tests for the limiter, including the window edge                            
+. >                                                                                               
+  Sent now: a Steer after 2 earlier Steer(s)                                                      
+
+=== Send now on the second Follow-up during a run (after the key) · variant C (Prompt recall) · ::sendnow ===
+   PROTOTYPE CDA-144 · C Prompt recall · macOS/Linux keys · run turn 1/4 · time paused (::play) ·…
+  
+  edit src/api/login.ts (+12 -2) [succeeded]
+    applied 1 edit
+  
+  bash bun test [succeeded]
+    14 pass, 0 fail
+  
+  verification [succeeded]
+  
+  assistant [completed]
+  Done.
+  
+  session [succeeded]
+    workspace changed
+  
+  > use a sliding window instead of a fixed one
+  
+  assistant [completed]
+  Reading the handler first.
+  
+  read src/api/login.ts [succeeded]
+    export async function login(req: Request) {
+. ── Prompt Queue: 3 Steering · 1 Follow-up · Up recalls ─────────────────────────────────────────
+  >
+  Sent now: a Steer after 2 earlier Steer(s)                                                      
+
+=== The first Follow-up in edit while the run goes on · variant A (Rows) · ::editing ===
+   PROTOTYPE CDA-144 · A Rows · macOS/Linux keys · run turn 1/4 · time paused (::play) · Tab vari…
+  
+  bash bun test [succeeded]
+    14 pass, 0 fail
+  
+  verification [succeeded]
+  
+  assistant [completed]
+  Done.
+  
+  session [succeeded]
+    workspace changed
+  
+  > use a sliding window instead of a fixed one
+  
+  assistant [completed]
+  Reading the handler first.
+  
+  read src/api/login.ts [succeeded]
+    export async function login(req: Request) {
+. Steering: reuse the existing redis client, not a new connection                                 
+. Steering: keep the 429 message short                                                            
+  Editing Follow-up: add tests for the limiter, including the window edge
+. Follow-up: update the API section of the README                                                 
+. >                                                                                               
+. Enter save · Shift+Enter/Ctrl+J new line · Esc keep the old text                                
+
+=== The first Follow-up in edit while the run goes on · variant B (Summary + panel) · ::editing ===
+   PROTOTYPE CDA-144 · B Summary + panel · macOS/Linux keys · run turn 1/4 · time paused (::play)…
+  edit src/api/login.ts (+12 -2) [succeeded]
+    applied 1 edit
+  
+  bash bun test [succeeded]
+    14 pass, 0 fail
+  
+  verification [succeeded]
+  
+  assistant [completed]
+  Done.
+  
+  ╭─ Prompt Queue ───────────────────────────────────────────────────────────────────────────────╮
+  │ Steering · the run takes one before each Model Turn                                          │
+  │  1  reuse the existing redis client, not a new connection                                    │
+  │  2  keep the 429 message short                                                               │
+  │ Follow-ups · the next starts after a run succeeds                                            │
+# │  3  add tests for the limiter, including the window edge  (editing)                          │
+  │  4  update the API section of the README                                                     │
+  │ ──────────────────────────────────────────────────────────────────────────────────────────── │
+  │ Edit: add tests for the limiter, including the window edge                                   │
+  ╰──────────────────────────────────────────────────────────────────────────────────────────────╯
+. Steering (2): reuse the existing redis client, not a new connection  (+1)                       
+. Follow-ups (2): add tests for the limiter, including the window edge  (+1)                      
+. >                                                                                               
+. Enter save · Shift+Enter/Ctrl+J new line · Esc keep the old text                                
+
+=== The first Follow-up in edit while the run goes on · variant C (Prompt recall) · ::editing ===
+   PROTOTYPE CDA-144 · C Prompt recall · macOS/Linux keys · run turn 1/4 · time paused (::play) ·…
+  
+  edit src/api/login.ts (+12 -2) [succeeded]
+    applied 1 edit
+  
+  bash bun test [succeeded]
+    14 pass, 0 fail
+  
+  verification [succeeded]
+  
+  assistant [completed]
+  Done.
+  
+  session [succeeded]
+    workspace changed
+  
+  > use a sliding window instead of a fixed one
+  
+  assistant [completed]
+  Reading the handler first.
+  
+  read src/api/login.ts [succeeded]
+    export async function login(req: Request) {
+. ── Follow-up 3 of 4 is in the Prompt; nothing takes it while it is shown ───────────────────────
+  Follow-up 3/4> add tests for the limiter, including the window edge
+. Up/Down next item · type to edit · Enter save · Alt+Enter send now · Ctrl+D delete · Esc back t…
+
+=== Follow-ups waiting after a failed run · variant A (Rows) · ::failed ===
+   PROTOTYPE CDA-144 · A Rows · macOS/Linux keys · no run · time paused (::play) · Tab variant · …
+  
+  > make the limit configurable per route
+  
+  assistant [completed]
+  Reading the handler first.
+  
+  read src/api/login.ts [succeeded]
+    export async function login(req: Request) {
+  
+  edit src/api/login.ts (+12 -2) [succeeded]
+    applied 1 edit
+  
+  bash bun test [succeeded]
+    14 pass, 0 fail
+  
+  verification [failed]
+  
+  session [failed, VERIFICATION_FAILED]
+    bun test: 1 failing test
+    workspace changed, partial changes possible
+  Follow-ups wait: the last run failed. Enter runs your own task first; Up, then Enter sends one …
+. Follow-up: read the limit from config/limits.ts                                                 
+. Follow-up: add tests for the per-route limits                                                   
+  >
+. Enter run · Up queue · Ctrl+R resume · Ctrl+N new Session · Shift+Enter/Ctrl+J new line · Esc t…
+
+=== Follow-ups waiting after a failed run · variant B (Summary + panel) · ::failed ===
+   PROTOTYPE CDA-144 · B Summary + panel · macOS/Linux keys · no run · time paused (::play) · Tab…
+  session [succeeded]
+    workspace changed
+  
+  > make the limit configurable per route
+  
+  assistant [completed]
+  Reading the handler first.
+  
+  read src/api/login.ts [succeeded]
+    export async function login(req: Request) {
+  
+  edit src/api/login.ts (+12 -2) [succeeded]
+    applied 1 edit
+  
+  bash bun test [succeeded]
+    14 pass, 0 fail
+  
+  verification [failed]
+  
+  session [failed, VERIFICATION_FAILED]
+    bun test: 1 failing test
+    workspace changed, partial changes possible
+  Follow-ups (2): read the limit from config/limits.ts  (+1)  · waiting: the last run failed
+  >
+. Enter run · Shift+Up queue · Ctrl+R resume · Ctrl+N new Session · Shift+Enter/Ctrl+J new line ·…
+
+=== Follow-ups waiting after a failed run · variant C (Prompt recall) · ::failed ===
+   PROTOTYPE CDA-144 · C Prompt recall · macOS/Linux keys · no run · time paused (::play) · Tab v…
+  session [succeeded]
+    workspace changed
+  
+  > make the limit configurable per route
+  
+  assistant [completed]
+  Reading the handler first.
+  
+  read src/api/login.ts [succeeded]
+    export async function login(req: Request) {
+  
+  edit src/api/login.ts (+12 -2) [succeeded]
+    applied 1 edit
+  
+  bash bun test [succeeded]
+    14 pass, 0 fail
+  
+  verification [failed]
+  
+  session [failed, VERIFICATION_FAILED]
+    bun test: 1 failing test
+    workspace changed, partial changes possible
+. ── Prompt Queue: 2 Follow-ups · waiting: the last run failed · Up recalls ──────────────────────
+  >
+. Enter run · Up queue · Ctrl+R resume · Ctrl+N new Session · Shift+Enter/Ctrl+J new line · Esc t…
+
+=== After Esc cancelled the run · variant A (Rows) · ::cancelled ===
+   PROTOTYPE CDA-144 · A Rows · macOS/Linux keys · no run · time paused (::play) · Tab variant · …
+  assistant [completed]
+  Done.
+  
+  session [succeeded]
+    workspace changed
+  
+  > use a sliding window instead of a fixed one
+  
+  assistant [completed]
+  Reading the handler first.
+  
+  read src/api/login.ts [succeeded]
+    export async function login(req: Request) {
+  
+  Cancellation requested
+  
+  session [cancelled]
+    workspace changed, partial changes possible
+  Follow-ups wait: the last run was cancelled. Enter runs your own task first; Up, then Enter sen…
+. Follow-up: reuse the existing redis client, not a new connection                                
+. Follow-up: keep the 429 message short                                                           
+. Follow-up: add tests for the limiter, including the window edge                                 
+. Follow-up: update the API section of the README                                                 
+  >
+. Enter run · Up queue · Ctrl+R resume · Ctrl+N new Session · Shift+Enter/Ctrl+J new line · Esc t…
+
+=== After Esc cancelled the run · variant B (Summary + panel) · ::cancelled ===
+   PROTOTYPE CDA-144 · B Summary + panel · macOS/Linux keys · no run · time paused (::play) · Tab…
+    14 pass, 0 fail
+  
+  verification [succeeded]
+  
+  assistant [completed]
+  Done.
+  
+  session [succeeded]
+    workspace changed
+  
+  > use a sliding window instead of a fixed one
+  
+  assistant [completed]
+  Reading the handler first.
+  
+  read src/api/login.ts [succeeded]
+    export async function login(req: Request) {
+  
+  Cancellation requested
+  
+  session [cancelled]
+    workspace changed, partial changes possible
+  Follow-ups (4): reuse the existing redis client, not a new connection  (+3)  · waiting: the las…
+  >
+. Enter run · Shift+Up queue · Ctrl+R resume · Ctrl+N new Session · Shift+Enter/Ctrl+J new line ·…
+
+=== After Esc cancelled the run · variant C (Prompt recall) · ::cancelled ===
+   PROTOTYPE CDA-144 · C Prompt recall · macOS/Linux keys · no run · time paused (::play) · Tab v…
+    14 pass, 0 fail
+  
+  verification [succeeded]
+  
+  assistant [completed]
+  Done.
+  
+  session [succeeded]
+    workspace changed
+  
+  > use a sliding window instead of a fixed one
+  
+  assistant [completed]
+  Reading the handler first.
+  
+  read src/api/login.ts [succeeded]
+    export async function login(req: Request) {
+  
+  Cancellation requested
+  
+  session [cancelled]
+    workspace changed, partial changes possible
+. ── Prompt Queue: 4 Follow-ups · waiting: the last run was cancelled · Up recalls ───────────────
+  >
+. Enter run · Up queue · Ctrl+R resume · Ctrl+N new Session · Shift+Enter/Ctrl+J new line · Esc t…
+
+=== Nine items, selection mode · variant A (Rows) · ::long ===
+   PROTOTYPE CDA-144 · A Rows · macOS/Linux keys · run turn 1/4 · time paused (::play) · Tab vari…
+  
+  verification [succeeded]
+  
+  assistant [completed]
+  Done.
+  
+  session [succeeded]
+    workspace changed
+  
+  > use a sliding window instead of a fixed one
+  
+  assistant [completed]
+  Reading the handler first.
+  
+  read src/api/login.ts [succeeded]
+    export async function login(req: Request) {
+.   4 more above                                                                                  
+. Follow-up: update the API section of the README                                                 
+. Follow-up: add a metrics counter for rejected requests                                          
+. Follow-up: document the new env vars                                                            
+. Follow-up: write a changelog entry                                                              
+. Follow-up: check the Windows CI job                                                             
+# Follow-up: open a draft PR                                                                      
+. >                                                                                               
+. Enter send now · e edit · d delete · Up/Down move · Esc back to Prompt                          
+
+=== Nine items, selection mode · variant B (Summary + panel) · ::long ===
+   PROTOTYPE CDA-144 · B Summary + panel · macOS/Linux keys · run turn 1/4 · time paused (::play)…
+  edit src/api/login.ts (+12 -2) [succeeded]
+    applied 1 edit
+  
+  bash bun test [succeeded]
+    14 pass, 0 fail
+  ╭─ Prompt Queue ───────────────────────────────────────────────────────────────────────────────╮
+  │ Steering · the run takes one before each Model Turn                                          │
+  │  1  reuse the existing redis client, not a new connection                                    │
+  │  2  keep the 429 message short                                                               │
+  │  3  and log the limiter decisions at debug level                                             │
+  │ Follow-ups · the next starts after a run succeeds                                            │
+  │  4  add tests for the limiter, including the window edge                                     │
+  │  5  update the API section of the README                                                     │
+  │  6  add a metrics counter for rejected requests                                              │
+  │  7  document the new env vars                                                                │
+  │  8  write a changelog entry                                                                  │
+  │  9  check the Windows CI job                                                                 │
+# │  10  open a draft PR                                                                         │
+  │ ──────────────────────────────────────────────────────────────────────────────────────────── │
+  │ open a draft PR                                                                              │
+  ╰──────────────────────────────────────────────────────────────────────────────────────────────╯
+. Steering (3): reuse the existing redis client, not a new connection  (+2)                       
+. Follow-ups (7): add tests for the limiter, including the window edge  (+6)                      
+. >                                                                                               
+. Enter send now · e edit · d delete · Up/Down move · Esc back to Prompt                          
+
+=== Nine items, selection mode · variant C (Prompt recall) · ::long ===
+   PROTOTYPE CDA-144 · C Prompt recall · macOS/Linux keys · run turn 1/4 · time paused (::play) ·…
+  
+  edit src/api/login.ts (+12 -2) [succeeded]
+    applied 1 edit
+  
+  bash bun test [succeeded]
+    14 pass, 0 fail
+  
+  verification [succeeded]
+  
+  assistant [completed]
+  Done.
+  
+  session [succeeded]
+    workspace changed
+  
+  > use a sliding window instead of a fixed one
+  
+  assistant [completed]
+  Reading the handler first.
+  
+  read src/api/login.ts [succeeded]
+    export async function login(req: Request) {
+. ── Follow-up 10 of 10 is in the Prompt; nothing takes it while it is shown ─────────────────────
+  Follow-up 10/10> open a draft PR
+. Up/Down next item · type to edit · Enter save · Alt+Enter send now · Ctrl+D delete · Esc back t…
+
+=== Resume list · variant A (Rows) · ::picker ===
+   PROTOTYPE CDA-144 · A Rows · macOS/Linux keys · no run · time paused (::play) · Tab variant · …
+   Resume a Session in ~/shop · 7 Sessions, newest first                                          
+.   NAME                                LAST ACTIVITY     TASKS     STATUS                        
+    add rate limiting to /api/login     now               1 task    this Session
+#   fix login redirect loop             12 min ago        6 tasks   open in another terminal (PID…
+    migrate session store to redis      yesterday 18:40   14 tasks  last run cut off
+    Sửa test đang lỗi trong src/math.…  3 days ago        1 task
+.   bump bun to 1.3                     5 days ago        ?         damaged, cannot resume        
+.   explore a new parser                2 weeks ago       2 tasks   made by a newer Coding Agent  
+    add a /health endpoint              3 weeks ago       9 tasks
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+. >                                                                                               
+. Enter open · Up/Down move · Esc close                                                           
+
+=== Resume list · variant B (Summary + panel) · ::picker ===
+   PROTOTYPE CDA-144 · B Summary + panel · macOS/Linux keys · no run · time paused (::play) · Tab…
+  > add rate limiting to /api/login
+  
+  assistant [completed]
+  Reading the handler first.
+  
+  ╭─ Resume a Session in ~/shop ─────────────────────────────────────────────────────────────────╮
+  │ Filter:                                                                                      │
+  │ ──────────────────────────────────────────────────────────────────────────────────────────── │
+  │ * add rate limiting to /api/login                                                            │
+  │     now · 1 task · this Session                                                              │
+# │   fix login redirect loop                                                                    │
+# │     12 min ago · 6 tasks · open in another terminal (PID 4242)                               │
+  │   migrate session store to redis                                                             │
+  │     yesterday 18:40 · 14 tasks · last run cut off                                            │
+  │   Sửa test đang lỗi trong src/math.ts                                                        │
+  │     3 days ago · 1 task                                                                      │
+  │   bump bun to 1.3                                                                            │
+  │     5 days ago · ? · damaged, cannot resume                                                  │
+  │   explore a new parser                                                                       │
+  │     2 weeks ago · 2 tasks · made by a newer Coding Agent                                     │
+  │   add a /health endpoint                                                                     │
+  │     3 weeks ago · 9 tasks                                                                    │
+  ╰──────────────────────────────────────────────────────────────────────────────────────────────╯
+. >                                                                                               
+. Enter open · Up/Down move · type to filter · Esc close                                          
+
+=== Resume list · variant C (Prompt recall) · ::picker ===
+   PROTOTYPE CDA-144 · C Prompt recall · macOS/Linux keys · no run · time paused (::play) · Tab v…
+   Resume a Session in ~/shop                                                                     
+   * add rate limiting to /api/login     │ fix login redirect loop                                
+#    fix login redirect loop             │ 12 min ago · 6 tasks                                   
+     migrate session store to redis      │ open in another terminal (PID 4242)
+     Sửa test đang lỗi trong src/math.ts │ 
+.    bump bun to 1.3                     │ > fix the login redirect loop                          
+.    explore a new parser                │ assistant [completed]                                  
+     add a /health endpoint              │   Redirect fixed.                                      
+.                                        │ 
+.                                        │ 
+.                                        │ 
+.                                        │ 
+.                                        │ 
+.                                        │ 
+.                                        │ 
+.                                        │ 
+.                                        │ 
+.                                        │ 
+.                                        │ 
+.                                        │ 
+.                                        │ 
+.                                        │ 
+.                                        │ 
+. >                                                                                               
+. Enter open · Up/Down move · Esc close                                                           
+
+=== Resume list: Enter on a Session open elsewhere · variant A (Rows) · ::picker ===
+   PROTOTYPE CDA-144 · A Rows · macOS/Linux keys · no run · time paused (::play) · Tab variant · …
+   Resume a Session in ~/shop · 7 Sessions, newest first                                          
+.   NAME                                LAST ACTIVITY     TASKS     STATUS                        
+    add rate limiting to /api/login     now               1 task    this Session
+#   fix login redirect loop             12 min ago        6 tasks   open in another terminal (PID…
+    migrate session store to redis      yesterday 18:40   14 tasks  last run cut off
+    Sửa test đang lỗi trong src/math.…  3 days ago        1 task
+.   bump bun to 1.3                     5 days ago        ?         damaged, cannot resume        
+.   explore a new parser                2 weeks ago       2 tasks   made by a newer Coding Agent  
+    add a /health endpoint              3 weeks ago       9 tasks
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+. >                                                                                               
+  "fix login redirect loop" is open in another terminal (PID 4242). Close it there first.         
+
+=== Resume list: Enter on a Session open elsewhere · variant B (Summary + panel) · ::picker ===
+   PROTOTYPE CDA-144 · B Summary + panel · macOS/Linux keys · no run · time paused (::play) · Tab…
+  > add rate limiting to /api/login
+  
+  assistant [completed]
+  Reading the handler first.
+  
+  ╭─ Resume a Session in ~/shop ─────────────────────────────────────────────────────────────────╮
+  │ Filter:                                                                                      │
+  │ ──────────────────────────────────────────────────────────────────────────────────────────── │
+  │ * add rate limiting to /api/login                                                            │
+  │     now · 1 task · this Session                                                              │
+# │   fix login redirect loop                                                                    │
+# │     12 min ago · 6 tasks · open in another terminal (PID 4242)                               │
+  │   migrate session store to redis                                                             │
+  │     yesterday 18:40 · 14 tasks · last run cut off                                            │
+  │   Sửa test đang lỗi trong src/math.ts                                                        │
+  │     3 days ago · 1 task                                                                      │
+  │   bump bun to 1.3                                                                            │
+  │     5 days ago · ? · damaged, cannot resume                                                  │
+  │   explore a new parser                                                                       │
+  │     2 weeks ago · 2 tasks · made by a newer Coding Agent                                     │
+  │   add a /health endpoint                                                                     │
+  │     3 weeks ago · 9 tasks                                                                    │
+  ╰──────────────────────────────────────────────────────────────────────────────────────────────╯
+. >                                                                                               
+  "fix login redirect loop" is open in another terminal (PID 4242). Close it there first.         
+
+=== Resume list: Enter on a Session open elsewhere · variant C (Prompt recall) · ::picker ===
+   PROTOTYPE CDA-144 · C Prompt recall · macOS/Linux keys · no run · time paused (::play) · Tab v…
+   Resume a Session in ~/shop                                                                     
+   * add rate limiting to /api/login     │ fix login redirect loop                                
+#    fix login redirect loop             │ 12 min ago · 6 tasks                                   
+     migrate session store to redis      │ open in another terminal (PID 4242)
+     Sửa test đang lỗi trong src/math.ts │ 
+.    bump bun to 1.3                     │ > fix the login redirect loop                          
+.    explore a new parser                │ assistant [completed]                                  
+     add a /health endpoint              │   Redirect fixed.                                      
+.                                        │ 
+.                                        │ 
+.                                        │ 
+.                                        │ 
+.                                        │ 
+.                                        │ 
+.                                        │ 
+.                                        │ 
+.                                        │ 
+.                                        │ 
+.                                        │ 
+.                                        │ 
+.                                        │ 
+.                                        │ 
+.                                        │ 
+. >                                                                                               
+  "fix login redirect loop" is open in another terminal (PID 4242). Close it there first.         
+
+=== Resume list: lost the race (after Enter) · variant A (Rows) · ::race ===
+   PROTOTYPE CDA-144 · A Rows · macOS/Linux keys · no run · time paused (::play) · Tab variant · …
+   Resume a Session in ~/shop · 7 Sessions, newest first                                          
+.   NAME                                LAST ACTIVITY     TASKS     STATUS                        
+    add rate limiting to /api/login     now               1 task    this Session
+.   fix login redirect loop             12 min ago        6 tasks   open in another terminal (PID…
+    migrate session store to redis      yesterday 18:40   14 tasks  last run cut off
+#   Sửa test đang lỗi trong src/math.…  3 days ago        1 task    open in another terminal (PID…
+.   bump bun to 1.3                     5 days ago        ?         damaged, cannot resume        
+.   explore a new parser                2 weeks ago       2 tasks   made by a newer Coding Agent  
+    add a /health endpoint              3 weeks ago       9 tasks
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+. >                                                                                               
+  "Sửa test đang lỗi trong src/math.ts" was just opened in another terminal (PID 5151)            
+
+=== Resume list: lost the race (after Enter) · variant B (Summary + panel) · ::race ===
+   PROTOTYPE CDA-144 · B Summary + panel · macOS/Linux keys · no run · time paused (::play) · Tab…
+  > add rate limiting to /api/login
+  
+  assistant [completed]
+  Reading the handler first.
+  
+  ╭─ Resume a Session in ~/shop ─────────────────────────────────────────────────────────────────╮
+  │ Filter:                                                                                      │
+  │ ──────────────────────────────────────────────────────────────────────────────────────────── │
+  │ * add rate limiting to /api/login                                                            │
+  │     now · 1 task · this Session                                                              │
+  │   fix login redirect loop                                                                    │
+  │     12 min ago · 6 tasks · open in another terminal (PID 4242)                               │
+  │   migrate session store to redis                                                             │
+  │     yesterday 18:40 · 14 tasks · last run cut off                                            │
+# │   Sửa test đang lỗi trong src/math.ts                                                        │
+# │     3 days ago · 1 task · open in another terminal (PID 5151)                                │
+  │   bump bun to 1.3                                                                            │
+  │     5 days ago · ? · damaged, cannot resume                                                  │
+  │   explore a new parser                                                                       │
+  │     2 weeks ago · 2 tasks · made by a newer Coding Agent                                     │
+  │   add a /health endpoint                                                                     │
+  │     3 weeks ago · 9 tasks                                                                    │
+  ╰──────────────────────────────────────────────────────────────────────────────────────────────╯
+. >                                                                                               
+  "Sửa test đang lỗi trong src/math.ts" was just opened in another terminal (PID 5151)            
+
+=== Resume list: lost the race (after Enter) · variant C (Prompt recall) · ::race ===
+   PROTOTYPE CDA-144 · C Prompt recall · macOS/Linux keys · no run · time paused (::play) · Tab v…
+   Resume a Session in ~/shop                                                                     
+   * add rate limiting to /api/login     │ Sửa test đang lỗi trong src/math.ts                    
+.    fix login redirect loop             │ 3 days ago · 1 task                                    
+     migrate session store to redis      │ open in another terminal (PID 5151)
+#    Sửa test đang lỗi trong src/math.ts │ 
+.    bump bun to 1.3                     │ > Sửa test đang lỗi trong src/math.ts                  
+.    explore a new parser                │ session [succeeded]                                    
+     add a /health endpoint              │ 
+.                                        │ 
+.                                        │ 
+.                                        │ 
+.                                        │ 
+.                                        │ 
+.                                        │ 
+.                                        │ 
+.                                        │ 
+.                                        │ 
+.                                        │ 
+.                                        │ 
+.                                        │ 
+.                                        │ 
+.                                        │ 
+.                                        │ 
+. >                                                                                               
+  "Sửa test đang lỗi trong src/math.ts" was just opened in another terminal (PID 5151)            
+
+=== Resume list while Follow-ups wait (after Enter) · variant A (Rows) · ::pickerwait ===
+   PROTOTYPE CDA-144 · A Rows · macOS/Linux keys · no run · time paused (::play) · Tab variant · …
+   Resume a Session in ~/shop · 7 Sessions, newest first                                          
+.   NAME                                LAST ACTIVITY     TASKS     STATUS                        
+    add rate limiting to /api/login     now               2 tasks   this Session
+.   fix login redirect loop             12 min ago        6 tasks   open in another terminal (PID…
+    migrate session store to redis      yesterday 18:40   14 tasks  last run cut off
+    Sửa test đang lỗi trong src/math.…  3 days ago        1 task
+.   bump bun to 1.3                     5 days ago        ?         damaged, cannot resume        
+.   explore a new parser                2 weeks ago       2 tasks   made by a newer Coding Agent  
+#   add a /health endpoint              3 weeks ago       9 tasks                                 
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+. >                                                                                               
+  Resuming discards 2 waiting Follow-ups. Press Enter again to resume.                            
+
+=== Resume list while Follow-ups wait (after Enter) · variant B (Summary + panel) · ::pickerwait ===
+   PROTOTYPE CDA-144 · B Summary + panel · macOS/Linux keys · no run · time paused (::play) · Tab…
+  session [succeeded]
+    workspace changed
+  
+  > make the limit configurable per route
+  ╭─ Resume a Session in ~/shop ─────────────────────────────────────────────────────────────────╮
+  │ Filter:                                                                                      │
+  │ ──────────────────────────────────────────────────────────────────────────────────────────── │
+  │ * add rate limiting to /api/login                                                            │
+  │     now · 2 tasks · this Session                                                             │
+  │   fix login redirect loop                                                                    │
+  │     12 min ago · 6 tasks · open in another terminal (PID 4242)                               │
+  │   migrate session store to redis                                                             │
+  │     yesterday 18:40 · 14 tasks · last run cut off                                            │
+  │   Sửa test đang lỗi trong src/math.ts                                                        │
+  │     3 days ago · 1 task                                                                      │
+  │   bump bun to 1.3                                                                            │
+  │     5 days ago · ? · damaged, cannot resume                                                  │
+  │   explore a new parser                                                                       │
+  │     2 weeks ago · 2 tasks · made by a newer Coding Agent                                     │
+# │   add a /health endpoint                                                                     │
+# │     3 weeks ago · 9 tasks                                                                    │
+  ╰──────────────────────────────────────────────────────────────────────────────────────────────╯
+  Follow-ups (2): read the limit from config/limits.ts  (+1)  · waiting: the last run failed
+. >                                                                                               
+  Resuming discards 2 waiting Follow-ups. Press Enter again to resume.                            
+
+=== Resume list while Follow-ups wait (after Enter) · variant C (Prompt recall) · ::pickerwait ===
+   PROTOTYPE CDA-144 · C Prompt recall · macOS/Linux keys · no run · time paused (::play) · Tab v…
+   Resume a Session in ~/shop                                                                     
+   * add rate limiting to /api/login     │ add a /health endpoint                                 
+.    fix login redirect loop             │ 3 weeks ago · 9 tasks                                  
+     migrate session store to redis      │ 
+     Sửa test đang lỗi trong src/math.ts │ > add a /health endpoint for the load balancer         
+.    bump bun to 1.3                     │ session [succeeded]                                    
+.    explore a new parser                │ 
+#    add a /health endpoint              │ 
+.                                        │ 
+.                                        │ 
+.                                        │ 
+.                                        │ 
+.                                        │ 
+.                                        │ 
+.                                        │ 
+.                                        │ 
+.                                        │ 
+.                                        │ 
+.                                        │ 
+.                                        │ 
+.                                        │ 
+.                                        │ 
+.                                        │ 
+. >                                                                                               
+  Resuming discards 2 waiting Follow-ups. Press Enter again to resume.                            
+
+=== Startup notice: another Coding Agent on this Repository Root · variant A (Rows) · ::startup ===
+   PROTOTYPE CDA-144 · A Rows · macOS/Linux keys · no run · time paused (::play) · Tab variant · …
+  Another Coding Agent is running in ~/shop (PID 4242, Session "fix login redirect loop").
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  >
+. Enter run · Ctrl+R resume · Ctrl+N new Session · Shift+Enter/Ctrl+J new line · Esc twice quit   
+
+=== Startup notice: another Coding Agent on this Repository Root · variant B (Summary + panel) · ::startup ===
+   PROTOTYPE CDA-144 · B Summary + panel · macOS/Linux keys · no run · time paused (::play) · Tab…
+  Another Coding Agent is running in ~/shop (PID 4242, Session "fix login redirect loop").
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  >
+. Enter run · Ctrl+R resume · Ctrl+N new Session · Shift+Enter/Ctrl+J new line · Esc twice quit   
+
+=== Startup notice: another Coding Agent on this Repository Root · variant C (Prompt recall) · ::startup ===
+   PROTOTYPE CDA-144 · C Prompt recall · macOS/Linux keys · no run · time paused (::play) · Tab v…
+  Another Coding Agent is running in ~/shop (PID 4242, Session "fix login redirect loop").
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  >
+. Enter run · Ctrl+R resume · Ctrl+N new Session · Shift+Enter/Ctrl+J new line · Esc twice quit   
+
+=== Startup notice: a new worktree · variant A (Rows) · ::worktree ===
+   PROTOTYPE CDA-144 · A Rows · macOS/Linux keys · no run · time paused (::play) · Tab variant · …
+  Worktree limiter created in ~/.coding-agent/worktrees/shop-3f9a1c2b7d4e/limiter, branch
+  coding-agent/limiter from main at 8eb6bb2.
+    The starting checkout has uncommitted changes; they stay there and are not in the worktree.
+    Copied from .worktreeinclude: .env, .env.local
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  >
+. Enter run · Ctrl+R resume · Ctrl+N new Session · Shift+Enter/Ctrl+J new line · Esc twice quit   
+
+=== Startup notice: a new worktree · variant B (Summary + panel) · ::worktree ===
+   PROTOTYPE CDA-144 · B Summary + panel · macOS/Linux keys · no run · time paused (::play) · Tab…
+  Worktree limiter created in ~/.coding-agent/worktrees/shop-3f9a1c2b7d4e/limiter, branch
+  coding-agent/limiter from main at 8eb6bb2.
+    The starting checkout has uncommitted changes; they stay there and are not in the worktree.
+    Copied from .worktreeinclude: .env, .env.local
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  >
+. Enter run · Ctrl+R resume · Ctrl+N new Session · Shift+Enter/Ctrl+J new line · Esc twice quit   
+
+=== Startup notice: a new worktree · variant C (Prompt recall) · ::worktree ===
+   PROTOTYPE CDA-144 · C Prompt recall · macOS/Linux keys · no run · time paused (::play) · Tab v…
+  Worktree limiter created in ~/.coding-agent/worktrees/shop-3f9a1c2b7d4e/limiter, branch
+  coding-agent/limiter from main at 8eb6bb2.
+    The starting checkout has uncommitted changes; they stay there and are not in the worktree.
+    Copied from .worktreeinclude: .env, .env.local
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  >
+. Enter run · Ctrl+R resume · Ctrl+N new Session · Shift+Enter/Ctrl+J new line · Esc twice quit   
