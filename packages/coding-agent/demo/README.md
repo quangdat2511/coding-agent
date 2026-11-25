@@ -22,18 +22,18 @@ CI has them.
   pasted Coding Task as one piece, new lines included.
 - [Bun](https://bun.sh) 1.3 or later, `git` 2.28 or later (`prepare-repo.sh` uses `git init -b`) and
   [asciinema](https://asciinema.org) 2 or 3.
-- A key for the provider, in the environment of the shell that runs the demo. The committed
-  recording uses `opencode` with `deepseek-v4.1-flash`, the evaluation provider and model of
-  [ADR 0007](../../../docs/adr/0007-evaluation-provider-and-model.md), so it needs
+- A key for the provider, in the environment of the shell that runs the demo. `record.sh` defaults
+  to `opencode` with `deepseek-v4.1-flash`, the evaluation provider and model of
+  [ADR 0007](../../../docs/adr/0007-evaluation-provider-and-model.md), which needs
   `OPENCODE_API_KEY`. Another provider works too: pass it and its model to `record.sh`, and report
-  them on the ticket.
+  them on the ticket. The committed recording uses `anthropic` with `claude-haiku-4-5`, so it
+  needed `ANTHROPIC_API_KEY`.
 
-  This differs from [ADR 0006 §5](../../../docs/adr/0006-implementation-order-and-mvp-completion-checklist.md),
+  Neither is the provider of [ADR 0006 §5](../../../docs/adr/0006-implementation-order-and-mvp-completion-checklist.md),
   which makes Google the daily driver and the provider "the demo" runs on, for cost. §6 item 6 asks
   only for "a live provider", and CDA-87 for "the provider and model used" to be recorded, so
-  neither is broken. ADR 0007 chose this provider for the evaluation, not for demos. The demo uses
-  it only because the person who ran it had its key. To spend nothing, run the demo again on Google
-  with the same script.
+  neither is broken. ADR 0007 chose its provider for the evaluation, not for demos. To spend
+  nothing, run the demo again on Google with the same script.
 - This repository's dependencies: `bun install` at the repository root.
 
 ## The run
@@ -43,7 +43,7 @@ run.
 
 | | |
 | --- | --- |
-| Provider and model | `opencode`, `deepseek-v4.1-flash` (the defaults of `record.sh`) |
+| Provider and model | `anthropic`, `claude-haiku-4-5`, passed to `record.sh` (its defaults are `opencode`, `deepseek-v4.1-flash`) |
 | Approval Policy | `ask`. The interactive path takes no other |
 | Run Limits | `default`: 30 Model Turns, 100 Tool Calls, 600,000 ms, 5,000 ms Cancellation Grace Period |
 | Verification command | `bun test`, set by `record.sh` through `CODING_AGENT_VERIFICATION_COMMAND` |
@@ -62,7 +62,8 @@ make a run behave.
 the demo by hand first and know what you will see.
 
 ```sh
-# In this shell only, without echoing it or leaving it in the shell history.
+# In this shell only, without echoing it or leaving it in the shell history. This is bash; in zsh,
+# the default shell of macOS, the first line is: read -rs "OPENCODE_API_KEY?OPENCODE_API_KEY: "
 read -rsp "OPENCODE_API_KEY: " OPENCODE_API_KEY && export OPENCODE_API_KEY; echo
 repo=$(bash packages/coding-agent/demo/prepare-repo.sh)
 CODING_AGENT_VERIFICATION_COMMAND="bun test" \
@@ -97,10 +98,10 @@ recording:
 | # | You do | You should see |
 | --- | --- | --- |
 | 1 | Paste the content of `packages/coding-agent/tests/fixtures/named-task/task.md` into the Prompt, then press Enter. Open the file in another terminal to copy it, never in the one being recorded | The task appears in the transcript after `> `, and the Agent Run starts |
-| 2 | Wait | `assistant [streaming]`: the answer streams in. The model first asks for a `bash` call that looks around the repository: `ls -la && cat package.json …; cat AGENTS.md` in the committed run, and `bun test` in the Google responses that the named-task test replays ([fixture README](../tests/fixtures/named-task/README.md#recorded-responses)) |
+| 2 | Wait | `assistant [streaming]`: the answer streams in. The model looks around the repository and asks for a `bash` call: `ls -la src/` in the committed run, after it read `src/slugify.ts`, and `bun test` in the Google responses that the named-task test replays ([fixture README](../tests/fixtures/named-task/README.md#recorded-responses)) |
 | 3 | Wait until the Approval overlay is drawn over the bottom of the transcript, and the footer reads `Esc/Ctrl+C cancel · y allow · n deny`. **Allow it:** press `y` | The overlay closes and the call goes from `[awaiting_approval]` to `[executing]` and `[succeeded]`, with its output under it. A quick command passes `[executing]` too fast to see |
-| 4 | Wait | The model reads `src/slugify.ts` (a `read` needs no Approval), states its plan, then asks to `write` `src/slugify.test.ts`: the **second overlay** |
-| 5 | **Cancel it:** press `Esc` while the second overlay is open | The overlay closes, the write never runs (`write src/slugify.test.ts [skipped, CANCELLED]`), `cancellation requested` appears, and the transcript ends with `session [cancelled]` and, under it, `workspace changed, partial changes possible` |
+| 4 | Wait | The model states its plan, then asks to `write` `src/slugify.test.ts`: the **second overlay**. It can read files first (a `read` needs no Approval). The committed run reads nothing here, because it read `src/slugify.ts` before the first overlay |
+| 5 | **Cancel it:** press `Esc` while the second overlay is open | The overlay closes, the write never runs (`write src/slugify.test.ts [skipped, CANCELLED]`), `cancellation requested` appears, and the transcript ends with `run [cancelled]` and, under it, `workspace changed, partial changes possible` |
 | 6 | Press `Esc` twice within one second | `Press Esc or Ctrl+C again within 1 second to quit.` after the first, and the Coding Agent exits 0 after the second. `record.sh` then takes over |
 
 If the model takes another path, keep the rule and not the order: allow the first overlay, cancel at
@@ -118,7 +119,7 @@ not queued, so press it again.
 The last lines of the transcript are the Agent Result of the cancelled Agent Run:
 
 ```text
-session [cancelled]
+run [cancelled]
   workspace changed, partial changes possible
 ```
 
@@ -146,27 +147,30 @@ expected outcome: the report promises no more than a possible change.
 
 ## The committed run
 
-`interactive-path.cast` was recorded on 2026-11-20, with the Coding Agent at commit `1e93f8e`:
+`interactive-path.cast` was recorded on 2026-11-25, with the Coding Agent at commit `2a5bf2d`:
 
 | | |
 | --- | --- |
-| Provider and model | `opencode`, `deepseek-v4.1-flash` |
-| Host | WSL2 (Linux 6.18), Bun 1.4.5, asciinema 2.4.0, a 156x41 terminal |
-| Approval allowed | `bash ls -la && cat package.json 2>/dev/null; cat AGENTS.md`, `[succeeded]` |
+| Provider and model | `anthropic`, `claude-haiku-4-5` |
+| Host | macOS (Darwin 27.2.0) in Terminal, Bun 1.3.14, asciinema 3.2.1 (asciicast v3), a 135x37 terminal |
+| Calls before the overlay | `read src/slugify.ts` `[succeeded]`, and `read src` `[failed, IS_DIRECTORY]`: the model asked `read` for a directory, which it refuses |
+| Approval allowed | `bash ls -la src/`, `[succeeded]` |
 | Cancelled at | the Approval of `write src/slugify.test.ts`, which ended `[skipped, CANCELLED]` |
-| Outcome | `session [cancelled]`, `workspace changed, partial changes possible` |
+| Outcome | `run [cancelled]`, `workspace changed, partial changes possible` |
 | Demo repository afterwards | `git status --short` empty: the cancelled write never ran |
 
-The run and the checks around it exposed two defects of the Full-screen TUI. Both are filed rather
-than fixed here, because they change `packages/tui` and not the demo, and neither touches an
+The first recording, made on 2026-11-20 on WSL2 with `opencode` and `deepseek-v4.1-flash` at commit
+`1e93f8e`, and the checks around it exposed two defects of the Full-screen TUI. Both are filed
+rather than fixed here, because they change `packages/tui` and not the demo, and neither touches an
 Approval or a Cancellation:
 
 - [CDA-119](https://datn-fit-hcmus.atlassian.net/browse/CDA-119): the terminal's answer to the
   TUI's kitty keyboard protocol query is echoed as the text `^[[?0u`, because Ink asks before it
   puts the terminal in raw mode. The first frame does not erase it: it only writes line breaks for
   the empty rows. The text stays on the first row of the screen until the Coding Task is drawn
-  there, which is from 2.04 s to 32.63 s in the recording, about 30 s. Replaying the recording
-  through `@xterm/headless` shows it.
+  there, which is from 2.04 s to 32.63 s in that recording, about 30 s. Replaying it through
+  `@xterm/headless` shows it. The current recording does not show it: macOS Terminal did not
+  answer the query.
 - [CDA-120](https://datn-fit-hcmus.atlassian.net/browse/CDA-120): on Windows Terminal with WSL2
   the mouse wheel moves the Prompt cursor instead of scrolling the transcript, because the terminal
   sends each wheel step as an arrow key. PgUp and PgDn scroll. Selecting text and copying it works.

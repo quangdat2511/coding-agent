@@ -223,11 +223,11 @@ describe("renderTui", () => {
         "",
         "limit reached: maxToolCalls (observed 101, limit 100)",
         "",
-        "session [failed, LIMIT_EXCEEDED]",
+        "run [failed, LIMIT_EXCEEDED]",
         "  Tool Call limit exceeded",
         "  workspace changed, partial changes possible",
         "",
-        "session [succeeded]",
+        "run [succeeded]",
         "  workspace unchanged",
       ),
     );
