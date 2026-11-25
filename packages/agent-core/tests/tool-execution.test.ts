@@ -846,6 +846,7 @@ describe("structured tool details", () => {
     { name: "null", details: null },
     { name: "a string", details: "not-an-object" },
     { name: "an array", details: ["a", "b"] },
+    { name: "a null-prototype array", details: Object.setPrototypeOf(["entry"], null) },
     { name: "a Date root", details: new Date("2026-11-25T00:00:00.000Z") },
     { name: "a Map root", details: new Map([["a", 1]]) },
     { name: "NaN", details: { count: Number.NaN } },
@@ -1121,5 +1122,41 @@ describe("structured tool details", () => {
       metadata: { durationMs: 0 },
     });
     expect(result && "details" in result).toBe(false);
+  });
+
+  it("carries a deeply nested valid JSON payload at the 40,960-byte limit without overflowing the stack", async () => {
+    // '{"nested1":' (11) + 20,474 * 2 (40,948) + '}' (1) = 40,960 UTF-8 bytes.
+    let nested: unknown[] = [];
+    for (let depth = 1; depth < 20_474; depth += 1) {
+      nested = [nested];
+    }
+    const deep = { nested1: nested };
+    const serialized = JSON.stringify(deep);
+    expect(Buffer.byteLength(serialized, "utf8")).toBe(40_960);
+
+    const { run } = openTestRun({
+      tools: [
+        fakeTool({
+          name: "deep",
+          outcome: { isError: false, content: "ok", details: deep as never },
+        }),
+      ],
+      model: {
+        turns: [
+          toolCallTurn({ toolCallId: "call-1", name: "deep", input: {} }),
+          textTurn("Fixed it."),
+        ],
+      },
+    });
+
+    await run.dispatch({ type: "start", task });
+    await run.result();
+    const events = await collect(run.events());
+    const result = resultOf(events, "tool_call-1");
+
+    expect(result?.isError).toBe(false);
+    expect(result?.content).toBe("ok");
+    expect(result?.details).toBeDefined();
+    expect(JSON.stringify(result?.details)).toBe(serialized);
   });
 });

@@ -18,37 +18,47 @@ const chargeBytes = (budget: ByteBudget, minBytes: number): boolean => {
 };
 
 const isPlainObject = (value: unknown): value is Record<string, unknown> => {
-  if (typeof value !== "object" || value === null) return false;
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
   const proto = Object.getPrototypeOf(value);
   return proto === Object.prototype || proto === null;
 };
 
-const cloneJsonObject = (
-  value: Record<string, unknown>,
+type CloneFrame =
+  | {
+      readonly kind: "array";
+      readonly source: readonly unknown[];
+      readonly target: JsonValue[];
+      index: number;
+    }
+  | {
+      readonly kind: "object";
+      readonly source: Record<string, unknown>;
+      readonly target: Record<string, JsonValue>;
+      readonly keys: readonly string[];
+      index: number;
+    };
+
+const pushObjectFrame = (
+  source: Record<string, unknown>,
   seen: Set<object>,
   budget: ByteBudget,
-): Readonly<Record<string, JsonValue>> | undefined => {
-  if (seen.has(value)) return undefined;
-  const keys = Object.keys(value);
+  stack: CloneFrame[],
+): Record<string, JsonValue> | undefined => {
+  if (seen.has(source)) return undefined;
+  const keys = Object.keys(source);
   // Minimum bytes for "{}" plus separating commas.
   if (!chargeBytes(budget, 2 + Math.max(0, keys.length - 1))) return undefined;
-  seen.add(value);
-  const entries: [string, JsonValue][] = [];
-  for (const key of keys) {
-    // Minimum bytes for `"<key>":` (each UTF-16 code unit encodes to at least 1 UTF-8 byte).
-    if (!chargeBytes(budget, key.length + 3)) return undefined;
-    const cloned = cloneJsonValue(value[key], seen, budget);
-    if (!cloned.ok) return undefined;
-    entries.push([key, cloned.value]);
-  }
-  seen.delete(value);
-  return Object.fromEntries(entries);
+  seen.add(source);
+  const target: Record<string, JsonValue> = {};
+  stack.push({ kind: "object", source, target, keys, index: 0 });
+  return target;
 };
 
-const cloneJsonValue = (
+const cloneStep = (
   value: unknown,
   seen: Set<object>,
   budget: ByteBudget,
+  stack: CloneFrame[],
 ): { readonly ok: true; readonly value: JsonValue } | { readonly ok: false } => {
   if (value === null) {
     return chargeBytes(budget, 4) ? { ok: true, value } : { ok: false };
@@ -72,21 +82,64 @@ const cloneJsonValue = (
     // Minimum bytes for "[]" plus separating commas.
     if (!chargeBytes(budget, 2 + Math.max(0, value.length - 1))) return { ok: false };
     seen.add(value);
-    const items: JsonValue[] = [];
-    for (let index = 0; index < value.length; index += 1) {
-      if (!(index in value)) return { ok: false };
-      const cloned = cloneJsonValue(value[index], seen, budget);
-      if (!cloned.ok) return { ok: false };
-      items.push(cloned.value);
-    }
-    seen.delete(value);
-    return { ok: true, value: items };
+    const target: JsonValue[] = [];
+    stack.push({ kind: "array", source: value, target, index: 0 });
+    return { ok: true, value: target };
   }
   if (isPlainObject(value)) {
-    const cloned = cloneJsonObject(value, seen, budget);
-    return cloned === undefined ? { ok: false } : { ok: true, value: cloned };
+    const target = pushObjectFrame(value, seen, budget, stack);
+    return target === undefined ? { ok: false } : { ok: true, value: target };
   }
   return { ok: false };
+};
+
+// Iteratively validates and deep-clones a plain JSON object so deeply nested valid payloads
+// within the 40 KiB cap never overflow the JS call stack.
+const cloneJsonObject = (
+  root: Record<string, unknown>,
+  budget: ByteBudget,
+): Readonly<Record<string, JsonValue>> | undefined => {
+  const seen = new Set<object>();
+  const stack: CloneFrame[] = [];
+  const clonedRoot = pushObjectFrame(root, seen, budget, stack);
+  if (clonedRoot === undefined) return undefined;
+
+  while (stack.length > 0) {
+    const frame = stack[stack.length - 1];
+    if (frame === undefined) break;
+    if (frame.kind === "array") {
+      if (frame.index >= frame.source.length) {
+        seen.delete(frame.source);
+        stack.pop();
+        continue;
+      }
+      const index = frame.index;
+      frame.index += 1;
+      if (!(index in frame.source)) return undefined;
+      const next = cloneStep(frame.source[index], seen, budget, stack);
+      if (!next.ok) return undefined;
+      frame.target.push(next.value);
+    } else {
+      if (frame.index >= frame.keys.length) {
+        seen.delete(frame.source);
+        stack.pop();
+        continue;
+      }
+      const key = frame.keys[frame.index] as string;
+      frame.index += 1;
+      // Minimum bytes for `"<key>":` (each UTF-16 code unit encodes to at least 1 UTF-8 byte).
+      if (!chargeBytes(budget, key.length + 3)) return undefined;
+      const next = cloneStep(frame.source[key], seen, budget, stack);
+      if (!next.ok) return undefined;
+      Object.defineProperty(frame.target, key, {
+        value: next.value,
+        enumerable: true,
+        writable: true,
+        configurable: true,
+      });
+    }
+  }
+  return clonedRoot;
 };
 
 // Reads, validates, and snapshots outcome.details, dropping invalid or > 40 KiB UTF-8 payloads
@@ -97,7 +150,7 @@ const snapshotDetails = (
   try {
     const value: unknown = outcome.details;
     if (value === undefined || !isPlainObject(value)) return undefined;
-    const cloned = cloneJsonObject(value, new Set(), { bytes: 0 });
+    const cloned = cloneJsonObject(value, { bytes: 0 });
     if (cloned === undefined) return undefined;
     const serialized = JSON.stringify(cloned);
     if (utf8Encoder.encode(serialized).byteLength > MAX_DETAILS_BYTES) return undefined;
