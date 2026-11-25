@@ -2,7 +2,7 @@
 
 Status: accepted
 
-Date: 2026-09-11 (Refined: 2026-09-12; Amended: 2026-09-13, 2026-11-09, 2026-11-11, 2026-11-12, 2026-11-22, 2026-11-24, 2026-11-26)
+Date: 2026-09-11 (Refined: 2026-09-12; Amended: 2026-09-13, 2026-11-09, 2026-11-11, 2026-11-12, 2026-11-22, 2026-11-24, 2026-11-25, 2026-11-26)
 
 ## Context
 
@@ -26,8 +26,11 @@ We establish the following tool contracts and safety guarantees across the archi
 | Tool | Input Schema | Success Result | Required Failure Cases (`error.code`) |
 |---|---|---|---|
 | `read` | `{ path: string, offset?: number, limit?: number }` | Numbered text lines (`line \| content`), canonical path, line range metadata | `NOT_FOUND`, `IS_DIRECTORY`, `PATH_OUTSIDE_REPO`, `PERMISSION_DENIED`, `SCHEMA_VIOLATION` (invalid offset/limit) |
+| `grep` | `{ pattern: string, path?: string, glob?: string, ignoreCase?: boolean, literal?: boolean, context?: number, limit?: number }` | Match (`path:line: text`) and context (`path-line- text`) lines relative to the Repository Root (or `No matches found`), optional cap notices, optional `details` (`matchLimitReached`, `linesTruncated`) | `NOT_FOUND`, `PATH_OUTSIDE_REPO`, `PERMISSION_DENIED`, `NON_ZERO_EXIT`, `SCHEMA_VIOLATION` (empty pattern/glob, invalid context/limit) |
+| `find` | `{ pattern: string, path?: string, limit?: number }` | Repository-root-relative paths in `fd` traversal order with `/` directory suffix (or empty-result message), optional cap/incomplete notices, optional `details` (`resultLimitReached`, `truncation`, `incomplete`) | `NOT_FOUND`, `NOT_A_DIRECTORY`, `PATH_OUTSIDE_REPO`, `PERMISSION_DENIED`, `NON_ZERO_EXIT`, `SCHEMA_VIOLATION` (empty pattern, invalid limit) |
+| `ls` | `{ path?: string, limit?: number }` | Bare entry names sorted case-insensitively (`/` for directories, `@` for symlinks; or empty/no-readable message), optional cap notices, optional `details` (`entryLimitReached`, `skippedEntries`, `truncation`) | `NOT_FOUND`, `NOT_A_DIRECTORY`, `PATH_OUTSIDE_REPO`, `PERMISSION_DENIED`, `SCHEMA_VIOLATION` (invalid limit) |
 | `write` | `{ path: string, content: string }` | Canonical path, bytes written | `PATH_OUTSIDE_REPO`, `PARENT_CREATION_FAILED`, `PERMISSION_DENIED`, `SCHEMA_VIOLATION` |
-| `edit` | `{ path: string, targetContent: string, replacementContent: string }` | Canonical path, replacement count (1) | `NO_MATCH`, `AMBIGUOUS_MATCH`, `NOT_FOUND`, `IS_DIRECTORY`, `PATH_OUTSIDE_REPO`, `PERMISSION_DENIED`, `SCHEMA_VIOLATION` |
+| `edit` | `{ path: string, edits: [{ oldText: string, newText: string }] }` (non-empty `edits`; legacy single-edit and string/object `edits` forms are normalized before Schema Validation) | Canonical path, count of ranges whose replacement changed their bytes, optional `details` (`diff` rows for UI rendering) | `NO_MATCH`, `AMBIGUOUS_MATCH`, `OVERLAPPING_EDITS`, `NO_CHANGE`, `NOT_FOUND`, `IS_DIRECTORY`, `PATH_OUTSIDE_REPO`, `PERMISSION_DENIED`, `SCHEMA_VIOLATION` |
 | `bash` | `{ command: string, timeoutMs?: number, cwd?: string }` | Combined stdout/stderr, exit code (0), duration | `TIMEOUT`, `SIGNAL`, `NON_ZERO_EXIT`, `PATH_OUTSIDE_REPO` (invalid cwd), `APPROVAL_DENIED`, `SCHEMA_VIOLATION` |
 
 Any tool may also fail with `TOOL_INTERNAL_ERROR` (§6).
@@ -54,12 +57,13 @@ Agent Core owns the path-validation step: it decides when validation runs (durin
   - When raw output exceeds 40 KiB, head and tail budgets are calculated dynamically from the remaining budget after reserving the UTF-8 byte length of the marker: `headBudget = tailBudget = (40,960 - markerBytes) / 2`.
   - The limit is measured strictly in UTF-8 bytes, not line counts.
   - A cut that lands inside a multi-byte character moves to the character boundary, so the returned content can be up to six bytes under the budget, three bytes per end.
+  - `grep`, `find`, and `ls` share this 40 KiB Output Budget and its `[...output truncated...]` marker, keeping whole lines inside the budget with their notices (match/result/entry limits, line truncation, and incomplete-result notices) included in the 40,960-byte cap.
 - **Execution Mode**: Commands execute in a non-interactive shell environment (`CI=1`, `TERM=dumb`) with `stdin` closed to prevent hanging on interactive prompts or REPLs.
 
 ### 4. Mutation Classification, Approval Policy, and Denial
 
 - Tools are categorized by mutation impact:
-  - **Read-only**: `read` is automatically approved and executed without user intervention.
+  - **Read-only**: `read`, `grep`, `find`, and `ls` are automatically approved and executed without user intervention. A read-only tool may acquire a pinned, SHA-256-verified managed binary (`rg` for `grep`, `fd` for `find`) into the outside-repository tool cache without Approval ([ADR 0010](./0010-managed-binary-acquisition-for-grep-and-find.md)).
   - **Mutating**: `write`, `edit`, and `bash` require explicit approval.
 - Agent Core models approval as the first-class `awaiting_approval` lifecycle state. The later
   [Agent Run state-machine decision](./0002-agent-session-state-machine-and-event-protocol.md)
@@ -79,7 +83,8 @@ The architecture distinguishes four precise mutation levels:
 1. **Pre-execution Rejections (Schema checking, Path Jailing, Approval Denial)**:
    - Strict **Zero mutation** guarantee. No filesystem or process side-effects occur.
 2. **Single-File Modifications (`write`, `edit`)**:
-   - **Target-File Atomicity**: The target file is never left half-written or corrupted. `write` writes to a temporary file in the destination directory and performs an atomic rename. `edit` strictly requires an exact, unique occurrence of `targetContent`; if missing or matching more than one location, it fails atomically without modifying the file.
+   - **Target-File Atomicity**: The target file is never left half-written or corrupted. `write` writes to a temporary file in the destination directory and performs an atomic rename.
+   - **Multi-Edit Atomicity (`edit`)**: `edit` requires an existing regular file, validates the batch read-only before Approval, and after Approval revalidates the path through the Path Jail, rereads the file, and recomputes all matches and replacements. Each entry in `edits` is matched independently against the original file (unique exact match first, falling back to fuzzy matching only when there are zero exact matches, counting every valid starting position including overlapping occurrences at either tier). Matched ranges must be pairwise disjoint (adjacent ranges are allowed; overlapping or identical ranges fail with `OVERLAPPING_EDITS`), and replacements are applied by file position so input order does not affect the result. Every edit in a mixed batch is validated; individual no-op edits are allowed, but if the reconstructed file is byte-identical to the original the call fails with `NO_CHANGE`. Any rejected batch leaves the target file untouched; a valid batch commits through a temporary file in the destination directory and one atomic rename. If optional diff generation for `details` fails or exhausts its budget, the validated atomic write still commits without `details`.
    - **Parent Directory Side-Effects**: Creation of missing parent directories (`mkdir -p`) is *not* rolled back if the subsequent file write fails. Empty directories may remain in the repository.
 3. **Shell Execution (`bash`)**:
    - **Explicitly Non-Transactional**: Shell execution is unmanaged and cannot be automatically rolled back. A script or command failing mid-execution (e.g., via non-zero exit code, signal, or timeout) may leave partial file changes or side-effects in the repository. Such outcomes are reported with `isError: true` and the corresponding error code (`TIMEOUT` or `NON_ZERO_EXIT`), signaling to the model that partial modifications may exist.
@@ -93,10 +98,13 @@ type ToolErrorCode =
   | "SCHEMA_VIOLATION"
   | "NOT_FOUND"
   | "IS_DIRECTORY"
+  | "NOT_A_DIRECTORY"
   | "PATH_OUTSIDE_REPO"
   | "PERMISSION_DENIED"
   | "NO_MATCH"
   | "AMBIGUOUS_MATCH"
+  | "OVERLAPPING_EDITS"
+  | "NO_CHANGE"
   | "PARENT_CREATION_FAILED"
   | "TIMEOUT"
   | "SIGNAL"
@@ -109,6 +117,7 @@ interface ToolResult {
   toolName: string;
   content: string;
   isError: boolean;
+  details?: Readonly<Record<string, JsonValue>>;
   error?: {
     code: ToolErrorCode;
     message: string;
@@ -124,6 +133,8 @@ interface ToolResult {
   };
 }
 ```
+
+`details` is optional and present only on successful Tool Results (`isError: false`); a tool omits it when it has no structured data to report. It carries a tool-specific plain JSON object using Agent Core's `JsonValue` type (such as structured edit diff rows or search/listing limit and truncation metadata) for observers and UI rendering. Agent Core validates and snapshots `details` under a separate 40 KiB UTF-8 serialized size limit and drops the field without changing execution status or `content` if invalid or oversized ([ADR 0004 §3](./0004-package-apis-and-dependency-direction.md#3-coding-agentagent-core)). `details` is never sent to the model ([ADR 0002 §3](./0002-agent-session-state-machine-and-event-protocol.md)) and is omitted from headless `events.jsonl` ([ADR 0005 §4](./0005-terminalbench-evaluation-protocol.md)).
 
 `TOOL_INTERNAL_ERROR` reports an unexpected failure inside a tool, such as a thrown exception or a rejected promise, that no other code describes. It is recoverable: Agent Core returns it to the model as an error `ToolResult` like any other code, so the model can adapt, and it counts toward the consecutive recoverable Tool Call failure limit. Its `message` is a sanitized summary, never a raw `Error`, stack trace, or mutable reference. A failure caused by an accepted cancellation is recorded as cancelled rather than with this code. If the failure occurs while a mutating tool executes, partial changes may exist, as for any failed mutating call. The name is deliberately distinct from the Agent Run's terminal `INTERNAL_ERROR` failure code.
 
@@ -416,6 +427,24 @@ On 2026-11-24, [CDA-147](https://datn-fit-hcmus.atlassian.net/browse/CDA-147) am
 - **Terminology**: Agent Session is renamed Agent Run, following ADR 0002 §8, and this record uses
   the new name in place. Behavior is unchanged.
 
+On 2026-11-25, [CDA-165](https://datn-fit-hcmus.atlassian.net/browse/CDA-165) amended this record:
+
+- **New read-only tools, multi-edit contract, and Tool Result details** (§1, §3, §4, §5, §6, §8): added
+  `grep`, `find`, and `ls` to the normative tool table (§1), the shared 40 KiB whole-line Output
+  Budget with notices included (§3), the read-only auto-approved tool set (§4), and §8's child-process
+  and read-only jail notes, noting that read-only tools may acquire managed binaries without Approval
+  ([ADR 0010](./0010-managed-binary-acquisition-for-grep-and-find.md)). Replaced `edit` with the
+  multi-edit contract (`{ path, edits: [{ oldText, newText }] }`), per-edit matching against the
+  original file, disjoint ranges, mixed-batch validation with individual no-ops, and one atomic
+  rename (§1, §5). Added `NOT_A_DIRECTORY`, `OVERLAPPING_EDITS`, and `NO_CHANGE` to `ToolErrorCode`
+  and optional `details` on successful `ToolResult` values (§6). Based on
+  [CDA-154](https://datn-fit-hcmus.atlassian.net/browse/CDA-154?focusedCommentId=10374),
+  [CDA-155](https://datn-fit-hcmus.atlassian.net/browse/CDA-155?focusedCommentId=10375),
+  [CDA-156](https://datn-fit-hcmus.atlassian.net/browse/CDA-156?focusedCommentId=10376),
+  [CDA-158](https://datn-fit-hcmus.atlassian.net/browse/CDA-158?focusedCommentId=10369),
+  [CDA-159](https://datn-fit-hcmus.atlassian.net/browse/CDA-159?focusedCommentId=10370), and
+  [CDA-160](https://datn-fit-hcmus.atlassian.net/browse/CDA-160?focusedCommentId=10373).
+
 On 2026-11-26, [CDA-143](https://datn-fit-hcmus.atlassian.net/browse/CDA-143), recorded in
 [ADR 0009](./0009-multi-prompt-sessions-and-session-resume.md) §6.12, amended this record:
 
@@ -428,7 +457,7 @@ On 2026-11-26, [CDA-143](https://datn-fit-hcmus.atlassian.net/browse/CDA-143), r
 
 ### 8. Credential Isolation for Tool and Verification Processes
 
-Coding Agent authenticates to Model Providers with credentials it reads from its own environment: the provider API-key variables that `@coding-agent/ai` defines. `bash` Tool Calls (§3) and the Verification Runner ([ADR 0003](./0003-mvp-context-planning-verification-and-session-memory.md) §3) start child processes on the model's behalf. Under the `"auto-approve"` policy (§4) with network access these children run unattended, so one that obtains a credential can send it anywhere; even under `"ask"`, a credential copied into a Tool Result enters the transcript, the Run Event log, and any exported trajectory. The credential reaches Coding Agent only because a launching process placed it in the environment Coding Agent inherits, so how the launcher holds it is part of the problem and cannot be fully solved inside Coding Agent. What this section can require therefore depends on the Approval Policy, and the guarantee is stated per policy below rather than as one absolute.
+Coding Agent authenticates to Model Providers with credentials it reads from its own environment: the provider API-key variables that `@coding-agent/ai` defines. `bash` (§3), `grep`, `find`, managed-binary extraction and version probes ([ADR 0010](./0010-managed-binary-acquisition-for-grep-and-find.md)), and the Verification Runner ([ADR 0003](./0003-mvp-context-planning-verification-and-session-memory.md) §3) start child processes on the model's behalf. Under the `"auto-approve"` policy (§4) with network access these children run unattended, so one that obtains a credential can send it anywhere; even under `"ask"`, a credential copied into a Tool Result enters the transcript, the Run Event log, and any exported trajectory. The credential reaches Coding Agent only because a launching process placed it in the environment Coding Agent inherits, so how the launcher holds it is part of the problem and cannot be fully solved inside Coding Agent. What this section can require therefore depends on the Approval Policy, and the guarantee is stated per policy below rather than as one absolute.
 
 This rule was grounded in Linux experiments (Docker, kernel 6.12, same-uid child): removing the variable from a child's environment blocks only the inherited copy; the credential still sits in a launcher's `/proc/<pid>/environ` and process memory, because an in-process delete does not rewrite the environment region fixed at `execve`. Marking a process non-dumpable denies a same-uid child those files, but only for the process so marked — a still-running ancestor shell that was started with the credential stays readable. See [ADR 0005](./0005-terminalbench-evaluation-protocol.md) for the evidence links.
 
@@ -446,7 +475,7 @@ Two rules hold on every entry point and under both policies:
 - **Launch contract.** No same-uid process reachable by a tool child may hold a provider credential in a readable form. The launcher must replace itself with the Coding Agent process (`exec`) rather than remain as a credential-bearing ancestor, must not leave a credential-bearing sibling such as a pipeline stage, and must not write the credential to a file a same-uid process can read. Coding Agent cannot mark or scrub a process it did not start, so this is an obligation on the launcher. [ADR 0005](./0005-terminalbench-evaluation-protocol.md) is the concrete instance for Harbor: the adapter `exec`s the agent and pipes its output nowhere.
 - **Startup verification.** Before the composition root opens an Agent Run under `"auto-approve"`, it walks its ancestor chain from its own parent (`/proc/self/stat` field 4, then each `/proc/<pid>/environ`, which it can read because the ancestors are the same user and not hardened) and, if any ancestor still holds one of the provider-credential variables Coding Agent uses, opens no Agent Run and returns a configuration error ([ADR 0002](./0002-agent-session-state-machine-and-event-protocol.md) §1; the headless path maps this to exit code 2, [ADR 0005](./0005-terminalbench-evaluation-protocol.md) §3). The check runs before Coding Agent drops `CAP_SYS_PTRACE` (§7, CDA-121), so that it reads as strongly as the process can and is stricter than the child. This makes the launch contract a checked precondition rather than a trusted one, and on Linux it rejects a launcher that failed to `exec`-replace itself. It walks only the ancestor chain, so a credential-bearing unrelated sibling remains the launcher's responsibility under the launch contract.
 
-**Under `"ask"` (interactive TUI and any attended headless).** The cross-process guarantee above is not claimed, and this section does not require it. The process that launched Coding Agent — typically the user's shell, which exported the provider key — remains a live, dumpable, same-uid ancestor holding the credential, and Coding Agent can neither scrub nor re-mark it. This residual is accepted for the MVP and bounded by two controls already in this ADR: read-only tools (`read`) are jailed to `repoRoot` (§2) and cannot open a `/proc` path, so no auto-approved tool can reach an ancestor's environment; and every mutating `bash` is gated by Approval (§4), so the only tool that can read `/proc` runs only after a human allows that specific command. Requiring interactive users to launch from a credential-free shell, or adding an opt-in hardened launch that delivers the credential to Coding Agent without any ancestor holding it, is deferred; this section states the residual rather than closing it.
+**Under `"ask"` (interactive TUI and any attended headless).** The cross-process guarantee above is not claimed, and this section does not require it. The process that launched Coding Agent — typically the user's shell, which exported the provider key — remains a live, dumpable, same-uid ancestor holding the credential, and Coding Agent can neither scrub nor re-mark it. This residual is accepted for the MVP and bounded by two controls already in this ADR: read-only tools (`read`, `grep`, `find`, and `ls`) are jailed to `repoRoot` (§2) without following symbolic links and cannot open a `/proc` path, so no auto-approved tool can reach an ancestor's environment; and every mutating `bash` is gated by Approval (§4), so the only tool that can read `/proc` runs only after a human allows that specific command. Requiring interactive users to launch from a credential-free shell, or adding an opt-in hardened launch that delivers the credential to Coding Agent without any ancestor holding it, is deferred; this section states the residual rather than closing it.
 
 **Scope of the guarantee.** Even under `"auto-approve"` the guarantee excludes a child that regains `CAP_SYS_PTRACE` after Coding Agent removed it (§7, CDA-121), for example through a setuid-root program, and platforms without a non-dumpable equivalent: on macOS a same-user process can read another's startup environment through `KERN_PROCARGS2` and `ps`, and there is no `PR_SET_DUMPABLE` analogue, so item 2 and the startup ancestor read are Linux-only. It also excludes a Coding Agent that runs as root with `CAP_SETUID` and `CAP_SETGID`. Its child can take the uid and gid of an ancestor of another user, such as the shell behind `sudo -E`. The child can then read the environment of that ancestor, which the startup check passed over because Coding Agent itself was denied it. Reproducible evaluation runs under `"auto-approve"` in Linux containers, where the contract and the check are enforceable.
 
