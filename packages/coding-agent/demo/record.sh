@@ -4,8 +4,7 @@
 # least 100x32, with the provider credential exported and nothing else to type in the shell.
 #
 # usage: bash packages/coding-agent/demo/record.sh [<provider> <model-id>]
-# The defaults are the provider and model of the committed recording, the evaluation provider and
-# model of ADR 0007: opencode, deepseek-v4.1-flash.
+# The defaults are the evaluation provider and model of ADR 0007: opencode, deepseek-v4.1-flash.
 #
 # It does not record keyboard input (no --stdin), so a key typed in the Prompt is not in the file.
 # The recording is written beside this script as interactive-path.cast. It is kept only when the
