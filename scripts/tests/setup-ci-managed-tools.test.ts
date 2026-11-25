@@ -302,10 +302,12 @@ describe("installManagedToolsForHost", () => {
       format,
     );
 
-    const fdGzip = Bun.gzipSync(fdArchive.archiveBytes);
-    const rgGzip = Bun.gzipSync(rgArchive.archiveBytes);
-    // Double-gzipping an already-compressed archive makes wire Content-Length larger than decoded bytes.
+    // Level 0 (stored gzip) always adds gzip framing overhead so wire Content-Length exceeds decoded
+    // bytes on every OS (including Windows .zip fixtures that would otherwise shrink at default level).
+    const fdGzip = Bun.gzipSync(fdArchive.archiveBytes, { level: 0 });
+    const rgGzip = Bun.gzipSync(rgArchive.archiveBytes, { level: 0 });
     expect(fdGzip.byteLength).toBeGreaterThan(fdArchive.bytes);
+    expect(rgGzip.byteLength).toBeGreaterThan(rgArchive.bytes);
 
     const fdAssetName = `fd-v10.5.2-fixture.${format}`;
     const rgAssetName = `ripgrep-16.0.0-fixture.${format}`;
