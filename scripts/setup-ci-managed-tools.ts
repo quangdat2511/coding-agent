@@ -19,6 +19,7 @@ import {
   DEFAULT_MANIFEST_PATH,
   type FetchFn,
   MANAGED_TOOL_NAMES,
+  type ManagedToolAsset,
   type ManagedToolName,
   type ManagedToolsManifest,
   PLATFORM_ARCH_KEYS,
@@ -62,22 +63,25 @@ function isRetryableStatus(status: number): boolean {
 async function readBoundedResponse(
   response: Response,
   url: string,
-  expectedBytes: number,
-  expectedSha256: string,
+  asset: ManagedToolAsset,
 ): Promise<Uint8Array> {
-  const contentLengthHeader = response.headers.get("content-length");
+  // Content-Length reflects the wire payload before decoding Content-Encoding, so only compare it
+  // against the decoded archive size when no transfer/content encoding is applied.
+  const contentEncoding = response.headers.get("content-encoding")?.trim().toLowerCase();
+  const isUnencoded = !contentEncoding || contentEncoding === "identity";
+  const contentLengthHeader = isUnencoded ? response.headers.get("content-length") : null;
   if (contentLengthHeader !== null) {
     const declaredLength = Number(contentLengthHeader);
-    if (Number.isFinite(declaredLength) && declaredLength > expectedBytes) {
+    if (Number.isFinite(declaredLength) && declaredLength > asset.bytes) {
       await response.body?.cancel();
       throw new Error(
-        `Size mismatch for ${url}: Content-Length ${declaredLength} exceeds expected ${expectedBytes} bytes`,
+        `Size mismatch for ${url}: Content-Length ${declaredLength} exceeds expected ${asset.bytes} bytes`,
       );
     }
   }
 
   const hash = createHash("sha256");
-  const buffer = new Uint8Array(expectedBytes);
+  const buffer = new Uint8Array(asset.bytes);
   let totalBytes = 0;
 
   if (response.body) {
@@ -88,10 +92,10 @@ async function readBoundedResponse(
         if (done) break;
         if (!value || value.byteLength === 0) continue;
 
-        if (totalBytes + value.byteLength > expectedBytes) {
+        if (totalBytes + value.byteLength > asset.bytes) {
           await reader.cancel();
           throw new Error(
-            `Size mismatch for ${url}: response exceeded expected ${expectedBytes} bytes`,
+            `Size mismatch for ${url}: response exceeded expected ${asset.bytes} bytes`,
           );
         }
 
@@ -104,13 +108,13 @@ async function readBoundedResponse(
     }
   }
 
-  if (totalBytes !== expectedBytes) {
-    throw new Error(`Size mismatch for ${url}: expected ${expectedBytes} bytes, got ${totalBytes}`);
+  if (totalBytes !== asset.bytes) {
+    throw new Error(`Size mismatch for ${url}: expected ${asset.bytes} bytes, got ${totalBytes}`);
   }
 
   const actualSha256 = hash.digest("hex");
-  if (actualSha256 !== expectedSha256) {
-    throw new Error(`SHA256 mismatch for ${url}: expected ${expectedSha256}, got ${actualSha256}`);
+  if (actualSha256 !== asset.sha256) {
+    throw new Error(`SHA256 mismatch for ${url}: expected ${asset.sha256}, got ${actualSha256}`);
   }
 
   return buffer;
@@ -118,8 +122,7 @@ async function readBoundedResponse(
 
 async function downloadAndVerify(
   url: string,
-  expectedBytes: number,
-  expectedSha256: string,
+  asset: ManagedToolAsset,
   fetchImpl: FetchFn,
   retryDelayMs: number,
 ): Promise<Uint8Array> {
@@ -139,7 +142,7 @@ async function downloadAndVerify(
           : new NonRetryableDownloadError(message);
       }
 
-      return await readBoundedResponse(response, url, expectedBytes, expectedSha256);
+      return await readBoundedResponse(response, url, asset);
     } catch (error) {
       const err = error instanceof Error ? error : new Error(String(error));
       if (err instanceof NonRetryableDownloadError || attempt === MAX_ATTEMPTS) {
@@ -285,13 +288,7 @@ export async function installManagedToolsForHost(
     const assetEntry = tool.assets[hostKey];
     const url = `${downloadBaseUrl}/${tool.repo}/releases/download/${tool.tagPrefix}${tool.version}/${assetEntry.asset}`;
 
-    const archiveBytes = await downloadAndVerify(
-      url,
-      assetEntry.bytes,
-      assetEntry.sha256,
-      fetchImpl,
-      retryDelayMs,
-    );
+    const archiveBytes = await downloadAndVerify(url, assetEntry, fetchImpl, retryDelayMs);
 
     const scratchDir = await mkdtemp(join(baseTemp, `coding-agent-extract-${toolName}-`));
     try {

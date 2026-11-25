@@ -16,7 +16,7 @@ async function createFixtureArchive(
   binaryName: string,
   binaryContent: string,
   format: "tar.gz" | "zip",
-): Promise<{ bytes: number; sha256: string; archiveBytes: Uint8Array }> {
+): Promise<{ bytes: number; sha256: string; archiveBytes: Uint8Array<ArrayBuffer> }> {
   const stageDir = join(workDir, `stage-${topDirName}`);
   const innerDir = join(stageDir, topDirName);
   await mkdir(innerDir, { recursive: true });
@@ -280,6 +280,85 @@ describe("installManagedToolsForHost", () => {
     }
   });
 
+  it("accepts a gzip-encoded HTTP response whose compressed Content-Length exceeds decoded manifest bytes", async () => {
+    const workDir = await mkdtemp(join(tmpdir(), "setup-ci-tools-gzip-"));
+    const isWindows = process.platform === "win32";
+    const hostKey = resolveHostTargetKey(process.platform, process.arch);
+    const format = isWindows ? "zip" : "tar.gz";
+    const ext = isWindows ? ".exe" : "";
+
+    const fdArchive = await createFixtureArchive(
+      workDir,
+      "fd-v10.5.2-fixture",
+      `fd${ext}`,
+      "#!/bin/sh\necho 'fd 10.5.2'\n",
+      format,
+    );
+    const rgArchive = await createFixtureArchive(
+      workDir,
+      "ripgrep-16.0.0-fixture",
+      `rg${ext}`,
+      "#!/bin/sh\necho 'ripgrep 16.0.0'\n",
+      format,
+    );
+
+    const fdGzip = Bun.gzipSync(fdArchive.archiveBytes);
+    const rgGzip = Bun.gzipSync(rgArchive.archiveBytes);
+    // Double-gzipping an already-compressed archive makes wire Content-Length larger than decoded bytes.
+    expect(fdGzip.byteLength).toBeGreaterThan(fdArchive.bytes);
+
+    const fdAssetName = `fd-v10.5.2-fixture.${format}`;
+    const rgAssetName = `ripgrep-16.0.0-fixture.${format}`;
+    const manifest = makeManifestForHost(
+      hostKey,
+      { asset: fdAssetName, bytes: fdArchive.bytes, sha256: fdArchive.sha256 },
+      { asset: rgAssetName, bytes: rgArchive.bytes, sha256: rgArchive.sha256 },
+    );
+
+    const server = Bun.serve({
+      port: 0,
+      fetch(req) {
+        const pathname = new URL(req.url).pathname;
+        if (pathname === `/sharkdp/fd/releases/download/v10.5.2/${fdAssetName}`) {
+          return new Response(fdGzip, {
+            headers: {
+              "Content-Encoding": "gzip",
+              "Content-Length": String(fdGzip.byteLength),
+            },
+          });
+        }
+        if (pathname === `/BurntSushi/ripgrep/releases/download/16.0.0/${rgAssetName}`) {
+          return new Response(rgGzip, {
+            headers: {
+              "Content-Encoding": "gzip",
+              "Content-Length": String(rgGzip.byteLength),
+            },
+          });
+        }
+        return new Response("Not found", { status: 404 });
+      },
+    });
+
+    try {
+      const result = await installManagedToolsForHost({
+        manifest,
+        binDir: join(workDir, "bin"),
+        downloadBaseUrl: server.url.toString().replace(/\/$/, ""),
+        retryDelayMs: 1,
+        // Windows cannot execute a shell-script stub named *.exe; verify real execution on Unix.
+        verifyVersion: isWindows ? async () => {} : undefined,
+      });
+
+      expect(result.installed.fd).toBe(join(workDir, "bin", `fd${ext}`));
+      expect(result.installed.rg).toBe(join(workDir, "bin", `rg${ext}`));
+    } finally {
+      server.stop(true);
+      await rm(workDir, { recursive: true, force: true });
+    }
+  });
+
+  // Skipped on Windows: the fixture binary is a POSIX shell script (`#!/bin/sh`), which Windows
+  // cannot execute as a `.exe` during `--version` verification.
   it.skipIf(process.platform === "win32")(
     "rejects a binary whose --version output has a prefix match like 10.5.20 for pinned 10.5.2",
     async () => {
