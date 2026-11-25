@@ -1,0 +1,81 @@
+{
+  "schemaVersion": 1,
+  "tools": {
+    "fd": {
+      "version": "10.5.2",
+      "repo": "sharkdp/fd",
+      "tagPrefix": "v",
+      "minimumVersion": "10.5.1",
+      "assets": {
+        "darwin-arm64": {
+          "asset": "fd-v10.5.2-aarch64-apple-darwin.tar.gz",
+          "bytes": 1349389,
+          "sha256": "81bf98a16d3d7230e4a9123fcede243d71ea31a577113476ed43f1cdf4773162"
+        },
+        "darwin-x64": {
+          "asset": "fd-v10.5.2-x86_64-apple-darwin.tar.gz",
+          "bytes": 1453160,
+          "sha256": "0f02e6000a8c896cd254cf4dccc7da1e604e77a32c6783609eed5e4cb07785e3"
+        },
+        "linux-arm64": {
+          "asset": "fd-v10.5.2-aarch64-unknown-linux-musl.tar.gz",
+          "bytes": 1643779,
+          "sha256": "63ea52cb31586e6d98efa2f06d73d542f16c7d0c4af0f07b579aaf9714cf907a"
+        },
+        "linux-x64": {
+          "asset": "fd-v10.5.2-x86_64-unknown-linux-musl.tar.gz",
+          "bytes": 1798931,
+          "sha256": "7e2d07fa2b8807642aaec67b7e2972a9fbe4db26fcb340a7372392db42b26694"
+        },
+        "win32-arm64": {
+          "asset": "fd-v10.5.2-aarch64-pc-windows-msvc.zip",
+          "bytes": 1388549,
+          "sha256": "0ee570ad513e6e1909642dbd79bf7177cf3457652e912c27726582c0f49df86e"
+        },
+        "win32-x64": {
+          "asset": "fd-v10.5.2-x86_64-pc-windows-msvc.zip",
+          "bytes": 1564536,
+          "sha256": "7edac75ef96b7e9a01ebb251a21ee86ea365a09adcfb865f1ec3346a906153b6"
+        }
+      }
+    },
+    "rg": {
+      "version": "16.0.0",
+      "repo": "BurntSushi/ripgrep",
+      "tagPrefix": "",
+      "minimumVersion": "13.0.0",
+      "assets": {
+        "darwin-arm64": {
+          "asset": "ripgrep-16.0.0-aarch64-apple-darwin.tar.gz",
+          "bytes": 1750703,
+          "sha256": "5a145656d5067144001bfce6648767fd3254599aa736f1ffdb7fb907760b8ca1"
+        },
+        "darwin-x64": {
+          "asset": "ripgrep-16.0.0-x86_64-apple-darwin.tar.gz",
+          "bytes": 1855282,
+          "sha256": "aa9183b0e0bfac03c5818895ad18b75001c402d230063898abfe5a58cd413caa"
+        },
+        "linux-arm64": {
+          "asset": "ripgrep-16.0.0-aarch64-unknown-linux-musl.tar.gz",
+          "bytes": 1988157,
+          "sha256": "374f1886be881e8e8683d7107278f7af1b6017fda75eb97de71f5783f42b0110"
+        },
+        "linux-x64": {
+          "asset": "ripgrep-16.0.0-x86_64-unknown-linux-musl.tar.gz",
+          "bytes": 2230229,
+          "sha256": "54268ab4643c00a290a29b0086066d64b3f56236dd805ec64629a86f9bd29fd0"
+        },
+        "win32-arm64": {
+          "asset": "ripgrep-16.0.0-aarch64-pc-windows-msvc.zip",
+          "bytes": 1672586,
+          "sha256": "3302ede09745d33ca2b287bf3c6434c54cb35c3b408a7d3a265939961add5a1a"
+        },
+        "win32-x64": {
+          "asset": "ripgrep-16.0.0-x86_64-pc-windows-msvc.zip",
+          "bytes": 1782487,
+          "sha256": "f418ae83e63046a94a7b5f3a44bf3a169f66e689164856ecee02547131c73931"
+        }
+      }
+    }
+  }
+}

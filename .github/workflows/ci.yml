@@ -91,7 +91,12 @@ jobs:
       - name: Install dependencies
         run: bun ci --ignore-scripts
 
+      - name: Install managed binaries (fd, rg)
+        run: bun run scripts/setup-ci-managed-tools.ts
+
       - name: Run tests
+        env:
+          CODING_AGENT_OFFLINE: "1"
         run: bun run test
 
   # A macOS minute counts as ten against the Actions minutes of a private repository, so pull
@@ -119,7 +124,12 @@ jobs:
       - name: Install dependencies
         run: bun ci --ignore-scripts
 
+      - name: Install managed binaries (fd, rg)
+        run: bun run scripts/setup-ci-managed-tools.ts
+
       - name: Run tests
+        env:
+          CODING_AGENT_OFFLINE: "1"
         run: bun run test
 
   build:
