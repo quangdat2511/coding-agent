@@ -292,3 +292,56 @@ from GitHub.
 The posting step uses `continue-on-error`. A Discord failure or a wrong secret or variable leaves
 the checks of the pull request green and shows the error in the job log. Run
 `bun test scripts/tests/notify-discord.test.ts` for the unit tests.
+
+## Managed binaries manifest and CI setup
+
+`grep` and `find` run pinned versions of `rg` (ripgrep) and `fd`. The source of truth for those
+pinned builds is `packages/tools/src/managed-tools.json`, which records `schemaVersion`, and for
+each tool its `version`, `repo`, `tagPrefix`, `minimumVersion`, and all six supported
+platform/architecture assets (`darwin-arm64`, `darwin-x64`, `linux-arm64`, `linux-x64`,
+`win32-arm64`, `win32-x64`) with their exact `asset` filename, `bytes`, and `sha256` digest.
+
+### Updating pinned versions (`scripts/update-managed-tools.ts`)
+
+`scripts/update-managed-tools.ts` is the only code in the repository that calls the GitHub API
+(`/releases/latest`). It runs by hand in a pull request, never in CI or during a normal test run.
+
+To bump the pinned `fd` and `rg` versions:
+
+1. Create a branch from the latest `main`.
+2. Run the update script from the repository root (optionally with `GITHUB_TOKEN` or `GH_TOKEN`
+   set to avoid unauthenticated API rate limits):
+
+   ```sh
+   bun run update:managed-tools
+   ```
+
+   The script fetches `/releases/latest` for `sharkdp/fd` and `BurntSushi/ripgrep`, validates that
+   the tag matches `tagPrefix`, checks that the version is at or above `minimumVersion`, verifies
+   that all six required assets are present with valid byte sizes and 64-hex `sha256:` digests,
+   and rewrites `packages/tools/src/managed-tools.json`. If any of the six targets is missing or
+   has no SHA-256 digest, the script exits 1 without rewriting the manifest.
+3. Inspect `git diff packages/tools/src/managed-tools.json` to confirm the new versions and asset
+   hashes.
+4. Run the offline checks and tests:
+
+   ```sh
+   bun run check
+   bun run typecheck
+   bun test packages/tools/tests/managed-tools-manifest.test.ts scripts/tests/update-managed-tools.test.ts scripts/tests/setup-ci-managed-tools.test.ts
+   ```
+
+5. Open a pull request. The Ubuntu and Windows CI jobs will download the newly pinned binaries,
+   verify their byte sizes and SHA-256 hashes against the updated manifest, and run the full test
+   suite with `CODING_AGENT_OFFLINE=1`. For a platform-specific check on macOS, trigger the `CI`
+   workflow manually on the branch.
+
+### CI setup (`scripts/setup-ci-managed-tools.ts`)
+
+The `Test (ubuntu-24.04)`, `Test (windows-2025)`, and `Test (macos-26)` jobs in
+`.github/workflows/ci.yml` run `bun run scripts/setup-ci-managed-tools.ts` before the test suite.
+It reads `packages/tools/src/managed-tools.json`, downloads the host's pinned `fd` and `rg`
+archives, verifies exact `bytes` and `sha256` before extraction, extracts into a temporary
+directory, checks `<binary> --version`, and appends the binary directory to `GITHUB_PATH`. The
+test suite then runs with `CODING_AGENT_OFFLINE=1` so no test accidentally reaches the network.
+Run `bun test scripts/tests/setup-ci-managed-tools.test.ts` for the offline unit tests.
