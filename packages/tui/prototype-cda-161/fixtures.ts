@@ -4,12 +4,65 @@ interface Edit {
   readonly insert: readonly string[];
 }
 
-function fixture(label: string, path: string, before: string, edits: readonly Edit[]) {
+export type DiffLine =
+  | {
+      readonly kind: "added" | "removed" | "context";
+      readonly lineNumber: number;
+      readonly text: string;
+    }
+  | { readonly kind: "gap" | "truncated" };
+
+const CONTEXT_LINES = 4;
+
+function fixture(
+  label: string,
+  path: string,
+  before: string,
+  edits: readonly Edit[],
+  previewRowsPerEnd?: number,
+) {
   const eol = before.includes("\r\n") ? "CRLF" : "LF";
   const lines = before.split(/\r?\n/);
   const added = edits.reduce((count, edit) => count + edit.insert.length, 0);
   const removed = edits.reduce((count, edit) => count + edit.remove, 0);
-  return { label, path, eol, lines, edits, added, removed };
+  const rows: DiffLine[] = [];
+
+  let oldLine = 1;
+  let newLine = 1;
+  function context(until: number, keepStart: number, keepEnd: number) {
+    const count = until - oldLine;
+    const visibleAtStart = Math.min(keepStart, count);
+    const hidden = Math.max(0, count - visibleAtStart - keepEnd);
+    for (const text of lines.slice(oldLine - 1, oldLine - 1 + visibleAtStart)) {
+      rows.push({ kind: "context", lineNumber: newLine++, text });
+      oldLine++;
+    }
+    if (hidden > 0) {
+      rows.push({ kind: "gap" });
+      oldLine += hidden;
+      newLine += hidden;
+    }
+    for (const text of lines.slice(oldLine - 1, until - 1)) {
+      rows.push({ kind: "context", lineNumber: newLine++, text });
+      oldLine++;
+    }
+  }
+
+  for (const [index, edit] of edits.entries()) {
+    context(edit.line, index === 0 ? 0 : CONTEXT_LINES, CONTEXT_LINES);
+    for (const text of lines.slice(oldLine - 1, oldLine - 1 + edit.remove)) {
+      rows.push({ kind: "removed", lineNumber: oldLine++, text });
+    }
+    for (const text of edit.insert) {
+      rows.push({ kind: "added", lineNumber: newLine++, text });
+    }
+  }
+  context(lines.length + 1, CONTEXT_LINES, 0);
+
+  if (previewRowsPerEnd !== undefined && rows.length > previewRowsPerEnd * 2 + 1) {
+    rows.splice(previewRowsPerEnd, rows.length - previewRowsPerEnd * 2, { kind: "truncated" });
+  }
+  return { label, path, eol, rows, added, removed };
 }
 
 const rule = (id: number, owner: string) =>
@@ -49,7 +102,7 @@ export const fixtures = {
     ],
   ),
   large: fixture(
-    "100 replaced lines · 3 regions",
+    "100 replaced lines · truncated",
     "src/policy/ownership.ts",
     [
       "export const ownership = [",
@@ -76,6 +129,7 @@ export const fixtures = {
         insert: Array.from({ length: 5 }, (_, index) => rule(230 + index, "support")),
       },
     ],
+    64, // Simulate a shortened payload with changed rows at both ends.
   ),
   crlf: fixture(
     "CRLF file",
