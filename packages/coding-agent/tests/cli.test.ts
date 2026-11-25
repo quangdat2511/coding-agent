@@ -383,14 +383,14 @@ describe("the coding-agent executable", () => {
         const outputDir = join(directory, "out");
         expect((await readdir(outputDir)).sort()).toEqual(runFiles);
         expect(await Bun.file(join(outputDir, "run.json")).json()).toMatchObject({
-          schemaVersion: 1,
+          schemaVersion: 2,
           codingAgent: { commit: null },
           profile: "default",
           tools: ["read", "write", "edit", "bash"],
         });
         expect(await lastEventType(outputDir)).toBe("run_settled");
         expect(await Bun.file(join(outputDir, "result.json")).json()).toMatchObject({
-          schemaVersion: 1,
+          schemaVersion: 2,
           exitCode: 0,
           result: { outcome: "succeeded" },
         });
@@ -444,7 +444,7 @@ describe("the coding-agent executable", () => {
         expect((await readdir(outputDir)).sort()).toEqual(runFiles);
         expect(await lastEventType(outputDir)).toBe("run_settled");
         expect(await Bun.file(join(outputDir, "result.json")).json()).toMatchObject({
-          schemaVersion: 1,
+          schemaVersion: 2,
           exitCode: 1,
           result: { outcome: "failed", failure: { code: "MODEL_FAILURE" } },
         });
@@ -582,7 +582,7 @@ describe("the coding-agent executable", () => {
         expect((await readdir(outputDir)).sort()).toEqual(runFiles);
         expect(await lastEventType(outputDir)).toBe("run_settled");
         expect(await Bun.file(join(outputDir, "result.json")).json()).toMatchObject({
-          schemaVersion: 1,
+          schemaVersion: 2,
           exitCode: 130,
           result: {
             outcome: "cancelled",
@@ -666,7 +666,7 @@ describe("the coding-agent executable", () => {
         expect((await readdir(outputDir)).sort()).toEqual(runFiles);
         expect(await lastEventType(outputDir)).toBe("run_settled");
         expect(await Bun.file(join(outputDir, "result.json")).json()).toMatchObject({
-          schemaVersion: 1,
+          schemaVersion: 2,
           exitCode: 1,
           result: {
             outcome: "failed",

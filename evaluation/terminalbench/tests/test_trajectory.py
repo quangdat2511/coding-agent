@@ -200,7 +200,7 @@ class TrajectoryTest(unittest.TestCase):
     def test_a_skipped_tool_call_records_the_reason(self) -> None:
         log = complete_events()
         log[6] = {
-            "schemaVersion": 1,
+            "schemaVersion": 2,
             "runId": RUN_ID,
             "sequence": 7,
             "occurredAt": OCCURRED_AT,
@@ -287,7 +287,7 @@ class TrajectoryTest(unittest.TestCase):
             "evidence": [],
         }
         log[15] = {
-            "schemaVersion": 1,
+            "schemaVersion": 2,
             "runId": RUN_ID,
             "sequence": 16,
             "occurredAt": OCCURRED_AT,

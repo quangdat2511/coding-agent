@@ -63,10 +63,10 @@ describe("the event log", () => {
     ]);
 
     expect(text.trimEnd().split("\n")).toEqual([
-      '{"schemaVersion":1,"runId":"run-1","sequence":1,' +
+      '{"schemaVersion":2,"runId":"run-1","sequence":1,' +
         '"occurredAt":"2026-11-12T00:00:00.000Z","type":"tool_execution_started",' +
         '"data":{"toolCallId":"call-1","mutation":"read_only"}}',
-      '{"schemaVersion":1,"runId":"run-1","sequence":5,' +
+      '{"schemaVersion":2,"runId":"run-1","sequence":5,' +
         '"occurredAt":"2026-11-12T00:00:00.000Z","type":"verification_started",' +
         '"data":{"verificationId":"v"}}',
     ]);

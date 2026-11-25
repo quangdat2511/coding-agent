@@ -382,7 +382,7 @@ describe("a headless run of the named task on Google", () => {
           parts: { text: string }[];
         };
         expect(await Bun.file(join(outputDir, "run.json")).json()).toEqual({
-          schemaVersion: 1,
+          schemaVersion: 2,
           codingAgent: { version: "0.0.1", commit: null },
           provider: "google",
           model: "gemini-3.5-flash-lite",
@@ -419,7 +419,7 @@ describe("a headless run of the named task on Google", () => {
       const types = events.map(({ type }) => type);
       const sequences = events.map(({ sequence }) => sequence);
 
-      expect(events.every(({ schemaVersion }) => schemaVersion === 1)).toBe(true);
+      expect(events.every(({ schemaVersion }) => schemaVersion === 2)).toBe(true);
       expect(new Set(events.map(({ runId }) => runId)).size).toBe(1);
       expect(types).not.toContain("assistant_content_delta");
       expect(types).toContain("assistant_message_completed");
@@ -479,7 +479,7 @@ describe("a headless run of the named task on Google", () => {
     await runNamedTask(replayInOrder(readOnlyRun), async ({ result, outputDir }) => {
       const written = await Bun.file(join(outputDir, "result.json")).json();
       expect(written).toEqual({
-        schemaVersion: 1,
+        schemaVersion: 2,
         exitCode: 0,
         result: JSON.parse(JSON.stringify(result.result)),
         finishedAt: expect.any(String),
@@ -503,7 +503,7 @@ describe("a headless run of the named task on Google", () => {
       ]);
       const written = await Bun.file(join(outputDir, "result.json")).json();
       expect(written).toMatchObject({
-        schemaVersion: 1,
+        schemaVersion: 2,
         exitCode: 1,
         result: { outcome: "failed", failure: { code: "MODEL_FAILURE" } },
       });
@@ -680,7 +680,7 @@ describe("a headless run of the named task on Google", () => {
           "run.json",
         ]);
         expect(await Bun.file(join(outputDir, "result.json")).json()).toMatchObject({
-          schemaVersion: 1,
+          schemaVersion: 2,
           exitCode: 130,
           result: { outcome: "cancelled", workspaceChanged: false, partialChangesPossible: false },
         });

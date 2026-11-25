@@ -186,7 +186,7 @@ also needs `TuiModel` from C1, because `tui` owns that type. Owns the two later 
 | --- | --- | --- |
 | D1 | Configuration, CLI parsing, the `ModelPort` adapter over `ai`, the system prompt assembly of ADR 0003 §1 and §2, and `coding-agent run` | Usage and configuration errors exit 2 before any Agent Run opens |
 | D2 | The composition root's two ADR 0001 §8 duties: marking the process non-dumpable through `prctl` before the first tool or Verification child, and, under `"auto-approve"` only, walking the ancestor chain at startup and refusing to open an Agent Run when an ancestor still holds a credential | A launcher that does not `exec`-replace itself is rejected with exit 2, and a same-uid child cannot read the Coding Agent process's `/proc/<pid>/environ` or `/proc/<pid>/mem` |
-| D3 | The full ADR 0005 §3 and §4 contract: exit codes 0, 1, 130, 2, 70; `run.json`, `events.jsonl`, `result.json` at `schemaVersion` 1; the `default` and `terminalbench` profiles | A smoke test per exit code asserts the files each run writes |
+| D3 | The full ADR 0005 §3 and §4 contract: exit codes 0, 1, 130, 2, 70; `run.json`, `events.jsonl`, `result.json` at `schemaVersion` 2; the `default` and `terminalbench` profiles | A smoke test per exit code asserts the files each run writes |
 | D4 | `projectRunEvent` and the interactive path | The projection has unit tests and performs no I/O |
 
 **Track E, provider breadth.** Runs from Join 1, parallel to everything else: Anthropic, then
@@ -312,8 +312,9 @@ count and its GPU count are therefore properties of the dataset the job names, n
 Track F's adapter and the record tooling take the dataset from the job configuration (ADR 0008 §5).
 
 On 2026-11-24, [CDA-147](https://datn-fit-hcmus.atlassian.net/browse/CDA-147) amended this record:
-Agent Session is renamed Agent Run (ADR 0002 §8), so A1 names `openAgentRun` and `RunLimits`, D4
-names `projectRunEvent`, and item 1 counts Run Event types. The work each item names is unchanged.
+Agent Session is renamed Agent Run (ADR 0002 §8), so A1 names `openAgentRun` and `RunLimits`, D3
+writes its files at `schemaVersion` 2 (ADR 0005 §4), D4 names `projectRunEvent`, and item 1 counts
+Run Event types. The work each item names is unchanged.
 
 ### 7. Tier 2: MVP evaluated
 

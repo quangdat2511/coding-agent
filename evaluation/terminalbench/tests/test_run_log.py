@@ -65,7 +65,7 @@ class RunLogTest(unittest.TestCase):
     def test_a_partly_written_last_line_is_dropped(self) -> None:
         self.read(log=truncated_events())
         with (self.output_dir / "events.jsonl").open("a", encoding="utf-8") as file:
-            file.write('{"schemaVersion": 1, "runId": "run-1", "sequence": 16, "oc')
+            file.write('{"schemaVersion": 2, "runId": "run-1", "sequence": 16, "oc')
 
         log = load_run_log(self.output_dir)
 
@@ -93,7 +93,7 @@ class RunLogTest(unittest.TestCase):
             # The process died while appending a Tool Result with Vietnamese output, so the last
             # byte of a multi byte character never reached the file.
             file.write(
-                '{"schemaVersion": 1, "runId": "run-1", "data": "Tiế'.encode("utf-8")[:-1]
+                '{"schemaVersion": 2, "runId": "run-1", "data": "Tiế'.encode("utf-8")[:-1]
             )
 
         log = load_run_log(self.output_dir)
@@ -103,7 +103,7 @@ class RunLogTest(unittest.TestCase):
 
     def test_a_damaged_line_before_the_last_event_is_refused(self) -> None:
         log = complete_events()
-        log[4] = {"schemaVersion": 1, "type": "tool_call_queued"}
+        log[4] = {"schemaVersion": 2, "type": "tool_call_queued"}
         with self.assertRaisesRegex(
             RunLogError, r"events\.jsonl line 5 does not have the Run Event envelope"
         ):
@@ -124,7 +124,7 @@ class RunLogTest(unittest.TestCase):
     def test_invalid_utf8_in_run_json_is_refused(self) -> None:
         write_run_files(self.output_dir, record=None)
         (self.output_dir / "run.json").write_bytes(
-            b'{"schemaVersion": 1, "systemPrompt": "Ti\xff"}'
+            b'{"schemaVersion": 2, "systemPrompt": "Ti\xff"}'
         )
 
         with self.assertRaisesRegex(RunLogError, r"run\.json is not valid UTF-8"):
@@ -159,24 +159,39 @@ class RunLogTest(unittest.TestCase):
     def test_another_schema_version_is_refused(self) -> None:
         with self.subTest(file="run.json"):
             with self.assertRaisesRegex(
-                RunLogError, r"run\.json: schemaVersion must be 1, found 2"
+                RunLogError, r"run\.json: schemaVersion must be 2, found 1"
             ):
-                self.read(record=run_record_data(schemaVersion=2))
+                self.read(record=run_record_data(schemaVersion=1))
 
         with self.subTest(file="result.json"):
-            result = {**result_record_data({"outcome": "succeeded"}), "schemaVersion": 2}
+            result = {**result_record_data({"outcome": "succeeded"}), "schemaVersion": 1}
             with self.assertRaisesRegex(
-                RunLogError, r"result\.json: schemaVersion must be 1, found 2"
+                RunLogError, r"result\.json: schemaVersion must be 2, found 1"
             ):
                 self.read(result=result)
 
         with self.subTest(file="events.jsonl"):
             log = complete_events()
-            log[0] = {**log[0], "schemaVersion": 2}
+            log[0] = {**log[0], "schemaVersion": 1}
             with self.assertRaisesRegex(
-                RunLogError, r"events\.jsonl line 1: schemaVersion must be 1, found 2"
+                RunLogError, r"events\.jsonl line 1: schemaVersion must be 2, found 1"
             ):
                 self.read(log=log)
+
+    def test_a_one_line_log_from_before_the_rename_is_refused(self) -> None:
+        # A run killed right after it started, logged in the envelope that CDA-147 renamed.
+        before_the_rename = {
+            "schemaVersion": 1,
+            "sessionId": "session-1",
+            "sequence": 1,
+            "occurredAt": "2026-11-12T00:00:00.000Z",
+            "type": "session_started",
+            "data": {"task": {"objective": OBJECTIVE}},
+        }
+        with self.assertRaisesRegex(
+            RunLogError, r"events\.jsonl line 1: schemaVersion must be 2, found 1"
+        ):
+            self.read(log=[before_the_rename], result=None)
 
     def test_a_record_without_a_system_prompt_is_refused(self) -> None:
         with self.assertRaisesRegex(RunLogError, "systemPrompt must be a string"):

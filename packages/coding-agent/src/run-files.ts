@@ -11,7 +11,7 @@ import type { BuildInfo } from "./build-info.ts";
 import type { Profile } from "./run-args.ts";
 import type { SamplingSettings, VerificationConfig } from "./run-config.ts";
 
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 
 export interface RunRecord {
   readonly codingAgent: BuildInfo;

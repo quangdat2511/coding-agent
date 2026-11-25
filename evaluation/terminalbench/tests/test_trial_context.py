@@ -102,7 +102,7 @@ class PopulateTrialContextTest(unittest.TestCase):
         log.insert(
             len(log) - 1,
             {
-                "schemaVersion": 1,
+                "schemaVersion": 2,
                 "runId": RUN_ID,
                 "sequence": 16,
                 "occurredAt": OCCURRED_AT,

@@ -153,7 +153,7 @@ A run writes three files into `--output-dir`
 ([ADR 0005 §4](../../docs/adr/0005-terminalbench-evaluation-protocol.md)). An evaluator reads the
 outcome from `result.json`, rebuilds the trajectory from `events.jsonl`, and reproduces the run
 from `run.json`. It does not need standard output. `src/run-files.ts` writes all three, and each
-carries `"schemaVersion": 1`.
+carries `"schemaVersion": 2`.
 
 **`run.json`** is written before the Coding Task starts. It is one JSON object with these fields:
 

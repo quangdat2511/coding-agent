@@ -297,9 +297,9 @@ On 2026-11-24, [CDA-147](https://datn-fit-hcmus.atlassian.net/browse/CDA-147) am
 the event log of §4 follows ADR 0002's rename of Agent Session to Agent Run. In `events.jsonl` the
 envelope's id is `runId`, formerly `sessionId`, and its value starts with `run-`; the first and last
 events are `run_started` and `run_settled`, formerly `session_started` and `session_settled`.
-`schemaVersion` stays 1. The MVP job's committed records keep the old names, and the adapter reads
-only the new ones, so it refuses a log written before this change as lacking the Run Event
-envelope.
+Because the envelope changed, all three files now carry `"schemaVersion": 2`, so the adapter
+refuses an older file with a version error rather than misreading it. The MVP job's published
+archives keep the old names at version 1.
 
 ### 2. Coding Agent artifact
 
@@ -368,7 +368,7 @@ error are diagnostic only and are not part of the contract.
 
 ### 4. Files written
 
-Each of the three files carries `"schemaVersion": 1`. Writing Run Events to disk is the point
+Each of the three files carries `"schemaVersion": 2`. Writing Run Events to disk is the point
 at which ADR 0002 §7 requires a schema version.
 
 - **`run.json`** is written before `start` is dispatched. It records the Coding Agent version and

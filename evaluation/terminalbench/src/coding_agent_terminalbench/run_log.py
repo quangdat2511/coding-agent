@@ -18,7 +18,7 @@ EVENTS_FILE = "events.jsonl"
 RESULT_FILE = "result.json"
 
 # ADR 0005 §4: all three files carry this schema version.
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 # The Run Events that the adapter reads, from packages/agent-core/src/events.ts.
 TASK_EVENT = "run_started"

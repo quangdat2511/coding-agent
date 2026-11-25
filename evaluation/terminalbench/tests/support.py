@@ -118,7 +118,7 @@ def write_manifest(artifact_dir: Path, data: Any) -> None:
 def run_record_data(**overrides: Any) -> dict[str, Any]:
     """The `RunRecord` that `packages/coding-agent/src/run-files.ts` writes to run.json."""
     data: dict[str, Any] = {
-        "schemaVersion": 1,
+        "schemaVersion": 2,
         "codingAgent": {"version": "0.0.1", "commit": COMMIT},
         "provider": "google",
         "model": MODEL["id"],
@@ -165,7 +165,7 @@ def agent_result(*, drop: tuple[str, ...] = (), **overrides: Any) -> dict[str, A
 def result_record_data(result: dict[str, Any], *, exit_code: int = 0) -> dict[str, Any]:
     """The `ResultRecord` that `run-files.ts` writes to result.json."""
     return {
-        "schemaVersion": 1,
+        "schemaVersion": 2,
         "exitCode": exit_code,
         "result": result,
         "finishedAt": "2026-11-12T00:00:16.000Z",
@@ -175,7 +175,7 @@ def result_record_data(result: dict[str, Any], *, exit_code: int = 0) -> dict[st
 def event(sequence: int, type: str, data: dict[str, Any]) -> dict[str, Any]:
     """One line of events.jsonl, in the envelope of ADR 0002 that `run-files.ts` writes."""
     return {
-        "schemaVersion": 1,
+        "schemaVersion": 2,
         "runId": RUN_ID,
         "sequence": sequence,
         "occurredAt": OCCURRED_AT,
