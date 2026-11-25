@@ -301,10 +301,12 @@ Because the envelope changed, all three files now carry `"schemaVersion": 2`, so
 refuses an older file with a version error rather than misreading it. The MVP job's published
 archives keep the old names at version 1.
 
-On 2026-11-25, [Amend ADR 0002, 0004 and 0005 for tool details, the TUI diff and headless logs](https://datn-fit-hcmus.atlassian.net/browse/CDA-166)
-amended the headless event log (§4) and task conditions (§5) to record the decisions on
-[Tool Details](https://datn-fit-hcmus.atlassian.net/browse/CDA-155?focusedCommentId=10375) and
-[managed binary acquisition](https://datn-fit-hcmus.atlassian.net/browse/CDA-160?focusedCommentId=10373).
+On 2026-11-25, [CDA-166](https://datn-fit-hcmus.atlassian.net/browse/CDA-166) amended this record:
+
+- The headless event log (§4) omits Tool Result details from `tool_call_completed`.
+  [Tool Details decision](https://datn-fit-hcmus.atlassian.net/browse/CDA-155?focusedCommentId=10375)
+- The headless agent (§5) acquires managed binaries on first use inside the task container.
+  [Managed binary acquisition decision](https://datn-fit-hcmus.atlassian.net/browse/CDA-160?focusedCommentId=10373)
 
 ### 2. Coding Agent artifact
 
@@ -439,9 +441,11 @@ Inside a task container:
   directories are ignored, because MCP and skill loading are outside the MVP. The two affected
   tasks stay in the dataset.
 - The headless agent acquires `rg` on the first `grep` call and `fd` on the first `find` call
-  inside the task container. If acquisition needs a download, the task's network mode applies.
-  The agent fetches the pinned asset and installs the binary in the per-trial cache, which defaults
-  to a directory under the agent user's home with a temporary-directory fallback. If acquisition
+  inside the task container. It checks the per-trial cache and then `PATH` for the pinned version.
+  When neither has that version and the agent is online, it downloads the pinned asset under the
+  task's network mode and installs the binary in the cache. The cache defaults to a directory
+  under the agent user's home with a temporary-directory fallback. If the agent is offline or
+  the download fails, it can use a binary on `PATH` that meets the minimum version. If acquisition
   fails, the Tool Call returns a recoverable `TOOL_INTERNAL_ERROR` and the model can fall back to
   `bash`. The adapter installation follows §6.
 

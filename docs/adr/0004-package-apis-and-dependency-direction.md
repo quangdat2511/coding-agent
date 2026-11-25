@@ -359,7 +359,7 @@ shape and omits the field when it has no additional data. When Agent Core accept
 validates and snapshots `details` for the top-level `ToolResult.details` field of the same type.
 The root must be a plain JSON object and nested values must satisfy Agent Core's `JsonValue`, with
 finite numbers. The complete serialized payload has a limit of 40 KiB measured in UTF-8 bytes,
-independent of the Tool Result's content budget. If the payload is invalid or exceeds the limit,
+independent of the Output Budget for `content`. If the payload is invalid or exceeds the limit,
 Agent Core drops the entire field and preserves the call's execution status and `content`.
 
 `prepare` and `execute` report every expected failure as a returned code and must not throw. If
@@ -533,24 +533,23 @@ export interface TuiHandle {
 `tui` owns `TuiModel`. `onApproval` mirrors ADR 0002's `resolve_approval` command, so the adapter
 renames arguments instead of translating them.
 
-On successful `edit` completion, Coding Agent validates the shape of `ToolResult.details.diff` and
-projects it into the TUI-owned `TranscriptEntry.tool_call.result.details` variant
-`{ kind: "edit_diff", rows }`. Each addition, removal, or context row carries `kind`, a positive
-1-based `lineNumber`, `text`, and optional `clipped: true`. Gap and truncation rows carry only
-`kind`. Coding Agent retains `result.content` for the plain result path, which the TUI uses when
-the diff is absent, empty, malformed, or unrecognized. The TUI selects the renderer by the
-display variant's `kind` using its own view types.
+Coding Agent supplies the TUI-owned `TranscriptEntry.tool_call.result.details` variant
+`{ kind: "edit_diff", rows }` through the [Run Event projection (§6)](#6-coding-agentcoding-agent).
+Each addition, removal, or context row carries `kind`, a positive 1-based `lineNumber`, `text`,
+and optional `clipped: true`. Gap and truncation rows carry only `kind`. The TUI selects the
+renderer by the display variant's `kind` using its own view types. For absent or unrecognized
+display variants, it displays `result.content`.
 
 The TUI lays out each physical transcript line as an internal `TranscriptRow` with
 `{ entryId, offset, spans: readonly RowSpan[] }`. A `RowSpan` is `{ text, tone? }` with initial
 tones `added`, `removed`, and `meta`. Ordinary text uses an unstyled span and a blank separator
 has an empty span list. A diff line has a `meta` span for the gutter and one for its marker and
-text. The transcript and Group 3's footer share one TUI-owned tone-to-Ink mapping and one
-color gate evaluated at mount. The mapping uses named ANSI colors `green` for `added`, `red` for
-`removed`, and `gray` for `meta`. Context text and the Tool Call header use the terminal's default
-foreground. The gate disables styling for non-TTY stdout, nonempty `NO_COLOR`, `TERM=dumb`, or
-active CI. `FORCE_COLOR` participates in Ink's color detection only when the gate permits
-styling. The plain view carries the same text, numbers, and markers.
+text. The transcript and TUI status footer share one TUI-owned tone-to-Ink mapping and one
+color gate evaluated at mount. At every supported color depth, the mapping uses named ANSI colors
+`green` for `added`, `red` for `removed`, and `gray` for `meta`. Context text and the Tool Call
+header use the terminal's default foreground. The gate disables styling for non-TTY stdout,
+nonempty `NO_COLOR`, `TERM=dumb`, or active CI. `FORCE_COLOR` participates in Ink's color detection
+only when the gate permits styling. The plain view carries the same text, numbers, and markers.
 
 A valid diff replaces the plain result body after execution, indented two cells under the Tool
 Call header. The header covers all change regions and shows the tool name, path summary, status,
@@ -591,6 +590,10 @@ adapter is application-owned. It is pure, has its own unit tests, and performs n
 it, the package holds configuration, wiring, and process handling, not domain logic. ADR 0002 scopes
 an Agent Run to exactly one Coding Task and has no prompt queue, so a submission opens a new
 Agent Run only when no Agent Run is active.
+
+On successful `edit` completion, `projectRunEvent` validates the shape of `ToolResult.details.diff`
+and projects it into the [TUI-owned `edit_diff` variant (§5)](#5-coding-agenttui). It retains
+`result.content` and omits the variant when the diff is absent, empty, malformed, or unrecognized.
 
 The externally stable contract is the command line, not `runHeadless`. The
 [Terminal-Bench integration research](../research/terminalbench-integration.md) for
@@ -856,12 +859,15 @@ amended this record:
   `9841914c71a74d81abe07f751aefd271fd924e63`; none occurs in its packages' source. Agent Core
   therefore no longer matches Pi's `AgentSession`, and that match is removed from §8's tables.
 
-On 2026-11-25, [Amend ADR 0002, 0004 and 0005 for tool details, the TUI diff and headless logs](https://datn-fit-hcmus.atlassian.net/browse/CDA-166)
-amended the tool port and validation boundary (§3) and the TUI projection and presentation (§5).
-See the decisions on [Tool Details](https://datn-fit-hcmus.atlassian.net/browse/CDA-155?focusedCommentId=10375),
-[the edit diff payload](https://datn-fit-hcmus.atlassian.net/browse/CDA-156?focusedCommentId=10376), and
-[the TUI renderer](https://datn-fit-hcmus.atlassian.net/browse/CDA-157?focusedCommentId=10381), supported by
-the [structured row research](../research/tui-diff-rows.md).
+On 2026-11-25, [CDA-166](https://datn-fit-hcmus.atlassian.net/browse/CDA-166) amended this record:
+
+- Agent Core (§3) validates and snapshots optional JSON details from a successful Tool Outcome.
+  [Tool Details decision](https://datn-fit-hcmus.atlassian.net/browse/CDA-155?focusedCommentId=10375)
+- The TUI (§5) owns the display variant, structured rows, and shared color handling.
+  [TUI rendering decision](https://datn-fit-hcmus.atlassian.net/browse/CDA-157?focusedCommentId=10381),
+  [structured row research](../research/tui-diff-rows.md)
+- Coding Agent (§6) validates and projects the edit diff into the TUI variant.
+  [Edit diff payload decision](https://datn-fit-hcmus.atlassian.net/browse/CDA-156?focusedCommentId=10376)
 
 ## Consequences
 

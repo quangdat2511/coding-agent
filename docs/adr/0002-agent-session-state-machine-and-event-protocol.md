@@ -519,9 +519,13 @@ On 2026-11-24, [CDA-147](https://datn-fit-hcmus.atlassian.net/browse/CDA-147) am
   `run_started` and `run_settled` (were `session_started` and `session_settled`). Behavior is
   unchanged. The file name is kept so that links to this record still resolve.
 
-On 2026-11-25, [Amend ADR 0002, 0004 and 0005 for tool details, the TUI diff and headless logs](https://datn-fit-hcmus.atlassian.net/browse/CDA-166)
-amended the model-facing transcript (§3) and Tool Call completion payload (§6) to record the
-[Tool Details decision](https://datn-fit-hcmus.atlassian.net/browse/CDA-155?focusedCommentId=10375).
+On 2026-11-25, [CDA-166](https://datn-fit-hcmus.atlassian.net/browse/CDA-166) amended this record:
+
+- The model-facing Tool Result message (§3) contains only the provider's Tool Call ID, `content`,
+  and `isError`.
+- The existing Tool Call completion event (§6) carries the full Tool Result, including validated
+  `details` when present on success.
+  [Tool Details decision](https://datn-fit-hcmus.atlassian.net/browse/CDA-155?focusedCommentId=10375)
 
 ## Consequences
 
