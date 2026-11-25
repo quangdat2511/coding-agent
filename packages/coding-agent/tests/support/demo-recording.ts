@@ -161,7 +161,7 @@ export function checkRecording(recording: string): string[] {
   // Any Tool Call after the overlay: a wrapped row could hide the tool's name, so it is not named.
   step(/\[(?:executing|succeeded)\]/, "a Tool Call running after the overlay");
   step(/cancellation requested/, "the Cancellation being requested");
-  step(/session \[cancelled\]/, "the cancelled Agent Run settling");
+  step(/^run \[cancelled\]/m, "the cancelled Agent Run settling");
   // The demo allows a mutating Tool Call before it cancels, so the Agent Run must say so.
   step(
     /workspace changed, partial changes possible/,

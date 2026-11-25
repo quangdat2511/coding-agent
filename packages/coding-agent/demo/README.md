@@ -100,7 +100,7 @@ recording:
 | 2 | Wait | `assistant [streaming]`: the answer streams in. The model first asks for a `bash` call that looks around the repository: `ls -la && cat package.json …; cat AGENTS.md` in the committed run, and `bun test` in the Google responses that the named-task test replays ([fixture README](../tests/fixtures/named-task/README.md#recorded-responses)) |
 | 3 | Wait until the Approval overlay is drawn over the bottom of the transcript, and the footer reads `Esc/Ctrl+C cancel · y allow · n deny`. **Allow it:** press `y` | The overlay closes and the call goes from `[awaiting_approval]` to `[executing]` and `[succeeded]`, with its output under it. A quick command passes `[executing]` too fast to see |
 | 4 | Wait | The model reads `src/slugify.ts` (a `read` needs no Approval), states its plan, then asks to `write` `src/slugify.test.ts`: the **second overlay** |
-| 5 | **Cancel it:** press `Esc` while the second overlay is open | The overlay closes, the write never runs (`write src/slugify.test.ts [skipped, CANCELLED]`), `cancellation requested` appears, and the transcript ends with `session [cancelled]` and, under it, `workspace changed, partial changes possible` |
+| 5 | **Cancel it:** press `Esc` while the second overlay is open | The overlay closes, the write never runs (`write src/slugify.test.ts [skipped, CANCELLED]`), `cancellation requested` appears, and the transcript ends with `run [cancelled]` and, under it, `workspace changed, partial changes possible` |
 | 6 | Press `Esc` twice within one second | `Press Esc or Ctrl+C again within 1 second to quit.` after the first, and the Coding Agent exits 0 after the second. `record.sh` then takes over |
 
 If the model takes another path, keep the rule and not the order: allow the first overlay, cancel at
@@ -118,7 +118,7 @@ not queued, so press it again.
 The last lines of the transcript are the Agent Result of the cancelled Agent Run:
 
 ```text
-session [cancelled]
+run [cancelled]
   workspace changed, partial changes possible
 ```
 

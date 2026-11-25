@@ -32,7 +32,7 @@ const GOOD_RUN = [
   "\u001b[2K\u001b[1Abash bun test [executing]\r\n",
   "write src/slugify.test.ts [awaiting_approval]\r\n",
   "\u001b[1;32mnotice\u001b[0m cancellation requested\r\n",
-  "session [cancelled]\r\n  workspace changed, partial changes possible\r\n",
+  "run [cancelled]\r\n  workspace changed, partial changes possible\r\n",
 ];
 
 describe("checking a recording of the interactive path", () => {
@@ -60,7 +60,7 @@ describe("checking a recording of the interactive path", () => {
     ["the overlay", "y allow", /Approval overlay/],
     ["a Tool Call after the overlay", "[executing]", /Tool Call running/],
     ["the cancellation request", "cancellation requested", /Cancellation being requested/],
-    ["the cancelled Agent Run", "session [cancelled]", /cancelled Agent Run settling/],
+    ["the cancelled Agent Run", "run [cancelled]", /cancelled Agent Run settling/],
     ["the workspace report", "workspace changed, partial changes possible", /workspace changed/],
   ])("rejects a run without %s", (_name, text, problem) => {
     const run = GOOD_RUN.map((output) => output.replace(text, "…"));
@@ -75,10 +75,18 @@ describe("checking a recording of the interactive path", () => {
 
   it("rejects a cancellation that timed out instead of settling", () => {
     const run = GOOD_RUN.map((output) =>
-      output.replace("session [cancelled]", "session [failed, CANCELLATION_TIMEOUT]"),
+      output.replace("run [cancelled]", "run [failed, CANCELLATION_TIMEOUT]"),
     );
     const problems = checkRecording(recordingOf(run));
     expect(problems).toContain('the transcript shows "CANCELLATION_TIMEOUT"');
+  });
+
+  it("does not take a cancelled Tool Call whose command ends in run for the outcome", () => {
+    const run = GOOD_RUN.map((output) =>
+      output.replace("run [cancelled]", "bash bun run [cancelled]"),
+    );
+    const problems = checkRecording(recordingOf(run));
+    expect(problems.some((message) => /cancelled Agent Run settling/.test(message))).toBe(true);
   });
 
   it("rejects a transcript that shows a defect of the run", () => {

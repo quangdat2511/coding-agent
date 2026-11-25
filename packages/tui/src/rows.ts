@@ -126,7 +126,7 @@ function progressLines(progress: string | undefined, columns: number): string[] 
 
 function outcomeLines(entry: Entry<"outcome">, columns: number): string[] {
   const { failure } = entry;
-  const header = `session [${[entry.status, failure?.code].filter(Boolean).join(", ")}]`;
+  const header = `run [${[entry.status, failure?.code].filter(Boolean).join(", ")}]`;
   const workspace = [
     entry.workspaceChanged ? "workspace changed" : "workspace unchanged",
     entry.partialChangesPossible ? "partial changes possible" : undefined,
