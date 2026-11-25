@@ -211,9 +211,9 @@ Each Tool Call passes through this zero-side-effect preflight before execution:
 7. execute the tool.
 
 Unknown tools, malformed or invalid arguments, policy violations, Approval denial, and tool
-failures become structured error Tool Results. They are appended to the transcript so the model can
-self-correct. They do not fail the Agent Run unless the consecutive-recoverable-failure limit
-is exhausted. Remaining calls in the same batch continue in order.
+failures become structured error Tool Results. Their model-facing messages are appended to the
+transcript so the model can self-correct. These errors do not fail the Agent Run unless the
+consecutive-recoverable-failure limit is exhausted. The rest of the batch continues in order.
 
 A denial or recoverable Tool Result never skips later calls. `tool_execution_started` is the
 execution boundary: a Tool Call without that event is unstarted. `cancelled` is reserved for a call
@@ -229,8 +229,10 @@ fragments remain internal until complete; invalid partial JSON is never exposed 
 
 A successfully completed Assistant Message is appended to the canonical transcript. Failed or
 cancelled partial output remains available for diagnostics but is never replayed to a provider.
-Each Tool Result is committed immediately to the canonical transcript; the AI adapter batches or
-reorders canonical result blocks when a provider requires a stricter wire representation.
+Agent Core immediately commits a model-facing message for each Tool Result to the canonical
+transcript. That message contains only the provider's Tool Call ID, `content`, and `isError`. The
+AI adapter batches or reorders these result blocks when a provider requires a stricter wire
+representation.
 
 Approval and Verification records stay in Agent State and the Run Event log. They enter model
 context only when represented as a Tool Result or as explicit Verification feedback.
@@ -427,7 +429,7 @@ Payloads contain the minimum immutable semantic data:
 | `approval_resolved` | IDs, `allowed \| denied \| auto_approved \| cancelled`, `decidedBy: "user" \| "policy"`, optional reason |
 | `tool_execution_started` | Tool Call ID and start metadata |
 | `tool_execution_progress` | Tool Call ID and bounded progress update |
-| `tool_call_completed` | Tool Call ID, `succeeded \| failed \| denied \| cancelled \| skipped`, optional Tool Result |
+| `tool_call_completed` | Tool Call ID, `succeeded \| failed \| denied \| cancelled \| skipped`, and the full Tool Result when one exists |
 | `candidate_completion_detected` | Model Turn and Assistant Message IDs |
 | `model_turn_completed` | Model Turn ID, `completed \| failed \| cancelled`, usage, optional failure |
 | `verification_started` | Verification ID and Candidate Completion reference |
@@ -436,6 +438,11 @@ Payloads contain the minimum immutable semantic data:
 | `cancellation_requested` | reason and state from which cancellation was requested |
 | `runtime_limit_reached` | limit kind, configured limit, and observed value |
 | `run_settled` | Agent Result |
+
+The existing `tool_call_completed` event carries validated `details` as part of the full Tool
+Result when a successful Tool Call provides them. Agent Core validates the payload as specified in
+[ADR 0004 §3](./0004-package-apis-and-dependency-direction.md#3-coding-agentagent-core). The Run Event
+union stays closed.
 
 A generic `state_changed` event, provider wire events, and consumer-specific TUI events are
 deliberately excluded. State transitions commit before their Run Events are appended, so an
@@ -511,6 +518,10 @@ On 2026-11-24, [CDA-147](https://datn-fit-hcmus.atlassian.net/browse/CDA-147) am
   place: `AgentRun`, `RunCommand`, `RunEvent`, `RunEventEnvelope`, `runId` (was `sessionId`), and
   `run_started` and `run_settled` (were `session_started` and `session_settled`). Behavior is
   unchanged. The file name is kept so that links to this record still resolve.
+
+On 2026-11-25, [Amend ADR 0002, 0004 and 0005 for tool details, the TUI diff and headless logs](https://datn-fit-hcmus.atlassian.net/browse/CDA-166)
+amended the model-facing transcript (§3) and Tool Call completion payload (§6) to record the
+[Tool Details decision](https://datn-fit-hcmus.atlassian.net/browse/CDA-155?focusedCommentId=10375).
 
 ## Consequences
 

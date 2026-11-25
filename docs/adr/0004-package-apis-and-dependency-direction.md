@@ -314,7 +314,12 @@ export type PrepareOutcome<S extends TSchema> =
   | { ok: false; code: ToolErrorCode; message: string };
 
 export type ToolOutcome =
-  | { isError: false; content: string; truncated?: boolean }
+  | {
+      isError: false;
+      content: string;
+      truncated?: boolean;
+      details?: Readonly<Record<string, JsonValue>>;
+    }
   | {
       isError: true;
       content: string;
@@ -348,6 +353,14 @@ Tools return `ToolOutcome`, not `ToolResult`. A tool that returned a full `ToolR
 component being audited. Agent Core assembles ADR 0001's `ToolResult` from the outcome, the Tool
 Call ID, the tool name, the measured duration, and the Approval metadata that only Agent Core holds.
 `ToolResult`, `ToolErrorCode`, and `ToolProgress` are exported from Agent Core.
+
+A successful Tool Outcome may include tool-specific `details`. Each tool defines its payload
+shape and omits the field when it has no additional data. When Agent Core accepts the outcome, it
+validates and snapshots `details` for the top-level `ToolResult.details` field of the same type.
+The root must be a plain JSON object and nested values must satisfy Agent Core's `JsonValue`, with
+finite numbers. The complete serialized payload has a limit of 40 KiB measured in UTF-8 bytes,
+independent of the Tool Result's content budget. If the payload is invalid or exceeds the limit,
+Agent Core drops the entire field and preserves the call's execution status and `content`.
 
 `prepare` and `execute` report every expected failure as a returned code and must not throw. If
 either throws or rejects anyway, Agent Core records a recoverable error Tool Result with
@@ -519,6 +532,41 @@ export interface TuiHandle {
 
 `tui` owns `TuiModel`. `onApproval` mirrors ADR 0002's `resolve_approval` command, so the adapter
 renames arguments instead of translating them.
+
+On successful `edit` completion, Coding Agent validates the shape of `ToolResult.details.diff` and
+projects it into the TUI-owned `TranscriptEntry.tool_call.result.details` variant
+`{ kind: "edit_diff", rows }`. Each addition, removal, or context row carries `kind`, a positive
+1-based `lineNumber`, `text`, and optional `clipped: true`. Gap and truncation rows carry only
+`kind`. Coding Agent retains `result.content` for the plain result path, which the TUI uses when
+the diff is absent, empty, malformed, or unrecognized. The TUI selects the renderer by the
+display variant's `kind` using its own view types.
+
+The TUI lays out each physical transcript line as an internal `TranscriptRow` with
+`{ entryId, offset, spans: readonly RowSpan[] }`. A `RowSpan` is `{ text, tone? }` with initial
+tones `added`, `removed`, and `meta`. Ordinary text uses an unstyled span and a blank separator
+has an empty span list. A diff line has a `meta` span for the gutter and one for its marker and
+text. The transcript and Group 3's footer share one TUI-owned tone-to-Ink mapping and one
+color gate evaluated at mount. The mapping uses named ANSI colors `green` for `added`, `red` for
+`removed`, and `gray` for `meta`. Context text and the Tool Call header use the terminal's default
+foreground. The gate disables styling for non-TTY stdout, nonempty `NO_COLOR`, `TERM=dumb`, or
+active CI. `FORCE_COLOR` participates in Ink's color detection only when the gate permits
+styling. The plain view carries the same text, numbers, and markers.
+
+A valid diff replaces the plain result body after execution, indented two cells under the Tool
+Call header. The header covers all change regions and shows the tool name, path summary, status,
+and any Tool Result truncation indicator. One gutter is sized to the widest displayed line number.
+Removals use old line numbers and `-`, additions use new line numbers and `+`, and context uses
+new line numbers and a blank marker. The renderer shows up to four supplied context lines on
+each side. It uses `…` for omitted unchanged lines and `Diff truncated` for omitted diff output,
+both in the `meta` tone with an empty gutter. The transcript shows any line-ending annotations
+included in the diff text.
+
+Before measuring width, the TUI expands tabs to four spaces and displays other control characters
+in diff text as printable escapes. It hard-wraps by terminal cell width with a `↪` continuation
+marker, a blank gutter, and text aligned with the first line. On narrow terminals it drops the
+gutter and indentation as needed, giving the marker priority at the smallest widths. Layout is
+cached by immutable entry and width. The fixed frame budget and viewport behavior apply to diff
+rows, with the viewport following the end or anchoring by entry ID and physical row offset.
 
 No terminal suspend-and-resume interface is specified. ADR 0001 runs `bash` non-interactively with
 `CI=1`, `TERM=dumb`, and stdin closed, so no MVP tool contends for the terminal. An interactive tool
@@ -807,6 +855,13 @@ amended this record:
 - **Pi names** (§8): the new names were checked on 2026-11-24 against the same Pi commit
   `9841914c71a74d81abe07f751aefd271fd924e63`; none occurs in its packages' source. Agent Core
   therefore no longer matches Pi's `AgentSession`, and that match is removed from §8's tables.
+
+On 2026-11-25, [Amend ADR 0002, 0004 and 0005 for tool details, the TUI diff and headless logs](https://datn-fit-hcmus.atlassian.net/browse/CDA-166)
+amended the tool port and validation boundary (§3) and the TUI projection and presentation (§5).
+See the decisions on [Tool Details](https://datn-fit-hcmus.atlassian.net/browse/CDA-155?focusedCommentId=10375),
+[the edit diff payload](https://datn-fit-hcmus.atlassian.net/browse/CDA-156?focusedCommentId=10376), and
+[the TUI renderer](https://datn-fit-hcmus.atlassian.net/browse/CDA-157?focusedCommentId=10381), supported by
+the [structured row research](../research/tui-diff-rows.md).
 
 ## Consequences
 
