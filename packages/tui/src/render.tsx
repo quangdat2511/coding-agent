@@ -69,6 +69,7 @@ export function mountTui(
   // overlay opens decides nothing.
   let lastActivity = now();
   let unmounted: Promise<void> | undefined;
+  let instance: ReturnType<typeof render> | undefined;
 
   // How the screen is shared out for the terminal's current size and the text typed so far.
   function measure() {
@@ -91,7 +92,7 @@ export function mountTui(
   // draws only the rows that fit above the Prompt, so the frame is never taller than the screen.
   function draw(scroll = 0) {
     // Ink would mount the tree again if it rendered after unmount.
-    if (unmounted !== undefined) {
+    if (unmounted !== undefined || instance === undefined) {
       return;
     }
     const { columns, prompt, frame, overlay, reasonLayout } = measure();
@@ -235,25 +236,39 @@ export function mountTui(
   // Left to itself, Ink treats any CI environment as non-interactive and draws nothing until
   // unmount. Deciding from isTTY alone renders the same way whether or not CI is set.
   const interactive = Boolean(streams.stdout.isTTY);
-  // An empty tree enters the alternate screen without drawing anything, so the cursor can be moved
-  // before the first frame.
-  const instance = render(null, {
-    stdout: streams.stdout,
-    stdin: streams.stdin,
-    interactive,
-    alternateScreen: true,
-    incrementalRendering: true,
-    maxFps: 60,
-    // Ctrl+C is a cancel key in the input policy. Left on, Ink would exit on it before the policy
-    // saw the key.
-    exitOnCtrlC: false,
-    kittyKeyboard: options.kittyKeyboard ? { mode: "auto" } : undefined,
-  });
-  if (interactive) {
-    streams.stdout.write(CURSOR_HOME);
+  const { stdin, stdout } = streams;
+  const enterRawMode = options.kittyKeyboard && interactive && stdin.isTTY && !stdin.isRaw;
+  try {
+    // Ink sends the kitty query when it creates the renderer. Its input hooks take ownership of
+    // raw mode on the first frame. An immediate terminal reply needs raw mode even before that.
+    if (enterRawMode) stdin.setRawMode(true);
+    // An empty tree enters the alternate screen without drawing anything, so the cursor can be
+    // moved before the first frame.
+    instance = render(null, {
+      stdout,
+      stdin,
+      interactive,
+      alternateScreen: true,
+      incrementalRendering: true,
+      maxFps: 60,
+      // Ctrl+C is a cancel key in the input policy. Left on, Ink would exit on it before the policy
+      // saw the key.
+      exitOnCtrlC: false,
+      kittyKeyboard: options.kittyKeyboard ? { mode: "auto" } : undefined,
+    });
+    if (interactive) stdout.write(CURSOR_HOME);
+    draw();
+  } catch (error) {
+    stdout.off("resize", redraw);
+    try {
+      instance?.unmount();
+    } finally {
+      if (enterRawMode && stdin.isRaw) stdin.setRawMode(false);
+    }
+    throw error;
   }
-  draw();
 
+  const mounted = instance;
   return {
     update(next) {
       // A new Approval restarts the wait for a quiet keyboard, so a key already on its way when
@@ -272,12 +287,12 @@ export function mountTui(
       unmounted ??= (async () => {
         streams.stdout.off("resize", redraw);
         // waitUntilExit() adds a beforeExit listener that only unmount() removes, so it goes first.
-        const exited = instance.waitUntilExit();
-        instance.unmount();
+        const exited = mounted.waitUntilExit();
+        mounted.unmount();
         await exited;
       })();
       return unmounted;
     },
-    flush: () => instance.waitUntilRenderFlush(),
+    flush: () => mounted.waitUntilRenderFlush(),
   };
 }
