@@ -301,6 +301,13 @@ Because the envelope changed, all three files now carry `"schemaVersion": 2`, so
 refuses an older file with a version error rather than misreading it. The MVP job's published
 archives keep the old names at version 1.
 
+On 2026-11-25, [CDA-166](https://datn-fit-hcmus.atlassian.net/browse/CDA-166) amended this record:
+
+- The headless event log (§4) omits Tool Result details from `tool_call_completed`.
+  [Tool Details decision](https://datn-fit-hcmus.atlassian.net/browse/CDA-155?focusedCommentId=10375)
+- The headless agent (§5) acquires managed binaries on first use inside the task container.
+  [Managed binary acquisition decision](https://datn-fit-hcmus.atlassian.net/browse/CDA-160?focusedCommentId=10373)
+
 ### 2. Coding Agent artifact
 
 A recorded job evaluates a standalone executable, not a source checkout. It is built from a commit
@@ -378,11 +385,12 @@ at which ADR 0002 §7 requires a schema version.
   and the assembled system prompt. It never contains a credential value.
 - **`events.jsonl`** holds one Run Event per line, in ADR 0002's envelope, appended as the
   writer receives them. `assistant_content_delta`, `tool_execution_progress`, and
-  `verification_progress` are omitted: the completion events carry the final message, Tool Result,
-  and evidence, and deltas would dominate the file. Written events keep their `sequence`, so
-  omissions appear as gaps. The writer is an ordinary consumer that the producer never awaits
-  (ADR 0002 §7), so a killed process can lose the unwritten tail. A reader treats a log that does
-  not end with `run_settled` as truncated.
+  `verification_progress` are omitted because deltas would dominate the file. The completion
+  events carry the final message, Tool Result, and evidence. The writer keeps `tool_call_completed`
+  and all its other fields while omitting the Tool Result's `details` from the serialized event.
+  Written events keep their `sequence`, so omitted events appear as gaps. The writer is an ordinary
+  consumer that the producer never awaits (ADR 0002 §7), so a killed process can lose the unwritten
+  tail. A reader treats a log that does not end with `run_settled` as truncated.
 - **`result.json`** is written after `run_settled`. It records the exit code, the Agent Result,
   and the finish time.
 
@@ -402,7 +410,7 @@ discovery, the Scratchpad convention, the tools, and the model settings are the 
 
 Under the defaults most tasks would end with `LIMIT_EXCEEDED` before meaningful work: each task in
 the default pin allows 28,800 s, and ADR 0008 requires every admissible dataset to give each task
-at least the 3,600,000 ms Agent Run, while an ordinary `grep` that finds nothing returns a
+at least the 3,600,000 ms Agent Run. A shell `grep` that finds no matches through `bash` returns a
 `NON_ZERO_EXIT` error Tool Result, which advances the consecutive-failure counter. A 3,600,000 ms
 Agent Run ends well inside Harbor's timeout, so the CLI settles and writes `result.json` itself
 instead of being cancelled from outside; Harbor's timeout is left unchanged. The turn and Tool Call
@@ -432,6 +440,14 @@ Inside a task container:
   instruction, skill, or MCP configuration is passed, and task-declared MCP servers and skills
   directories are ignored, because MCP and skill loading are outside the MVP. The two affected
   tasks stay in the dataset.
+- The headless agent acquires `rg` on the first `grep` call and `fd` on the first `find` call
+  inside the task container. It checks the per-trial cache and then `PATH` for the pinned version.
+  When neither has that version and the agent is online, it downloads the pinned asset under the
+  task's network mode and installs the binary in the cache. The cache defaults to a directory
+  under the agent user's home with a temporary-directory fallback. If the agent is offline or
+  the download fails, it can use a binary on `PATH` that meets the minimum version. If acquisition
+  fails, the Tool Call returns a recoverable `TOOL_INTERNAL_ERROR` and the model can fall back to
+  `bash`. The adapter installation follows §6.
 
 ### 6. Harbor adapter
 
