@@ -1,12 +1,12 @@
 # Terminal UI
 
-The Terminal UI context describes how a person observes and controls an Agent Session inside a
+The Terminal UI context describes how a person observes and controls an Agent Run inside a
 terminal.
 
 ## Language
 
 **Full-screen TUI**:
-A terminal interface that owns and redraws the terminal screen while presenting the Agent Session
+A terminal interface that owns and redraws the terminal screen while presenting the Agent Run
 and accepting user decisions.
 _Avoid_: CLI output, command prompt, terminal framework
 
@@ -25,8 +25,8 @@ position.
 _Avoid_: Approval dialog, popup, modal, confirmation prompt
 
 **Quit**:
-The person's own ending of the Full-screen TUI, made while no Agent Session is active by pressing the
+The person's own ending of the Full-screen TUI, made while no Agent Run is active by pressing the
 cancel key twice in quick succession. A single press only asks the person to confirm, and while an
-Agent Session is active the same key starts Cancellation instead, so a Quit never discards a running
+Agent Run is active the same key starts Cancellation instead, so a Quit never discards a running
 Coding Task. A signal that ends the run from outside is not a Quit.
 _Avoid_: Exit, close, abort, cancel

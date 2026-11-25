@@ -12,7 +12,7 @@ async function repository(files: Record<string, string>): Promise<string> {
   const tree: Record<string, string> = {
     "package.json": JSON.stringify({ workspaces: ["packages/*"] }),
     "packages/agent-core/package.json": "{}",
-    "packages/agent-core/src/events.ts": "export type SessionEvent = string;\n",
+    "packages/agent-core/src/events.ts": "export type RunEvent = string;\n",
     "packages/tools/package.json": "{}",
     ...files,
   };
@@ -90,7 +90,7 @@ describe("findImportViolations", () => {
   it("reports a relative import that resolves into a sibling package", async () => {
     const root = await repository({
       "packages/tools/src/index.ts":
-        'import type { SessionEvent } from "../../agent-core/src/events.ts";\n',
+        'import type { RunEvent } from "../../agent-core/src/events.ts";\n',
     });
 
     expect(await findImportViolations(root)).toEqual([
@@ -140,7 +140,7 @@ describe("findImportViolations", () => {
   it("reports path aliases but not scoped package names", async () => {
     const root = await repository({
       "packages/tools/src/index.ts": [
-        'import type { SessionEvent } from "@coding-agent/agent-core";',
+        'import type { RunEvent } from "@coding-agent/agent-core";',
         'import { a } from "@/a";',
         'import { b } from "@tests/b";',
         'import { c } from "@examples/c";',

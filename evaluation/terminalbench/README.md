@@ -148,8 +148,8 @@ run if an ancestor still holds the key.
 
 | Exit code | Meaning (ADR 0005 §3) | `run()` |
 | --- | --- | --- |
-| 0, 1, 130 | The Agent Session settled as succeeded, failed, or cancelled | Returns, and the verifier scores the trial |
-| Any other | No Agent Session settled | Raises the `NonZeroAgentExitCodeError` subclass that Harbor's `exec_as_agent` would raise, and Harbor still runs the verifier |
+| 0, 1, 130 | The Agent Run settled as succeeded, failed, or cancelled | Returns, and the verifier scores the trial |
+| Any other | No Agent Run settled | Raises the `NonZeroAgentExitCodeError` subclass that Harbor's `exec_as_agent` would raise, and Harbor still runs the verifier |
 
 ### Provider key
 
@@ -208,7 +208,7 @@ of ADR 0005 §4 from `coding-agent/` in the downloaded logs, and fills the trial
   tokens, so for that provider `n_cache_tokens` holds the difference. `cost_usd` is left unset,
   because the provider contract carries no pricing.
 - `metadata` names the Agent Result outcome and failure code, any runtime limit that ended the
-  session, the Model Turn and Tool Call counts, the Evaluation Profile, the SHA-256 of every
+  Agent Run, the Model Turn and Tool Call counts, the Evaluation Profile, the SHA-256 of every
   executable in the artifact, the file that `install()` put in the container
   (`installed_executable`), and whether the log was truncated.
 - `trajectory.json` is written beside the `coding-agent/` directory, at the path Harbor reads a
@@ -224,7 +224,7 @@ of ADR 0005 §4 from `coding-agent/` in the downloaded logs, and fills the trial
   `Trajectory` model before it is written, and follows the ATIF version that model defaults to.
 
 Three modules do this. `run_log.py` reads and checks the three files, and marks a log that does
-not end with `session_settled` as truncated. `trajectory.py` converts a `RunLog` into Harbor's
+not end with `run_settled` as truncated. `trajectory.py` converts a `RunLog` into Harbor's
 `Trajectory` and writes it. `trial_context.py` fills the `AgentContext` and writes the trajectory.
 The conversion reads files only: it needs no network and no Harbor job.
 
@@ -669,7 +669,7 @@ The command refuses, and writes nothing, when:
   more than once, or ran a task at another digest than its `lock.json` records;
 - the trials did not run the artifact that `artifact-manifest.json` describes, by version, commit
   and every SHA-256 value, or they did not all use one profile, provider, model, sampling setting
-  and `SessionLimits`;
+  and `RunLimits`;
 - the smoke job did not run the smoke set that the dataset record names, or the rerun job is not
   named `<job name>-rerun` or does not repeat the recorded job's dataset, agent, model and
   artifact;

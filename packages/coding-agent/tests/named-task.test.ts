@@ -84,8 +84,8 @@ async function replayedOutcome(run: NamedTaskRun) {
     exitCode: run.exitCode,
     finishedAt: result.finishedAt,
     outcome: result.result.outcome,
-    events: (await loggedEvents(run.outputDir)).map(({ sessionId, occurredAt, type }) => ({
-      sessionId,
+    events: (await loggedEvents(run.outputDir)).map(({ runId, occurredAt, type }) => ({
+      runId,
       occurredAt,
       type,
     })),
@@ -120,7 +120,7 @@ describe.skipIf(!cleanChain)("the named task, replayed end to end", () => {
       "result.json",
       "run.json",
     ]);
-    expect((await loggedEvents(first.outputDir)).at(-1)?.type).toBe("session_settled");
+    expect((await loggedEvents(first.outputDir)).at(-1)?.type).toBe("run_settled");
     expect(await Bun.file(join(first.outputDir, "run.json")).json()).toMatchObject({
       verification: { command: NAMED_TASK_RUN.verificationCommand },
       tools: ["read", "write", "edit", "bash"],
@@ -159,7 +159,7 @@ describe.skipIf(!cleanChain)("the named task, replayed end to end", () => {
   it("logs the injected clock and identifiers", async () => {
     const events = await loggedEvents(first.outputDir);
     const { finishedAt } = await Bun.file(join(first.outputDir, "result.json")).json();
-    expect(new Set(events.map(({ sessionId }) => sessionId))).toEqual(new Set(["session-1"]));
+    expect(new Set(events.map(({ runId }) => runId))).toEqual(new Set(["run-1"]));
     expect(new Set(events.map(({ occurredAt }) => occurredAt))).toEqual(new Set([finishedAt]));
     const uuid = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
     expect(await Bun.file(join(first.outputDir, "events.jsonl")).text()).not.toMatch(uuid);

@@ -2,7 +2,7 @@ import { join } from "node:path";
 
 export interface LoggedEvent {
   readonly schemaVersion: number;
-  readonly sessionId: string;
+  readonly runId: string;
   readonly sequence: number;
   readonly occurredAt: string;
   readonly type: string;

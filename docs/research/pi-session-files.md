@@ -10,7 +10,7 @@ the `main` commit titled `fix(ai): replay Responses tool calls with status "comp
 
 This note uses only Pi's source and its own documentation. It feeds CDA-141 ("Decide the session
 file schema, location, and how a resumed Session is redrawn") and compares Pi with this
-repository's Agent Core transcript and Session Events. It does not decide anything for CDA-141.
+repository's Agent Core transcript and Run Events. It does not decide anything for CDA-141.
 
 [Pi architecture research](./pi-architecture.md) pinned the older commit `9841914c` (version
 `0.85.0`). The session format kept the same header, version number (3), and 8-character entry IDs
@@ -22,10 +22,10 @@ persisted, and the session file is now created at the first user message instead
 assistant message (commit `ff72faba2`, "save new session file at the first user message"). None
 of these additions bumped the session version.
 
-Terminology: this repository's code still calls one prompt's lifecycle an Agent Session and its
-observations Session Events (`packages/agent-core/src/events.ts`). The CDA-141 plan renames them
-to Agent Run and Run Events, with Session meaning the conversation the person sees. This note uses
-"Pi session" for Pi's concept and the current code names for ours.
+Terminology: CDA-147 renamed this repository's lifecycle of one prompt to Agent Run and its
+observations to Run Events (`packages/agent-core/src/events.ts`), with Session meaning the
+conversation the person sees. This note uses "Pi session" for Pi's concept and the current code
+names for ours.
 
 ## Question
 
@@ -386,17 +386,17 @@ The redraw renders final messages only. No streaming events are replayed, becaus
 
 | Concern | Pi session file | This repository today |
 | --- | --- | --- |
-| Unit | One file per conversation, many prompts | One Agent Session per Coding Task, starting with an empty transcript ([`open-session.ts`](../../packages/agent-core/src/open-session.ts)) |
-| Persisted record | Final messages plus state-change entries | Headless mode writes Session Events to `events.jsonl` with `schemaVersion: 1` on each line, omitting deltas and progress ([ADR 0005 §4](../adr/0005-terminalbench-evaluation-protocol.md), [`run-files.ts`](../../packages/coding-agent/src/run-files.ts)) |
+| Unit | One file per conversation, many prompts | One Agent Run per Coding Task, starting with an empty transcript ([`open-run.ts`](../../packages/agent-core/src/open-run.ts)) |
+| Persisted record | Final messages plus state-change entries | Headless mode writes Run Events to `events.jsonl` with `schemaVersion: 2` on each line, omitting deltas and progress ([ADR 0005 §4](../adr/0005-terminalbench-evaluation-protocol.md), [`run-files.ts`](../../packages/coding-agent/src/run-files.ts)) |
 | Message shape | `system`, `user`, `assistant`, `toolResult` messages, each with a timestamp | `Message = UserMessage \| AssistantMessage`; tool results are `tool_result` blocks inside user messages; no timestamps or IDs on messages ([`types.ts`](../../packages/ai/src/types.ts)) |
 | Ordering | `id`/`parentId` tree plus file order | `sequence` in the event envelope is the sole ordering authority ([ADR 0002 §6](../adr/0002-agent-session-state-machine-and-event-protocol.md)) |
-| Approval, Verification, limits | No entry types; Pi has no built-in permission system and does not ask before tool calls ([README](https://github.com/earendil-works/pi/blob/69a6993486acee850d14a4a1547daa4a167228ad/README.md#L88-L90), [security doc](https://github.com/earendil-works/pi/blob/69a6993486acee850d14a4a1547daa4a167228ad/packages/coding-agent/docs/security.md#L3)) | First-class events: `approval_*`, `verification_*`, `runtime_limit_reached`, `session_settled` with the Agent Result ([`events.ts`](../../packages/agent-core/src/events.ts)) |
+| Approval, Verification, limits | No entry types; Pi has no built-in permission system and does not ask before tool calls ([README](https://github.com/earendil-works/pi/blob/69a6993486acee850d14a4a1547daa4a167228ad/README.md#L88-L90), [security doc](https://github.com/earendil-works/pi/blob/69a6993486acee850d14a4a1547daa4a167228ad/packages/coding-agent/docs/security.md#L3)) | First-class events: `approval_*`, `verification_*`, `runtime_limit_reached`, `run_settled` with the Agent Result ([`events.ts`](../../packages/agent-core/src/events.ts)) |
 | Model and prompt | `model_change`, `thinking_level_change`, persisted system messages | `run.json` records provider, model, and the assembled system prompt once per run ([ADR 0005 §4](../adr/0005-terminalbench-evaluation-protocol.md)) |
-| Compaction | `compaction` and `branch_summary` entries | Deferred: the transcript is the only in-session memory ([ADR 0003 §4](../adr/0003-mvp-context-planning-verification-and-session-memory.md)) |
-| Redraw | Final messages on the active branch, mapped to components in `interactive-mode.ts` | Session Events folded into the TUI model by `projectSessionEvent` ([`projection.ts`](../../packages/coding-agent/src/projection.ts)); nothing is read back from disk |
+| Compaction | `compaction` and `branch_summary` entries | Deferred: the transcript is the only in-run memory ([ADR 0003 §4](../adr/0003-mvp-context-planning-verification-and-session-memory.md)) |
+| Redraw | Final messages on the active branch, mapped to components in `interactive-mode.ts` | Run Events folded into the TUI model by `projectRunEvent` ([`projection.ts`](../../packages/coding-agent/src/projection.ts)); nothing is read back from disk |
 | Versioning | One `version` in the header; load-time migration rewrites the file | No per-event version in memory; a version is needed once events are persisted ([ADR 0002 §7](../adr/0002-agent-session-state-machine-and-event-protocol.md)), and ADR 0005 put it on every line |
 
-ADR 0002 §1 also says Session Events are observations, not an event-sourcing or replay contract.
+ADR 0002 §1 also says Run Events are observations, not an event-sourcing or replay contract.
 Rebuilding a Session from persisted events would make them one, which is a change to that ADR
 rather than a use of it.
 
@@ -411,7 +411,7 @@ recommended here.
   directly, as in Pi. Approval decisions, Verification evidence, cancellation, limits, and Agent
   Results are lost unless new entry types are added for them; our `Message` would also need
   timestamps, since Pi's list time comes from message timestamps.
-- **Session Events** in the ADR 0002 envelope, as `events.jsonl` already does. One writer and one
+- **Run Events** in the ADR 0002 envelope, as `events.jsonl` already does. One writer and one
   schema serve both headless and interactive runs, and Approval and Verification history survives.
   Resume then needs a projection from events back to a model transcript, which does not exist
   today, and treats events as replayable, which ADR 0002 §1 rules out. Pi stores no deltas, and
@@ -424,7 +424,7 @@ recommended here.
 Pi has no entry marking where one prompt's run begins or ends; `agent_end` is not stored, and a
 user message is the only boundary. A Session holding many Agent Runs could add explicit run-start
 and run-settled entries carrying the run ID and Agent Result, or leave runs implicit as Pi does.
-Either way, Agent Core currently opens every Agent Session with an empty transcript, so resuming
+Either way, Agent Core currently opens every Agent Run with an empty transcript, so resuming
 also needs Agent Core to accept a prior transcript.
 
 ### Tree or linear
@@ -504,8 +504,8 @@ line) to carry these fields, which conflicts with append-only writes unless it i
   `Message` shape that means pairing `tool_call` blocks with `tool_result` blocks in the following
   user message. Approval and Verification history would not appear unless stored separately.
 - **By folding stored events through the existing projection.** Coding Agent already turns each
-  Session Event into the TUI model with the pure `projectSessionEvent`, and keeps earlier Agent
-  Sessions in the transcript
+  Run Event into the TUI model with the pure `projectRunEvent`, and keeps earlier Agent
+  Runs in the transcript
   ([`projection.ts`](../../packages/coding-agent/src/projection.ts),
   [ADR 0004 §6](../adr/0004-package-apis-and-dependency-direction.md)). Replaying a stored log
   through it would redraw Approval and Verification as they were shown live. It relies on events

@@ -7,8 +7,13 @@ project contexts.
 
 **Coding Agent**:
 The application that accepts a Coding Task and coordinates model interaction, controlled tools,
-the Agent Session, and the Full-screen TUI.
+Agent Runs, and the Full-screen TUI.
 _Avoid_: Chatbot, assistant, model
+
+**Session**:
+The conversation the person sees: many Agent Runs, one per Coding Task, over one transcript that
+is saved and can be reopened.
+_Avoid_: Agent Run, chat, thread
 
 **TerminalBench Evaluation**:
 A reproducible run that records this Coding Agent's results on TerminalBench without using Pi's
@@ -16,7 +21,7 @@ score as a pass or fail threshold.
 _Avoid_: Pi comparison, benchmark competition
 
 **Evaluation Profile**:
-A named, source-controlled set of Agent Session limits selected for a run; it changes no prompt,
+A named, source-controlled set of Run Limits selected for a run; it changes no prompt,
 tool, or model setting.
 _Avoid_: Benchmark mode, eval config, limit flags
 

@@ -5,7 +5,7 @@ import { editTool } from "./edit.ts";
 import { readTool } from "./read.ts";
 import { writeTool } from "./write.ts";
 
-// The registry the composition root hands to an Agent Session. bash starts its commands through
+// The registry the composition root hands to an Agent Run. bash starts its commands through
 // the launcher, which strips provider credentials from every child (ADR 0001 §8). A harness that
 // needs fewer tools composes its own from the individually exported ones.
 export function createDefaultTools(launcher: ChildProcessLauncher): ToolRegistry {

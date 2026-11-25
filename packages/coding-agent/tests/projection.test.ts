@@ -3,9 +3,9 @@ import {
   type AgentResult,
   type ExecutableTool,
   type ModelPort,
-  openAgentSession,
+  openAgentRun,
   type RepoPath,
-  type SessionEvent,
+  type RunEvent,
   type ToolRegistry,
 } from "@coding-agent/agent-core";
 import type {
@@ -16,29 +16,29 @@ import type {
 } from "@coding-agent/ai";
 import { BashParams } from "@coding-agent/tools";
 import type { TuiModel } from "@coding-agent/tui";
-import { projectSessionEvent } from "../src/index.ts";
+import { projectRunEvent } from "../src/index.ts";
 
-type EventType = SessionEvent["type"];
-type DataOf<Type extends EventType> = Extract<SessionEvent, { type: Type }>["data"];
+type EventType = RunEvent["type"];
+type DataOf<Type extends EventType> = Extract<RunEvent, { type: Type }>["data"];
 
 const EMPTY: TuiModel = { transcript: [] };
 const usage = { inputTokens: 1, outputTokens: 1 };
 
-// Builds Session Events of one Agent Session with consecutive sequence numbers.
-function sessionEvents(sessionId = "s1") {
+// Builds Run Events of one Agent Run with consecutive sequence numbers.
+function runEvents(runId = "s1") {
   let sequence = 0;
-  return <Type extends EventType>(type: Type, data: DataOf<Type>): SessionEvent =>
+  return <Type extends EventType>(type: Type, data: DataOf<Type>): RunEvent =>
     ({
-      sessionId,
+      runId,
       sequence: ++sequence,
       occurredAt: "2026-11-18T00:00:00.000Z",
       type,
       data,
-    }) as SessionEvent;
+    }) as RunEvent;
 }
 
-function project(events: readonly SessionEvent[], initial: TuiModel = EMPTY): TuiModel {
-  return events.reduce((model, event) => projectSessionEvent(event, model), initial);
+function project(events: readonly RunEvent[], initial: TuiModel = EMPTY): TuiModel {
+  return events.reduce((model, event) => projectRunEvent(event, model), initial);
 }
 
 function deepFreeze<T>(value: T): T {
@@ -69,8 +69,8 @@ function settled(result: Partial<AgentResult> & Pick<AgentResult, "outcome">): A
   } as AgentResult;
 }
 
-const event = sessionEvents();
-const started = event("session_started", { task: { objective: "Fix the failing test" } });
+const event = runEvents();
+const started = event("run_started", { task: { objective: "Fix the failing test" } });
 const messageStarted = event("assistant_message_started", { modelTurnId: "t1", messageId: "m1" });
 const bashQueued = event("tool_call_queued", {
   modelTurnId: "t1",
@@ -79,11 +79,11 @@ const bashQueued = event("tool_call_queued", {
 });
 const bashStarted = event("tool_execution_started", { toolCallId: "c1", mutation: "mutating" });
 
-function progress(output: string, toolCallId = "c1"): SessionEvent {
+function progress(output: string, toolCallId = "c1"): RunEvent {
   return event("tool_execution_progress", { toolCallId, update: { output } });
 }
 
-describe("projectSessionEvent", () => {
+describe("projectRunEvent", () => {
   it("is pure: it never mutates the previous model and returns a new one for a change", () => {
     const prev = deepFreeze(project([started, messageStarted, bashQueued, bashStarted]));
     const snapshot = structuredClone(prev);
@@ -96,7 +96,7 @@ describe("projectSessionEvent", () => {
           outcome: "succeeded",
           result: { toolCallId: "c1", toolName: "bash", content: "1 pass", isError: false },
         }),
-        event("session_settled", { result: settled({ outcome: "cancelled", cancellation: {} }) }),
+        event("run_settled", { result: settled({ outcome: "cancelled", cancellation: {} }) }),
       ],
       prev,
     );
@@ -106,12 +106,12 @@ describe("projectSessionEvent", () => {
     expect(next.transcript).toHaveLength(prev.transcript.length + 1);
   });
 
-  it("adds the Coding Task when a session starts and keeps the sessions before it", () => {
-    const second = sessionEvents("s2");
+  it("adds the Coding Task when an Agent Run starts and keeps the Agent Runs before it", () => {
+    const second = runEvents("s2");
     const model = project([
       started,
-      event("session_settled", { result: settled({ outcome: "succeeded" }) }),
-      second("session_started", { task: { objective: "Now add a test" } }),
+      event("run_settled", { result: settled({ outcome: "succeeded" }) }),
+      second("run_started", { task: { objective: "Now add a test" } }),
     ]);
 
     expect(model.transcript.map(({ kind, id }) => ({ kind, id }))).toEqual([
@@ -212,8 +212,8 @@ describe("projectSessionEvent", () => {
   describe("Tool Calls", () => {
     it("appear queued, then running, then completed with their result", () => {
       const queued = project([started, bashQueued]);
-      const running = projectSessionEvent(bashStarted, queued);
-      const completed = projectSessionEvent(
+      const running = projectRunEvent(bashStarted, queued);
+      const completed = projectRunEvent(
         event("tool_call_completed", {
           toolCallId: "c1",
           outcome: "failed",
@@ -304,8 +304,8 @@ describe("projectSessionEvent", () => {
     const running = project([started, bashQueued, bashStarted]);
 
     it("shows the latest output of an executing Tool Call, each update replacing the last", () => {
-      const first = projectSessionEvent(progress("line 1\n"), running);
-      const second = projectSessionEvent(progress("line 1\nline 2\n"), first);
+      const first = projectRunEvent(progress("line 1\n"), running);
+      const second = projectRunEvent(progress("line 1\nline 2\n"), first);
 
       expect(first.transcript.at(-1)).toMatchObject({ status: "executing", progress: "line 1\n" });
       expect(second.transcript.at(-1)).toMatchObject({ progress: "line 1\nline 2\n" });
@@ -334,12 +334,12 @@ describe("projectSessionEvent", () => {
         [event("tool_call_completed", { toolCallId: "c1", outcome: "cancelled" })],
         running,
       );
-      const withOutput = projectSessionEvent(progress("same\n"), running);
+      const withOutput = projectRunEvent(progress("same\n"), running);
 
-      expect(projectSessionEvent(progress("early\n"), queued)).toBe(queued);
-      expect(projectSessionEvent(progress("late\n"), completed)).toBe(completed);
-      expect(projectSessionEvent(progress("other\n", "unknown"), running)).toBe(running);
-      expect(projectSessionEvent(progress("same\n"), withOutput)).toBe(withOutput);
+      expect(projectRunEvent(progress("early\n"), queued)).toBe(queued);
+      expect(projectRunEvent(progress("late\n"), completed)).toBe(completed);
+      expect(projectRunEvent(progress("other\n", "unknown"), running)).toBe(running);
+      expect(projectRunEvent(progress("same\n"), withOutput)).toBe(withOutput);
     });
   });
 
@@ -371,7 +371,7 @@ describe("projectSessionEvent", () => {
     });
 
     it("close when allowed, and the call waits to execute", () => {
-      const model = projectSessionEvent(
+      const model = projectRunEvent(
         event("approval_resolved", {
           approvalId: "ap1",
           toolCallId: "c3",
@@ -426,12 +426,12 @@ describe("projectSessionEvent", () => {
         policy: "auto-approve",
       });
 
-      expect(projectSessionEvent(autoRequested, queued)).toBe(queued);
+      expect(projectRunEvent(autoRequested, queued)).toBe(queued);
     });
 
-    it("close when the session settles while one is pending", () => {
-      const model = projectSessionEvent(
-        event("session_settled", { result: settled({ outcome: "cancelled", cancellation: {} }) }),
+    it("close when the Agent Run settles while one is pending", () => {
+      const model = projectRunEvent(
+        event("run_settled", { result: settled({ outcome: "cancelled", cancellation: {} }) }),
         pending,
       );
 
@@ -449,7 +449,7 @@ describe("projectSessionEvent", () => {
     ]);
 
     it("shows its start and its outcome with the evidence", () => {
-      const model = projectSessionEvent(
+      const model = projectRunEvent(
         event("verification_completed", {
           verificationId: "v1",
           outcome: "continue",
@@ -494,7 +494,7 @@ describe("projectSessionEvent", () => {
 
     it("handles verification_progress, which the MVP never emits, without a change", () => {
       expect(
-        projectSessionEvent(
+        projectRunEvent(
           event("verification_progress", { verificationId: "v1", update: { message: "1/3" } }),
           verifying,
         ),
@@ -502,13 +502,13 @@ describe("projectSessionEvent", () => {
     });
   });
 
-  describe("the end of a session", () => {
+  describe("the end of an Agent Run", () => {
     it("shows the limit that ended it and the failure it settled with", () => {
-      const limited = sessionEvents();
+      const limited = runEvents();
       const model = project([
-        limited("session_started", { task: { objective: "Fix the failing test" } }),
+        limited("run_started", { task: { objective: "Fix the failing test" } }),
         limited("runtime_limit_reached", { kind: "maxToolCalls", limit: 100, observed: 101 }),
-        limited("session_settled", {
+        limited("run_settled", {
           result: settled({
             outcome: "failed",
             failure: { code: "LIMIT_EXCEEDED", message: "Tool Call limit exceeded" },
@@ -536,11 +536,11 @@ describe("projectSessionEvent", () => {
     });
 
     it("shows a requested cancellation and whether the workspace changed", () => {
-      const cancel = sessionEvents("s3");
+      const cancel = runEvents("s3");
       const model = project([
-        cancel("session_started", { task: { objective: "Refactor" } }),
+        cancel("run_started", { task: { objective: "Refactor" } }),
         cancel("cancellation_requested", { reason: "user", requestedFrom: "streaming_model" }),
-        cancel("session_settled", {
+        cancel("run_settled", {
           result: settled({
             outcome: "cancelled",
             cancellation: { reason: "user" },
@@ -573,13 +573,13 @@ describe("projectSessionEvent", () => {
         event("candidate_completion_detected", { modelTurnId: "t1", messageId: "m1" }),
         event("model_turn_completed", { modelTurnId: "t1", outcome: "completed", usage }),
       ]) {
-        expect(projectSessionEvent(unchanged, model)).toBe(model);
+        expect(projectRunEvent(unchanged, model)).toBe(model);
       }
     });
   });
 });
 
-// A recorded Agent Session: a real session driven by a scripted model and a fake bash tool, under
+// A recorded Agent Run: a real Agent Run driven by a scripted model and a fake bash tool, under
 // the ask Approval Policy, whose whole event sequence is projected.
 describe("a recorded event sequence", () => {
   function streamOf(events: readonly ModelStreamEvent[], result: AssistantMessage): ModelStream {
@@ -678,7 +678,7 @@ describe("a recorded event sequence", () => {
     };
     const repoRoot = "/repo" as RepoPath;
     let id = 0;
-    const opened = openAgentSession({
+    const opened = openAgentRun({
       model: scriptedModel(),
       systemPrompt: "Test.",
       tools,
@@ -721,16 +721,16 @@ describe("a recorded event sequence", () => {
       ids: { next: (kind) => `${kind}-${++id}` },
     });
     if (!opened.ok) throw new Error(opened.message);
-    const { session } = opened;
+    const { run } = opened;
 
     const models: TuiModel[] = [];
     let model = EMPTY;
     const observed = (async () => {
-      for await (const next of session.events()) {
-        model = projectSessionEvent(next, model);
+      for await (const next of run.events()) {
+        model = projectRunEvent(next, model);
         models.push(model);
         if (next.type === "approval_requested") {
-          void session.dispatch({
+          void run.dispatch({
             type: "resolve_approval",
             approvalId: next.data.approvalId,
             decision: "allow",
@@ -738,8 +738,8 @@ describe("a recorded event sequence", () => {
         }
       }
     })();
-    await session.dispatch({ type: "start", task: { objective: "Make the tests pass" } });
-    const result = await session.result();
+    await run.dispatch({ type: "start", task: { objective: "Make the tests pass" } });
+    const result = await run.result();
     await observed;
 
     expect(result.outcome).toBe("succeeded");
@@ -755,16 +755,16 @@ describe("a recorded event sequence", () => {
     ).toBe(true);
     expect(model).toEqual({
       transcript: [
-        { kind: "user", id: "session-1/task", text: "Make the tests pass" },
+        { kind: "user", id: "run-1/task", text: "Make the tests pass" },
         {
           kind: "assistant",
-          id: "session-1/message/assistant_message-3",
+          id: "run-1/message/assistant_message-3",
           text: "Running the tests.",
           status: "completed",
         },
         {
           kind: "tool_call",
-          id: "session-1/tool_call/tool_call-4",
+          id: "run-1/tool_call/tool_call-4",
           toolName: "bash",
           summary: "bun test",
           status: "succeeded",
@@ -772,19 +772,19 @@ describe("a recorded event sequence", () => {
         },
         {
           kind: "assistant",
-          id: "session-1/message/assistant_message-7",
+          id: "run-1/message/assistant_message-7",
           text: "All tests pass.",
           status: "completed",
         },
         {
           kind: "verification",
-          id: "session-1/verification/verification-8",
+          id: "run-1/verification/verification-8",
           status: "succeeded",
           evidence: ["bun test exited 0"],
         },
         {
           kind: "outcome",
-          id: "session-1/outcome",
+          id: "run-1/outcome",
           status: "succeeded",
           workspaceChanged: true,
           partialChangesPossible: false,

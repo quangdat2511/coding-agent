@@ -19,7 +19,7 @@ export interface Clock {
 }
 
 export type IdKind =
-  | "session"
+  | "run"
   | "model_turn"
   | "assistant_message"
   | "tool_call"
@@ -30,7 +30,7 @@ export interface IdSource {
   next(kind: IdKind): string;
 }
 
-export interface SessionLimits {
+export interface RunLimits {
   readonly maxModelTurns: number;
   readonly maxToolCalls: number;
   readonly maxDurationMs: number;

@@ -27,7 +27,7 @@ leg is measured separately, so switching mid-session builds the comparison table
 
 ## What it drives
 
-One scripted Agent Session, identical for all three renderers, covering everything CDA-17
+One scripted Agent Run, identical for all three renderers, covering everything CDA-17
 asked to see: the task prompt, a streaming transcript, tool calls with their output, an
 approval gate that really blocks, `allow-always` suppressing later gates, a rejection with
 its recovery path, cancellation of a long-running tool, a verification table with a failing
@@ -47,7 +47,7 @@ for Ink because it is more distinct from Pi and still leaves substantial project
 
 That preference is compatible with "building the TUI ourselves." Under the Ink approach, Ink
 owns low-level reconciliation, layout, terminal diffing, and terminal lifecycle. This project
-still owns the agent session model, transcript virtualization and scrolling, approval UX,
+still owns the agent run model, transcript virtualization and scrolling, approval UX,
 input policy, themes, and all product-specific TUI modules. This is different from adopting
 `@earendil-works/pi-tui`, which would reuse a ready-made coding-agent TUI.
 

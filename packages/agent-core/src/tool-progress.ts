@@ -20,7 +20,7 @@ export function progressTail(text: string, maxBytes = TOOL_PROGRESS_MAX_BYTES): 
   return decoder.decode(bytes.subarray(start));
 }
 
-// At most one Tool Progress Session Event per Tool Call in this interval, so a chatty command
+// At most one Tool Progress Run Event per Tool Call in this interval, so a chatty command
 // cannot flood the event log or its observers.
 export const TOOL_PROGRESS_INTERVAL_MS = 250;
 

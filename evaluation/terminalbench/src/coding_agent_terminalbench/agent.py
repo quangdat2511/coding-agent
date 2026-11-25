@@ -39,7 +39,7 @@ from coding_agent_terminalbench.launch import (
     ModelChoice,
     build_command,
     check_agent_env,
-    session_settled,
+    run_settled,
     split_model,
 )
 from coding_agent_terminalbench.manifest import (
@@ -270,7 +270,7 @@ class CodingAgent(BaseInstalledAgent):
         # It passes no cwd, so the agent starts where the task image places it, and no timeout,
         # so only Harbor's agent timeout bounds the run.
         result = await environment.exec(command=command)
-        if session_settled(result.return_code):
+        if run_settled(result.return_code):
             # A failed or cancelled Agent Result is an outcome that the verifier scores.
             # populate_context_post_run fills the AgentContext from the files in --output-dir.
             return

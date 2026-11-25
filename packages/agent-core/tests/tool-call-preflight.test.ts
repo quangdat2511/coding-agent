@@ -7,7 +7,7 @@ import {
   fakeTool,
   fakeWriteTool,
   objective,
-  openTestSession,
+  openTestRun,
   resultOf,
   type ScriptedToolCall,
   textTurn,
@@ -35,13 +35,13 @@ const unknownCalls = toolCallTurn(
 
 describe("resolving Tool Calls in preflight", () => {
   it("queues every call of a batch in model order before resolving the first", async () => {
-    const { session } = openTestSession({
+    const { run } = openTestRun({
       model: { turns: [unknownCalls, textTurn("Fixed it.")] },
     });
 
-    await session.dispatch({ type: "start", task });
-    await session.result();
-    const events = await collect(session.events());
+    await run.dispatch({ type: "start", task });
+    await run.result();
+    const events = await collect(run.events());
     const toolCallEvents = events.filter(
       (event) => event.type === "tool_call_queued" || event.type === "tool_call_completed",
     );
@@ -78,15 +78,15 @@ describe("resolving Tool Calls in preflight", () => {
     ]);
   });
 
-  it("counts every queued call toward the session's Tool Calls", async () => {
-    const { session } = openTestSession({
+  it("counts every queued call toward the run's Tool Calls", async () => {
+    const { run } = openTestRun({
       model: { turns: [unknownCalls, textTurn("Fixed it.")] },
     });
 
-    await session.dispatch({ type: "start", task });
-    await session.result();
+    await run.dispatch({ type: "start", task });
+    await run.result();
 
-    expect(session.snapshot().counters.toolCalls).toBe(2);
+    expect(run.snapshot().counters.toolCalls).toBe(2);
   });
 
   it("prepares each call only after the call before it has its Tool Result", async () => {
@@ -94,11 +94,11 @@ describe("resolving Tool Calls in preflight", () => {
     const inspect: ExecutableTool = {
       ...fakeTool({ name: "inspect" }),
       async prepare() {
-        transcriptAtSecondPrepare = session.snapshot().transcript;
+        transcriptAtSecondPrepare = run.snapshot().transcript;
         return { ok: false, code: "NOT_FOUND", message: "nothing to inspect" };
       },
     };
-    const { session } = openTestSession({
+    const { run } = openTestRun({
       tools: [fakeWriteTool(), inspect],
       model: {
         turns: [
@@ -111,8 +111,8 @@ describe("resolving Tool Calls in preflight", () => {
       },
     });
 
-    await session.dispatch({ type: "start", task });
-    await session.result();
+    await run.dispatch({ type: "start", task });
+    await run.result();
 
     expect(transcriptAtSecondPrepare.at(-1)).toEqual(
       toolResultMessage("call-1", "../outside.ts is outside the repository"),
@@ -120,13 +120,13 @@ describe("resolving Tool Calls in preflight", () => {
   });
 
   it("returns to streaming once every call resolves in preflight, sending their Tool Results in model order", async () => {
-    const { session, model } = openTestSession({
+    const { run, model } = openTestRun({
       model: { turns: [unknownCalls, textTurn("Fixed it.")] },
     });
 
-    await session.dispatch({ type: "start", task });
-    await session.result();
-    const events = await collect(session.events());
+    await run.dispatch({ type: "start", task });
+    await run.result();
+    const events = await collect(run.events());
     const queued = events.findIndex((event) => event.type === "tool_call_queued");
 
     expect(events.slice(queued, queued + 7).map(({ type, data }) => ({ type, data }))).toEqual([
@@ -170,14 +170,14 @@ describe("resolving Tool Calls in preflight", () => {
 
   it("rejects a call to an unknown tool with a NOT_FOUND error Tool Result and asks the model again", async () => {
     const call = { toolCallId: "call-1", name: "frobnicate", input: {} };
-    const { session, model } = openTestSession({
+    const { run, model } = openTestRun({
       model: { turns: [toolCallTurn(call), textTurn("Fixed it.")] },
     });
     const unknown = 'unknown tool "frobnicate"; the available tools are echo';
 
-    await session.dispatch({ type: "start", task });
-    await session.result();
-    const events = await collect(session.events());
+    await run.dispatch({ type: "start", task });
+    await run.result();
+    const events = await collect(run.events());
 
     expect(events.find((event) => event.type === "tool_call_completed")?.data).toEqual({
       toolCallId: "tool_call-1",
@@ -192,7 +192,7 @@ describe("resolving Tool Calls in preflight", () => {
   });
 
   it("rejects malformed JSON arguments with a SCHEMA_VIOLATION error Tool Result, without preparing the call", async () => {
-    const { session, portCalls } = openTestSession({
+    const { run, portCalls } = openTestRun({
       model: {
         turns: [
           toolCallTurn({ toolCallId: "call-1", name: "echo", arguments: '{"text": "hi"' }),
@@ -202,10 +202,10 @@ describe("resolving Tool Calls in preflight", () => {
     });
     const invalidJson = expect.stringMatching(/^the arguments for echo are not valid JSON: /);
 
-    await session.dispatch({ type: "start", task });
-    await session.result();
+    await run.dispatch({ type: "start", task });
+    await run.result();
 
-    expect(resultOf(await collect(session.events()), "tool_call-1")).toEqual(
+    expect(resultOf(await collect(run.events()), "tool_call-1")).toEqual(
       errorResult("echo", "SCHEMA_VIOLATION", invalidJson),
     );
     expect(portCalls).not.toContain("tool.prepare(echo)");
@@ -230,15 +230,15 @@ describe("resolving Tool Calls in preflight", () => {
   ])(
     "rejects the call with a SCHEMA_VIOLATION error Tool Result, without preparing it, when $name",
     async ({ call, problem }) => {
-      const { session, portCalls } = openTestSession({
+      const { run, portCalls } = openTestRun({
         tools: [fakeTool({ name: "read", parameters: Type.Object({ path: Type.String() }) })],
         model: { turns: [toolCallTurn(call), textTurn("Fixed it.")] },
       });
 
-      await session.dispatch({ type: "start", task });
-      await session.result();
+      await run.dispatch({ type: "start", task });
+      await run.result();
 
-      expect(resultOf(await collect(session.events()), "tool_call-1")).toEqual(
+      expect(resultOf(await collect(run.events()), "tool_call-1")).toEqual(
         errorResult("read", "SCHEMA_VIOLATION", `Schema Validation failed for read: ${problem}`),
       );
       expect(portCalls).not.toContain("tool.prepare(read)");
@@ -246,7 +246,7 @@ describe("resolving Tool Calls in preflight", () => {
   );
 
   it("rejects the call with the code and message of a prepare that refuses it, such as a path outside the repository", async () => {
-    const { session, portCalls } = openTestSession({
+    const { run, portCalls } = openTestRun({
       tools: [fakeWriteTool()],
       model: {
         turns: [
@@ -256,10 +256,10 @@ describe("resolving Tool Calls in preflight", () => {
       },
     });
 
-    await session.dispatch({ type: "start", task });
-    await session.result();
+    await run.dispatch({ type: "start", task });
+    await run.result();
 
-    expect(resultOf(await collect(session.events()), "tool_call-1")).toEqual(
+    expect(resultOf(await collect(run.events()), "tool_call-1")).toEqual(
       errorResult("write", "PATH_OUTSIDE_REPO", "../outside.ts is outside the repository"),
     );
     expect(portCalls).toContain("workspace.resolveForCreate(../outside.ts)");
@@ -268,7 +268,7 @@ describe("resolving Tool Calls in preflight", () => {
   it.each(["throw", "reject"] as const)(
     "rejects the call with a recoverable TOOL_INTERNAL_ERROR, without a stack trace, when prepare %ss",
     async (failure) => {
-      const { session } = openTestSession({
+      const { run } = openTestRun({
         tools: [throwingTool({ phase: "prepare", failure })],
         model: {
           turns: [
@@ -280,10 +280,10 @@ describe("resolving Tool Calls in preflight", () => {
       const sanitized =
         "explode failed unexpectedly while preparing the call: explode failed during prepare";
 
-      await session.dispatch({ type: "start", task });
-      const { outcome } = await session.result();
+      await run.dispatch({ type: "start", task });
+      const { outcome } = await run.result();
 
-      expect(resultOf(await collect(session.events()), "tool_call-1")).toEqual(
+      expect(resultOf(await collect(run.events()), "tool_call-1")).toEqual(
         errorResult("explode", "TOOL_INTERNAL_ERROR", sanitized),
       );
       expect(outcome).toBe("succeeded");
@@ -291,7 +291,7 @@ describe("resolving Tool Calls in preflight", () => {
   );
 
   it("rejects the call with a recoverable TOOL_INTERNAL_ERROR, without preparing it, when the tool's schema cannot be evaluated", async () => {
-    const { session, portCalls } = openTestSession({
+    const { run, portCalls } = openTestRun({
       tools: [
         fakeTool({
           name: "grep",
@@ -306,10 +306,10 @@ describe("resolving Tool Calls in preflight", () => {
       },
     });
 
-    await session.dispatch({ type: "start", task });
-    const { outcome } = await session.result();
+    await run.dispatch({ type: "start", task });
+    const { outcome } = await run.result();
 
-    expect(resultOf(await collect(session.events()), "tool_call-1")?.error).toEqual({
+    expect(resultOf(await collect(run.events()), "tool_call-1")?.error).toEqual({
       code: "TOOL_INTERNAL_ERROR",
       message: expect.stringMatching(/^the parameter schema of grep could not be evaluated: /),
     });
@@ -339,7 +339,7 @@ describe("resolving Tool Calls in preflight", () => {
         ...fakeTool({ name: "broken" }),
         prepare: async () => outcome as PrepareOutcome,
       };
-      const { session } = openTestSession({
+      const { run } = openTestRun({
         tools: [broken],
         model: {
           turns: [
@@ -349,10 +349,10 @@ describe("resolving Tool Calls in preflight", () => {
         },
       });
 
-      await session.dispatch({ type: "start", task });
-      const settled = await session.result();
+      await run.dispatch({ type: "start", task });
+      const settled = await run.result();
 
-      expect(resultOf(await collect(session.events()), "tool_call-1")?.error).toEqual({
+      expect(resultOf(await collect(run.events()), "tool_call-1")?.error).toEqual({
         code: "TOOL_INTERNAL_ERROR",
         message:
           "broken failed unexpectedly while preparing the call: prepare returned an unusable outcome",
@@ -362,7 +362,7 @@ describe("resolving Tool Calls in preflight", () => {
   );
 
   it("counts each error Tool Result as a consecutive recoverable failure, across Model Turns", async () => {
-    const { session } = openTestSession({
+    const { run } = openTestRun({
       model: {
         turns: [
           unknownCalls,
@@ -373,14 +373,14 @@ describe("resolving Tool Calls in preflight", () => {
       limits: { maxConsecutiveRecoverableFailures: 10 },
     });
 
-    await session.dispatch({ type: "start", task });
-    await session.result();
+    await run.dispatch({ type: "start", task });
+    await run.result();
 
-    expect(session.snapshot().counters.consecutiveRecoverableFailures).toBe(3);
+    expect(run.snapshot().counters.consecutiveRecoverableFailures).toBe(3);
   });
 
   it("prepares only the calls that pass Schema Validation and executes only those that pass preflight", async () => {
-    const { session, portCalls } = openTestSession({
+    const { run, portCalls } = openTestRun({
       tools: [fakeTool(), fakeWriteTool(), throwingTool({ phase: "prepare" })],
       model: {
         turns: [
@@ -399,8 +399,8 @@ describe("resolving Tool Calls in preflight", () => {
       limits: { maxConsecutiveRecoverableFailures: 10 },
     });
 
-    await session.dispatch({ type: "start", task });
-    await session.result();
+    await run.dispatch({ type: "start", task });
+    await run.result();
 
     expect(portCalls.filter((call) => call.startsWith("tool."))).toEqual([
       "tool.prepare(write)",
@@ -413,7 +413,7 @@ describe("resolving Tool Calls in preflight", () => {
   });
 
   it("enters awaiting_approval and emits approval_requested when a mutating call passes preflight under the ask policy", async () => {
-    const { session } = openTestSession({
+    const { run } = openTestRun({
       tools: [fakeTool(), fakeWriteTool()],
       model: {
         turns: [
@@ -427,10 +427,10 @@ describe("resolving Tool Calls in preflight", () => {
       },
     });
 
-    await session.dispatch({ type: "start", task });
-    await waitForEvent(session, "approval_requested");
+    await run.dispatch({ type: "start", task });
+    await waitForEvent(run, "approval_requested");
 
-    const snapshot = session.snapshot();
+    const snapshot = run.snapshot();
     expect(snapshot.phase).toBe("awaiting_approval");
     expect(snapshot).toMatchObject({
       phase: "awaiting_approval",
@@ -443,13 +443,13 @@ describe("resolving Tool Calls in preflight", () => {
       },
     });
 
-    // Allow the call so the session can settle
-    await session.dispatch({
+    // Allow the call so the run can settle
+    await run.dispatch({
       type: "resolve_approval",
       approvalId: "approval-1",
       decision: "allow",
     });
-    const result = await session.result();
+    const result = await run.result();
     expect(result.outcome).toBe("succeeded");
   });
 });

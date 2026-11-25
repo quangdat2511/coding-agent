@@ -2,7 +2,7 @@ import { PROVIDER_CREDENTIAL_ENV_VARS } from "@coding-agent/ai";
 
 // What the committed recording of the interactive path has to show (ADR 0006 §6 item 6): the
 // output streaming, one Approval decided in the overlay, and one Cancellation that settles the
-// session with its workspace report, with no credential anywhere in the file. The recording is a
+// Agent Run with its workspace report, with no credential anywhere in the file. The recording is a
 // terminal capture in the asciicast format of asciinema, version 2 or 3. Both put one JSON header
 // on the first line and one `[time, code, data]` event on each line after it.
 //
@@ -161,11 +161,11 @@ export function checkRecording(recording: string): string[] {
   // Any Tool Call after the overlay: a wrapped row could hide the tool's name, so it is not named.
   step(/\[(?:executing|succeeded)\]/, "a Tool Call running after the overlay");
   step(/cancellation requested/, "the Cancellation being requested");
-  step(/session \[cancelled\]/, "the cancelled session settling");
-  // The demo allows a mutating Tool Call before it cancels, so the session must say so.
+  step(/session \[cancelled\]/, "the cancelled Agent Run settling");
+  // The demo allows a mutating Tool Call before it cancels, so the Agent Run must say so.
   step(
     /workspace changed, partial changes possible/,
-    "the cancelled session reporting that the workspace changed and partial changes are possible",
+    "the cancelled Agent Run reporting that the workspace changed and partial changes are possible",
   );
 
   return problems;

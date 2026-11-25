@@ -4,7 +4,7 @@ ATIF is Harbor's format and moves with Harbor, so the writer lives beside the Ha
 of in the TypeScript packages: one module here absorbs that churn. The conversion follows the table
 of ADR 0005 §6, and a document is written only after Harbor's `Trajectory` model accepts it.
 
-A log that does not end with `session_settled` is truncated (ADR 0005 §4) and still converts: the
+A log that does not end with `run_settled` is truncated (ADR 0005 §4) and still converts: the
 steps of the events that were written are kept, and the Agent Result fields are left out.
 
 The Assistant Message of Coding Agent holds text and Tool Calls only, so ATIF's displayable
@@ -37,7 +37,7 @@ from coding_agent_terminalbench.run_log import (
     TURN_COMPLETED_EVENT,
     TURN_STARTED_EVENT,
     RunLog,
-    SessionEvent,
+    RunEvent,
     TokenCounts,
     count_of,
     events_of_type,
@@ -87,7 +87,7 @@ def build_trajectory(log: RunLog, *, agent: AgentIdentity) -> Trajectory:
                 steps.append(_user_step(len(steps) + 1, event, feedback))
 
     return Trajectory(
-        session_id=log.session_id,
+        session_id=log.run_id,
         agent=Agent(name=agent.name, version=agent.version, model_name=_model_name(log)),
         steps=steps,
         final_metrics=_final_metrics(log, steps),
@@ -112,13 +112,13 @@ def write_trajectory(path: Path, trajectory: Trajectory) -> None:
         raise
 
 
-def _user_step(step_id: int, event: SessionEvent, message: str) -> Step:
+def _user_step(step_id: int, event: RunEvent, message: str) -> Step:
     return Step(step_id=step_id, source="user", timestamp=event.occurred_at, message=message)
 
 
 def _agent_step(
     step_id: int,
-    event: SessionEvent,
+    event: RunEvent,
     model_turn: str | None,
     queued_calls: Mapping[tuple[str, str], str],
     completed_calls: Mapping[str, Mapping[str, Any]],
@@ -257,7 +257,7 @@ def _final_metrics(log: RunLog, steps: list[Step]) -> FinalMetrics:
     )
 
 
-def _queued_calls(events: tuple[SessionEvent, ...]) -> dict[tuple[str, str], str]:
+def _queued_calls(events: tuple[RunEvent, ...]) -> dict[tuple[str, str], str]:
     """The Agent Core id of every queued Tool Call, by Model Turn and provider id."""
     queued: dict[tuple[str, str], str] = {}
     for event in events_of_type(events, CALL_QUEUED_EVENT):
@@ -272,7 +272,7 @@ def _queued_calls(events: tuple[SessionEvent, ...]) -> dict[tuple[str, str], str
     return queued
 
 
-def _completed_calls(events: tuple[SessionEvent, ...]) -> dict[str, Mapping[str, Any]]:
+def _completed_calls(events: tuple[RunEvent, ...]) -> dict[str, Mapping[str, Any]]:
     """The `tool_call_completed` data of every Tool Call, by Agent Core id."""
     completed: dict[str, Mapping[str, Any]] = {}
     for event in events_of_type(events, CALL_COMPLETED_EVENT):
@@ -282,7 +282,7 @@ def _completed_calls(events: tuple[SessionEvent, ...]) -> dict[str, Mapping[str,
     return completed
 
 
-def _turn_usages(events: tuple[SessionEvent, ...]) -> dict[str, Mapping[str, Any]]:
+def _turn_usages(events: tuple[RunEvent, ...]) -> dict[str, Mapping[str, Any]]:
     """The usage of every completed Model Turn, by Model Turn id."""
     usages: dict[str, Mapping[str, Any]] = {}
     for event in events_of_type(events, TURN_COMPLETED_EVENT):

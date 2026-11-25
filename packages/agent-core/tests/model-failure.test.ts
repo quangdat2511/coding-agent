@@ -1,10 +1,10 @@
 import { describe, expect, it } from "bun:test";
 import type { AssistantMessage, FinishReason, ModelStreamEvent } from "@coding-agent/ai";
-import type { AgentFailure, AgentResult, SessionEvent } from "../src/index.ts";
+import type { AgentFailure, AgentResult, RunEvent } from "../src/index.ts";
 import {
   collect,
   failingStream,
-  openTestSession,
+  openTestRun,
   type ScriptedTurn,
   textTurn,
   throwingRequest,
@@ -43,10 +43,10 @@ const rawStream =
     result: () => new Promise(() => {}),
   });
 
-const closingTypes: SessionEvent["type"][] = [
+const closingTypes: RunEvent["type"][] = [
   "assistant_message_completed",
   "model_turn_completed",
-  "session_settled",
+  "run_settled",
 ];
 
 describe("settling a failed Model Turn", () => {
@@ -150,13 +150,13 @@ describe("settling a failed Model Turn", () => {
       },
     },
   ])("settles MODEL_FAILURE when $name", async ({ turn, failure }) => {
-    const { session } = openTestSession({ model: { turns: [turn] } });
+    const { run } = openTestRun({ model: { turns: [turn] } });
 
-    await session.dispatch({ type: "start", task });
-    const result = await session.result();
+    await run.dispatch({ type: "start", task });
+    const result = await run.result();
 
     expect(failureOf(result)).toEqual(failure);
-    const events = await collect(session.events());
+    const events = await collect(run.events());
     expect(events.slice(-3).map((event) => event.type)).toEqual(closingTypes);
   });
 
@@ -245,27 +245,27 @@ describe("settling a failed Model Turn", () => {
       turn: endingWith({ role: "assistant", content: [], model: "fake-model" }),
     },
   ])("settles MODEL_PROTOCOL_ERROR when $name", async ({ turn }) => {
-    const { session } = openTestSession({ model: { turns: [turn] } });
+    const { run } = openTestRun({ model: { turns: [turn] } });
 
-    await session.dispatch({ type: "start", task });
-    const result = await session.result();
+    await run.dispatch({ type: "start", task });
+    const result = await run.result();
 
     expect(failureOf(result)).toEqual({
       code: "MODEL_PROTOCOL_ERROR",
       message: expect.any(String),
     });
-    const events = await collect(session.events());
+    const events = await collect(run.events());
     expect(events.slice(-3).map((event) => event.type)).toEqual(closingTypes);
   });
 
   it("keeps the partial output of a failed response for diagnostics, outside the transcript", async () => {
-    const { session, model } = openTestSession({
+    const { run, model } = openTestRun({
       model: { turns: [failingStream(opening, new Error("socket hang up"))] },
     });
 
-    await session.dispatch({ type: "start", task });
-    const result = await session.result();
-    const events = await collect(session.events());
+    await run.dispatch({ type: "start", task });
+    const result = await run.result();
+    const events = await collect(run.events());
     const failure = failureOf(result);
 
     expect(events.slice(-3).map(({ type, data }) => ({ type, data }))).toEqual([
@@ -292,22 +292,20 @@ describe("settling a failed Model Turn", () => {
           failure,
         },
       },
-      { type: "session_settled", data: { result } },
+      { type: "run_settled", data: { result } },
     ]);
-    expect(session.snapshot().transcript).toEqual([
-      { role: "user", content: "Fix the failing test" },
-    ]);
+    expect(run.snapshot().transcript).toEqual([{ role: "user", content: "Fix the failing test" }]);
     expect(model.requests).toHaveLength(1);
   });
 
   it("reports the blocked response and counts its usage when a content filter stops it", async () => {
-    const { session } = openTestSession({
+    const { run } = openTestRun({
       model: { turns: [finishingWith({ reason: "content_filter", rawReason: "SAFETY" })] },
     });
 
-    await session.dispatch({ type: "start", task });
-    const result = await session.result();
-    const events = await collect(session.events());
+    await run.dispatch({ type: "start", task });
+    const result = await run.result();
+    const events = await collect(run.events());
 
     expect(
       events.find((event) => event.type === "assistant_message_completed")?.data,
@@ -319,6 +317,6 @@ describe("settling a failed Model Turn", () => {
       },
     });
     expect(result.usage).toEqual({ inputTokens: 10, outputTokens: 5 });
-    expect(session.snapshot().transcript).toHaveLength(1);
+    expect(run.snapshot().transcript).toHaveLength(1);
   });
 });

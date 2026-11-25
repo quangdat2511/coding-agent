@@ -2,7 +2,7 @@
 // from a Tool Call child through this process. A launcher that started Coding Agent as a child,
 // rather than replacing itself with it through exec, still holds the credential in its own
 // /proc/<pid>/environ, and a same-uid child can read that file. Coding Agent cannot scrub or mark
-// a process it did not start. So before an Agent Session opens under "auto-approve", cli.ts walks
+// a process it did not start. So before an Agent Run opens under "auto-approve", cli.ts walks
 // the ancestor chain from this process's parent and refuses the run if an ancestor still holds one
 // of the provider-credential variables, in its environment or as an assignment in its arguments.
 //

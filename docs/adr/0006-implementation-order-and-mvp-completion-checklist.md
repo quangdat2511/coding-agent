@@ -16,11 +16,11 @@ Every architectural decision this order depends on is recorded:
 - [Tool contracts and safety policy](./0001-tool-contracts-and-safety-policy.md) fixes the four tool
   contracts, the path jail, the Approval Policy, the 40 KiB output budget, and, in §8, credential
   isolation for tool and Verification processes.
-- [Agent Session state machine and event protocol](./0002-agent-session-state-machine-and-event-protocol.md)
-  fixes nine states, nineteen Session Event types, and the Agent Session interface.
-- [MVP context, planning, verification, and session memory](./0003-mvp-context-planning-verification-and-session-memory.md)
+- [Agent Run state machine and event protocol](./0002-agent-session-state-machine-and-event-protocol.md)
+  fixes nine states, nineteen Run Event types, and the Agent Run interface.
+- [MVP context, planning, verification, and run memory](./0003-mvp-context-planning-verification-and-session-memory.md)
   fixes Project Instructions discovery, planning as a prompt requirement, the Verification outcomes,
-  and the session limits.
+  and the Run Limits.
 - [Package APIs and dependency direction](./0004-package-apis-and-dependency-direction.md) fixes five
   packages, an allowlisted type-only graph with one composition root, and the boundary enforcement.
 - [TerminalBench evaluation protocol](./0005-terminalbench-evaluation-protocol.md) fixes the pins, the
@@ -154,7 +154,7 @@ not been shown to work.
 
 | Slice | Contents | Exit criterion |
 | --- | --- | --- |
-| A1 | Construction and ports: `openAgentSession`, `ModelPort`, `Clock`, `IdSource`, `SessionLimits`, `WorkspaceResolver`, `RepoPath`, `ExecutableTool`, `ToolRegistry`, `VerificationPolicy`, and the full Agent State and Session Event type surface | Invalid construction returns `INVALID_CONFIGURATION` and creates no session, event, or transition |
+| A1 | Construction and ports: `openAgentRun`, `ModelPort`, `Clock`, `IdSource`, `RunLimits`, `WorkspaceResolver`, `RepoPath`, `ExecutableTool`, `ToolRegistry`, `VerificationPolicy`, and the full Agent State and Run Event type surface | Invalid construction returns `INVALID_CONFIGURATION` and creates no Agent Run, event, or transition |
 | A2 | Loop core: `ready`, `streaming_model`, `executing_tool`, `verifying`, `succeeded`, `failed`; transcript commitment; Candidate Completion; sequential dispatch; preflight in ADR 0002 §4 order; the auto-approved path | A fake `ModelPort` and fake tool drive a task to `succeeded` with the event sequence asserted |
 | A3 | Approval: `awaiting_approval`, `approval_requested`, `approval_resolved`, deny paths, and the self-transitions of ADR 0002 §2 | Allow, deny with a queued call remaining, and deny with none remaining each reach the right state |
 | A4 | Cancellation and limits: `cancelling`, the grace period, `runtime_limit_reached`, `LIMIT_EXCEEDED`, `partialChangesPossible` | Cancellation from every nonterminal state settles as `cancelled`, or as `failed` with `CANCELLATION_TIMEOUT`, unless a duration breach was already recorded; that breach settles as `LIMIT_EXCEEDED` |
@@ -179,15 +179,15 @@ The split rail stays out of the MVP. ADR 0004 §5 already makes it opt-in, which
 piece of the interaction model that can slip without weakening anything the destination names.
 
 **Track D, Coding Agent.** Starts once A1 has published the ports, because D1's `ModelPort` adapter
-and `coding-agent run` both need `ModelPort` and `openAgentSession`, which Agent Core defines. D4
+and `coding-agent run` both need `ModelPort` and `openAgentRun`, which Agent Core defines. D4
 also needs `TuiModel` from C1, because `tui` owns that type. Owns the two later joins.
 
 | Slice | Contents | Exit criterion |
 | --- | --- | --- |
-| D1 | Configuration, CLI parsing, the `ModelPort` adapter over `ai`, the system prompt assembly of ADR 0003 §1 and §2, and `coding-agent run` | Usage and configuration errors exit 2 before any Agent Session opens |
-| D2 | The composition root's two ADR 0001 §8 duties: marking the process non-dumpable through `prctl` before the first tool or Verification child, and, under `"auto-approve"` only, walking the ancestor chain at startup and refusing to open a session when an ancestor still holds a credential | A launcher that does not `exec`-replace itself is rejected with exit 2, and a same-uid child cannot read the Coding Agent process's `/proc/<pid>/environ` or `/proc/<pid>/mem` |
-| D3 | The full ADR 0005 §3 and §4 contract: exit codes 0, 1, 130, 2, 70; `run.json`, `events.jsonl`, `result.json` at `schemaVersion` 1; the `default` and `terminalbench` profiles | A smoke test per exit code asserts the files each run writes |
-| D4 | `projectSessionEvent` and the interactive path | The projection has unit tests and performs no I/O |
+| D1 | Configuration, CLI parsing, the `ModelPort` adapter over `ai`, the system prompt assembly of ADR 0003 §1 and §2, and `coding-agent run` | Usage and configuration errors exit 2 before any Agent Run opens |
+| D2 | The composition root's two ADR 0001 §8 duties: marking the process non-dumpable through `prctl` before the first tool or Verification child, and, under `"auto-approve"` only, walking the ancestor chain at startup and refusing to open an Agent Run when an ancestor still holds a credential | A launcher that does not `exec`-replace itself is rejected with exit 2, and a same-uid child cannot read the Coding Agent process's `/proc/<pid>/environ` or `/proc/<pid>/mem` |
+| D3 | The full ADR 0005 §3 and §4 contract: exit codes 0, 1, 130, 2, 70; `run.json`, `events.jsonl`, `result.json` at `schemaVersion` 2; the `default` and `terminalbench` profiles | A smoke test per exit code asserts the files each run writes |
+| D4 | `projectRunEvent` and the interactive path | The projection has unit tests and performs no I/O |
 
 **Track E, provider breadth.** Runs from Join 1, parallel to everything else: Anthropic, then
 OpenRouter, OpenAI, xAI, and OpenCode, each against one shared conformance suite of recorded
@@ -225,9 +225,9 @@ pin, `uv --frozen`, and Modal access before the recorded job depends on all four
 - **Join 2, the walking skeleton.** A2, B1, and D1 meet: headless `coding-agent run` completes the
   named fixture task using Google, `read` only, the auto-approved path, and no configured
   verification command, exiting 0. This is the first moment a real model response drives a real tool
-  through a real session, and it is deliberately reached through the headless entry point: it needs
-  no Ink, no projection, and it is the contract the evaluation adapter consumes. The TUI is not
-  deferred by this, because track C has been running since Join 1.
+  through a real Agent Run, and it is deliberately reached through the headless entry point: it
+  needs no Ink, no projection, and it is the contract the evaluation adapter consumes. The TUI is
+  not deferred by this, because track C has been running since Join 1.
 
   ADR 0001 §8 does not gate this join, even though ADR 0005 §3 makes `--approval-policy auto-approve`
   mandatory on the headless path. The skeleton registers `read` only, so it starts no child process
@@ -257,7 +257,7 @@ normalization leaked Google's shape.
 Tier 1 is reached when all of the following are observable. No item is satisfied by a claim that
 something works.
 
-1. Agent Core implements all nine states and all nineteen Session Event types. Every event has an
+1. Agent Core implements all nine states and all nineteen Run Event types. Every event has an
    emitter except `tool_execution_progress` and `verification_progress`, which are declared without
    one: ADR 0004 §3 shapes `ToolProgress` with the first tool that reports progress, and ADR 0005 §4
    already omits both from the on-disk log.
@@ -310,6 +310,11 @@ the evaluation dataset is a job parameter, and the counts a job reports derive f
 following [ADR 0008](./0008-evaluation-dataset-as-a-job-parameter.md). Item 11's task-environment
 count and its GPU count are therefore properties of the dataset the job names, not of this record.
 Track F's adapter and the record tooling take the dataset from the job configuration (ADR 0008 §5).
+
+On 2026-11-24, [CDA-147](https://datn-fit-hcmus.atlassian.net/browse/CDA-147) amended this record:
+Agent Session is renamed Agent Run (ADR 0002 §8), so A1 names `openAgentRun` and `RunLimits`, D3
+writes its files at `schemaVersion` 2 (ADR 0005 §4), D4 names `projectRunEvent`, and item 1 counts
+Run Event types. The work each item names is unchanged.
 
 ### 7. Tier 2: MVP evaluated
 

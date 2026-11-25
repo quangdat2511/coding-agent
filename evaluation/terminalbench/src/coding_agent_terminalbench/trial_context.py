@@ -100,7 +100,7 @@ def _metadata(
 
 
 def _limit_reached(log: RunLog) -> dict[str, Any] | None:
-    """The runtime limit that ended the session, when one did."""
+    """The runtime limit that ended the Agent Run, when one did."""
     for event in reversed(log.events):
         if event.type == LIMIT_REACHED_EVENT:
             return dict(event.data)

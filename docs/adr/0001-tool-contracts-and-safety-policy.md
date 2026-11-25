@@ -2,7 +2,7 @@
 
 Status: accepted
 
-Date: 2026-09-11 (Refined: 2026-09-12; Amended: 2026-09-13, 2026-11-09, 2026-11-11, 2026-11-12, 2026-11-22)
+Date: 2026-09-11 (Refined: 2026-09-12; Amended: 2026-09-13, 2026-11-09, 2026-11-11, 2026-11-12, 2026-11-22, 2026-11-24)
 
 ## Context
 
@@ -62,7 +62,7 @@ Agent Core owns the path-validation step: it decides when validation runs (durin
   - **Read-only**: `read` is automatically approved and executed without user intervention.
   - **Mutating**: `write`, `edit`, and `bash` require explicit approval.
 - Agent Core models approval as the first-class `awaiting_approval` lifecycle state. The later
-  [Agent Session state-machine decision](./0002-agent-session-state-machine-and-event-protocol.md)
+  [Agent Run state-machine decision](./0002-agent-session-state-machine-and-event-protocol.md)
   standardizes the earlier working name `PENDING_APPROVAL`; the behavior is unchanged.
 - Agent Core exposes an `ApprovalPolicy` contract:
   - `"ask"` (default): Used by interactive CLI/TUI interfaces, yielding execution to human
@@ -70,7 +70,7 @@ Agent Core owns the path-validation step: it decides when validation runs (durin
   - `"auto-approve"`: Used exclusively in isolated execution harnesses (such as automated TerminalBench benchmark runs).
 - When a human selects `deny`, Agent Core returns a `ToolResult` with `isError: true` and
   `error.code: "APPROVAL_DENIED"`, containing user feedback to allow model adaptation, alongside
-  an explicit emergency session abort option.
+  an explicit emergency run abort option.
 
 ### 5. Partial Changes and Atomicity Invariants
 
@@ -125,7 +125,7 @@ interface ToolResult {
 }
 ```
 
-`TOOL_INTERNAL_ERROR` reports an unexpected failure inside a tool, such as a thrown exception or a rejected promise, that no other code describes. It is recoverable: Agent Core returns it to the model as an error `ToolResult` like any other code, so the model can adapt, and it counts toward the consecutive recoverable Tool Call failure limit. Its `message` is a sanitized summary, never a raw `Error`, stack trace, or mutable reference. A failure caused by an accepted cancellation is recorded as cancelled rather than with this code. If the failure occurs while a mutating tool executes, partial changes may exist, as for any failed mutating call. The name is deliberately distinct from the Agent Session's terminal `INTERNAL_ERROR` failure code.
+`TOOL_INTERNAL_ERROR` reports an unexpected failure inside a tool, such as a thrown exception or a rejected promise, that no other code describes. It is recoverable: Agent Core returns it to the model as an error `ToolResult` like any other code, so the model can adapt, and it counts toward the consecutive recoverable Tool Call failure limit. Its `message` is a sanitized summary, never a raw `Error`, stack trace, or mutable reference. A failure caused by an accepted cancellation is recorded as cancelled rather than with this code. If the failure occurs while a mutating tool executes, partial changes may exist, as for any failed mutating call. The name is deliberately distinct from the Agent Run's terminal `INTERNAL_ERROR` failure code.
 
 ### 7. Amendments
 
@@ -204,7 +204,7 @@ On 2026-11-12, [CDA-71](https://datn-fit-hcmus.atlassian.net/browse/CDA-71) amen
 - **Error classification** (§1): `TIMEOUT` is decided by bash's own timer, not by the signal the
   shell died of, since a command can send itself the same signal. `SIGNAL` means the shell itself
   was ended by a signal bash did not send; a killed child of a shell that goes on is a normal
-  exit. A cancelled call reports `SIGNAL` with `[cancelled; ...]`. Session cancellation aborts the
+  exit. A cancelled call reports `SIGNAL` with `[cancelled; ...]`. Agent Run cancellation aborts the
   active Tool Call through its signal; once the call quiesces, Agent Core records it as cancelled
   (ADR 0002 §5, [CDA-73](https://datn-fit-hcmus.atlassian.net/browse/CDA-73)).
 - **Process lifetime** (§3): a timeout or cancellation sends `SIGTERM` to the command's process
@@ -340,8 +340,8 @@ Only the thread that applied the drop changed: the Bun helper threads still show
 The order of the startup checks comes from two runs of the isolation test's launcher check, which
 asks that a launcher that keeps its shell is refused with exit 2. With the ancestor check after the
 drop, the artifact built at commit `4fd7393` on Modal (`music-harmony`, root) did not refuse it: the
-agent opened a session and exited 1 (`LAUNCHER_NOT_REJECTED`), while all four probe paths passed and
-all four controls found the key. The result file is outside the repository, on the author's
+agent opened an Agent Run and exited 1 (`LAUNCHER_NOT_REJECTED`), while all four probe paths passed
+and all four controls found the key. The result file is outside the repository, on the author's
 machine in `cda121-evidence/isolation-modal-4fd7393-root.json`, and is not yet attached to Jira. The
 commit hashes `4fd7393` and `4298d32` in this amendment are those of this branch before it was
 rebased onto `main` at `d6499b6`. The rebase changed no file but ADR 0005 and the Isolation Record
@@ -411,9 +411,14 @@ The Record still needs a passing Modal non-root run under the evidence rule in A
   that had replaced itself with `exec`. Keeping the check before the drop does not depend on the
   answer.
 
+On 2026-11-24, [CDA-147](https://datn-fit-hcmus.atlassian.net/browse/CDA-147) amended this record:
+
+- **Terminology**: Agent Session is renamed Agent Run, following ADR 0002 §8, and this record uses
+  the new name in place. Behavior is unchanged.
+
 ### 8. Credential Isolation for Tool and Verification Processes
 
-Coding Agent authenticates to Model Providers with credentials it reads from its own environment: the provider API-key variables that `@coding-agent/ai` defines. `bash` Tool Calls (§3) and the Verification Runner ([ADR 0003](./0003-mvp-context-planning-verification-and-session-memory.md) §3) start child processes on the model's behalf. Under the `"auto-approve"` policy (§4) with network access these children run unattended, so one that obtains a credential can send it anywhere; even under `"ask"`, a credential copied into a Tool Result enters the transcript, the Session Event log, and any exported trajectory. The credential reaches Coding Agent only because a launching process placed it in the environment Coding Agent inherits, so how the launcher holds it is part of the problem and cannot be fully solved inside Coding Agent. What this section can require therefore depends on the Approval Policy, and the guarantee is stated per policy below rather than as one absolute.
+Coding Agent authenticates to Model Providers with credentials it reads from its own environment: the provider API-key variables that `@coding-agent/ai` defines. `bash` Tool Calls (§3) and the Verification Runner ([ADR 0003](./0003-mvp-context-planning-verification-and-session-memory.md) §3) start child processes on the model's behalf. Under the `"auto-approve"` policy (§4) with network access these children run unattended, so one that obtains a credential can send it anywhere; even under `"ask"`, a credential copied into a Tool Result enters the transcript, the Run Event log, and any exported trajectory. The credential reaches Coding Agent only because a launching process placed it in the environment Coding Agent inherits, so how the launcher holds it is part of the problem and cannot be fully solved inside Coding Agent. What this section can require therefore depends on the Approval Policy, and the guarantee is stated per policy below rather than as one absolute.
 
 This rule was grounded in Linux experiments (Docker, kernel 6.12, same-uid child): removing the variable from a child's environment blocks only the inherited copy; the credential still sits in a launcher's `/proc/<pid>/environ` and process memory, because an in-process delete does not rewrite the environment region fixed at `execve`. Marking a process non-dumpable denies a same-uid child those files, but only for the process so marked — a still-running ancestor shell that was started with the credential stays readable. See [ADR 0005](./0005-terminalbench-evaluation-protocol.md) for the evidence links.
 
@@ -429,7 +434,7 @@ Two rules hold on every entry point and under both policies:
 **Under `"auto-approve"` (isolated execution harness).** The guarantee is that a Tool Call or Verification child running as the same user, without `CAP_SYS_PTRACE` (which Coding Agent removes from itself under this policy, §7), cannot obtain a provider credential. Items 1 and 2 are necessary but not sufficient, because the process that launched Coding Agent may itself hold the credential. Two further requirements close that gap:
 
 - **Launch contract.** No same-uid process reachable by a tool child may hold a provider credential in a readable form. The launcher must replace itself with the Coding Agent process (`exec`) rather than remain as a credential-bearing ancestor, must not leave a credential-bearing sibling such as a pipeline stage, and must not write the credential to a file a same-uid process can read. Coding Agent cannot mark or scrub a process it did not start, so this is an obligation on the launcher. [ADR 0005](./0005-terminalbench-evaluation-protocol.md) is the concrete instance for Harbor: the adapter `exec`s the agent and pipes its output nowhere.
-- **Startup verification.** Before the composition root opens an Agent Session under `"auto-approve"`, it walks its ancestor chain from its own parent (`/proc/self/stat` field 4, then each `/proc/<pid>/environ`, which it can read because the ancestors are the same user and not hardened) and, if any ancestor still holds one of the provider-credential variables Coding Agent uses, opens no Agent Session and returns a configuration error ([ADR 0002](./0002-agent-session-state-machine-and-event-protocol.md) §1; the headless path maps this to exit code 2, [ADR 0005](./0005-terminalbench-evaluation-protocol.md) §3). The check runs before Coding Agent drops `CAP_SYS_PTRACE` (§7, CDA-121), so that it reads as strongly as the process can and is stricter than the child. This makes the launch contract a checked precondition rather than a trusted one, and on Linux it rejects a launcher that failed to `exec`-replace itself. It walks only the ancestor chain, so a credential-bearing unrelated sibling remains the launcher's responsibility under the launch contract.
+- **Startup verification.** Before the composition root opens an Agent Run under `"auto-approve"`, it walks its ancestor chain from its own parent (`/proc/self/stat` field 4, then each `/proc/<pid>/environ`, which it can read because the ancestors are the same user and not hardened) and, if any ancestor still holds one of the provider-credential variables Coding Agent uses, opens no Agent Run and returns a configuration error ([ADR 0002](./0002-agent-session-state-machine-and-event-protocol.md) §1; the headless path maps this to exit code 2, [ADR 0005](./0005-terminalbench-evaluation-protocol.md) §3). The check runs before Coding Agent drops `CAP_SYS_PTRACE` (§7, CDA-121), so that it reads as strongly as the process can and is stricter than the child. This makes the launch contract a checked precondition rather than a trusted one, and on Linux it rejects a launcher that failed to `exec`-replace itself. It walks only the ancestor chain, so a credential-bearing unrelated sibling remains the launcher's responsibility under the launch contract.
 
 **Under `"ask"` (interactive TUI and any attended headless).** The cross-process guarantee above is not claimed, and this section does not require it. The process that launched Coding Agent — typically the user's shell, which exported the provider key — remains a live, dumpable, same-uid ancestor holding the credential, and Coding Agent can neither scrub nor re-mark it. This residual is accepted for the MVP and bounded by two controls already in this ADR: read-only tools (`read`) are jailed to `repoRoot` (§2) and cannot open a `/proc` path, so no auto-approved tool can reach an ancestor's environment; and every mutating `bash` is gated by Approval (§4), so the only tool that can read `/proc` runs only after a human allows that specific command. Requiring interactive users to launch from a credential-free shell, or adding an opt-in hardened launch that delivers the credential to Coding Agent without any ancestor holding it, is deferred; this section states the residual rather than closing it.
 

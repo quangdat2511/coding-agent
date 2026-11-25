@@ -1,15 +1,15 @@
-import type { SessionEvent } from "./events.ts";
+import type { RunEvent } from "./events.ts";
 
 export interface EventLog {
   readonly lastSequence: number;
-  append(event: SessionEvent): void;
+  append(event: RunEvent): void;
   close(): void;
-  follow(afterSequence: number): AsyncIterable<SessionEvent>;
-  events(afterSequence?: number): readonly SessionEvent[];
+  follow(afterSequence: number): AsyncIterable<RunEvent>;
+  events(afterSequence?: number): readonly RunEvent[];
 }
 
 export function createEventLog(): EventLog {
-  const events: SessionEvent[] = [];
+  const events: RunEvent[] = [];
   let closed = false;
   let changed = Promise.withResolvers<void>();
 

@@ -1,13 +1,13 @@
 import type {
   AgentResult,
-  SessionEvent,
+  RunEvent,
   ToolResult,
   VerificationEvidence,
 } from "@coding-agent/agent-core";
 import type { AssistantMessage } from "@coding-agent/ai";
 import type { TuiModel } from "@coding-agent/tui";
 
-// The Session Event to TuiModel projection (ADR 0004 §6). It is pure: it performs no I/O, never
+// The Run Event to TuiModel projection (ADR 0004 §6). It is pure: it performs no I/O, never
 // mutates prev, and returns prev itself when an event changes nothing the TUI shows. Only the
 // entry an event changes is replaced, so the TUI keeps the layout of every other entry.
 
@@ -26,10 +26,10 @@ const SUMMARY_ARGUMENT: Readonly<Record<string, string>> = {
   bash: "command",
 };
 
-export function projectSessionEvent(event: SessionEvent, prev: TuiModel): TuiModel {
+export function projectRunEvent(event: RunEvent, prev: TuiModel): TuiModel {
   switch (event.type) {
-    case "session_started":
-      // A TUI runs one Agent Session after another, so the transcript keeps earlier sessions.
+    case "run_started":
+      // A TUI runs one Agent Run after another, so the transcript keeps earlier Agent Runs.
       return append(withoutPendingApproval(prev), {
         kind: "user",
         id: entryId(event, "task"),
@@ -104,7 +104,7 @@ export function projectSessionEvent(event: SessionEvent, prev: TuiModel): TuiMod
       );
       return {
         ...next,
-        // approvalId stays the session's own, because the overlay hands it back to onApproval.
+        // approvalId stays the Agent Run's own, because the overlay hands it back to onApproval.
         pendingApproval: {
           approvalId: event.data.approvalId,
           toolName: call?.toolName ?? "tool",
@@ -200,7 +200,7 @@ export function projectSessionEvent(event: SessionEvent, prev: TuiModel): TuiMod
       });
     }
 
-    case "session_settled":
+    case "run_settled":
       return append(
         withoutPendingApproval(prev),
         outcomeOf(entryId(event, "outcome"), event.data.result),
@@ -208,15 +208,15 @@ export function projectSessionEvent(event: SessionEvent, prev: TuiModel): TuiMod
 
     default: {
       const unhandled: never = event;
-      throw new Error(`Unhandled Session Event: ${JSON.stringify(unhandled)}`);
+      throw new Error(`Unhandled Run Event: ${JSON.stringify(unhandled)}`);
     }
   }
 }
 
-// Entry ids carry the session id, because the transcript spans every session the TUI has run and
-// Agent Core IDs are unique only within one session.
-function entryId(event: SessionEvent, kind: string, id?: string): string {
-  return id === undefined ? `${event.sessionId}/${kind}` : `${event.sessionId}/${kind}/${id}`;
+// Entry ids carry the run id, because the transcript spans every Agent Run the TUI has shown and
+// Agent Core IDs are unique only within one Agent Run.
+function entryId(event: RunEvent, kind: string, id?: string): string {
+  return id === undefined ? `${event.runId}/${kind}` : `${event.runId}/${kind}/${id}`;
 }
 
 function append(model: TuiModel, entry: TranscriptEntry): TuiModel {

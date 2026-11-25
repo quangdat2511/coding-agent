@@ -6,7 +6,7 @@ import {
   fakeWorkspace,
   fakeWriteTool,
   objective,
-  openTestSession,
+  openTestRun,
   resultOf,
   textTurn,
   toolCallMessage,
@@ -45,7 +45,7 @@ const expectedDeniedResult = (
 
 describe("waiting for Approval under the ask policy", () => {
   it("enters awaiting_approval and emits approval_requested with the correct identifiers, summary, and policy", async () => {
-    const { session } = openTestSession({
+    const { run } = openTestRun({
       tools: [fakeWriteTool()],
       model: {
         turns: [
@@ -55,10 +55,10 @@ describe("waiting for Approval under the ask policy", () => {
       },
     });
 
-    await session.dispatch({ type: "start", task });
-    await waitForEvent(session, "approval_requested");
+    await run.dispatch({ type: "start", task });
+    await waitForEvent(run, "approval_requested");
 
-    expect(session.snapshot()).toMatchObject({
+    expect(run.snapshot()).toMatchObject({
       phase: "awaiting_approval",
       modelTurn: { modelTurnId: "model_turn-1", index: 0 },
       toolCall: { id: "tool_call-1", providerId: "call-1", name: "write" },
@@ -70,15 +70,15 @@ describe("waiting for Approval under the ask policy", () => {
       },
     });
 
-    // Allow so the session can settle, then verify events
-    await session.dispatch({
+    // Allow so the run can settle, then verify events
+    await run.dispatch({
       type: "resolve_approval",
       approvalId: "approval-1",
       decision: "allow",
     });
-    await session.result();
+    await run.result();
 
-    const events = await collect(session.events());
+    const events = await collect(run.events());
     const requested = events.find((event) => event.type === "approval_requested");
     expect(requested?.data).toEqual({
       approvalId: "approval-1",
@@ -93,11 +93,11 @@ describe("waiting for Approval under the ask policy", () => {
     const write: ExecutableTool = {
       ...fakeWriteTool(),
       async execute() {
-        executingState = session.snapshot();
+        executingState = run.snapshot();
         return { isError: false, content: "ok" };
       },
     };
-    const { session } = openTestSession({
+    const { run } = openTestRun({
       tools: [write],
       model: {
         turns: [
@@ -107,10 +107,10 @@ describe("waiting for Approval under the ask policy", () => {
       },
     });
 
-    await session.dispatch({ type: "start", task });
-    await waitForEvent(session, "approval_requested");
+    await run.dispatch({ type: "start", task });
+    await waitForEvent(run, "approval_requested");
 
-    const approvalResult = await session.dispatch({
+    const approvalResult = await run.dispatch({
       type: "resolve_approval",
       approvalId: "approval-1",
       decision: "allow",
@@ -118,8 +118,8 @@ describe("waiting for Approval under the ask policy", () => {
     });
     expect(approvalResult).toMatchObject({ accepted: true });
 
-    const result = await session.result();
-    const events = await collect(session.events());
+    const result = await run.result();
+    const events = await collect(run.events());
 
     // Check approval_resolved event
     const resolved = events.find((event) => event.type === "approval_resolved");
@@ -153,7 +153,7 @@ describe("waiting for Approval under the ask policy", () => {
   });
 
   it("immediately transitions to executing_tool upon dispatching an allow decision", async () => {
-    const { session } = openTestSession({
+    const { run } = openTestRun({
       tools: [fakeWriteTool()],
       model: {
         turns: [
@@ -163,10 +163,10 @@ describe("waiting for Approval under the ask policy", () => {
       },
     });
 
-    await session.dispatch({ type: "start", task });
-    await waitForEvent(session, "approval_requested");
+    await run.dispatch({ type: "start", task });
+    await waitForEvent(run, "approval_requested");
 
-    const commandResult = await session.dispatch({
+    const commandResult = await run.dispatch({
       type: "resolve_approval",
       approvalId: "approval-1",
       decision: "allow",
@@ -174,14 +174,14 @@ describe("waiting for Approval under the ask policy", () => {
     expect(commandResult).toMatchObject({ accepted: true });
 
     // State snapshot must immediately reflect executing_tool, not awaiting_approval
-    expect(session.snapshot().phase).toBe("executing_tool");
+    expect(run.snapshot().phase).toBe("executing_tool");
 
-    const result = await session.result();
+    const result = await run.result();
     expect(result.outcome).toBe("succeeded");
   });
 
   it("rejects a resolve_approval naming a different approvalId as STALE_APPROVAL", async () => {
-    const { session } = openTestSession({
+    const { run } = openTestRun({
       tools: [fakeWriteTool()],
       model: {
         turns: [
@@ -191,10 +191,10 @@ describe("waiting for Approval under the ask policy", () => {
       },
     });
 
-    await session.dispatch({ type: "start", task });
-    await waitForEvent(session, "approval_requested");
+    await run.dispatch({ type: "start", task });
+    await waitForEvent(run, "approval_requested");
 
-    const staleResult = await session.dispatch({
+    const staleResult = await run.dispatch({
       type: "resolve_approval",
       approvalId: "wrong-id",
       decision: "allow",
@@ -205,25 +205,25 @@ describe("waiting for Approval under the ask policy", () => {
     });
 
     // Clean up: allow with the correct id
-    await session.dispatch({
+    await run.dispatch({
       type: "resolve_approval",
       approvalId: "approval-1",
       decision: "allow",
     });
-    await session.result();
+    await run.result();
   });
 
   it("rejects a resolve_approval with no Approval pending as INVALID_STATE", async () => {
-    const { session } = openTestSession({
+    const { run } = openTestRun({
       model: {
         turns: [textTurn("Done.")],
       },
     });
 
-    await session.dispatch({ type: "start", task });
-    await session.result();
+    await run.dispatch({ type: "start", task });
+    await run.result();
 
-    const noApproval = await session.dispatch({
+    const noApproval = await run.dispatch({
       type: "resolve_approval",
       approvalId: "any-id",
       decision: "allow",
@@ -235,7 +235,7 @@ describe("waiting for Approval under the ask policy", () => {
   });
 
   it("never enters awaiting_approval for a read-only call under the ask policy", async () => {
-    const { session } = openTestSession({
+    const { run } = openTestRun({
       tools: [fakeTool({ name: "lookup" })],
       model: {
         turns: [
@@ -245,9 +245,9 @@ describe("waiting for Approval under the ask policy", () => {
       },
     });
 
-    await session.dispatch({ type: "start", task });
-    const result = await session.result();
-    const events = await collect(session.events());
+    await run.dispatch({ type: "start", task });
+    const result = await run.result();
+    const events = await collect(run.events());
     const types = events.map(({ type }) => type);
 
     expect(types).toContain("tool_execution_started");
@@ -259,7 +259,7 @@ describe("waiting for Approval under the ask policy", () => {
   it("produces an error Tool Result rather than a mutation when a path becomes invalid during the approval wait", async () => {
     const workspace = fakeWorkspace();
     let checks = 0;
-    const { session } = openTestSession({
+    const { run } = openTestRun({
       tools: [fakeWriteTool()],
       workspace: {
         ...workspace,
@@ -278,16 +278,16 @@ describe("waiting for Approval under the ask policy", () => {
       },
     });
 
-    await session.dispatch({ type: "start", task });
-    await waitForEvent(session, "approval_requested");
-    await session.dispatch({
+    await run.dispatch({ type: "start", task });
+    await waitForEvent(run, "approval_requested");
+    await run.dispatch({
       type: "resolve_approval",
       approvalId: "approval-1",
       decision: "allow",
     });
-    await session.result();
+    await run.result();
 
-    const events = await collect(session.events());
+    const events = await collect(run.events());
     expect(events.find((event) => event.type === "tool_call_completed")?.data).toMatchObject({
       toolCallId: "tool_call-1",
       outcome: "failed",
@@ -307,7 +307,7 @@ describe("waiting for Approval under the ask policy", () => {
         return { isError: false, content: "ok" };
       },
     };
-    const { session, model } = openTestSession({
+    const { run, model } = openTestRun({
       tools: [write],
       model: {
         turns: [
@@ -317,10 +317,10 @@ describe("waiting for Approval under the ask policy", () => {
       },
     });
 
-    await session.dispatch({ type: "start", task });
-    await waitForEvent(session, "approval_requested");
+    await run.dispatch({ type: "start", task });
+    await waitForEvent(run, "approval_requested");
 
-    const commandResult = await session.dispatch({
+    const commandResult = await run.dispatch({
       type: "resolve_approval",
       approvalId: "approval-1",
       decision: "deny",
@@ -328,14 +328,14 @@ describe("waiting for Approval under the ask policy", () => {
     });
     expect(commandResult).toMatchObject({ accepted: true });
 
-    // When denied with none remaining, the session returns directly to streaming_model
-    expect(session.snapshot().phase).toBe("streaming_model");
+    // When denied with none remaining, the run returns directly to streaming_model
+    expect(run.snapshot().phase).toBe("streaming_model");
 
-    const result = await session.result();
+    const result = await run.result();
     expect(result.outcome).toBe("succeeded");
     expect(executed).toBe(false);
 
-    const events = await collect(session.events());
+    const events = await collect(run.events());
 
     // 1. Approval was resolved as denied with decidedBy: "user" and the reason
     const resolved = events.find((event) => event.type === "approval_resolved");
@@ -376,7 +376,7 @@ describe("waiting for Approval under the ask policy", () => {
   });
 
   it("uses the default reason when a denial does not provide one", async () => {
-    const { session } = openTestSession({
+    const { run } = openTestRun({
       tools: [fakeWriteTool()],
       model: {
         turns: [
@@ -386,25 +386,25 @@ describe("waiting for Approval under the ask policy", () => {
       },
     });
 
-    await session.dispatch({ type: "start", task });
-    await waitForEvent(session, "approval_requested");
+    await run.dispatch({ type: "start", task });
+    await waitForEvent(run, "approval_requested");
 
-    const commandResult = await session.dispatch({
+    const commandResult = await run.dispatch({
       type: "resolve_approval",
       approvalId: "approval-1",
       decision: "deny",
     });
     expect(commandResult).toMatchObject({ accepted: true });
 
-    await session.result();
-    const events = await collect(session.events());
+    await run.result();
+    const events = await collect(run.events());
     const toolResult = resultOf(events, "tool_call-1");
 
     expect(toolResult).toEqual(expectedDeniedResult("tool_call-1", "write"));
   });
 
   it("uses the default reason when a denial provides a blank reason", async () => {
-    const { session } = openTestSession({
+    const { run } = openTestRun({
       tools: [fakeWriteTool()],
       model: {
         turns: [
@@ -414,10 +414,10 @@ describe("waiting for Approval under the ask policy", () => {
       },
     });
 
-    await session.dispatch({ type: "start", task });
-    await waitForEvent(session, "approval_requested");
+    await run.dispatch({ type: "start", task });
+    await waitForEvent(run, "approval_requested");
 
-    const commandResult = await session.dispatch({
+    const commandResult = await run.dispatch({
       type: "resolve_approval",
       approvalId: "approval-1",
       decision: "deny",
@@ -425,8 +425,8 @@ describe("waiting for Approval under the ask policy", () => {
     });
     expect(commandResult).toMatchObject({ accepted: true });
 
-    await session.result();
-    const events = await collect(session.events());
+    await run.result();
+    const events = await collect(run.events());
     const toolResult = resultOf(events, "tool_call-1");
 
     expect(toolResult).toEqual(expectedDeniedResult("tool_call-1", "write"));
@@ -455,7 +455,7 @@ describe("waiting for Approval under the ask policy", () => {
       },
     };
 
-    const { session } = openTestSession({
+    const { run } = openTestRun({
       tools: [write],
       model: {
         turns: [
@@ -468,17 +468,17 @@ describe("waiting for Approval under the ask policy", () => {
       },
     });
 
-    await session.dispatch({ type: "start", task });
-    const req1 = await waitForEvent(session, "approval_requested");
+    await run.dispatch({ type: "start", task });
+    const req1 = await waitForEvent(run, "approval_requested");
 
-    await session.dispatch({
+    await run.dispatch({
       type: "resolve_approval",
       approvalId: "approval-1",
       decision: "deny",
     });
 
     // While call 2 is still preparing in executing_tool, no Approval is pending
-    const invalidResult = await session.dispatch({
+    const invalidResult = await run.dispatch({
       type: "resolve_approval",
       approvalId: "approval-1",
       decision: "allow",
@@ -494,11 +494,11 @@ describe("waiting for Approval under the ask policy", () => {
       prepared: { input: { path: "src/b.ts" }, paths: [], summary: "write src/b.ts" },
     });
 
-    const req2 = await waitForEvent(session, "approval_requested", req1.sequence);
+    const req2 = await waitForEvent(run, "approval_requested", req1.sequence);
     expect(req2.data.approvalId).toBe("approval-2");
 
     // Once approval-2 is pending, dispatching the old approval-1 returns STALE_APPROVAL
-    const staleResult = await session.dispatch({
+    const staleResult = await run.dispatch({
       type: "resolve_approval",
       approvalId: "approval-1",
       decision: "allow",
@@ -508,13 +508,13 @@ describe("waiting for Approval under the ask policy", () => {
       code: "STALE_APPROVAL",
     });
 
-    await session.dispatch({
+    await run.dispatch({
       type: "resolve_approval",
       approvalId: "approval-2",
       decision: "allow",
     });
 
-    const result = await session.result();
+    const result = await run.result();
     expect(result.outcome).toBe("succeeded");
   });
 
@@ -529,7 +529,7 @@ describe("waiting for Approval under the ask policy", () => {
       },
     };
 
-    const { session } = openTestSession({
+    const { run } = openTestRun({
       tools: [fakeWriteTool(), inspect],
       model: {
         turns: [
@@ -542,20 +542,20 @@ describe("waiting for Approval under the ask policy", () => {
       },
     });
 
-    await session.dispatch({ type: "start", task });
-    await waitForEvent(session, "approval_requested");
+    await run.dispatch({ type: "start", task });
+    await waitForEvent(run, "approval_requested");
 
-    await session.dispatch({
+    await run.dispatch({
       type: "resolve_approval",
       approvalId: "approval-1",
       decision: "deny",
     });
 
-    const result = await session.result();
+    const result = await run.result();
     expect(result.outcome).toBe("succeeded");
     expect(call2PrepareCount).toBe(1);
 
-    const events = await collect(session.events());
+    const events = await collect(run.events());
     expect(resultOf(events, "tool_call-1")?.error?.code).toBe("APPROVAL_DENIED");
     expect(resultOf(events, "tool_call-2")?.error?.code).toBe("SCHEMA_VIOLATION");
   });
@@ -569,13 +569,13 @@ describe("waiting for Approval under the ask policy", () => {
       async prepare(input, ctx) {
         prepareCount++;
         if (prepareCount === 2) {
-          phaseDuringCall2Prepare = session.snapshot().phase;
+          phaseDuringCall2Prepare = run.snapshot().phase;
         }
         return baseWrite.prepare(input, ctx);
       },
     };
 
-    const { session } = openTestSession({
+    const { run } = openTestRun({
       tools: [write],
       model: {
         turns: [
@@ -588,10 +588,10 @@ describe("waiting for Approval under the ask policy", () => {
       },
     });
 
-    await session.dispatch({ type: "start", task });
+    await run.dispatch({ type: "start", task });
 
     // First call requests approval
-    const req1 = await waitForEvent(session, "approval_requested");
+    const req1 = await waitForEvent(run, "approval_requested");
     expect(req1.data).toMatchObject({
       approvalId: "approval-1",
       toolCallId: "tool_call-1",
@@ -599,7 +599,7 @@ describe("waiting for Approval under the ask policy", () => {
     });
 
     // Deny the first call
-    const denyResult = await session.dispatch({
+    const denyResult = await run.dispatch({
       type: "resolve_approval",
       approvalId: "approval-1",
       decision: "deny",
@@ -608,7 +608,7 @@ describe("waiting for Approval under the ask policy", () => {
     expect(denyResult).toMatchObject({ accepted: true });
 
     // Second call requests a fresh approval and moves to awaiting_approval
-    const req2 = await waitForEvent(session, "approval_requested", req1.sequence);
+    const req2 = await waitForEvent(run, "approval_requested", req1.sequence);
     expect(req2.data).toMatchObject({
       approvalId: "approval-2",
       toolCallId: "tool_call-2",
@@ -618,7 +618,7 @@ describe("waiting for Approval under the ask policy", () => {
     // Verify call 2 prepared while in executing_tool, then entered awaiting_approval
     expect(phaseDuringCall2Prepare).toBe("executing_tool");
 
-    expect(session.snapshot()).toMatchObject({
+    expect(run.snapshot()).toMatchObject({
       phase: "awaiting_approval",
       toolCall: { id: "tool_call-2", providerId: "call-2", name: "write" },
       queuedToolCalls: [],
@@ -629,18 +629,18 @@ describe("waiting for Approval under the ask policy", () => {
       },
     });
 
-    // Allow the second call so the session settles
-    const allowResult = await session.dispatch({
+    // Allow the second call so the run settles
+    const allowResult = await run.dispatch({
       type: "resolve_approval",
       approvalId: "approval-2",
       decision: "allow",
     });
     expect(allowResult).toMatchObject({ accepted: true });
 
-    const result = await session.result();
+    const result = await run.result();
     expect(result.outcome).toBe("succeeded");
 
-    const events = await collect(session.events());
+    const events = await collect(run.events());
 
     // Call 1 was denied and has no execution-started event
     const executionEvents = events.filter((event) => event.type === "tool_execution_started");
@@ -661,7 +661,7 @@ describe("waiting for Approval under the ask policy", () => {
       },
     };
 
-    const { session } = openTestSession({
+    const { run } = openTestRun({
       tools: [fakeWriteTool(), lookup],
       model: {
         turns: [
@@ -674,24 +674,24 @@ describe("waiting for Approval under the ask policy", () => {
       },
     });
 
-    await session.dispatch({ type: "start", task });
-    const req = await waitForEvent(session, "approval_requested");
+    await run.dispatch({ type: "start", task });
+    const req = await waitForEvent(run, "approval_requested");
     expect(req.data.toolCallId).toBe("tool_call-1");
 
     // Deny the mutating call
-    await session.dispatch({
+    await run.dispatch({
       type: "resolve_approval",
       approvalId: "approval-1",
       decision: "deny",
       reason: "skip write",
     });
 
-    // The session should automatically execute the read-only call without another approval request
-    const result = await session.result();
+    // The run should automatically execute the read-only call without another approval request
+    const result = await run.result();
     expect(result.outcome).toBe("succeeded");
     expect(lookupExecuted).toBe(true);
 
-    const events = await collect(session.events());
+    const events = await collect(run.events());
     const approvalRequests = events.filter((event) => event.type === "approval_requested");
     expect(approvalRequests).toHaveLength(1);
 
@@ -708,12 +708,12 @@ describe("waiting for Approval under the ask policy", () => {
     const write: typeof baseWrite = {
       ...baseWrite,
       async prepare(input, ctx) {
-        phaseDuringCall2Prepare = session.snapshot().phase;
+        phaseDuringCall2Prepare = run.snapshot().phase;
         return baseWrite.prepare(input, ctx);
       },
     };
 
-    const { session } = openTestSession({
+    const { run } = openTestRun({
       tools: [fakeTool({ name: "lookup" }), write],
       model: {
         turns: [
@@ -726,10 +726,10 @@ describe("waiting for Approval under the ask policy", () => {
       },
     });
 
-    await session.dispatch({ type: "start", task });
+    await run.dispatch({ type: "start", task });
 
     // Lookup completes automatically in executing_tool, and write prepares in executing_tool
-    const req = await waitForEvent(session, "approval_requested");
+    const req = await waitForEvent(run, "approval_requested");
     expect(req.data).toMatchObject({
       approvalId: "approval-1",
       toolCallId: "tool_call-2",
@@ -737,15 +737,15 @@ describe("waiting for Approval under the ask policy", () => {
     });
 
     // Write moved into awaiting_approval
-    expect(session.snapshot().phase).toBe("awaiting_approval");
+    expect(run.snapshot().phase).toBe("awaiting_approval");
 
     // Allow write to finish
-    await session.dispatch({
+    await run.dispatch({
       type: "resolve_approval",
       approvalId: "approval-1",
       decision: "allow",
     });
-    const result = await session.result();
+    const result = await run.result();
     expect(result.outcome).toBe("succeeded");
 
     // Verify call 2 prepared while in executing_tool, then moved to awaiting_approval
@@ -757,14 +757,14 @@ describe("waiting for Approval under the ask policy", () => {
     const inspect: ExecutableTool = {
       ...fakeTool({ name: "inspect" }),
       async prepare(input) {
-        stateAtPrepare ??= session.snapshot();
+        stateAtPrepare ??= run.snapshot();
         return {
           ok: true,
           prepared: { input, paths: [], summary: `inspect ${JSON.stringify(input)}` },
         };
       },
     };
-    const { session } = openTestSession({
+    const { run } = openTestRun({
       approvalPolicy: "auto-approve",
       tools: [fakeWriteTool(), inspect],
       model: {
@@ -779,8 +779,8 @@ describe("waiting for Approval under the ask policy", () => {
       },
     });
 
-    await session.dispatch({ type: "start", task });
-    await session.result();
+    await run.dispatch({ type: "start", task });
+    await run.result();
 
     expect(stateAtPrepare).toMatchObject({
       phase: "executing_tool",
@@ -793,7 +793,7 @@ describe("waiting for Approval under the ask policy", () => {
     let failuresObservedAtCall2Req = 0;
     let failuresObservedAtCall3Req = 0;
 
-    const { session } = openTestSession({
+    const { run } = openTestRun({
       tools: [fakeWriteTool()],
       model: {
         turns: [
@@ -807,39 +807,39 @@ describe("waiting for Approval under the ask policy", () => {
       },
     });
 
-    await session.dispatch({ type: "start", task });
+    await run.dispatch({ type: "start", task });
 
     // Call 1
-    const req1 = await waitForEvent(session, "approval_requested");
-    await session.dispatch({
+    const req1 = await waitForEvent(run, "approval_requested");
+    await run.dispatch({
       type: "resolve_approval",
       approvalId: "approval-1",
       decision: "deny",
     });
 
     // Call 2
-    const req2 = await waitForEvent(session, "approval_requested", req1.sequence);
-    failuresObservedAtCall2Req = session.snapshot().counters.consecutiveRecoverableFailures;
+    const req2 = await waitForEvent(run, "approval_requested", req1.sequence);
+    failuresObservedAtCall2Req = run.snapshot().counters.consecutiveRecoverableFailures;
 
-    await session.dispatch({
+    await run.dispatch({
       type: "resolve_approval",
       approvalId: "approval-2",
       decision: "deny",
     });
 
     // Call 3
-    const req3 = await waitForEvent(session, "approval_requested", req2.sequence);
+    const req3 = await waitForEvent(run, "approval_requested", req2.sequence);
     expect(req3.data.toolCallId).toBe("tool_call-3");
-    failuresObservedAtCall3Req = session.snapshot().counters.consecutiveRecoverableFailures;
+    failuresObservedAtCall3Req = run.snapshot().counters.consecutiveRecoverableFailures;
 
     // Allow Call 3
-    await session.dispatch({
+    await run.dispatch({
       type: "resolve_approval",
       approvalId: "approval-3",
       decision: "allow",
     });
 
-    const result = await session.result();
+    const result = await run.result();
     expect(result.outcome).toBe("succeeded");
 
     // Denials incremented consecutive recoverable failures
@@ -847,7 +847,7 @@ describe("waiting for Approval under the ask policy", () => {
     expect(failuresObservedAtCall3Req).toBe(2);
 
     // After call 3 succeeded, the consecutive counter reset to 0
-    expect(session.snapshot().counters.consecutiveRecoverableFailures).toBe(0);
+    expect(run.snapshot().counters.consecutiveRecoverableFailures).toBe(0);
   });
 
   it("emits no approval events and skips the call when commit throws during approval request", async () => {
@@ -861,7 +861,7 @@ describe("waiting for Approval under the ask policy", () => {
       },
     };
 
-    const { session, clock } = openTestSession({
+    const { run, clock } = openTestRun({
       tools: [tool],
       model: {
         turns: [
@@ -879,9 +879,9 @@ describe("waiting for Approval under the ask policy", () => {
       return originalNow();
     };
 
-    await session.dispatch({ type: "start", task });
+    await run.dispatch({ type: "start", task });
 
-    const result = await session.result();
+    const result = await run.result();
     expect(result).toMatchObject({
       outcome: "failed",
       failure: {
@@ -890,7 +890,7 @@ describe("waiting for Approval under the ask policy", () => {
       },
     });
 
-    const events = await collect(session.events());
+    const events = await collect(run.events());
     const eventTypes = events.map((event) => event.type);
     expect(eventTypes).not.toContain("approval_requested");
     expect(eventTypes).not.toContain("approval_resolved");

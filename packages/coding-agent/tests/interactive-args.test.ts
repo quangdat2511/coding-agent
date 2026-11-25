@@ -13,7 +13,7 @@ const usageError = (flag: string | undefined, message: string) => ({
 });
 
 describe("parsing the interactive options", () => {
-  it("returns the session options, including the ask policy and the default repository root", () => {
+  it("returns the Agent Run options, including the ask policy and the default repository root", () => {
     expect(parseInteractiveArgs(valid, cwd)).toEqual({
       ok: true,
       args: {

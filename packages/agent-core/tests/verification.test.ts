@@ -3,7 +3,7 @@ import type { AgentState, VerificationDecision } from "../src/index.ts";
 import {
   collect,
   fakeWriteTool,
-  openTestSession,
+  openTestRun,
   textMessage,
   textTurn,
   toolCallTurn,
@@ -65,18 +65,18 @@ const testsCannotRun: Extract<VerificationDecision, { outcome: "failed" }> = {
 describe("verifying a Candidate Completion", () => {
   it("waits in verifying while the policy judges the candidate", async () => {
     let during: AgentState | undefined;
-    const { session, verification } = openTestSession({
+    const { run, verification } = openTestRun({
       model: { turns: [textTurn("Fixed it.")] },
       verification: [
         async () => {
-          during = session.snapshot();
+          during = run.snapshot();
           return testsPass;
         },
       ],
     });
 
-    await session.dispatch({ type: "start", task });
-    await session.result();
+    await run.dispatch({ type: "start", task });
+    await run.result();
 
     expect(during).toMatchObject({
       phase: "verifying",
@@ -95,30 +95,30 @@ describe("verifying a Candidate Completion", () => {
   });
 
   it("settles succeeded with the candidate and the policy's evidence when the policy succeeds", async () => {
-    const { session } = openTestSession({
+    const { run } = openTestRun({
       model: { turns: [textTurn("Fixed it.")] },
       verification: [testsPass],
     });
 
-    await session.dispatch({ type: "start", task });
+    await run.dispatch({ type: "start", task });
 
-    expect(await session.result()).toMatchObject({
+    expect(await run.result()).toMatchObject({
       outcome: "succeeded",
       finalMessage: textMessage("Fixed it."),
       verification: testsPass,
     });
-    expect(session.snapshot().phase).toBe("succeeded");
+    expect(run.snapshot().phase).toBe("succeeded");
   });
 
   it("appends the feedback and asks the model again in a new Model Turn when the policy continues", async () => {
-    const { session, model } = openTestSession({
+    const { run, model } = openTestRun({
       model: { turns: [textTurn("Fixed it."), textTurn("Fixed it properly.")] },
       verification: [testsFail, testsPass],
     });
 
-    await session.dispatch({ type: "start", task });
-    await session.result();
-    const events = await collect(session.events());
+    await run.dispatch({ type: "start", task });
+    await run.result();
+    const events = await collect(run.events());
 
     expect(model.requests[1]?.context.messages).toEqual([
       objective,
@@ -140,19 +140,19 @@ describe("verifying a Candidate Completion", () => {
   });
 
   it("settles succeeded with the next candidate once the policy accepts it", async () => {
-    const { session } = openTestSession({
+    const { run } = openTestRun({
       model: { turns: [textTurn("Fixed it."), textTurn("Fixed it properly.")] },
       verification: [testsFail, testsPass],
     });
 
-    await session.dispatch({ type: "start", task });
+    await run.dispatch({ type: "start", task });
 
-    expect(await session.result()).toMatchObject({
+    expect(await run.result()).toMatchObject({
       outcome: "succeeded",
       finalMessage: textMessage("Fixed it properly."),
       verification: testsPass,
     });
-    expect(session.snapshot().transcript).toEqual([
+    expect(run.snapshot().transcript).toEqual([
       objective,
       textMessage("Fixed it."),
       feedback,
@@ -161,14 +161,14 @@ describe("verifying a Candidate Completion", () => {
   });
 
   it("settles failed with VERIFICATION_FAILED when the policy fails", async () => {
-    const { session } = openTestSession({
+    const { run } = openTestRun({
       model: { turns: [textTurn("Fixed it.")] },
       verification: [testsCannotRun],
     });
 
-    await session.dispatch({ type: "start", task });
+    await run.dispatch({ type: "start", task });
 
-    expect(await session.result()).toEqual({
+    expect(await run.result()).toEqual({
       outcome: "failed",
       failure: { code: "VERIFICATION_FAILED", message: "bun: command not found" },
       finalMessage: textMessage("Fixed it."),
@@ -178,25 +178,25 @@ describe("verifying a Candidate Completion", () => {
       partialChangesPossible: false,
       lastSequence: 10,
     });
-    expect(session.snapshot().phase).toBe("failed");
+    expect(run.snapshot().phase).toBe("failed");
   });
 
   it("closes the Verification run and settles INTERNAL_ERROR when the policy throws", async () => {
-    const { session } = openTestSession({
+    const { run } = openTestRun({
       model: { turns: [textTurn("Fixed it.")] },
       verification: [() => Promise.reject(new Error("runner crashed"))],
     });
 
-    await session.dispatch({ type: "start", task });
-    const result = await session.result();
-    const events = await collect(session.events());
+    await run.dispatch({ type: "start", task });
+    const result = await run.result();
+    const events = await collect(run.events());
 
     expect(events.slice(-2)).toMatchObject([
       {
         type: "verification_completed",
         data: { verificationId: "verification-1", outcome: "failed", evidence: [] },
       },
-      { type: "session_settled", data: { result } },
+      { type: "run_settled", data: { result } },
     ]);
     expect(result).toMatchObject({
       outcome: "failed",
@@ -205,21 +205,21 @@ describe("verifying a Candidate Completion", () => {
   });
 
   it("settles INTERNAL_ERROR when the policy reports a cancellation nobody requested", async () => {
-    const { session } = openTestSession({
+    const { run } = openTestRun({
       model: { turns: [textTurn("Fixed it.")] },
       verification: [{ outcome: "cancelled" }],
     });
 
-    await session.dispatch({ type: "start", task });
-    const result = await session.result();
-    const events = await collect(session.events());
+    await run.dispatch({ type: "start", task });
+    const result = await run.result();
+    const events = await collect(run.events());
 
     expect(events.slice(-2)).toMatchObject([
       {
         type: "verification_completed",
         data: { verificationId: "verification-1", outcome: "failed", evidence: [] },
       },
-      { type: "session_settled", data: { result } },
+      { type: "run_settled", data: { result } },
     ]);
     expect(result).toMatchObject({
       outcome: "failed",
@@ -231,7 +231,7 @@ describe("verifying a Candidate Completion", () => {
   });
 
   it("marks partialChangesPossible when verification fails after workspace was changed by a mutating tool", async () => {
-    const { session } = openTestSession({
+    const { run } = openTestRun({
       tools: [fakeWriteTool()],
       approvalPolicy: "auto-approve",
       model: {
@@ -258,14 +258,14 @@ describe("verifying a Candidate Completion", () => {
       ],
     });
 
-    await session.dispatch({ type: "start", task });
-    const result = await session.result();
+    await run.dispatch({ type: "start", task });
+    const result = await run.result();
 
     expect(result.outcome).toBe("failed");
     expect(result.workspaceChanged).toBe(true);
     expect(result.partialChangesPossible).toBe(true);
     expect(
-      (session.snapshot() as Extract<AgentState, { phase: "failed" }>).partialChangesPossible,
+      (run.snapshot() as Extract<AgentState, { phase: "failed" }>).partialChangesPossible,
     ).toBe(true);
   });
 });

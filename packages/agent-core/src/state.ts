@@ -43,18 +43,18 @@ export interface AssistantMessageDraft {
   readonly blocks: readonly DisplayBlock[];
 }
 
-export interface SessionCounters {
+export interface RunCounters {
   readonly modelTurns: number;
   readonly toolCalls: number;
   readonly consecutiveRecoverableFailures: number;
 }
 
 interface AgentStateCommon {
-  readonly sessionId: string;
+  readonly runId: string;
   readonly task?: CodingTask;
   readonly transcript: readonly Message[];
   readonly usage: UsageTotals;
-  readonly counters: SessionCounters;
+  readonly counters: RunCounters;
   readonly activeDurationMs: number;
   readonly workspaceChanged: boolean;
   readonly partialChangesPossible: boolean;

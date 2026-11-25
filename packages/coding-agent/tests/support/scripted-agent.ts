@@ -1,12 +1,12 @@
-// A real Agent Session over a scripted model and a fake mutating tool, so the interactive path is
-// tested against the session it will drive, with a pending Approval and nothing from a provider.
+// A real Agent Run over a scripted model and a fake mutating tool, so the interactive path is
+// tested against the Agent Run it will drive, with a pending Approval and nothing from a provider.
 import {
-  type AgentSession,
+  type AgentRun,
   type ExecutableTool,
   type ModelPort,
-  openAgentSession,
+  openAgentRun,
   type RepoPath,
-  type SessionCommand,
+  type RunCommand,
   type ToolRegistry,
 } from "@coding-agent/agent-core";
 import type {
@@ -16,7 +16,7 @@ import type {
   ToolCallBlock,
 } from "@coding-agent/ai";
 import { BashParams } from "@coding-agent/tools";
-import type { SessionConfig, SessionFactoryResult } from "../../src/session-factory.ts";
+import type { AgentRunConfig, AgentRunFactoryResult } from "../../src/agent-run-factory.ts";
 
 const usage = { inputTokens: 1, outputTokens: 1 };
 
@@ -107,8 +107,8 @@ export interface ScriptedAgentOptions {
   readonly answer?: string;
   // Records "events(<after>)" and "dispatch:<type>" (plus ":<reason>" of a cancel) in order.
   readonly calls?: string[];
-  // The approval policy and limits the host asked for, one entry per opened session.
-  readonly configs?: SessionConfig[];
+  // The approval policy and limits the host asked for, one entry per opened Agent Run.
+  readonly configs?: AgentRunConfig[];
 }
 
 export function scriptedAgent({
@@ -122,9 +122,9 @@ export function scriptedAgent({
     get: (name) => (name === "bash" ? (fakeBash as ExecutableTool) : undefined),
     list: () => [fakeBash as ExecutableTool],
   };
-  return async (config: SessionConfig): Promise<SessionFactoryResult> => {
+  return async (config: AgentRunConfig): Promise<AgentRunFactoryResult> => {
     configs?.push(config);
-    const opened = openAgentSession({
+    const opened = openAgentRun({
       model: scriptedModel(answer),
       systemPrompt: "Test.",
       tools,
@@ -147,23 +147,23 @@ export function scriptedAgent({
       ids: { next: (kind) => `${kind}-${++ids}` },
     });
     if (!opened.ok) return opened;
-    const { session } = opened;
-    const observed: AgentSession = {
-      dispatch: (command: SessionCommand) => {
+    const { run } = opened;
+    const observed: AgentRun = {
+      dispatch: (command: RunCommand) => {
         const reason = command.type === "cancel" && command.reason ? `:${command.reason}` : "";
         calls?.push(`dispatch:${command.type}${reason}`);
-        return session.dispatch(command);
+        return run.dispatch(command);
       },
-      snapshot: () => session.snapshot(),
+      snapshot: () => run.snapshot(),
       events: (after) => {
         calls?.push(`events(${after})`);
-        return session.events(after);
+        return run.events(after);
       },
-      result: () => session.result(),
+      result: () => run.result(),
     };
     return {
       ok: true,
-      session: observed,
+      run: observed,
       systemPrompt: "Test.",
       toolNames: ["bash"],
       skippedInstructions: [],

@@ -10,8 +10,8 @@ import {
 } from "./support/process.ts";
 
 // Smoke tests of the entry point on the interactive path. A test runner has no terminal, so what
-// they can show is every refusal before the TUI takes the screen; the session itself is covered in
-// interactive.test.ts, against a TUI that records what it is given.
+// they can show is every refusal before the TUI takes the screen; the Agent Run itself is covered
+// in interactive.test.ts, against a TUI that records what it is given.
 
 const packageRoot = join(import.meta.dir, "..");
 const bin = join(packageRoot, "src", "cli.ts");

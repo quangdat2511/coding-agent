@@ -2,7 +2,7 @@ import { constants } from "node:fs";
 import * as nodeFs from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type {
-  OpenSessionResult,
+  OpenRunResult,
   PathResolution,
   RepoPath,
   WorkspaceResolver,
@@ -11,10 +11,10 @@ import { errnoOf } from "./errno.ts";
 import { toPortablePath } from "./messages.ts";
 import { namesDirectory, normalizeWindowsShellPath } from "./paths.ts";
 
-// The same failure shape openAgentSession reports, narrowed to the one field this factory checks.
+// The same failure shape openAgentRun reports, narrowed to the one field this factory checks.
 export type CreateWorkspaceResult =
   | { readonly ok: true; readonly workspace: WorkspaceResolver }
-  | (Extract<OpenSessionResult, { ok: false }> & { readonly field: "repoRoot" });
+  | (Extract<OpenRunResult, { ok: false }> & { readonly field: "repoRoot" });
 
 // The filesystem operations the resolver needs. Not exported from the package: it lets tests
 // simulate failures, such as EACCES, that a process running as root cannot produce.

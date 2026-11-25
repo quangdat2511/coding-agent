@@ -5,7 +5,7 @@ import {
   fakeTool,
   fakeWorkspace,
   fakeWriteTool,
-  openTestSession,
+  openTestRun,
   resultOf,
   textMessage,
   textTurn,
@@ -29,14 +29,14 @@ describe("executing auto-approved Tool Calls", () => {
       },
     };
     const call = { toolCallId: "call-1", name: "lookup", input: {} };
-    const { session, clock } = openTestSession({
+    const { run, clock } = openTestRun({
       tools: [lookup],
       model: { turns: [toolCallTurn(call), textTurn("Fixed it.")] },
     });
 
-    await session.dispatch({ type: "start", task });
-    const result = await session.result();
-    const events = await collect(session.events());
+    await run.dispatch({ type: "start", task });
+    const result = await run.result();
+    const events = await collect(run.events());
     const toolResult = {
       toolCallId: "tool_call-1",
       toolName: "lookup",
@@ -46,7 +46,7 @@ describe("executing auto-approved Tool Calls", () => {
     };
 
     expect(events.map(({ sequence, type, data }) => ({ sequence, type, data }))).toEqual([
-      { sequence: 1, type: "session_started", data: { task } },
+      { sequence: 1, type: "run_started", data: { task } },
       {
         sequence: 2,
         type: "model_turn_started",
@@ -141,7 +141,7 @@ describe("executing auto-approved Tool Calls", () => {
           evidence: [{ type: "no_command_configured", workspaceChanged: false }],
         },
       },
-      { sequence: 17, type: "session_settled", data: { result } },
+      { sequence: 17, type: "run_settled", data: { result } },
     ]);
     expect(result).toMatchObject({
       outcome: "succeeded",
@@ -157,11 +157,11 @@ describe("executing auto-approved Tool Calls", () => {
     const write: ExecutableTool = {
       ...fakeWriteTool(),
       async execute() {
-        executingState = session.snapshot();
+        executingState = run.snapshot();
         return { isError: false, content: "ok" };
       },
     };
-    const { session } = openTestSession({
+    const { run } = openTestRun({
       approvalPolicy: "auto-approve",
       tools: [write],
       model: {
@@ -172,9 +172,9 @@ describe("executing auto-approved Tool Calls", () => {
       },
     });
 
-    await session.dispatch({ type: "start", task });
-    const result = await session.result();
-    const events = await collect(session.events());
+    await run.dispatch({ type: "start", task });
+    const result = await run.result();
+    const events = await collect(run.events());
     const queued = events.findIndex((event) => event.type === "tool_call_queued");
 
     expect(events.slice(queued + 1, queued + 5).map(({ type, data }) => ({ type, data }))).toEqual([
@@ -231,8 +231,8 @@ describe("executing auto-approved Tool Calls", () => {
     });
   });
 
-  it("hands execute the prepared call and the session's workspace, so the tool re-validates its paths", async () => {
-    const { session, portCalls } = openTestSession({
+  it("hands execute the prepared call and the run's workspace, so the tool re-validates its paths", async () => {
+    const { run, portCalls } = openTestRun({
       approvalPolicy: "auto-approve",
       tools: [fakeWriteTool()],
       model: {
@@ -243,8 +243,8 @@ describe("executing auto-approved Tool Calls", () => {
       },
     });
 
-    await session.dispatch({ type: "start", task });
-    await session.result();
+    await run.dispatch({ type: "start", task });
+    await run.result();
 
     expect(portCalls.filter((call) => /^(tool|workspace)\./.test(call))).toEqual([
       "tool.prepare(write)",
@@ -252,7 +252,7 @@ describe("executing auto-approved Tool Calls", () => {
       "tool.execute(write)",
       "workspace.resolveForCreate(/repo/src/a.ts)",
     ]);
-    expect(resultOf(await collect(session.events()), "tool_call-1")?.content).toBe(
+    expect(resultOf(await collect(run.events()), "tool_call-1")?.content).toBe(
       "wrote /repo/src/a.ts",
     );
   });
@@ -260,7 +260,7 @@ describe("executing auto-approved Tool Calls", () => {
   it("records a failed Tool Result when a prepared path no longer passes the Path Jail at execution", async () => {
     const workspace = fakeWorkspace();
     let checks = 0;
-    const { session } = openTestSession({
+    const { run } = openTestRun({
       approvalPolicy: "auto-approve",
       tools: [fakeWriteTool()],
       workspace: {
@@ -280,9 +280,9 @@ describe("executing auto-approved Tool Calls", () => {
       },
     });
 
-    await session.dispatch({ type: "start", task });
-    await session.result();
-    const events = await collect(session.events());
+    await run.dispatch({ type: "start", task });
+    await run.result();
+    const events = await collect(run.events());
 
     expect(events.find((event) => event.type === "tool_call_completed")?.data).toMatchObject({
       toolCallId: "tool_call-1",
@@ -297,7 +297,7 @@ describe("executing auto-approved Tool Calls", () => {
   it.each(["throw", "reject"] as const)(
     "records a recoverable TOOL_INTERNAL_ERROR, without a stack trace, when execute %ss",
     async (failure) => {
-      const { session, model } = openTestSession({
+      const { run, model } = openTestRun({
         tools: [throwingTool({ failure })],
         model: {
           turns: [
@@ -309,10 +309,10 @@ describe("executing auto-approved Tool Calls", () => {
       const sanitized =
         "explode failed unexpectedly while executing the call: explode failed during execute";
 
-      await session.dispatch({ type: "start", task });
-      const { outcome } = await session.result();
+      await run.dispatch({ type: "start", task });
+      const { outcome } = await run.result();
 
-      expect(resultOf(await collect(session.events()), "tool_call-1")).toEqual({
+      expect(resultOf(await collect(run.events()), "tool_call-1")).toEqual({
         toolCallId: "tool_call-1",
         toolName: "explode",
         content: sanitized,
@@ -343,7 +343,7 @@ describe("executing auto-approved Tool Calls", () => {
         ...fakeTool({ name: "broken" }),
         execute: async () => outcome as ToolOutcome,
       };
-      const { session } = openTestSession({
+      const { run } = openTestRun({
         tools: [broken],
         model: {
           turns: [
@@ -353,10 +353,10 @@ describe("executing auto-approved Tool Calls", () => {
         },
       });
 
-      await session.dispatch({ type: "start", task });
-      await session.result();
+      await run.dispatch({ type: "start", task });
+      await run.result();
 
-      expect(resultOf(await collect(session.events()), "tool_call-1")?.error).toEqual({
+      expect(resultOf(await collect(run.events()), "tool_call-1")?.error).toEqual({
         code: "TOOL_INTERNAL_ERROR",
         message:
           "broken failed unexpectedly while executing the call: execute returned an unusable outcome",
@@ -366,7 +366,7 @@ describe("executing auto-approved Tool Calls", () => {
 
   it("returns a tool's error outcome to the model as a failed Tool Result with its truncation flag", async () => {
     const error = { code: "NON_ZERO_EXIT", message: "exited with 1" } as const;
-    const { session, model } = openTestSession({
+    const { run, model } = openTestRun({
       tools: [
         fakeTool({ outcome: { isError: true, content: "1 failing", error, truncated: true } }),
       ],
@@ -378,9 +378,9 @@ describe("executing auto-approved Tool Calls", () => {
       },
     });
 
-    await session.dispatch({ type: "start", task });
-    await session.result();
-    const events = await collect(session.events());
+    await run.dispatch({ type: "start", task });
+    await run.result();
+    const events = await collect(run.events());
 
     expect(events.find((event) => event.type === "tool_call_completed")?.data).toEqual({
       toolCallId: "tool_call-1",
@@ -411,7 +411,7 @@ describe("executing auto-approved Tool Calls", () => {
           metadata: { durationMs: 1, approval: { status: "allowed", decidedBy: "user" } },
         }) as ToolOutcome,
     };
-    const { session } = openTestSession({
+    const { run } = openTestRun({
       tools: [forger],
       model: {
         turns: [
@@ -421,10 +421,10 @@ describe("executing auto-approved Tool Calls", () => {
       },
     });
 
-    await session.dispatch({ type: "start", task });
-    await session.result();
+    await run.dispatch({ type: "start", task });
+    await run.result();
 
-    expect(resultOf(await collect(session.events()), "tool_call-1")).toEqual({
+    expect(resultOf(await collect(run.events()), "tool_call-1")).toEqual({
       toolCallId: "tool_call-1",
       toolName: "forger",
       content: "ok",
@@ -433,8 +433,8 @@ describe("executing auto-approved Tool Calls", () => {
     });
   });
 
-  it("marks partial changes possible when an auto-approved mutating call fails, and the session still succeeds", async () => {
-    const { session } = openTestSession({
+  it("marks partial changes possible when an auto-approved mutating call fails, and the run still succeeds", async () => {
+    const { run } = openTestRun({
       approvalPolicy: "auto-approve",
       tools: [throwingTool({ mutation: "mutating" })],
       model: {
@@ -445,9 +445,9 @@ describe("executing auto-approved Tool Calls", () => {
       },
     });
 
-    await session.dispatch({ type: "start", task });
+    await run.dispatch({ type: "start", task });
 
-    expect(await session.result()).toMatchObject({
+    expect(await run.result()).toMatchObject({
       outcome: "succeeded",
       workspaceChanged: true,
       partialChangesPossible: true,
@@ -455,7 +455,7 @@ describe("executing auto-approved Tool Calls", () => {
   });
 
   it("changes neither mutation flag when a read-only call fails", async () => {
-    const { session } = openTestSession({
+    const { run } = openTestRun({
       tools: [throwingTool()],
       model: {
         turns: [
@@ -465,9 +465,9 @@ describe("executing auto-approved Tool Calls", () => {
       },
     });
 
-    await session.dispatch({ type: "start", task });
+    await run.dispatch({ type: "start", task });
 
-    expect(await session.result()).toMatchObject({
+    expect(await run.result()).toMatchObject({
       workspaceChanged: false,
       partialChangesPossible: false,
     });
@@ -478,11 +478,11 @@ describe("executing auto-approved Tool Calls", () => {
     const echo: ExecutableTool = {
       ...fakeTool(),
       async execute() {
-        failuresBeforeSuccess = session.snapshot().counters.consecutiveRecoverableFailures;
+        failuresBeforeSuccess = run.snapshot().counters.consecutiveRecoverableFailures;
         return { isError: false, content: "ok" };
       },
     };
-    const { session } = openTestSession({
+    const { run } = openTestRun({
       tools: [echo],
       model: {
         turns: [
@@ -496,11 +496,11 @@ describe("executing auto-approved Tool Calls", () => {
       },
     });
 
-    await session.dispatch({ type: "start", task });
-    await session.result();
+    await run.dispatch({ type: "start", task });
+    await run.result();
 
     expect(failuresBeforeSuccess).toBe(2);
-    expect(session.snapshot().counters.consecutiveRecoverableFailures).toBe(0);
+    expect(run.snapshot().counters.consecutiveRecoverableFailures).toBe(0);
   });
 
   it("resolves a mixed batch in model order before the next Model Turn, committing each Tool Result as it completes", async () => {
@@ -508,7 +508,7 @@ describe("executing auto-approved Tool Calls", () => {
     const echo: ExecutableTool = {
       ...fakeTool(),
       async execute() {
-        executingState = session.snapshot();
+        executingState = run.snapshot();
         return { isError: false, content: "echoed" };
       },
     };
@@ -517,15 +517,15 @@ describe("executing auto-approved Tool Calls", () => {
       { toolCallId: "call-2", name: "write", input: { path: "src/a.ts" } },
       { toolCallId: "call-3", name: "frobnicate", input: {} },
     ] as const;
-    const { session, model } = openTestSession({
+    const { run, model } = openTestRun({
       approvalPolicy: "auto-approve",
       tools: [echo, fakeWriteTool()],
       model: { turns: [toolCallTurn(...calls), textTurn("Fixed it.")] },
     });
 
-    await session.dispatch({ type: "start", task });
-    await session.result();
-    const outcomes = (await collect(session.events())).flatMap((event) =>
+    await run.dispatch({ type: "start", task });
+    await run.result();
+    const outcomes = (await collect(run.events())).flatMap((event) =>
       event.type === "tool_call_completed" ? [[event.data.toolCallId, event.data.outcome]] : [],
     );
 
@@ -553,7 +553,7 @@ describe("executing auto-approved Tool Calls", () => {
   });
 
   it("emits no Approval events for a read-only call under the auto-approve policy", async () => {
-    const { session } = openTestSession({
+    const { run } = openTestRun({
       approvalPolicy: "auto-approve",
       model: {
         turns: [
@@ -563,9 +563,9 @@ describe("executing auto-approved Tool Calls", () => {
       },
     });
 
-    await session.dispatch({ type: "start", task });
-    await session.result();
-    const types = (await collect(session.events())).map(({ type }) => type);
+    await run.dispatch({ type: "start", task });
+    await run.result();
+    const types = (await collect(run.events())).map(({ type }) => type);
 
     expect(types).toContain("tool_execution_started");
     expect(types).not.toContain("approval_requested");
@@ -577,7 +577,7 @@ describe("executing auto-approved Tool Calls", () => {
     let toolExecuting = false;
     const firstTool = fakeTool({ name: "first" });
 
-    const { session, clock, config } = openTestSession({
+    const { run, clock, config } = openTestRun({
       tools: [
         {
           ...firstTool,
@@ -619,15 +619,15 @@ describe("executing auto-approved Tool Calls", () => {
       return originalNow();
     };
 
-    await session.dispatch({ type: "start", task });
+    await run.dispatch({ type: "start", task });
 
-    const result = await session.result();
+    const result = await run.result();
     expect(result).toMatchObject({
       outcome: "failed",
       failure: { code: "INTERNAL_ERROR" },
     });
 
-    const events = await collect(session.events());
+    const events = await collect(run.events());
     const started = events.find((e) => e.type === "tool_execution_started");
     expect(started?.data.toolCallId).toBe("tool_call-1");
 
@@ -646,7 +646,7 @@ describe("executing auto-approved Tool Calls", () => {
     const turnCompleted = events.find((e) => e.type === "model_turn_completed");
     expect(turnCompleted?.data.outcome).toBe("failed");
 
-    const settled = events.find((e) => e.type === "session_settled");
+    const settled = events.find((e) => e.type === "run_settled");
     expect(settled).toBeDefined();
   });
 
@@ -660,7 +660,7 @@ describe("executing auto-approved Tool Calls", () => {
         return original.prepare(input, ctx);
       },
     };
-    const { session, clock } = openTestSession({
+    const { run, clock } = openTestRun({
       tools: [tool],
       approvalPolicy: "auto-approve",
       model: {
@@ -676,14 +676,14 @@ describe("executing auto-approved Tool Calls", () => {
       return originalNow();
     };
 
-    await session.dispatch({ type: "start", task });
-    const result = await session.result();
+    await run.dispatch({ type: "start", task });
+    const result = await run.result();
     expect(result.outcome).toBe("failed");
     if (result.outcome === "failed") {
       expect(result.failure.code).toBe("INTERNAL_ERROR");
     }
 
-    const events = await collect(session.events());
+    const events = await collect(run.events());
     const started = events.find((e) => e.type === "tool_execution_started");
     expect(started).toBeUndefined();
 
@@ -697,7 +697,7 @@ describe("executing auto-approved Tool Calls", () => {
 
   it("skips already queued call when ids throws on a subsequent call in queueToolCalls", async () => {
     let idCallCount = 0;
-    const { session, config } = openTestSession({
+    const { run, config } = openTestRun({
       tools: [fakeTool({ name: "first" }), fakeTool({ name: "second" })],
       approvalPolicy: "auto-approve",
       model: {
@@ -721,14 +721,14 @@ describe("executing auto-approved Tool Calls", () => {
       return originalNext(prefix);
     };
 
-    await session.dispatch({ type: "start", task });
-    const result = await session.result();
+    await run.dispatch({ type: "start", task });
+    const result = await run.result();
     expect(result.outcome).toBe("failed");
     if (result.outcome === "failed") {
       expect(result.failure.code).toBe("INTERNAL_ERROR");
     }
 
-    const events = await collect(session.events());
+    const events = await collect(run.events());
     const queuedEvents = events.filter((e) => e.type === "tool_call_queued");
     expect(queuedEvents).toHaveLength(1);
     expect(queuedEvents[0]?.data.toolCall.id).toBe("tool_call-1");
@@ -747,7 +747,7 @@ describe("executing auto-approved Tool Calls", () => {
 
   it("does not double-count usage if commit of model_turn_completed throws", async () => {
     let callCount = 0;
-    const { session, clock } = openTestSession({
+    const { run, clock } = openTestRun({
       model: { turns: [textTurn("Done")] },
     });
 
@@ -760,9 +760,9 @@ describe("executing auto-approved Tool Calls", () => {
       return originalNow();
     };
 
-    await session.dispatch({ type: "start", task });
+    await run.dispatch({ type: "start", task });
 
-    const result = await session.result();
+    const result = await run.result();
     expect(result.outcome).toBe("failed");
     if (result.outcome === "failed") {
       expect(result.failure.code).toBe("INTERNAL_ERROR");

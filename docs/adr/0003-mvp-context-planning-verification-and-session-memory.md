@@ -1,18 +1,18 @@
-# MVP Context, Planning, Verification, and Session Memory
+# MVP Context, Planning, Verification, and Run Memory
 
 Status: accepted
 
-Date: 2026-09-13 (Amended: 2026-09-16, 2026-11-05, 2026-11-15)
+Date: 2026-09-13 (Amended: 2026-09-16, 2026-11-05, 2026-11-15, 2026-11-24)
 
 ## Context
 
-Ticket [CDA-23](https://datn-fit-hcmus.atlassian.net/browse/CDA-23) defines the minimum runtime behavior for repository context gathering, explicit planning, post-change verification, and in-session memory for the Bun/TypeScript Coding Agent MVP. Earlier architectural decisions established the foundation:
+Ticket [CDA-23](https://datn-fit-hcmus.atlassian.net/browse/CDA-23) defines the minimum runtime behavior for repository context gathering, explicit planning, post-change verification, and in-run memory for the Bun/TypeScript Coding Agent MVP. Earlier architectural decisions established the foundation:
 
 - [ADR 0001: Tool Contracts and Safety Policy](./0001-tool-contracts-and-safety-policy.md) ([CDA-19](https://datn-fit-hcmus.atlassian.net/browse/CDA-19)) standardized tool schemas, sandbox boundaries (`repoRoot`), mutation classifications, and a 40 KiB UTF-8 byte budget for tool outputs.
-- [ADR 0002: Agent Session State Machine and Event Protocol](./0002-agent-session-state-machine-and-event-protocol.md) ([CDA-16](https://datn-fit-hcmus.atlassian.net/browse/CDA-16)) defined the 9 lifecycle states, candidate completion detection, and delegated the exact evidence shapes and feedback representations to CDA-23.
+- [ADR 0002: Agent Run State Machine and Event Protocol](./0002-agent-session-state-machine-and-event-protocol.md) ([CDA-16](https://datn-fit-hcmus.atlassian.net/browse/CDA-16)) defined the 9 lifecycle states, candidate completion detection, and delegated the exact evidence shapes and feedback representations to CDA-23.
 - Map Epic [CDA-13](https://datn-fit-hcmus.atlassian.net/browse/CDA-13) ruled out-of-scope all vector databases, RAG/embeddings, cross-session persistent memory, and MCP/LSP integrations for the MVP.
 
-This record establishes the normative behavior, data shapes, and operational policies for context ingestion, planning constraints, verification loop closure, and session memory bounds.
+This record establishes the normative behavior, data shapes, and operational policies for context ingestion, planning constraints, verification loop closure, and run memory bounds.
 
 ## Decision
 
@@ -43,7 +43,7 @@ Explicit planning is implemented at the model prompt layer rather than as a stat
 - **Zero Runtime State Expansion**: `Agent Core` retains the 9 states accepted in ADR 0002; no `planning` state or rigid runtime plan gate is introduced. This preserves seamless execution in both interactive TUI and headless unattended environments (TerminalBench).
 - **System Prompt Requirement**: The system prompt enforces explicit planning through instructions:
   > *"Before invoking any mutating tool (`write`, `edit`, `bash`), you must analyze the objective, state your assumptions, and outline a numbered, step-by-step execution plan in your initial response turn."*
-- **Transcript Persistence**: The plan is emitted as standard text content within the first `AssistantMessage`. Because the canonical transcript is immutable and included in subsequent Model Turns, the plan remains visible to the model throughout the session without custom state management.
+- **Transcript Persistence**: The plan is emitted as standard text content within the first `AssistantMessage`. Because the canonical transcript is immutable and included in subsequent Model Turns, the plan remains visible to the model throughout the Agent Run without custom state management.
 - **Scratchpad Convention**: For complex tasks requiring persistent notes or checklists across multiple turns, the runtime establishes the `.scratch/` directory convention (e.g. `.scratch/plan.md`). The model writes to this directory using the standard `write` tool within `repoRoot`.
 
 ### 3. Post-Change Verification Policy and Feedback Loop
@@ -83,7 +83,7 @@ When a model turn completes without tool calls, Agent Core detects a `Candidate 
 
   The verification policy evaluates the discriminated runner result without overlapping outcomes:
   1. **Byte-Exact Output Budget**: The captured output budget is **40 KiB (40,960 UTF-8 bytes)** applied to combined stdout and stderr. It strictly reuses the dynamic head+tail split algorithm, marker, and valid UTF-8 boundary rules defined in [ADR 0001](./0001-tool-contracts-and-safety-policy.md) before recording evidence or injecting into feedback. Citing ADR-0001 directly avoids duplicating the algorithm formula while preserving both initial test execution context and final assertion failure diagnostics for model self-correction.
-  2. **Pass (`status === "completed"` with `exitCode === 0`)**: The policy returns `outcome: "succeeded"`, transitioning the session to `succeeded`.
+  2. **Pass (`status === "completed"` with `exitCode === 0`)**: The policy returns `outcome: "succeeded"`, transitioning the Agent Run to `succeeded`.
   3. **Test Assertion Failures (`status === "completed"` with `exitCode !== 0`, excluding launch errors)**: The command ran to completion but test assertions failed. The policy returns `outcome: "continue"`. A structured user message containing the bounded output is injected into the next Model Turn:
      ```text
      [Verification Failed]
@@ -93,12 +93,12 @@ When a model turn completes without tool calls, Agent Core detects a `Candidate 
      {output}
      Please analyze the failure, adjust your changes, and verify again.
      ```
-  4. **Execution and System Failures (`status === "timed_out"` or `status === "launch_failed"`)**: The command could not run to normal test completion (binary not found / ENOENT, exit code 127/126, shell syntax error, or command timeout). The policy returns `outcome: "failed"` with `AgentFailureCode: "VERIFICATION_FAILED"`. This immediately halts the session rather than trapping the model in an unrecoverable environment loop.
+  4. **Execution and System Failures (`status === "timed_out"` or `status === "launch_failed"`)**: The command could not run to normal test completion (binary not found / ENOENT, exit code 127/126, shell syntax error, or command timeout). The policy returns `outcome: "failed"` with `AgentFailureCode: "VERIFICATION_FAILED"`. This immediately halts the Agent Run rather than trapping the model in an unrecoverable environment loop.
   5. **Cancellation (`status === "cancelled"`)**: The abort signal ended the run, or had already aborted so nothing started. This is not a decision: Agent Core records the Verification as cancelled ([ADR 0002](./0002-agent-session-state-machine-and-event-protocol.md) §5), and the Verification Policy reports cancellation instead of returning `succeeded`, `continue`, or `failed`. It reports it as `VerificationCancelled`, `{ outcome: "cancelled" }`, which `verify` returns beside `VerificationDecision` rather than as one of its members ([ADR 0004](./0004-package-apis-and-dependency-direction.md) §3, [CDA-77](https://datn-fit-hcmus.atlassian.net/browse/CDA-77)).
 
 - **Fallback Verification**: If no verification command is configured:
   - Fallback verification is non-gating: it unconditionally returns `outcome: "succeeded"` regardless of `workspaceChanged`, because `CodingTask` defines no field distinguishing read-only from mutating intent.
-  - The `workspaceChanged` check is evidence-only: evidence records the observed mutation state as `{ type: "no_command_configured", workspaceChanged: boolean }`. External callers requiring mandatory workspace modifications can evaluate `AgentResult.workspaceChanged` upon session settlement without turning verification into an implicit gate.
+  - The `workspaceChanged` check is evidence-only: evidence records the observed mutation state as `{ type: "no_command_configured", workspaceChanged: boolean }`. External callers requiring mandatory workspace modifications can evaluate `AgentResult.workspaceChanged` upon Agent Run settlement without turning verification into an implicit gate.
 
 - **Evidence Schema**: Every verification outcome records structured evidence conforming to this closed union:
   ```typescript
@@ -127,19 +127,19 @@ When a model turn completes without tool calls, Agent Core detects a `Candidate 
       };
   ```
 
-### 4. In-Session Memory and Bounded Limits
+### 4. In-Run Memory and Bounded Limits
 
-Memory management in the MVP is strictly bounded to one in-memory task session:
+Memory management in the MVP is strictly bounded to one in-memory Agent Run:
 
-- **No Dynamic LLM Compaction**: Dynamic summarization turns and rolling message truncation are deferred. In-session memory consists solely of the immutable canonical transcript (messages, tool calls, and tool results).
+- **No Dynamic LLM Compaction**: Dynamic summarization turns and rolling message truncation are deferred. In-run memory consists solely of the immutable canonical transcript (messages, tool calls, and tool results).
 - **Tool Output Budgets**: Tool results remain strictly capped at 40 KiB UTF-8 bytes per ADR 0001, preventing context explosion from command outputs or file reads.
-- **Session Limits Defaults**: Agent Core enforces injected limits at runtime, while ownership of concrete default values belongs to `Coding Agent` configuration per [ADR 0002](./0002-agent-session-state-machine-and-event-protocol.md). For the MVP, `Coding Agent` establishes these standard defaults:
+- **Run Limits Defaults**: Agent Core enforces injected limits at runtime, while ownership of concrete default values belongs to `Coding Agent` configuration per [ADR 0002](./0002-agent-session-state-machine-and-event-protocol.md). For the MVP, `Coding Agent` establishes these standard defaults:
   - `maxModelTurns`: **30**
   - `maxToolCalls`: **100**
   - `maxDurationMs`: **600,000 ms** (10 minutes active execution)
   - `maxConsecutiveRecoverableFailures`: **3**
 - **Recoverable Failure Accounting**: `maxConsecutiveRecoverableFailures` bounds consecutive recoverable failures during tool execution. The counter increments for each error Tool Result (including unknown tools, malformed or invalid arguments, schema validation errors, policy violations, Approval denials, and tool runtime failures), resets after a successful Tool Result, and is evaluated sequentially per Tool Result within batched calls. Verification `continue` never increments this counter, as repeated Candidate Completion and Verification cycles are already bounded by `maxModelTurns` and maximum active execution duration per [ADR 0002](./0002-agent-session-state-machine-and-event-protocol.md) §4.
-- **Breach Semantics**: When any limit is exhausted, the session terminates immediately in `failed` with code `LIMIT_EXCEEDED`. If any mutating tool was executed prior to exhaustion, `partialChangesPossible` is set to `true`.
+- **Breach Semantics**: When any limit is exhausted, the Agent Run terminates immediately in `failed` with code `LIMIT_EXCEEDED`. If any mutating tool was executed prior to exhaustion, `partialChangesPossible` is set to `true`.
 
 ### 5. Amendments
 
@@ -180,7 +180,7 @@ On 2026-11-15, [CDA-74](https://datn-fit-hcmus.atlassian.net/browse/CDA-74) amen
   started.
 - **Exit codes 126 and 127** (§3): always `launch_failed`, with the exit code, even when a command
   inside a script exits with one. The cost accepted is that a test suite whose last step is a
-  missing command ends the Agent Session rather than continuing.
+  missing command ends the Agent Run rather than continuing.
 - **A shell ended by a signal the runner did not send** (§3), such as an out-of-memory kill or a
   crash: `completed`, with 128 plus the signal's number as the exit code, as a shell reports such a
   child. The crash is a failure the model may fix, not an environment that cannot run.
@@ -195,8 +195,8 @@ On 2026-11-15, [CDA-74](https://datn-fit-hcmus.atlassian.net/browse/CDA-74) amen
 Evidence behind this amendment:
 
 - *Read in source:* the `bash` supervision the runner shares (`packages/tools/src/process-run.ts`),
-  and Agent Core's handling of a Verification Policy that throws: the session fails with
-  `INTERNAL_ERROR` (`packages/agent-core/src/agent-session.ts`), which is why the runner never
+  and Agent Core's handling of a Verification Policy that throws: the Agent Run fails with
+  `INTERNAL_ERROR` (`packages/agent-core/src/agent-run.ts`), which is why the runner never
   rejects.
 - *Tried locally* (macOS, bash 3.2.57, uid 501): a missing command exits 127, a file with mode 644
   exits 126, `if then` exits 2, `make -f /dev/null nothing` exits 2, and `kill -TERM $$` exits 143.
@@ -218,7 +218,7 @@ On 2026-11-17, [CDA-77](https://datn-fit-hcmus.atlassian.net/browse/CDA-77) amen
   union has no member for a cancelled run and Agent Core already records a cancelled
   Verification with empty evidence. It is not a `VerificationDecision` member: ADR 0002 §4's policy
   still returns exactly one of three decisions when it decides. Agent Core records the Verification
-  as cancelled when the session is cancelling, and settles `LIMIT_EXCEEDED` when a breached limit
+  as cancelled when the Agent Run is cancelling, and settles `LIMIT_EXCEEDED` when a breached limit
   aborted the run ([ADR 0002](./0002-agent-session-state-machine-and-event-protocol.md) §4,
   [CDA-76](https://datn-fit-hcmus.atlassian.net/browse/CDA-76)). Those are the only times it aborts
   the signal it passes, so it settles `INTERNAL_ERROR` when a policy reports a cancellation at any
@@ -246,14 +246,20 @@ On 2026-11-17, [CDA-77](https://datn-fit-hcmus.atlassian.net/browse/CDA-77) amen
 Evidence behind this amendment:
 
 - *Read in source:* Agent Core aborts the Verification signal only in `cancel` and when it records
-  a breached duration limit (`packages/agent-core/src/agent-session.ts`). After `verify` returns,
-  it settles `LIMIT_EXCEEDED` when a limit was breached and cancelled when the session is
+  a breached duration limit (`packages/agent-core/src/agent-run.ts`). After `verify` returns,
+  it settles `LIMIT_EXCEEDED` when a limit was breached and cancelled when the Agent Run is
   cancelling, whatever the policy returned.
 - *Run locally* (Linux, Bun 1.3.14): the policy's tests with a scripted runner and with the real
   runner in a temporary repository, and Agent Core's tests for a reported cancellation with and
   without a cancel.
 - *Prescriptions:* the separate cancellation type, the quoted command, the feedback layout, the
   single combined output and the failure wording are decisions, not observations.
+
+On 2026-11-24, [CDA-147](https://datn-fit-hcmus.atlassian.net/browse/CDA-147) amended this record:
+
+- **Agent Session is renamed Agent Run** (title, Context, §2 to §5): the memory §4 bounds is that
+  of one Agent Run, and Session Limits are Run Limits (`RunLimits`), following ADR 0002 §8.
+  Behavior is unchanged. The file name is kept so that links to this record still resolve.
 
 ## Consequences
 

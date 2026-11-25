@@ -1,8 +1,8 @@
 import {
-  type AgentSession,
+  type AgentRun,
   type ApprovalPolicy,
-  type OpenSessionResult,
-  openAgentSession,
+  type OpenRunResult,
+  openAgentRun,
 } from "@coding-agent/agent-core";
 import {
   type ChildProcessLauncher,
@@ -16,7 +16,7 @@ import { createModelPort } from "./model-port.ts";
 import type { RunConfig } from "./run-config.ts";
 import { assembleSystemPrompt, type SkippedProjectInstructions } from "./system-prompt.ts";
 
-export type SessionConfig = Pick<
+export type AgentRunConfig = Pick<
   RunConfig,
   | "model"
   | "credential"
@@ -27,20 +27,20 @@ export type SessionConfig = Pick<
   | "verification"
 > & { readonly approvalPolicy: ApprovalPolicy };
 
-export type SessionFactoryResult =
+export type AgentRunFactoryResult =
   | {
       readonly ok: true;
-      readonly session: AgentSession;
+      readonly run: AgentRun;
       readonly systemPrompt: string;
       readonly toolNames: readonly string[];
       readonly skippedInstructions: readonly SkippedProjectInstructions[];
     }
-  | Extract<OpenSessionResult, { ok: false }>;
+  | Extract<OpenRunResult, { ok: false }>;
 
-export async function openSession(
-  config: SessionConfig,
+export async function openRun(
+  config: AgentRunConfig,
   launcher: ChildProcessLauncher,
-): Promise<SessionFactoryResult> {
+): Promise<AgentRunFactoryResult> {
   const workspace = await createWorkspaceResolver(config.givenRepoRoot);
   if (!workspace.ok) return workspace;
   const tools = createDefaultTools(launcher);
@@ -52,7 +52,7 @@ export async function openSession(
   if (!prompt.ok) return prompt;
   const runner = createVerificationRunner({ launcher, workspace: workspace.workspace });
   if (!runner.ok) throw new Error(runner.message);
-  const opened = openAgentSession({
+  const opened = openAgentRun({
     model: createModelPort(config),
     systemPrompt: prompt.systemPrompt,
     tools,

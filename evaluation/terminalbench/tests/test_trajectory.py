@@ -23,7 +23,7 @@ from tests.support import (
     FINAL_TEXT,
     OBJECTIVE,
     OCCURRED_AT,
-    SESSION_ID,
+    RUN_ID,
     SYSTEM_PROMPT,
     agent_result,
     cancelled_events,
@@ -85,7 +85,7 @@ class TrajectoryTest(unittest.TestCase):
         self.assertEqual(trajectory.agent.name, "coding-agent")
         self.assertEqual(trajectory.agent.version, f"0.0.1 {COMMIT}")
         self.assertEqual(trajectory.agent.model_name, "google/gemini-3.5-flash-lite")
-        self.assertEqual(trajectory.session_id, SESSION_ID)
+        self.assertEqual(trajectory.session_id, RUN_ID)
 
     def test_keys_a_tool_call_by_its_agent_core_id_and_answers_it_on_its_own_step(self) -> None:
         trajectory = self.build()
@@ -200,8 +200,8 @@ class TrajectoryTest(unittest.TestCase):
     def test_a_skipped_tool_call_records_the_reason(self) -> None:
         log = complete_events()
         log[6] = {
-            "schemaVersion": 1,
-            "sessionId": SESSION_ID,
+            "schemaVersion": 2,
+            "runId": RUN_ID,
             "sequence": 7,
             "occurredAt": OCCURRED_AT,
             "type": "tool_call_completed",
@@ -287,11 +287,11 @@ class TrajectoryTest(unittest.TestCase):
             "evidence": [],
         }
         log[15] = {
-            "schemaVersion": 1,
-            "sessionId": SESSION_ID,
+            "schemaVersion": 2,
+            "runId": RUN_ID,
             "sequence": 16,
             "occurredAt": OCCURRED_AT,
-            "type": "session_settled",
+            "type": "run_settled",
             "data": {
                 "result": agent_result(
                     outcome="failed",

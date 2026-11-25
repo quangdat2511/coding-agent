@@ -20,6 +20,24 @@ export async function writePreloadingBunfig(directory: string): Promise<void> {
   await Bun.write(join(directory, "preload.ts"), 'process.stderr.write("preloaded\\n");\n');
 }
 
+// Windows can keep an executable locked for a moment after it exits, so removal retries.
+const REMOVE_ATTEMPTS = 10;
+const REMOVE_RETRY_MS = 100;
+const RETRYABLE_REMOVE: ReadonlySet<string | undefined> = new Set(["EBUSY", "EPERM", "ENOTEMPTY"]);
+
+async function removeDirectory(directory: string): Promise<void> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await rm(directory, { recursive: true, force: true });
+      return;
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException | undefined)?.code;
+      if (attempt >= REMOVE_ATTEMPTS || !RETRYABLE_REMOVE.has(code)) throw error;
+      await Bun.sleep(REMOVE_RETRY_MS * attempt);
+    }
+  }
+}
+
 export async function withTemporaryDirectory<T>(
   body: (directory: string) => Promise<T>,
 ): Promise<T> {
@@ -27,7 +45,7 @@ export async function withTemporaryDirectory<T>(
   try {
     return await body(directory);
   } finally {
-    await rm(directory, { recursive: true, force: true });
+    await removeDirectory(directory);
   }
 }
 

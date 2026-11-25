@@ -1,5 +1,6 @@
 import type { AgentResult } from "@coding-agent/agent-core";
 import type { ChildProcessLauncher } from "@coding-agent/tools";
+import { openRun } from "./agent-run-factory.ts";
 import { BUILD_INFO } from "./build-info.ts";
 import { systemClock } from "./clock-and-ids.ts";
 import { diagnostic, messageOf, redactorOf } from "./diagnostics.ts";
@@ -7,7 +8,6 @@ import type { ExitCode } from "./exit-codes.ts";
 import type { RunArgs } from "./run-args.ts";
 import { type RunConfig, removeCreated, resolveRunConfig } from "./run-config.ts";
 import { openRunFiles, type RunFiles, type RunRecord } from "./run-files.ts";
-import { openSession } from "./session-factory.ts";
 
 export interface HeadlessOptions {
   readonly args: RunArgs;
@@ -19,13 +19,13 @@ export interface HeadlessOptions {
   readonly launcher: ChildProcessLauncher;
   // Aborting it dispatches `cancel`; a string abort reason becomes the cancellation reason.
   readonly signal: AbortSignal;
-  // Called once the Agent Session can take `cancel`.
-  readonly onSessionOpened?: () => void;
+  // Called once the Agent Run can take `cancel`.
+  readonly onRunOpened?: () => void;
 }
 
 export interface HeadlessResult {
   readonly exitCode: ExitCode;
-  // Absent when no Agent Session settled.
+  // Absent when no Agent Run settled.
   readonly result?: AgentResult;
 }
 
@@ -113,23 +113,23 @@ export async function runHeadless(options: HeadlessOptions): Promise<HeadlessRes
   let files: RunFiles | undefined;
   let stopListening = (): void => undefined;
   try {
-    const opened = await openSession(config, options.launcher);
+    const opened = await openRun(config, options.launcher);
     if (!opened.ok) {
       await removeCreated(createdDirectories);
       return refuse(opened, stderr);
     }
-    const { session, skippedInstructions } = opened;
+    const { run: agentRun, skippedInstructions } = opened;
     for (const { path, reason } of skippedInstructions) {
       stderr(diagnostic(`Project Instructions candidate ${path} skipped: ${reason}`));
     }
 
     files = await openRunFiles(config.outputDir, runRecord(config, opened), redact);
-    // Never awaited by the Agent Session, so a failed write surfaces only once it has settled.
-    const logged = failureOf(files.logEvents(session.events()));
+    // Never awaited by the Agent Run, so a failed write surfaces only once it has settled.
+    const logged = failureOf(files.logEvents(agentRun.events()));
 
     const cancel = () => {
       const { reason } = options.signal;
-      return session.dispatch({
+      return agentRun.dispatch({
         type: "cancel",
         ...(typeof reason === "string" ? { reason } : {}),
       });
@@ -141,18 +141,18 @@ export async function runHeadless(options: HeadlessOptions): Promise<HeadlessRes
     };
     options.signal.addEventListener("abort", onAbort, { once: true });
     stopListening = () => options.signal.removeEventListener("abort", onAbort);
-    options.onSessionOpened?.();
+    options.onRunOpened?.();
 
     // A listener never runs for an abort that came first, so that abort cancels in place of `start`.
     const task = { objective: config.objective };
     const dispatched = await (options.signal.aborted
       ? cancel()
-      : session.dispatch({ type: "start", task }));
+      : agentRun.dispatch({ type: "start", task }));
     if (!dispatched.accepted)
-      throw new Error(`the Agent Session refused its first command: ${dispatched.message}`);
+      throw new Error(`the Agent Run refused its first command: ${dispatched.message}`);
     running = true;
 
-    const result = await session.result();
+    const result = await agentRun.result();
     const finishedAt = systemClock.now();
     const logFailure = await logged;
     const exitCode: ExitCode = logFailure === undefined ? EXIT_CODE_BY_OUTCOME[result.outcome] : 70;

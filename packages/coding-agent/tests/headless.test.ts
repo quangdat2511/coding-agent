@@ -147,7 +147,7 @@ describe("a headless run that OpenCode Go refuses with an HTTP status", () => {
           const written = await Bun.file(join(outputDir, "result.json")).json();
           expect(written).toMatchObject({ exitCode: 1, result: { outcome: "failed", failure } });
           expect((await loggedEvents(outputDir)).at(-1)).toMatchObject({
-            type: "session_settled",
+            type: "run_settled",
             data: { result: { outcome: "failed", failure } },
           });
         },
@@ -382,7 +382,7 @@ describe("a headless run of the named task on Google", () => {
           parts: { text: string }[];
         };
         expect(await Bun.file(join(outputDir, "run.json")).json()).toEqual({
-          schemaVersion: 1,
+          schemaVersion: 2,
           codingAgent: { version: "0.0.1", commit: null },
           provider: "google",
           model: "gemini-3.5-flash-lite",
@@ -411,7 +411,7 @@ describe("a headless run of the named task on Google", () => {
     );
   });
 
-  it("logs one Session Event per line, without deltas and with their sequence numbers", async () => {
+  it("logs one Run Event per line, without deltas and with their sequence numbers", async () => {
     await runNamedTask(replayInOrder(readOnlyRun), async ({ result, outputDir }) => {
       const text = await Bun.file(join(outputDir, "events.jsonl")).text();
       expect(text).toEndWith("\n");
@@ -419,8 +419,8 @@ describe("a headless run of the named task on Google", () => {
       const types = events.map(({ type }) => type);
       const sequences = events.map(({ sequence }) => sequence);
 
-      expect(events.every(({ schemaVersion }) => schemaVersion === 1)).toBe(true);
-      expect(new Set(events.map(({ sessionId }) => sessionId)).size).toBe(1);
+      expect(events.every(({ schemaVersion }) => schemaVersion === 2)).toBe(true);
+      expect(new Set(events.map(({ runId }) => runId)).size).toBe(1);
       expect(types).not.toContain("assistant_content_delta");
       expect(types).toContain("assistant_message_completed");
       expect(types).toContain("tool_call_completed");
@@ -428,7 +428,7 @@ describe("a headless run of the named task on Google", () => {
 
       expect(events[0]).toMatchObject({
         sequence: 1,
-        type: "session_started",
+        type: "run_started",
         data: { task: { objective: await Bun.file(NAMED_TASK_FILE).text() } },
       });
       expect(sequences).toEqual([...sequences].sort((a, b) => a - b));
@@ -437,7 +437,7 @@ describe("a headless run of the named task on Google", () => {
       expect(sequences.length).toBeLessThan(sequences.at(-1) ?? 0);
       expect(events.at(-1)).toMatchObject({
         sequence: result.result?.lastSequence,
-        type: "session_settled",
+        type: "run_settled",
         data: { result: JSON.parse(JSON.stringify(result.result)) },
       });
     });
@@ -450,12 +450,12 @@ describe("a headless run of the named task on Google", () => {
       () => {
         expect(atSecondRequest.readError).toBeUndefined();
         expect(atSecondRequest.types).toContain("tool_call_completed");
-        expect(atSecondRequest.types).not.toContain("session_settled");
+        expect(atSecondRequest.types).not.toContain("run_settled");
       },
       {
         onRequest: async (outputDir, sent) => {
           if (sent.length !== 2) return;
-          // The log is written behind the Agent Session, so give it a moment to catch up.
+          // The log is written behind the Agent Run, so give it a moment to catch up.
           for (let attempt = 0; attempt < 200; attempt++) {
             try {
               const types = (await loggedEvents(outputDir)).map(({ type }) => type);
@@ -479,7 +479,7 @@ describe("a headless run of the named task on Google", () => {
     await runNamedTask(replayInOrder(readOnlyRun), async ({ result, outputDir }) => {
       const written = await Bun.file(join(outputDir, "result.json")).json();
       expect(written).toEqual({
-        schemaVersion: 1,
+        schemaVersion: 2,
         exitCode: 0,
         result: JSON.parse(JSON.stringify(result.result)),
         finishedAt: expect.any(String),
@@ -503,12 +503,12 @@ describe("a headless run of the named task on Google", () => {
       ]);
       const written = await Bun.file(join(outputDir, "result.json")).json();
       expect(written).toMatchObject({
-        schemaVersion: 1,
+        schemaVersion: 2,
         exitCode: 1,
         result: { outcome: "failed", failure: { code: "MODEL_FAILURE" } },
       });
       expect((await loggedEvents(outputDir)).at(-1)).toMatchObject({
-        type: "session_settled",
+        type: "run_settled",
         data: { result: { outcome: "failed" } },
       });
     });
@@ -616,7 +616,7 @@ describe("a headless run of the named task on Google", () => {
         expect(stdout).not.toBe("");
         expect(stderr).toContain("coding-agent: succeeded; workspace changed: no\n");
         expect(stderr).toContain("coding-agent: internal error: ");
-        expect((await loggedEvents(outputDir)).at(-1)?.type).toBe("session_settled");
+        expect((await loggedEvents(outputDir)).at(-1)?.type).toBe("run_settled");
         expect((await readdir(outputDir)).sort()).toEqual([
           "events.jsonl",
           "result.json",
@@ -680,14 +680,14 @@ describe("a headless run of the named task on Google", () => {
           "run.json",
         ]);
         expect(await Bun.file(join(outputDir, "result.json")).json()).toMatchObject({
-          schemaVersion: 1,
+          schemaVersion: 2,
           exitCode: 130,
           result: { outcome: "cancelled", workspaceChanged: false, partialChangesPossible: false },
         });
         const events = await loggedEvents(outputDir);
         expect(events.filter(({ type }) => type === "cancellation_requested")).toHaveLength(1);
         expect(events.at(-1)).toMatchObject({
-          type: "session_settled",
+          type: "run_settled",
           data: { result: { outcome: "cancelled" } },
         });
       },
@@ -713,7 +713,7 @@ describe("a headless run of the named task on Google", () => {
         ]);
         expect((await loggedEvents(outputDir)).map(({ type }) => type)).toEqual([
           "cancellation_requested",
-          "session_settled",
+          "run_settled",
         ]);
         expect(await Bun.file(join(outputDir, "result.json")).json()).toMatchObject({
           exitCode: 130,
@@ -749,7 +749,7 @@ describe("a headless run of the named task on Google", () => {
           result: { outcome: "failed", failure: { code: "CANCELLATION_TIMEOUT" } },
         });
         expect((await loggedEvents(outputDir)).at(-1)).toMatchObject({
-          type: "session_settled",
+          type: "run_settled",
           data: { result: { outcome: "failed" } },
         });
       },

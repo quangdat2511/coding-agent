@@ -10,7 +10,7 @@ from coding_agent_terminalbench.launch import (
     ModelChoice,
     build_command,
     check_agent_env,
-    session_settled,
+    run_settled,
     split_model,
 )
 
@@ -114,9 +114,9 @@ class BuildCommandTest(unittest.TestCase):
         self.assertIn("--model 'a b' ", command)
 
 
-class SessionSettledTest(unittest.TestCase):
-    def test_only_0_1_and_130_mean_a_settled_session(self) -> None:
-        self.assertEqual([code for code in range(-15, 256) if session_settled(code)], [0, 1, 130])
+class RunSettledTest(unittest.TestCase):
+    def test_only_0_1_and_130_mean_a_settled_agent_run(self) -> None:
+        self.assertEqual([code for code in range(-15, 256) if run_settled(code)], [0, 1, 130])
 
 
 class ProviderListTest(unittest.TestCase):

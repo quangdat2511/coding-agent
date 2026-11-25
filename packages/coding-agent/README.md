@@ -1,12 +1,12 @@
 # @coding-agent/coding-agent
 
 The composition root: the `coding-agent` executable that turns a command line into an Agent
-Session. The command line, exit codes and files written are its external contract
+Run. The command line, exit codes and files written are its external contract
 ([ADR 0005 §3](../../docs/adr/0005-terminalbench-evaluation-protocol.md)).
 
 ## Running a task
 
-`coding-agent run` resolves the configuration, opens one Agent Session, starts the Coding Task from
+`coding-agent run` resolves the configuration, opens one Agent Run, starts the Coding Task from
 the task file, and waits for the Agent Result. `runHeadless` in `src/headless.ts` implements this.
 `src/cli.ts` parses the arguments and hardens the process first.
 
@@ -16,8 +16,8 @@ the task file, and waits for the Agent Result. `runHeadless` in `src/headless.ts
 | `failed` | 1 |
 | `cancelled` | 130 |
 
-A run that opens no Agent Session exits 2 on a usage or configuration error. An internal error
-outside the Agent Session exits 70. A run that exits 0, 1 or 130 has written the three files of
+A run that opens no Agent Run exits 2 on a usage or configuration error. An internal error
+outside the Agent Run exits 70. A run that exits 0, 1 or 130 has written the three files of
 [Files written](#files-written).
 
 The run prints the final assistant message on standard output. On standard error it prints one
@@ -32,7 +32,7 @@ file that the model read can carry the credential, so the run replaces the crede
 ## Running interactively
 
 `coding-agent` with flags and no command opens the Full-screen TUI. The person types a Coding Task
-in the Prompt, watches the Agent Session stream, decides each Approval in the Approval overlay, and
+in the Prompt, watches the Agent Run stream, decides each Approval in the Approval overlay, and
 cancels with one key. `runInteractive` in `src/interactive.ts` implements this.
 
 ```text
@@ -55,42 +55,43 @@ the three of `run` that make sense without a task file, and nothing else is acce
   `auto-approve` only, so this path does not run it. The process is still marked non-dumpable.
 - **No `--task-file` and no `--output-dir`.** The Coding Task is typed, and this path writes none of
   `run.json`, `events.jsonl` or `result.json`.
-- **No `--profile`.** It runs the `default` Session Limits.
+- **No `--profile`.** It runs the `default` Run Limits.
 - **A terminal is required.** Without one on both standard input and output it exits 2 and points to
   `coding-agent run`.
 
-An Agent Session is scoped to one Coding Task and has no prompt queue, so a submission opens a
-session only when none is active. A submission while one runs, or opens, is refused with a notice
-in the transcript. When a session has settled, the next submission opens a new one, and the
+An Agent Run is scoped to one Coding Task and has no prompt queue, so a submission opens an
+Agent Run only when none is active. A submission while one runs, or opens, is refused with a notice
+in the transcript. When an Agent Run has settled, the next submission opens a new one, and the
 transcript keeps the earlier ones.
 
 | Key or signal | While a Coding Task runs | With none |
 | --- | --- | --- |
 | `Esc` or `Ctrl+C` | dispatches `cancel` | a first press shows a notice; a second within one second quits |
-| `SIGINT` or `SIGTERM` | dispatches `cancel`, waits for the session to settle, then unmounts | unmounts |
+| `SIGINT` or `SIGTERM` | dispatches `cancel`, waits for the Agent Run to settle, then unmounts | unmounts |
 
 | Exit code | Meaning |
 | --- | --- |
 | 0 | quit with two presses of the cancel key |
-| 130 | ended by `SIGINT` or `SIGTERM`; a running session settled first |
+| 130 | ended by `SIGINT` or `SIGTERM`; a running Agent Run settled first |
 | 2 | invalid invocation or configuration, or no terminal; nothing was opened |
 | 70 | internal Coding Agent error |
 
-A signal that comes while a session is still opening does not wait for it past the Cancellation
-Grace Period, because an open cannot be cancelled: the run ends with 130, and a session that opens
-after that is cancelled in place of started. A submission while the run waits for a session to
-settle is refused with a notice, and the signal's name is the cancellation reason in the transcript.
+A signal that comes while an Agent Run is still opening does not wait for it past the
+Cancellation Grace Period, because an open cannot be cancelled: the run ends with 130, and an Agent
+Run that opens after that is cancelled in place of started. A submission while the run waits for an
+Agent Run to settle is refused with a notice, and the signal's name is the cancellation reason in
+the transcript.
 
-The TUI shows the outcome of every Agent Session, a failed one included, and none of them changes
+The TUI shows the outcome of every Agent Run, a failed one included, and none of them changes
 the exit code: it describes how the run ended, not what the Coding Task achieved.
 
-The host reads a snapshot of the Agent Session and follows its Session Events from the snapshot's
+The host reads a snapshot of the Agent Run and follows its Run Events from the snapshot's
 last sequence, before it dispatches `start`, so no event is lost in between (ADR 0002 §7). A failure
-while showing one event never reaches the Agent Session: that event is lost from the display, with
+while showing one event never reaches the Agent Run: that event is lost from the display, with
 a notice. A draw that fails gets no notice, because a terminal that cannot draw the transcript
 cannot draw a notice either, and the next draw shows the whole model again. An event stream that
-fails ends the display's following of that session with a notice, but the session still counts as
-running until it settles. The credential is replaced by `[redacted]` in everything the transcript
+fails ends the display's following of that Agent Run with a notice, but the Agent Run still counts
+as running until it settles. The credential is replaced by `[redacted]` in everything the transcript
 shows.
 
 The interactive path registers the same four tools and the same Verification Policy as
@@ -126,14 +127,14 @@ becomes the cancellation reason in the Agent Result.
 - A run whose active work quiesces within the Cancellation Grace Period settles `cancelled` and
   exits 130, with the three files written. The Agent Result reports `workspaceChanged` and
   `partialChangesPossible`.
-- A signal that arrives before the Coding Task starts cancels the Agent Session in place of
+- A signal that arrives before the Coding Task starts cancels the Agent Run in place of
   starting it. The run makes no Model Turn and still exits 130 with the three files.
 - A run whose active work ignores the cancellation past the grace period settles `failed` with
   `CANCELLATION_TIMEOUT` and exits 1, with the three files written.
-- Only the first signal cancels. A later one changes nothing while the Agent Session is cancelling
+- Only the first signal cancels. A later one changes nothing while the Agent Run is cancelling
   or writing `result.json`.
 - `src/cli.ts` listens for the signals from just before the ancestor check until `runHeadless`
-  returns. A signal before the Agent Session opens cancels it as soon as it opens; a second one
+  returns. A signal before the Agent Run opens cancels it as soon as it opens; a second one
   before then ends the process by that signal, so a run stuck in configuration can still be
   stopped. A signal outside that window ends the process in the default way.
 
@@ -152,7 +153,7 @@ A run writes three files into `--output-dir`
 ([ADR 0005 §4](../../docs/adr/0005-terminalbench-evaluation-protocol.md)). An evaluator reads the
 outcome from `result.json`, rebuilds the trajectory from `events.jsonl`, and reproduces the run
 from `run.json`. It does not need standard output. `src/run-files.ts` writes all three, and each
-carries `"schemaVersion": 1`.
+carries `"schemaVersion": 2`.
 
 **`run.json`** is written before the Coding Task starts. It is one JSON object with these fields:
 
@@ -163,27 +164,27 @@ carries `"schemaVersion": 1`.
 | `sampling` | `maxOutputTokens` and `temperature`. `null` means the provider's default |
 | `transportRetryBound` | how often `@coding-agent/ai` re-issues a request before its stream opens |
 | `repoRoot` | the canonical Repository Root |
-| `profile`, `limits` | the Evaluation Profile and its resolved Session Limits |
+| `profile`, `limits` | the Evaluation Profile and its resolved Run Limits |
 | `approvalPolicy` | the Approval Policy |
 | `verification` | `command`, or `null` when no command is configured |
 | `tools` | the name of each registered tool |
 | `systemPrompt` | the assembled system prompt |
 
-**`events.jsonl`** holds one Session Event on each line, in the envelope of
+**`events.jsonl`** holds one Run Event on each line, in the envelope of
 [ADR 0002](../../docs/adr/0002-agent-session-state-machine-and-event-protocol.md) with
 `schemaVersion` added. The run appends each line when the event arrives. It leaves out
 `assistant_content_delta`, `tool_execution_progress` and `verification_progress`, because the
 completion events carry the final message, the Tool Result and the evidence. The other events keep
 their `sequence`, so a gap in the numbers marks the events that were left out.
 
-The Agent Session never waits for the log. A killed process can therefore lose the last events. A
-log is complete only if its last line is a `session_settled` event. A reader must treat any other
+The Agent Run never waits for the log. A killed process can therefore lose the last events. A
+log is complete only if its last line is a `run_settled` event. A reader must treat any other
 log as truncated, and must not take its last event as the outcome of the run. Each line is written
 when its event arrives, so a reader can also catch a line half written, during a run or after a
 kill. Only a line that ends in a newline is a whole event, and a reader ignores the text after the
 last newline.
 
-**`result.json`** is written after the Agent Session settles and the log has written its last
+**`result.json`** is written after the Agent Run settles and the log has written its last
 event. It holds `exitCode`, `result` (the Agent Result) and `finishedAt` (the time the run received
 the Agent Result, in ISO 8601).
 
@@ -216,7 +217,7 @@ These rules apply to all three files:
 - The credential value is never written. Each string and each property name goes through the same
   replacement as the printed text, so the value appears as `[redacted]`.
 - When the output directory holds files of an earlier run, the run removes the old `result.json`
-  before it writes `run.json`, and it empties `events.jsonl`. It does this once the Agent Session
+  before it writes `run.json`, and it empties `events.jsonl`. It does this once the Agent Run
   is open. A run that is refused before that point, with exit code 2 or 70, leaves the directory as
   it was, so the files of the earlier run stay.
 - `run.json` and `result.json` are each written to `<name>.partial` and renamed into place, so a
@@ -224,14 +225,14 @@ These rules apply to all three files:
   ignores.
 - When a file cannot be written, the run exits 70. A failure before the Coding Task starts ends
   the run before its first Model Turn, and the run removes the `run.json` and `events.jsonl` it
-  wrote. A failure in the log during the task shows only after the session settles. The run then
-  still writes `result.json`, with `exitCode` 70, and the log has no `session_settled`, so a reader
+  wrote. A failure in the log during the task shows only after the Agent Run settles. The run then
+  still writes `result.json`, with `exitCode` 70, and the log has no `run_settled`, so a reader
   treats it as truncated. A failure to write `result.json` leaves none. Either way the run still
   prints the final message and the outcome.
 
-### Session factory
+### Agent Run factory
 
-`openSession` in `src/session-factory.ts` is the one place that builds an Agent Session.
+`openRun` in `src/agent-run-factory.ts` is the one place that builds an Agent Run.
 `runHeadless` uses it now, and the interactive entry point will use it too. It builds the Workspace
 Resolver, the tool registry, the system prompt, the Verification Policy and the `ModelPort`, and it
 supplies the clock and the identifiers:
@@ -239,12 +240,12 @@ supplies the clock and the identifiers:
 - It registers `read`, `write`, `edit` and `bash` through `createDefaultTools`.
 - It builds the Verification Policy with `createVerificationPolicy`, from the configured command or
   `null` when none is configured (see [Verification command](#verification-command)). The policy
-  runs the command through a Verification Runner bound to the session's Workspace Resolver.
+  runs the command through a Verification Runner bound to the Agent Run's Workspace Resolver.
 - The entry point passes in the child launcher. `src/cli.ts` creates it after
   [process hardening](#process-hardening), with the credential names `@coding-agent/ai` declares, so
   every `bash` and Verification child starts without a provider credential.
 
-When the factory opens no Agent Session, the run removes the output directory it created, as a
+When the factory opens no Agent Run, the run removes the output directory it created, as a
 configuration error does.
 
 ### Named task
@@ -290,7 +291,7 @@ ADR 0005 §3 has no flag for that. The injection uses Bun, not Coding Agent:
   starts Coding Agent sets its environment, so a Tool Call cannot redirect the key. The credential
   isolation test in `evaluation/terminalbench` uses this variable to reach its fake model server.
 - The end-to-end test also preloads `tests/support/fixed-clock-and-ids.ts`. It replaces
-  `src/clock-and-ids.ts`, which supplies the session's clock and identifiers and the time in
+  `src/clock-and-ids.ts`, which supplies the Agent Run's clock and identifiers and the time in
   `result.json`, with a clock that never moves and identifiers that count from 1. Two replays then
   log the same times and identifiers.
 
@@ -336,7 +337,7 @@ Surrounding whitespace is ignored, and a blank variable counts as unset, so `goo
 `readEnvCredential` lookup.
 
 `opencode` is OpenCode's Go subscription gateway (ADR 0007), not its Zen plan. Each request names
-the client with a `coding-agent/<version>` user agent, and every request of one Agent Session
+the client with a `coding-agent/<version>` user agent, and every request of one Agent Run
 carries the same `x-opencode-session` header, which is what lets the gateway reuse its prompt
 cache.
 
@@ -356,16 +357,16 @@ choice, never the repository's:
 The command runs after each Candidate Completion, with the timeout of a `bash` Tool Call (30 s),
 and its output is bounded to 40 KiB:
 
-- exit code 0: the Agent Session succeeds;
+- exit code 0: the Agent Run succeeds;
 - any other exit code: the next Model Turn gets a `[Verification Failed]` message with the command,
   the exit code and the output, and the model keeps working;
 - a timeout, or a command that could not run, for example on a shell syntax error or exit code 126
-  or 127: the Agent Session fails with `VERIFICATION_FAILED`.
+  or 127: the Agent Run fails with `VERIFICATION_FAILED`.
 
 The interactive path and the end-to-end test configure a command this way. The headless evaluation
 path leaves it unset ([ADR 0005 §5](../../docs/adr/0005-terminalbench-evaluation-protocol.md)).
 
-### Session limits
+### Run Limits
 
 The `default` profile uses the ADR 0003 §4 limits: 30 Model Turns, 100 Tool Calls, 600,000 ms and 3
 consecutive recoverable failures, with a 5,000 ms cancellation grace. The grace is long enough for a
@@ -376,7 +377,7 @@ The `terminalbench` profile uses the ADR 0005 §5 limits: 250 Model Turns, 1,000
 3,600,000 ms and 10 consecutive recoverable failures. Its cancellation grace is the same as in
 `default`. A profile changes only these limits. The system prompt, Project Instructions discovery, the
 Scratchpad convention, the tools and the model settings are the same under both profiles. The values
-live in `SESSION_LIMITS_BY_PROFILE` in `src/run-config.ts`, so a build fixes them, and no flag or
+live in `RUN_LIMITS_BY_PROFILE` in `src/run-config.ts`, so a build fixes them, and no flag or
 environment variable changes them. `run.json` records the profile name and its resolved limits.
 
 ### Model settings
@@ -400,10 +401,10 @@ to every provider except Google, whose API cannot honour it; Agent Core still ac
 
 ### System prompt
 
-Every Agent Session starts from one system prompt. `assembleSystemPrompt` in
+Every Agent Run starts from one system prompt. `assembleSystemPrompt` in
 `src/system-prompt.ts` builds it
 ([ADR 0003 §1 and §2](../../docs/adr/0003-mvp-context-planning-verification-and-session-memory.md)).
-The session factory calls it and passes the prompt to `openAgentSession`. The prompt contains these
+The Agent Run factory calls it and passes the prompt to `openAgentRun`. The prompt contains these
 parts:
 
 - the planning requirement, which asks for a numbered plan before the first mutating Tool Call
@@ -437,7 +438,7 @@ If a candidate is missing, the Coding Agent tries the next one. If a candidate i
 empty, or is a link to nothing usable, the Coding Agent also tries the next one. It then adds the
 candidate and the reason to the `skipped` list, and the run prints each entry on standard error. If
 the file found cannot be read, for example because of its permissions, `assembleSystemPrompt`
-returns `INVALID_CONFIGURATION`, and the session factory opens no Agent Session. The CLI exits 2 on
+returns `INVALID_CONFIGURATION`, and the Agent Run factory opens no Agent Run. The CLI exits 2 on
 this error, as it does for the configuration errors below.
 
 The packaged instructions are 32,768 UTF-8 bytes at most. A larger file is cut at a character
@@ -460,7 +461,7 @@ end them early. The escaped form counts toward the limit. The rest of the conten
 
 ### Configuration errors
 
-Each of these exits 2 before any Agent Session opens, with the reason on standard error:
+Each of these exits 2 before any Agent Run opens, with the reason on standard error:
 
 - a model the provider does not list;
 - no credential in the provider's variables (a blank value counts as none);

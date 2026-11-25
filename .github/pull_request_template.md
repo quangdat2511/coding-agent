@@ -29,7 +29,7 @@ Thuật ngữ đã có thì dùng đúng như trong CONTEXT.md. Khái niệm m�
 <!--
 Một ví dụ cụ thể cho thấy hành vi mới. Có thể là:
 - Output TUI/CLI: ảnh, asciinema hoặc GIF.
-- Tool Result hoặc chuỗi Session Event.
+- Tool Result hoặc chuỗi Run Event.
 - Input và output của một hàm public.
 Nếu PR sửa hành vi có sẵn thì để cả trước và sau.
 PR không có hành vi mới (chỉ sửa docs, refactor, config) thì ghi "Không có: <lý do>", không xóa mục này.
@@ -49,7 +49,7 @@ Bản đồ diff theo file hoặc module, không kể lại code từng dòng.
 <!--
 Mục này bắt buộc trong ba trường hợp sau, các trường hợp khác thì xóa mục này.
 - PR thêm hoặc đổi luồng chạy qua từ 2 thành phần trở lên.
-- PR thêm hoặc đổi trạng thái của Agent Session.
+- PR thêm hoặc đổi trạng thái của Agent Run.
 - PR có vấn đề về thứ tự xử lý hoặc chạy đồng thời.
 
 - Chỉ vẽ phần PR thêm hoặc đổi. Nếu sửa một luồng đã có thì vẽ trước và sau, hoặc tô đậm node mới
@@ -60,7 +60,7 @@ Mục này bắt buộc trong ba trường hợp sau, các trường hợp khác
   - `sequenceDiagram`: điều cần thấy là thứ tự các thành phần gọi nhau (Agent Core, ModelPort,
     Model Provider, Coding Agent, Full-screen TUI). Nếu dùng `alt`, `opt`, `loop` thì ghi điều
     kiện thành câu rõ ràng.
-  - `stateDiagram-v2`: thêm hoặc đổi trạng thái của Agent Session.
+  - `stateDiagram-v2`: thêm hoặc đổi trạng thái của Agent Run.
 - Khoảng 15 node trở xuống, lớn hơn thì tách thành nhiều sơ đồ. Ánh xạ lỗi sang mã lỗi thì viết
   thành bảng, không vẽ.
 - Dùng thuật ngữ trong CONTEXT.md và ADR. Mở tab Preview để chắc sơ đồ hiển thị được.

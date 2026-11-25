@@ -20,7 +20,7 @@ job's task count, which its manifest derives from the dataset's task list rather
 protocol constant ([ADR 0008](./0008-evaluation-dataset-as-a-job-parameter.md)); the cost figures
 below are computed at the default pin. The model must resolve through
 `ProviderDirectory.getModel`, which reads `packages/ai/src/providers/<provider>.models.json`,
-because an unlisted id is refused with exit 2 before a session opens. `@coding-agent/ai` counts
+because an unlisted id is refused with exit 2 before an Agent Run opens. `@coding-agent/ai` counts
 reasoning tokens but never requests a reasoning effort, so the job runs at each provider's default,
 while the published TerminalBench
 figures are produced at each vendor's maximum effort inside the vendor's own harness. No paid
@@ -107,12 +107,12 @@ Zen plan — with **`deepseek-v4.1-flash`**.
    subscription's allowance is what makes such an experiment affordable later, without amending this
    record.
 
-5. **Long-session reliability is accepted as unmeasured, and made visible.** No independent
+5. **Long-horizon reliability is accepted as unmeasured, and made visible.** No independent
    long-horizon result exists for this model: it appears on no Terminal-Bench row, and a vendor
    benchmark would not be evidence of 250-turn persistence. The choice does control truncation
    pressure — 1M context and an output cap far beyond a single turn — and DeepSeek documents
    thinking as the model's default mode, which the harness neither requests nor disables.
-   A model that stops early is not hidden: the harness ends the session at the first Candidate
+   A model that stops early is not hidden: the harness ends the Agent Run at the first Candidate
    Completion, so an early stop appears in the per-task table as a failure rather than as a limit
    reached. The three-task smoke job bounds the cost of a bad run and shows whether the agent stops
    early on three short CPU tasks; it cannot establish 250-turn persistence, and this record does
@@ -128,7 +128,7 @@ Zen plan — with **`deepseek-v4.1-flash`**.
    OpenAI SDK appends `/chat/completions` itself; the `x-opencode-session` header in place of
    today's `x-session-id`; and a `coding-agent/<version>` user agent — none of which it does
    today. The session header is also what lets Go reuse its prompt cache, which the cost model above
-   assumes, so its value must stay stable for the whole Agent Session and differ between sessions: a
+   assumes, so its value must stay stable for the whole Agent Run and differ between Agent Runs: a
    per-turn UUID would defeat the cache and price the typical job's input as uncached, about $6.2
    instead of $2.6 off-peak.
    `opencode` then joins the shared conformance suite as a sixth member of the tier-1 provider
@@ -226,3 +226,8 @@ On 2026-11-17, [CDA-114](https://datn-fit-hcmus.atlassian.net/browse/CDA-114) am
   ([ADR 0008](./0008-evaluation-dataset-as-a-job-parameter.md)). The provider and model choice is
   unchanged and applies to any admissible dataset. A job on another dataset is a separate
   experiment, and its result is not pooled with this one's.
+
+On 2026-11-24, [CDA-147](https://datn-fit-hcmus.atlassian.net/browse/CDA-147) amended this record:
+
+- **Terminology**: Agent Session is renamed Agent Run, following ADR 0002 §8, and this record uses
+  the new name in place. The `x-opencode-session` header keeps its name. Behavior is unchanged.

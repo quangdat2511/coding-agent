@@ -23,8 +23,8 @@ INSTRUCTION_PATH = "/installed-agent/instruction.md"
 # the environment's agent log directory after the run, so the files reach the trial directory.
 OUTPUT_DIR_NAME = "coding-agent"
 
-# ADR 0005 §3: 0, 1 and 130 mean that the Agent Session settled as succeeded, failed or cancelled.
-# 2 and 70 mean that no Agent Session settled, and any other code is outside the contract.
+# ADR 0005 §3: 0, 1 and 130 mean that the Agent Run settled as succeeded, failed or cancelled.
+# 2 and 70 mean that no Agent Run settled, and any other code is outside the contract.
 SETTLED_EXIT_CODES = frozenset({0, 1, 130})
 
 # The `--provider` values of ADR 0005 §3 and the variables that each one reads its key from.
@@ -143,6 +143,6 @@ def build_command(choice: ModelChoice, environment_logs_dir: PurePosixPath) -> s
     return f"exec {shlex.join(argv)}"
 
 
-def session_settled(return_code: int) -> bool:
-    """Whether the exit code means that the Agent Session settled (ADR 0005 §3)."""
+def run_settled(return_code: int) -> bool:
+    """Whether the exit code means that the Agent Run settled (ADR 0005 §3)."""
     return return_code in SETTLED_EXIT_CODES

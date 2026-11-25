@@ -9,9 +9,9 @@ into actions and evidence.
 A natural-language objective to inspect or change one selected code repository.
 _Avoid_: Prompt, chat, job
 
-**Agent Session**:
-The in-memory lifecycle that executes exactly one Coding Task.
-_Avoid_: Conversation, persistent session
+**Agent Run**:
+The in-memory lifecycle that executes exactly one Coding Task. A Session holds many Agent Runs.
+_Avoid_: Session, conversation, Agent Session
 
 **Model Turn**:
 One model request and streamed response together with the resolution of every Tool Call produced
@@ -19,12 +19,12 @@ by that response.
 _Avoid_: Message, prompt, loop iteration
 
 **Agent State**:
-The authoritative current snapshot of an Agent Session, including its lifecycle, transcript,
+The authoritative current snapshot of an Agent Run, including its lifecycle, transcript,
 active work, and outcome.
 _Avoid_: Runtime state, UI state, event log
 
-**Session Event**:
-An ordered observation that a committed change occurred within an Agent Session.
+**Run Event**:
+An ordered observation that a committed change occurred within an Agent Run.
 _Avoid_: Provider event, UI event, replay command
 
 **Candidate Completion**:
@@ -33,12 +33,12 @@ passed Verification.
 _Avoid_: Final answer, successful result
 
 **Agent Result**:
-The single terminal outcome of an Agent Session, including its completion status and supporting
+The single terminal outcome of an Agent Run, including its completion status and supporting
 evidence or failure reason.
 _Avoid_: Exit code, final message, summary
 
-**Session Limits**:
-The bounded runtime constraints (model turns, tool calls, active execution duration, and consecutive recoverable failures) enforced on an Agent Session to guarantee termination.
+**Run Limits**:
+The bounded runtime constraints (model turns, tool calls, active execution duration, and consecutive recoverable failures) enforced on an Agent Run to guarantee termination.
 _Avoid_: Quotas, timeouts, guardrails
 
 **Repository Root**:
@@ -82,7 +82,7 @@ Evidence gathered after a change to determine whether the Coding Task's result i
 _Avoid_: Testing, validation
 
 **Verification Policy**:
-The injected rule set that evaluates a Candidate Completion and decides whether the Agent Session succeeds, continues with feedback, or fails. A Verification run ended by Cancellation is reported as cancelled rather than decided.
+The injected rule set that evaluates a Candidate Completion and decides whether the Agent Run succeeds, continues with feedback, or fails. A Verification run ended by Cancellation is reported as cancelled rather than decided.
 _Avoid_: Test runner, evaluation script, completion validator
 
 **Verification Runner**:
@@ -94,7 +94,7 @@ Structured observations (such as command execution records, exit codes, and outp
 _Avoid_: Test logs, proof, verification data
 
 **Project Instructions**:
-Repository-level guidance documents (such as `AGENTS.md`) loaded into the initial session context to guide model behavior.
+Repository-level guidance documents (such as `AGENTS.md`) loaded into the initial context of an Agent Run to guide model behavior.
 _Avoid_: System prompt, context file, rules
 
 **Scratchpad**:
@@ -102,7 +102,7 @@ A temporary in-repository workspace or file (such as `.scratch/`) used by the ag
 _Avoid_: Memory, workspace cache, draft directory
 
 **Cancellation**:
-The commanded termination of an Agent Session from any nonterminal state, which halts further execution, signals active adapters, and quiesces before settling.
+The commanded termination of an Agent Run from any nonterminal state, which halts further execution, signals active adapters, and quiesces before settling.
 _Avoid_: Abort, stop, kill, interruption
 
 **Quiescence**:
@@ -110,9 +110,9 @@ The state where all in-flight asynchronous effects (model streaming, tool execut
 _Avoid_: Inactivity, idle, drain
 
 **Cancellation Grace Period**:
-The time window an Agent Session allows active effects to quiesce after cancellation before forcefully settling as failed with `CANCELLATION_TIMEOUT`.
+The time window an Agent Run allows active effects to quiesce after cancellation before forcefully settling as failed with `CANCELLATION_TIMEOUT`.
 _Avoid_: Cancellation timeout, abort window, grace delay
 
 **Skipped Tool Call**:
-An unstarted queued Tool Call that is terminated with reason `CANCELLED` (or failure code) without executing or producing a Tool Result because the session is terminating.
+An unstarted queued Tool Call that is terminated with reason `CANCELLED` (or failure code) without executing or producing a Tool Result because the Agent Run is terminating.
 _Avoid_: Cancelled call, dropped call, abandoned call

@@ -18,10 +18,10 @@ EVENTS_FILE = "events.jsonl"
 RESULT_FILE = "result.json"
 
 # ADR 0005 §4: all three files carry this schema version.
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
-# The Session Events that the adapter reads, from packages/agent-core/src/events.ts.
-TASK_EVENT = "session_started"
+# The Run Events that the adapter reads, from packages/agent-core/src/events.ts.
+TASK_EVENT = "run_started"
 TURN_STARTED_EVENT = "model_turn_started"
 TURN_COMPLETED_EVENT = "model_turn_completed"
 MESSAGE_COMPLETED_EVENT = "assistant_message_completed"
@@ -29,7 +29,7 @@ CALL_QUEUED_EVENT = "tool_call_queued"
 CALL_COMPLETED_EVENT = "tool_call_completed"
 FEEDBACK_EVENT = "verification_completed"
 LIMIT_REACHED_EVENT = "runtime_limit_reached"
-SETTLED_EVENT = "session_settled"
+SETTLED_EVENT = "run_settled"
 
 
 class RunLogError(ValueError):
@@ -47,10 +47,10 @@ class RunRecord:
 
 
 @dataclass(frozen=True)
-class SessionEvent:
+class RunEvent:
     """One line of events.jsonl, in the envelope of ADR 0002."""
 
-    session_id: str
+    run_id: str
     sequence: int
     occurred_at: str
     type: str
@@ -78,20 +78,20 @@ class RunLog:
     """The files of one run, as the adapter reads them."""
 
     record: RunRecord
-    events: tuple[SessionEvent, ...]
+    events: tuple[RunEvent, ...]
     # The Agent Result from result.json, or from the settled event when that file is missing.
     agent_result: Mapping[str, Any] | None
 
     @property
-    def session_id(self) -> str | None:
-        return self.events[0].session_id if self.events else None
+    def run_id(self) -> str | None:
+        return self.events[0].run_id if self.events else None
 
     @property
     def truncated(self) -> bool:
-        """Whether the log stops before the session settled (ADR 0005 §4).
+        """Whether the log stops before the Agent Run settled (ADR 0005 §4).
 
         The writer is an ordinary consumer that the producer never awaits, so a killed process
-        loses the tail. A log that does not end with `session_settled` is truncated.
+        loses the tail. A log that does not end with `run_settled` is truncated.
         """
         return not self.events or self.events[-1].type != SETTLED_EVENT
 
@@ -102,7 +102,7 @@ class RunLog:
         The Agent Result is the authority when there is one. A killed process loses the tail of the
         log and never writes result.json, so the usage of each completed Model Turn is summed then,
         which is the case that ADR 0005 §6 sends to the events. A log truncated by a failed append
-        can still have a result.json, and that file is the more complete record of the session.
+        can still have a result.json, and that file is the more complete record of the Agent Run.
         """
         if self.agent_result is not None:
             return tokens_of(self.agent_result.get("usage"))
@@ -113,12 +113,12 @@ class RunLog:
 
     @property
     def model_turns(self) -> int:
-        """How many Model Turns the session started."""
+        """How many Model Turns the Agent Run started."""
         return sum(1 for _ in events_of_type(self.events, TURN_STARTED_EVENT))
 
     @property
     def tool_calls(self) -> int:
-        """How many Tool Calls the session queued."""
+        """How many Tool Calls the Agent Run queued."""
         return sum(1 for _ in events_of_type(self.events, CALL_QUEUED_EVENT))
 
 
@@ -132,7 +132,7 @@ def load_run_log(directory: Path) -> RunLog:
     return RunLog(record=record, events=events, agent_result=agent_result)
 
 
-def events_of_type(events: Iterable[SessionEvent], type_name: str) -> Iterator[SessionEvent]:
+def events_of_type(events: Iterable[RunEvent], type_name: str) -> Iterator[RunEvent]:
     """The events of one type, in the order the log holds them."""
     return (event for event in events if event.type == type_name)
 
@@ -187,7 +187,7 @@ def _read_record(path: Path) -> RunRecord:
     )
 
 
-def _read_events(path: Path) -> tuple[SessionEvent, ...]:
+def _read_events(path: Path) -> tuple[RunEvent, ...]:
     raw = _read_optional(path)
     if raw is None:
         return ()
@@ -199,7 +199,7 @@ def _read_events(path: Path) -> tuple[SessionEvent, ...]:
     # U+2028 and U+0085, which JSON.stringify leaves inside a string.
     lines = raw.split(b"\n")
     last = max((index for index, line in enumerate(lines) if line.strip()), default=-1)
-    events: list[SessionEvent] = []
+    events: list[RunEvent] = []
     for index, line in enumerate(lines):
         if not line.strip():
             continue
@@ -209,7 +209,7 @@ def _read_events(path: Path) -> tuple[SessionEvent, ...]:
             if index == last:
                 return tuple(events)
             raise RunLogError(
-                f"{path} line {index + 1} is not a whole Session Event: {exc}"
+                f"{path} line {index + 1} is not a whole Run Event: {exc}"
             ) from exc
         if not isinstance(data, Mapping):
             if index == last:
@@ -221,7 +221,7 @@ def _read_events(path: Path) -> tuple[SessionEvent, ...]:
             if index == last:
                 return tuple(events)
             raise RunLogError(
-                f"{path} line {index + 1} does not have the Session Event envelope"
+                f"{path} line {index + 1} does not have the Run Event envelope"
             )
         events.append(event)
     return tuple(events)
@@ -273,8 +273,8 @@ def _parse_json(text: str, path: Path) -> Any:
         raise RunLogError(f"{path} is not valid JSON: {exc}") from exc
 
 
-def _settled_result(events: tuple[SessionEvent, ...]) -> Mapping[str, Any] | None:
-    """The Agent Result that `session_settled` carries, when result.json is missing."""
+def _settled_result(events: tuple[RunEvent, ...]) -> Mapping[str, Any] | None:
+    """The Agent Result that `run_settled` carries, when result.json is missing."""
     if not events or events[-1].type != SETTLED_EVENT:
         return None
     result = events[-1].data.get("result")
@@ -301,22 +301,22 @@ def _require_schema_version(
     )
 
 
-def _event_of(data: Mapping[str, Any]) -> SessionEvent | None:
-    session_id = data.get("sessionId")
+def _event_of(data: Mapping[str, Any]) -> RunEvent | None:
+    run_id = data.get("runId")
     sequence = data.get("sequence")
     occurred_at = data.get("occurredAt")
     type_name = data.get("type")
     event_data = data.get("data")
     if (
-        not isinstance(session_id, str)
+        not isinstance(run_id, str)
         or type(sequence) is not int
         or not isinstance(occurred_at, str)
         or not isinstance(type_name, str)
         or not isinstance(event_data, Mapping)
     ):
         return None
-    return SessionEvent(
-        session_id=session_id,
+    return RunEvent(
+        run_id=run_id,
         sequence=sequence,
         occurred_at=occurred_at,
         type=type_name,
