@@ -59,6 +59,20 @@ function redacted(value: unknown, redact: Redact): unknown {
   );
 }
 
+// Structured tool details are for interactive display only and stay out of events.jsonl.
+function withoutToolDetails(event: RunEvent): RunEvent {
+  if (
+    event.type !== "tool_call_completed" ||
+    event.data.outcome === "skipped" ||
+    event.data.result === undefined ||
+    !("details" in event.data.result)
+  ) {
+    return event;
+  }
+  const { details: _omitted, ...result } = event.data.result;
+  return { ...event, data: { ...event.data, result } };
+}
+
 export async function openRunFiles(
   outputDir: string,
   run: RunRecord,
@@ -93,7 +107,7 @@ export async function openRunFiles(
     async logEvents(events) {
       for await (const event of events) {
         if (OMITTED_EVENTS.has(event.type)) continue;
-        await log.appendFile(serialize(event));
+        await log.appendFile(serialize(withoutToolDetails(event)));
       }
     },
     writeResult: (result) => writeDocument("result.json", result),

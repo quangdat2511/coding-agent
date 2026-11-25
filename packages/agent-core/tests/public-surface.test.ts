@@ -170,6 +170,24 @@ describe("tool ports", () => {
       expect(code).toBe("NOT_FOUND");
     }
   });
+
+  it("allows structured JSON details only on a successful tool outcome (compile-time)", () => {
+    const ok: ToolOutcome = {
+      isError: false,
+      content: "ok",
+      details: { matchLimitReached: 100, linesTruncated: true },
+    };
+    const failedWithDetails: ToolOutcome = {
+      isError: true,
+      content: "boom",
+      error: { code: "NON_ZERO_EXIT", message: "boom" },
+      // @ts-expect-error only successful outcomes can carry details
+      details: { exitCode: 1 },
+    };
+
+    expect(ok.isError).toBe(false);
+    expect(failedWithDetails.isError).toBe(true);
+  });
 });
 
 describe("injected ports", () => {

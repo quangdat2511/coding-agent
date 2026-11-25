@@ -114,12 +114,19 @@ export type ToolExecutionProgressEvent = RunEventEnvelope<
   { toolCallId: string; update: ToolProgress }
 >;
 
+// Carries the whole ToolResult, including structured details when present. Only successful
+// results can carry details.
 export type ToolCallCompletedEvent = RunEventEnvelope<
   "tool_call_completed",
   | {
       toolCallId: string;
-      outcome: "succeeded" | "failed" | "denied" | "cancelled";
+      outcome: "succeeded";
       result?: ToolResult;
+    }
+  | {
+      toolCallId: string;
+      outcome: "failed" | "denied" | "cancelled";
+      result?: Omit<ToolResult, "details">;
     }
   | { toolCallId: string; outcome: "skipped"; reason: SkipReason }
 >;

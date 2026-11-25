@@ -770,3 +770,278 @@ describe("executing auto-approved Tool Calls", () => {
     expect(result.usage).toEqual({ inputTokens: 10, outputTokens: 5 });
   });
 });
+
+describe("structured tool details", () => {
+  it("carries a valid details payload to tool_call_completed while keeping it out of the next model request", async () => {
+    const details = {
+      matchLimitReached: 100,
+      linesTruncated: true,
+      incomplete: { exitCode: 2 },
+      paths: ["src/a.ts", null],
+    };
+    const { run, model } = openTestRun({
+      tools: [
+        fakeTool({ name: "find", outcome: { isError: false, content: "src/a.ts", details } }),
+      ],
+      model: {
+        turns: [
+          toolCallTurn({ toolCallId: "call-1", name: "find", input: {} }),
+          textTurn("Fixed it."),
+        ],
+      },
+    });
+
+    await run.dispatch({ type: "start", task });
+    await run.result();
+    const events = await collect(run.events());
+
+    expect(resultOf(events, "tool_call-1")).toEqual({
+      toolCallId: "tool_call-1",
+      toolName: "find",
+      content: "src/a.ts",
+      isError: false,
+      details,
+      metadata: { durationMs: 0 },
+    });
+    expect(model.requests[1]?.context.messages.at(-1)).toEqual(
+      toolResultMessage("call-1", "src/a.ts", false),
+    );
+  });
+
+  it("snapshots details so mutating the tool's object afterwards cannot change the recorded result", async () => {
+    const nested = { exitCode: 2 };
+    const items = ["a.ts"];
+    const details: Record<string, unknown> = { incomplete: nested, items };
+    const tool: ExecutableTool = {
+      ...fakeTool({ name: "find" }),
+      async execute() {
+        return { isError: false, content: "a.ts", details } as ToolOutcome;
+      },
+    };
+    const { run } = openTestRun({
+      tools: [tool],
+      model: {
+        turns: [
+          toolCallTurn({ toolCallId: "call-1", name: "find", input: {} }),
+          textTurn("Fixed it."),
+        ],
+      },
+    });
+
+    await run.dispatch({ type: "start", task });
+    await run.result();
+
+    nested.exitCode = 99;
+    items.push("b.ts");
+    details.added = true;
+
+    const events = await collect(run.events());
+    expect(resultOf(events, "tool_call-1")?.details).toEqual({
+      incomplete: { exitCode: 2 },
+      items: ["a.ts"],
+    });
+  });
+
+  it.each<{ name: string; details: unknown }>([
+    { name: "null", details: null },
+    { name: "a string", details: "not-an-object" },
+    { name: "an array", details: ["a", "b"] },
+    { name: "a Date root", details: new Date("2026-11-25T00:00:00.000Z") },
+    { name: "a Map root", details: new Map([["a", 1]]) },
+    { name: "NaN", details: { count: Number.NaN } },
+    { name: "Infinity", details: { count: Number.POSITIVE_INFINITY } },
+    { name: "-Infinity", details: { count: Number.NEGATIVE_INFINITY } },
+    { name: "an undefined object property", details: { count: undefined } },
+    { name: "an undefined array element", details: { items: [1, undefined] } },
+    { name: "a function", details: { run: () => 1 } },
+    { name: "a toJSON function", details: { toJSON: () => ({ ok: true }) } },
+    { name: "a symbol", details: { tag: Symbol("x") } },
+    { name: "a bigint", details: { big: 1n } },
+    { name: "a nested Date", details: { at: new Date("2026-11-25T00:00:00.000Z") } },
+    {
+      name: "a circular reference",
+      details: (() => {
+        const circular: Record<string, unknown> = {};
+        circular.self = circular;
+        return circular;
+      })(),
+    },
+    {
+      name: "a throwing getter",
+      details: Object.defineProperty({}, "boom", {
+        enumerable: true,
+        get() {
+          throw new Error("getter exploded");
+        },
+      }),
+    },
+  ])(
+    "drops invalid details ($name) while keeping content and success status",
+    async ({ details }) => {
+      const tool: ExecutableTool = {
+        ...fakeTool({ name: "grep" }),
+        execute: async () => ({ isError: false, content: "match line 1", details }) as ToolOutcome,
+      };
+      const { run } = openTestRun({
+        tools: [tool],
+        model: {
+          turns: [
+            toolCallTurn({ toolCallId: "call-1", name: "grep", input: {} }),
+            textTurn("Fixed it."),
+          ],
+        },
+      });
+
+      await run.dispatch({ type: "start", task });
+      await run.result();
+      const events = await collect(run.events());
+      const result = resultOf(events, "tool_call-1");
+
+      expect(result).toEqual({
+        toolCallId: "tool_call-1",
+        toolName: "grep",
+        content: "match line 1",
+        isError: false,
+        metadata: { durationMs: 0 },
+      });
+      expect(result && "details" in result).toBe(false);
+    },
+  );
+
+  it("keeps details at exactly 40,960 UTF-8 bytes and drops details at 40,961 UTF-8 bytes", async () => {
+    // '{"t":""}' is 8 UTF-8 bytes; 'é' is 2 UTF-8 bytes (1 UTF-16 code unit).
+    // 20,476 * 2 = 40,952 bytes -> total 40,960 UTF-8 bytes (string length 20,484).
+    const exact = { t: "é".repeat(20_476) };
+    // 20,476 * 2 + 1 = 40,953 bytes -> total 40,961 UTF-8 bytes (still < 40,960 JS code units).
+    const over = { t: `${"é".repeat(20_476)}a` };
+
+    expect(Buffer.byteLength(JSON.stringify(exact), "utf8")).toBe(40_960);
+    expect(Buffer.byteLength(JSON.stringify(over), "utf8")).toBe(40_961);
+
+    const { run } = openTestRun({
+      tools: [
+        fakeTool({
+          name: "exact",
+          outcome: { isError: false, content: "ok-exact", details: exact },
+        }),
+        fakeTool({ name: "over", outcome: { isError: false, content: "ok-over", details: over } }),
+      ],
+      model: {
+        turns: [
+          toolCallTurn(
+            { toolCallId: "call-1", name: "exact", input: {} },
+            { toolCallId: "call-2", name: "over", input: {} },
+          ),
+          textTurn("Fixed it."),
+        ],
+      },
+    });
+
+    await run.dispatch({ type: "start", task });
+    await run.result();
+    const events = await collect(run.events());
+
+    expect(resultOf(events, "tool_call-1")?.details).toEqual(exact);
+    const overResult = resultOf(events, "tool_call-2");
+    expect(overResult).toEqual({
+      toolCallId: "tool_call-2",
+      toolName: "over",
+      content: "ok-over",
+      isError: false,
+      metadata: { durationMs: 0 },
+    });
+    expect(overResult && "details" in overResult).toBe(false);
+  });
+
+  it("never carries details on a failed Tool Outcome even if attached at runtime", async () => {
+    const tool: ExecutableTool = {
+      ...fakeTool({ name: "failer" }),
+      execute: async () =>
+        ({
+          isError: true,
+          content: "failed",
+          error: { code: "NON_ZERO_EXIT", message: "exited 1" },
+          details: { exitCode: 1 },
+        }) as unknown as ToolOutcome,
+    };
+    const { run } = openTestRun({
+      tools: [tool],
+      model: {
+        turns: [
+          toolCallTurn({ toolCallId: "call-1", name: "failer", input: {} }),
+          textTurn("Fixed it."),
+        ],
+      },
+    });
+
+    await run.dispatch({ type: "start", task });
+    await run.result();
+    const events = await collect(run.events());
+    const result = resultOf(events, "tool_call-1");
+
+    expect(result?.isError).toBe(true);
+    expect(result && "details" in result).toBe(false);
+  });
+
+  it("leaves a call without details unchanged with no details key", async () => {
+    const { run } = openTestRun({
+      tools: [fakeTool({ name: "plain", outcome: { isError: false, content: "ok" } })],
+      model: {
+        turns: [
+          toolCallTurn({ toolCallId: "call-1", name: "plain", input: {} }),
+          textTurn("Fixed it."),
+        ],
+      },
+    });
+
+    await run.dispatch({ type: "start", task });
+    await run.result();
+    const events = await collect(run.events());
+    const result = resultOf(events, "tool_call-1");
+
+    expect(result).toEqual({
+      toolCallId: "tool_call-1",
+      toolName: "plain",
+      content: "ok",
+      isError: false,
+      metadata: { durationMs: 0 },
+    });
+    expect(result && "details" in result).toBe(false);
+  });
+
+  it("drops details without failing the call when reading outcome.details itself throws", async () => {
+    const tool: ExecutableTool = {
+      ...fakeTool({ name: "throwing-details" }),
+      execute: async () =>
+        Object.defineProperty({ isError: false, content: "ok" }, "details", {
+          enumerable: true,
+          get() {
+            throw new Error("details getter exploded");
+          },
+        }) as ToolOutcome,
+    };
+    const { run } = openTestRun({
+      tools: [tool],
+      model: {
+        turns: [
+          toolCallTurn({ toolCallId: "call-1", name: "throwing-details", input: {} }),
+          textTurn("Fixed it."),
+        ],
+      },
+    });
+
+    await run.dispatch({ type: "start", task });
+    await run.result();
+    const events = await collect(run.events());
+    const result = resultOf(events, "tool_call-1");
+
+    expect(result).toEqual({
+      toolCallId: "tool_call-1",
+      toolName: "throwing-details",
+      content: "ok",
+      isError: false,
+      metadata: { durationMs: 0 },
+    });
+    expect(result && "details" in result).toBe(false);
+  });
+});

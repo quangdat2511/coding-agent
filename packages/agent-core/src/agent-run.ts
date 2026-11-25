@@ -795,10 +795,15 @@ export function createAgentRun(config: OpenRunConfig, initial: ReadyState): Agen
           partialChangesPossible:
             state.partialChangesPossible || (outcome === "failed" && mutating),
         },
-        {
-          type: "tool_call_completed",
-          data: { toolCallId: toolCall.id, outcome, result },
-        },
+        outcome === "succeeded"
+          ? {
+              type: "tool_call_completed",
+              data: { toolCallId: toolCall.id, outcome, result },
+            }
+          : {
+              type: "tool_call_completed",
+              data: { toolCallId: toolCall.id, outcome, result },
+            },
       );
 
       const failureBreach = guard.checkAfterToolResult(state.counters);
@@ -891,6 +896,7 @@ export function createAgentRun(config: OpenRunConfig, initial: ReadyState): Agen
       content: outcome.content,
       isError: outcome.isError,
       ...(outcome.isError ? { error: outcome.error } : {}),
+      ...(!outcome.isError && outcome.details !== undefined ? { details: outcome.details } : {}),
       metadata: {
         durationMs,
         ...(approval === undefined ? {} : { approval }),

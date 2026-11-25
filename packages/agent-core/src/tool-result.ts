@@ -1,3 +1,5 @@
+import type { JsonValue } from "./json.ts";
+
 export type ToolErrorCode =
   | "SCHEMA_VIOLATION"
   | "NOT_FOUND"
@@ -28,6 +30,7 @@ export interface ToolResult {
   readonly content: string;
   readonly isError: boolean;
   readonly error?: ToolError;
+  readonly details?: Readonly<Record<string, JsonValue>>;
   readonly metadata?: {
     readonly durationMs: number;
     readonly approval?: {

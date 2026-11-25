@@ -247,6 +247,35 @@ describe("projectRunEvent", () => {
       });
     });
 
+    it("projects a Tool Result carrying details cleanly to the plain result", () => {
+      const completed = project([
+        started,
+        bashQueued,
+        bashStarted,
+        event("tool_call_completed", {
+          toolCallId: "c1",
+          outcome: "succeeded",
+          result: {
+            toolCallId: "c1",
+            toolName: "bash",
+            content: "1 pass",
+            isError: false,
+            details: { matchLimitReached: 100 },
+            metadata: { durationMs: 5 },
+          },
+        }),
+      ]);
+
+      expect(completed.transcript.at(-1)).toEqual({
+        kind: "tool_call",
+        id: "s1/tool_call/c1",
+        toolName: "bash",
+        summary: "bun test",
+        status: "succeeded",
+        result: { content: "1 pass", isError: false },
+      });
+    });
+
     it("show a Skipped Tool Call with its reason and without a Tool Result", () => {
       const model = project([
         started,
