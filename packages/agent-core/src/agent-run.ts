@@ -124,6 +124,8 @@ const toolResultMessage = (providerId: string, { content, isError }: ToolResult)
   content: [{ type: "tool_result", toolCallId: providerId, content, isError }],
 });
 
+const withoutDetails = ({ details: _omitted, ...rest }: ToolResult) => rest;
+
 function withoutPhase(state: AgentState): StateWithoutPhase {
   return {
     runId: state.runId,
@@ -802,7 +804,7 @@ export function createAgentRun(config: OpenRunConfig, initial: ReadyState): Agen
             }
           : {
               type: "tool_call_completed",
-              data: { toolCallId: toolCall.id, outcome, result },
+              data: { toolCallId: toolCall.id, outcome, result: withoutDetails(result) },
             },
       );
 

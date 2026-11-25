@@ -30,6 +30,7 @@ import type {
   ToolErrorCode,
   ToolOutcome,
   ToolRegistry,
+  ToolResult,
   UsageTotals,
   VerificationDecision,
   VerificationPolicy,
@@ -850,6 +851,30 @@ describe("run events", () => {
 
     expect(skipped.outcome).toBe("skipped");
     expect(withResult.outcome).toBe("skipped");
+  });
+
+  it("forbids passing a ToolResult variable carrying details to a non-succeeded completion (compile-time)", () => {
+    const resultWithDetails: ToolResult = {
+      toolCallId: "tool-1",
+      toolName: "find",
+      content: "src/a.ts",
+      isError: false,
+      details: { resultLimitReached: 100 },
+    };
+    const succeeded: DataOf<"tool_call_completed"> = {
+      toolCallId: "tool-1",
+      outcome: "succeeded",
+      result: resultWithDetails,
+    };
+    const failed: DataOf<"tool_call_completed"> = {
+      toolCallId: "tool-1",
+      outcome: "failed",
+      // @ts-expect-error non-succeeded tool_call_completed results cannot carry details
+      result: resultWithDetails,
+    };
+
+    expect(succeeded.outcome).toBe("succeeded");
+    expect(failed.outcome).toBe("failed");
   });
 
   it("lets a consumer read events after a snapshot sequence", async () => {

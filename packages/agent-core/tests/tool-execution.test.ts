@@ -1044,4 +1044,82 @@ describe("structured tool details", () => {
     });
     expect(result && "details" in result).toBe(false);
   });
+
+  it("preserves the validated content even if a details getter mutates outcome.content before throwing", async () => {
+    const tool: ExecutableTool = {
+      ...fakeTool({ name: "mutating-details" }),
+      execute: async () => {
+        const outcome: { isError: false; content: string; details?: unknown } = {
+          isError: false,
+          content: "original content",
+        };
+        Object.defineProperty(outcome, "details", {
+          enumerable: true,
+          get() {
+            outcome.content = "mutated content";
+            throw new Error("details getter exploded");
+          },
+        });
+        return outcome as ToolOutcome;
+      },
+    };
+    const { run } = openTestRun({
+      tools: [tool],
+      model: {
+        turns: [
+          toolCallTurn({ toolCallId: "call-1", name: "mutating-details", input: {} }),
+          textTurn("Fixed it."),
+        ],
+      },
+    });
+
+    await run.dispatch({ type: "start", task });
+    await run.result();
+    const events = await collect(run.events());
+    const result = resultOf(events, "tool_call-1");
+
+    expect(result).toEqual({
+      toolCallId: "tool_call-1",
+      toolName: "mutating-details",
+      content: "original content",
+      isError: false,
+      metadata: { durationMs: 0 },
+    });
+    expect(result && "details" in result).toBe(false);
+  });
+
+  it("stops early and drops a deeply shared DAG payload without hanging or failing the call", async () => {
+    // Depth 30 binary DAG would expand to > 10^9 nodes if cloned without an early byte budget.
+    let node: Record<string, unknown> = { leaf: "x" };
+    for (let depth = 0; depth < 30; depth += 1) {
+      node = { a: node, b: node };
+    }
+    const tool: ExecutableTool = {
+      ...fakeTool({ name: "dag" }),
+      execute: async () => ({ isError: false, content: "ok", details: node }) as ToolOutcome,
+    };
+    const { run } = openTestRun({
+      tools: [tool],
+      model: {
+        turns: [
+          toolCallTurn({ toolCallId: "call-1", name: "dag", input: {} }),
+          textTurn("Fixed it."),
+        ],
+      },
+    });
+
+    await run.dispatch({ type: "start", task });
+    await run.result();
+    const events = await collect(run.events());
+    const result = resultOf(events, "tool_call-1");
+
+    expect(result).toEqual({
+      toolCallId: "tool_call-1",
+      toolName: "dag",
+      content: "ok",
+      isError: false,
+      metadata: { durationMs: 0 },
+    });
+    expect(result && "details" in result).toBe(false);
+  });
 });
