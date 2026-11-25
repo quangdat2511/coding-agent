@@ -124,6 +124,8 @@ const toolResultMessage = (providerId: string, { content, isError }: ToolResult)
   content: [{ type: "tool_result", toolCallId: providerId, content, isError }],
 });
 
+const withoutDetails = ({ details: _omitted, ...rest }: ToolResult) => rest;
+
 function withoutPhase(state: AgentState): StateWithoutPhase {
   return {
     runId: state.runId,
@@ -795,10 +797,15 @@ export function createAgentRun(config: OpenRunConfig, initial: ReadyState): Agen
           partialChangesPossible:
             state.partialChangesPossible || (outcome === "failed" && mutating),
         },
-        {
-          type: "tool_call_completed",
-          data: { toolCallId: toolCall.id, outcome, result },
-        },
+        outcome === "succeeded"
+          ? {
+              type: "tool_call_completed",
+              data: { toolCallId: toolCall.id, outcome, result },
+            }
+          : {
+              type: "tool_call_completed",
+              data: { toolCallId: toolCall.id, outcome, result: withoutDetails(result) },
+            },
       );
 
       const failureBreach = guard.checkAfterToolResult(state.counters);
@@ -891,6 +898,7 @@ export function createAgentRun(config: OpenRunConfig, initial: ReadyState): Agen
       content: outcome.content,
       isError: outcome.isError,
       ...(outcome.isError ? { error: outcome.error } : {}),
+      ...(!outcome.isError && outcome.details !== undefined ? { details: outcome.details } : {}),
       metadata: {
         durationMs,
         ...(approval === undefined ? {} : { approval }),

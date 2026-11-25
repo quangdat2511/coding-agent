@@ -20,13 +20,14 @@ import {
 
 const task = { objective: "Fix the failing test" };
 
-const errorResult = (toolName: string, code: ToolErrorCode, message: string): ToolResult => ({
-  toolCallId: "tool_call-1",
-  toolName,
-  content: message,
-  isError: true,
-  error: { code, message },
-});
+const errorResult = (toolName: string, code: ToolErrorCode, message: string) =>
+  ({
+    toolCallId: "tool_call-1",
+    toolName,
+    content: message,
+    isError: true,
+    error: { code, message },
+  }) satisfies ToolResult;
 
 const unknownCalls = toolCallTurn(
   { toolCallId: "call-1", name: "frobnicate", input: {} },

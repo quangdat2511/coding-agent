@@ -77,14 +77,57 @@ describe("the event log", () => {
       event(1, "tool_call_completed", {
         toolCallId: "call-1",
         outcome: "failed",
-        result: { details: { [secret]: [`key ${secret}`], nested: { [`x-${secret}`]: 1 } } },
+        result: { error: { [secret]: [`key ${secret}`], nested: { [`x-${secret}`]: 1 } } },
       }),
     ]);
 
     expect(text).not.toContain(secret);
-    expect(JSON.parse(text).data.result.details).toEqual({
+    expect(JSON.parse(text).data.result.error).toEqual({
       "[redacted]": ["key [redacted]"],
       nested: { "x-[redacted]": 1 },
     });
+  });
+
+  it("removes result.details from tool_call_completed before writing events.jsonl, keeping its other fields", async () => {
+    const completed = event(1, "tool_call_completed", {
+      toolCallId: "call-1",
+      outcome: "succeeded",
+      result: {
+        toolCallId: "call-1",
+        toolName: "find",
+        content: "src/a.ts",
+        isError: false,
+        details: { resultLimitReached: 100, incomplete: { exitCode: 2 } },
+        metadata: { durationMs: 12 },
+      },
+    });
+    const text = await logged([completed]);
+    const parsed = JSON.parse(text.trimEnd());
+
+    expect(parsed).toEqual({
+      schemaVersion: 2,
+      runId: "run-1",
+      sequence: 1,
+      occurredAt: "2026-11-12T00:00:00.000Z",
+      type: "tool_call_completed",
+      data: {
+        toolCallId: "call-1",
+        outcome: "succeeded",
+        result: {
+          toolCallId: "call-1",
+          toolName: "find",
+          content: "src/a.ts",
+          isError: false,
+          metadata: { durationMs: 12 },
+        },
+      },
+    });
+    expect("details" in parsed.data.result).toBe(false);
+    // Does not mutate the original event object passed to logEvents.
+    expect(
+      completed.type === "tool_call_completed" &&
+        completed.data.outcome === "succeeded" &&
+        completed.data.result?.details,
+    ).toEqual({ resultLimitReached: 100, incomplete: { exitCode: 2 } });
   });
 });

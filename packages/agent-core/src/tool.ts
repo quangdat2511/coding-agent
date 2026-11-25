@@ -1,5 +1,6 @@
 import type { ToolDeclaration } from "@coding-agent/ai";
 import type { Static, TSchema } from "typebox";
+import type { JsonValue } from "./json.ts";
 import type { ToolError, ToolErrorCode, ToolProgress } from "./tool-result.ts";
 import type { RepoPath, WorkspaceResolver } from "./workspace.ts";
 
@@ -25,7 +26,12 @@ export type PrepareOutcome<S extends TSchema = TSchema> =
   | { readonly ok: false; readonly code: ToolErrorCode; readonly message: string };
 
 export type ToolOutcome =
-  | { readonly isError: false; readonly content: string; readonly truncated?: boolean }
+  | {
+      readonly isError: false;
+      readonly content: string;
+      readonly truncated?: boolean;
+      readonly details?: Readonly<Record<string, JsonValue>>;
+    }
   | {
       readonly isError: true;
       readonly content: string;
