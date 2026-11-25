@@ -13,13 +13,24 @@ _Avoid_: Prompt, chat, job
 The in-memory lifecycle that executes exactly one Coding Task. A Session holds many Agent Runs.
 _Avoid_: Session, conversation, Agent Session
 
+**Transcript**:
+The ordered messages the model is given: each Coding Task, the model's completed Assistant
+Messages, Tool Results, Verification feedback, Steers and Outcome Notes. An Agent Run starts from a
+given Transcript and extends it.
+_Avoid_: History, context (the whole model request), conversation, chat log
+
 **Model Turn**:
 One model request and streamed response together with the resolution of every Tool Call produced
 by that response.
 _Avoid_: Message, prompt, loop iteration
 
+**Steer**:
+A message the person sends to the running Coding Task. The Agent Run takes it just before a Model
+Turn and appends it to the Transcript.
+_Avoid_: Interrupt, injection, mid-task prompt
+
 **Agent State**:
-The authoritative current snapshot of an Agent Run, including its lifecycle, transcript,
+The authoritative current snapshot of an Agent Run, including its lifecycle, Transcript,
 active work, and outcome.
 _Avoid_: Runtime state, UI state, event log
 
@@ -36,6 +47,11 @@ _Avoid_: Final answer, successful result
 The single terminal outcome of an Agent Run, including its completion status and supporting
 evidence or failure reason.
 _Avoid_: Exit code, final message, summary
+
+**Outcome Note**:
+The message Agent Core appends to the Transcript when an Agent Run settles without success, telling
+the model how that Coding Task ended.
+_Avoid_: System message, interruption marker, status message
 
 **Run Limits**:
 The bounded runtime constraints (model turns, tool calls, active execution duration, and consecutive recoverable failures) enforced on an Agent Run to guarantee termination.
@@ -69,6 +85,10 @@ _Avoid_: Verification, testing
 The normalized outcome returned to the model and runtime after a Tool Call executes, is rejected, or fails.
 _Avoid_: Command output, execution response
 
+**Closing Tool Result**:
+The Tool Result Agent Core records for a Tool Call that ends without a result of its own (skipped, or stopped while running), so every Tool Call in the Transcript has a Tool Result.
+_Avoid_: Synthetic result, fake result, placeholder
+
 **Output Budget**:
 The 40 KiB of UTF-8 that bounds a Tool Result's content, keeping the start and the end of longer output around a truncation marker.
 _Avoid_: Output limit, truncation size, max output
@@ -94,7 +114,7 @@ Structured observations (such as command execution records, exit codes, and outp
 _Avoid_: Test logs, proof, verification data
 
 **Project Instructions**:
-Repository-level guidance documents (such as `AGENTS.md`) loaded into the initial context of an Agent Run to guide model behavior.
+Repository-level guidance documents (such as `AGENTS.md`) packaged into the system prompt that every Agent Run of a Session is given, to guide model behavior.
 _Avoid_: System prompt, context file, rules
 
 **Scratchpad**:
@@ -114,5 +134,5 @@ The time window an Agent Run allows active effects to quiesce after cancellation
 _Avoid_: Cancellation timeout, abort window, grace delay
 
 **Skipped Tool Call**:
-An unstarted queued Tool Call that is terminated with reason `CANCELLED` (or failure code) without executing or producing a Tool Result because the Agent Run is terminating.
+An unstarted queued Tool Call that is terminated with reason `CANCELLED` (or failure code) without executing because the Agent Run is terminating. It gets a Closing Tool Result.
 _Avoid_: Cancelled call, dropped call, abandoned call

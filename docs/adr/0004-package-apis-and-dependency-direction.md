@@ -869,6 +869,91 @@ On 2026-11-25, [CDA-166](https://datn-fit-hcmus.atlassian.net/browse/CDA-166) am
 - Coding Agent (§6) validates and projects the edit diff into the TUI variant.
   [Edit diff payload decision](https://datn-fit-hcmus.atlassian.net/browse/CDA-156?focusedCommentId=10376)
 
+On 2026-11-26, [CDA-138](https://datn-fit-hcmus.atlassian.net/browse/CDA-138),
+[CDA-139](https://datn-fit-hcmus.atlassian.net/browse/CDA-139),
+[CDA-140](https://datn-fit-hcmus.atlassian.net/browse/CDA-140),
+[CDA-141](https://datn-fit-hcmus.atlassian.net/browse/CDA-141),
+[CDA-142](https://datn-fit-hcmus.atlassian.net/browse/CDA-142),
+[CDA-143](https://datn-fit-hcmus.atlassian.net/browse/CDA-143),
+[CDA-145](https://datn-fit-hcmus.atlassian.net/browse/CDA-145) and
+[CDA-162](https://datn-fit-hcmus.atlassian.net/browse/CDA-162), recorded in
+[ADR 0009](./0009-multi-prompt-sessions-and-session-resume.md), amended this record:
+
+- **Agent Run construction** (§3): `openAgentRun`'s config gains three fields, validated before
+  `ready` with the rest (ADR 0002 §8), and Agent Core exports one pure function:
+
+  ```typescript
+  export function openAgentRun(config: {
+    // ...the fields above, unchanged
+    transcript?: readonly Message[]; // the Session's Transcript; default []
+    steers?: SteerSource; // absent: the run never takes a Steer
+    wording: TranscriptWording;
+  }): OpenRunResult;
+
+  export interface SteerSource {
+    take(): { readonly id: string; readonly text: string } | undefined; // synchronous
+  }
+
+  export interface TranscriptWording {
+    closingToolResult(call: NormalizedToolCall, closing: ToolCallClosing): string;
+    outcomeNote(result: AgentResult): string | undefined; // undefined adds no note
+  }
+
+  export type ToolCallClosing =
+    | { outcome: "skipped"; reason: SkipReason } // never started
+    | { outcome: "cancelled" }; // stopped while running, with no result of its own
+
+  export function transcriptFromRunEvents(events: readonly RunEvent[]): Message[];
+  ```
+
+  Both `TranscriptWording` functions are synchronous and pure. Coding Agent supplies the
+  implementation, as it already supplies the Verification Policy whose feedback wording lives
+  outside Agent Core, so changing the wording or the tag, or turning notes off, never touches Agent
+  Core, and a new `AgentFailureCode` breaks the implementation's exhaustive switch at compile time.
+  `transcriptFromRunEvents` returns the messages one Agent Run appended, built by the code that
+  builds them in the run (`toolResultMessage` takes the `providerId` from `tool_call_queued`), so
+  Coding Agent never re-implements how a message is built. An Agent Core test checks it against
+  `snapshot().transcript.slice(carriedMessages)` for every run in the suite. Headless passes no
+  `transcript` and no `steers`.
+- **Run Events** (§3, Consequences): ADR 0002 now fixes twenty Run Event types, `steer_taken`
+  (`SteerTakenEvent`) included.
+- **Provider Signature** (§2): the Google adapter sends a `ToolCallBlock.signature` only when
+  `AssistantMessage.model` equals the request's `model.id`, as Pi does. Only provider `google`
+  writes signatures, and a resumed Session can change model (ADR 0009 §4.11).
+- **`tui`** (§5): `renderTui` takes `{ model, handlers, keySet?, hints? }`, and `TuiHandlers` is one
+  `onAction` handler typed by `TuiActions` (ADR 0009 §8.1). `onSubmit`, `onCancel` and `onApproval`
+  give way to the Actions `session.submit`, `run.cancel` and `run.resolveApproval`, which mirrors
+  ADR 0002's `resolve_approval` as `onApproval` did. `TuiActions` is the fifth public name.
+  `TuiModel`'s `transcript` becomes `sessionView`, its `TranscriptEntry` becomes `SessionViewEntry`
+  (the `edit_diff` variant of `result.details` included), and it gains `session`, `run` and `queue`.
+  What this section calls the transcript is the Session view in the Terminal UI glossary.
+- **Coding Agent** (§6): Coding Agent owns the Session with its Transcript, system prompt and model;
+  the Prompt Queue and its `SteerSource`; the `TranscriptWording` implementation; the Session file
+  with its records, writer, reader and naming request; the listing function that `session.list` and
+  `coding-agent sessions` share; the Session lock with its held-or-stale rule and startup notice;
+  Worktrees with `.worktreeinclude`, cleanup, the removal guard and their notices; the Session
+  Controller; and the TUI adapter. `projectRunEvent` becomes `projectSessionLogEntry`, still pure,
+  which takes a `SessionLogEntry` and the previous `TuiModel`: it projects each Run Event as before,
+  the edit diff from `ToolResult.details` included, and also `interrupted` and `reasoning` records
+  and Session notices. The Session file keeps `details` so a resumed Session redraws its diffs (ADR
+  0009 §4.2). The sentence "ADR 0002 scopes an Agent Run to exactly one Coding Task and has no
+  prompt queue, so a submission opens a new Agent Run only when no Agent Run is active" is
+  superseded: an Agent Run still has one Coding Task, and a submission during a run is a Steer or a
+  Follow-up in the Prompt Queue. Agent Core and Tools learn nothing of Sessions, locks or Worktrees.
+- **Interactive command line** (§6, the CDA-85 note above): the interactive path takes
+  `--repo-root`, `--worktree [name]`, at most one of `-c`/`--continue`, `-r`/`--resume` and
+  `--session <id>`, and `--provider` with `--model`, now optional together (ADR 0009 §9). When they
+  are omitted, the model follows the Session. An empty command line starts the interactive path
+  when a model is found, and otherwise exits 2 with "No model: pass --provider and --model".
+  `coding-agent sessions` is a second command word beside `run`, whose command line is unchanged.
+- **Placement** (§7): the composition root still assembles the `systemPrompt` passed to
+  `openAgentRun`, now once per Session rather than once per Agent Run (ADR 0003 §5).
+- **Pi names** (§8): `SteerSource`, `TranscriptWording`, `ToolCallClosing`, `SteerTakenEvent`,
+  `transcriptFromRunEvents`, `TuiActions`, `SessionController`, `ControllerState`,
+  `ControllerUpdate`, `SessionLogEntry`, `SessionListEntry` and `projectSessionLogEntry` were
+  checked on 2026-11-25 against Pi commit `9841914c71a74d81abe07f751aefd271fd924e63`; none occurs in
+  its packages.
+
 ## Consequences
 
 - `ai` tests against recorded provider fixtures with no other package present. Agent Core tests use

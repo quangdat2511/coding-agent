@@ -2,7 +2,7 @@
 
 Status: accepted
 
-Date: 2026-09-11 (Refined: 2026-09-12; Amended: 2026-09-13, 2026-11-09, 2026-11-11, 2026-11-12, 2026-11-22, 2026-11-24)
+Date: 2026-09-11 (Refined: 2026-09-12; Amended: 2026-09-13, 2026-11-09, 2026-11-11, 2026-11-12, 2026-11-22, 2026-11-24, 2026-11-26)
 
 ## Context
 
@@ -415,6 +415,16 @@ On 2026-11-24, [CDA-147](https://datn-fit-hcmus.atlassian.net/browse/CDA-147) am
 
 - **Terminology**: Agent Session is renamed Agent Run, following ADR 0002 §8, and this record uses
   the new name in place. Behavior is unchanged.
+
+On 2026-11-26, [CDA-143](https://datn-fit-hcmus.atlassian.net/browse/CDA-143), recorded in
+[ADR 0009](./0009-multi-prompt-sessions-and-session-resume.md) §6.12, amended this record:
+
+- **Non-inheritance for Worktree git commands** (§8, item 1): every git command Coding Agent starts
+  for a Worktree runs with the environment that Tools' `createChildEnvironmentBuilder` builds,
+  without the provider credentials, because `git worktree add` runs the repository's
+  `post-checkout` hook, which is repository code. Under `"ask"` the person's shell already holds the
+  key, so this closes no proven hole. It keeps one rule: nothing Coding Agent starts inherits a
+  provider credential.
 
 ### 8. Credential Isolation for Tool and Verification Processes
 
