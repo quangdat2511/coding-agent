@@ -52,6 +52,6 @@ _Avoid_: Exit, close, abort, cancel
 
 **Run Usage**:
 The tokens and cost of every Model Turn since the Full-screen TUI started, summed across all the
-Agent Sessions it has run. Its cost is unknown, not zero, once a Model Turn used tokens without a
+Agent Runs it has started. Its cost is unknown, not zero, once a Model Turn used tokens without a
 known Usage Cost.
 _Avoid_: Session usage, session cost
