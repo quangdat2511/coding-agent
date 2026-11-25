@@ -18,19 +18,6 @@ const EXPECTED_TOOLS = {
 const SEMVER_RE = /^(\d+)\.(\d+)\.(\d+)$/;
 const SHA256_RE = /^[0-9a-f]{64}$/;
 
-function compareSemver(a: string, b: string): number {
-  const matchA = SEMVER_RE.exec(a);
-  const matchB = SEMVER_RE.exec(b);
-  if (!matchA || !matchB) {
-    throw new Error(`Invalid semver: ${a} vs ${b}`);
-  }
-  for (let i = 1; i <= 3; i++) {
-    const diff = Number(matchA[i]) - Number(matchB[i]);
-    if (diff !== 0) return diff;
-  }
-  return 0;
-}
-
 describe("managed-tools.json manifest", () => {
   it("uses schemaVersion 1 and declares exactly fd and rg", () => {
     expect(manifest.schemaVersion).toBe(1);
@@ -47,7 +34,7 @@ describe("managed-tools.json manifest", () => {
         expect(tool.version).toMatch(SEMVER_RE);
         expect(tool.minimumVersion).toMatch(SEMVER_RE);
         expect(tool.minimumVersion).toBe(expected.floor);
-        expect(compareSemver(tool.minimumVersion, tool.version)).toBeLessThanOrEqual(0);
+        expect(Bun.semver.order(tool.minimumVersion, tool.version)).toBeLessThanOrEqual(0);
       });
 
       it("has all six supported platform/arch targets with valid asset names, sizes, and 64-hex SHA-256 hashes", () => {

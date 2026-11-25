@@ -340,8 +340,13 @@ To bump the pinned `fd` and `rg` versions:
 
 The `Test (ubuntu-24.04)`, `Test (windows-2025)`, and `Test (macos-26)` jobs in
 `.github/workflows/ci.yml` run `bun run scripts/setup-ci-managed-tools.ts` before the test suite.
-It reads `packages/tools/src/managed-tools.json`, downloads the host's pinned `fd` and `rg`
-archives, verifies exact `bytes` and `sha256` before extraction, extracts into a temporary
-directory, checks `<binary> --version`, and appends the binary directory to `GITHUB_PATH`. The
-test suite then runs with `CODING_AGENT_OFFLINE=1` so no test accidentally reaches the network.
-Run `bun test scripts/tests/setup-ci-managed-tools.test.ts` for the offline unit tests.
+It reads `packages/tools/src/managed-tools.json`, downloads only the host's pinned `fd` and `rg`
+release archives from `github.com/<repo>/releases/download/...`, bounds the streamed download by
+`bytes` and verifies `sha256` before extraction, extracts into a temporary directory, checks that
+`<binary> --version` matches the exact pinned version, and appends the binary directory to
+`GITHUB_PATH`.
+
+After setup completes, the test suite itself runs with `CODING_AGENT_OFFLINE=1` so no test calls
+GitHub during a normal run. GitHub API calls (`/releases/latest`) happen only when running
+`scripts/update-managed-tools.ts` manually in a pull request, never in CI or during tests. Run
+`bun test scripts/tests/setup-ci-managed-tools.test.ts` for the offline unit tests.

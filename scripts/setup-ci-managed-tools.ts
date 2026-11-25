@@ -1,6 +1,6 @@
 // Installs the pinned managed binaries (fd, rg) from packages/tools/src/managed-tools.json
-// into a temporary directory for CI jobs, verifies byte size and SHA-256 before extraction,
-// checks `--version`, and adds the directory to GITHUB_PATH.
+// into a temporary directory for CI jobs, verifies byte size (bounded while streaming) and
+// SHA-256 before extraction, checks `--version`, and adds the directory to GITHUB_PATH.
 import { createHash } from "node:crypto";
 import {
   appendFile,
@@ -18,6 +18,7 @@ import { join } from "node:path";
 import {
   DEFAULT_MANIFEST_PATH,
   type FetchFn,
+  MANAGED_TOOL_NAMES,
   type ManagedToolName,
   type ManagedToolsManifest,
   PLATFORM_ARCH_KEYS,
@@ -28,6 +29,11 @@ const SUPPORTED_KEYS = new Set<PlatformArchKey>(PLATFORM_ARCH_KEYS);
 const RETRYABLE_STATUSES = new Set([408, 425, 429]);
 const MAX_ATTEMPTS = 3;
 const DEFAULT_RETRY_DELAY_MS = 250;
+
+const VERSION_LINE_PREFIX: Record<ManagedToolName, string> = {
+  fd: "fd",
+  rg: "ripgrep",
+};
 
 class NonRetryableDownloadError extends Error {}
 
@@ -42,8 +48,72 @@ export function resolveHostTargetKey(
   return key;
 }
 
+export function parseToolVersion(toolName: ManagedToolName, stdout: string): string | undefined {
+  const firstLine = stdout.split(/\r?\n/, 1)[0]?.trim() ?? "";
+  const prefix = VERSION_LINE_PREFIX[toolName];
+  const match = new RegExp(`^${prefix}\\s+(\\d+\\.\\d+\\.\\d+)(?:\\s|$)`).exec(firstLine);
+  return match?.[1];
+}
+
 function isRetryableStatus(status: number): boolean {
   return RETRYABLE_STATUSES.has(status) || (status >= 500 && status <= 599);
+}
+
+async function readBoundedResponse(
+  response: Response,
+  url: string,
+  expectedBytes: number,
+  expectedSha256: string,
+): Promise<Uint8Array> {
+  const contentLengthHeader = response.headers.get("content-length");
+  if (contentLengthHeader !== null) {
+    const declaredLength = Number(contentLengthHeader);
+    if (Number.isFinite(declaredLength) && declaredLength > expectedBytes) {
+      await response.body?.cancel();
+      throw new Error(
+        `Size mismatch for ${url}: Content-Length ${declaredLength} exceeds expected ${expectedBytes} bytes`,
+      );
+    }
+  }
+
+  const hash = createHash("sha256");
+  const buffer = new Uint8Array(expectedBytes);
+  let totalBytes = 0;
+
+  if (response.body) {
+    const reader = response.body.getReader();
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (!value || value.byteLength === 0) continue;
+
+        if (totalBytes + value.byteLength > expectedBytes) {
+          await reader.cancel();
+          throw new Error(
+            `Size mismatch for ${url}: response exceeded expected ${expectedBytes} bytes`,
+          );
+        }
+
+        buffer.set(value, totalBytes);
+        totalBytes += value.byteLength;
+        hash.update(value);
+      }
+    } finally {
+      reader.releaseLock();
+    }
+  }
+
+  if (totalBytes !== expectedBytes) {
+    throw new Error(`Size mismatch for ${url}: expected ${expectedBytes} bytes, got ${totalBytes}`);
+  }
+
+  const actualSha256 = hash.digest("hex");
+  if (actualSha256 !== expectedSha256) {
+    throw new Error(`SHA256 mismatch for ${url}: expected ${expectedSha256}, got ${actualSha256}`);
+  }
+
+  return buffer;
 }
 
 async function downloadAndVerify(
@@ -62,27 +132,14 @@ async function downloadAndVerify(
       });
 
       if (!response.ok) {
+        await response.body?.cancel();
         const message = `HTTP ${response.status} downloading ${url}`;
         throw isRetryableStatus(response.status)
           ? new Error(message)
           : new NonRetryableDownloadError(message);
       }
 
-      const bytes = new Uint8Array(await response.arrayBuffer());
-      if (bytes.byteLength !== expectedBytes) {
-        throw new Error(
-          `Size mismatch for ${url}: expected ${expectedBytes} bytes, got ${bytes.byteLength}`,
-        );
-      }
-
-      const actualSha256 = createHash("sha256").update(bytes).digest("hex");
-      if (actualSha256 !== expectedSha256) {
-        throw new Error(
-          `SHA256 mismatch for ${url}: expected ${expectedSha256}, got ${actualSha256}`,
-        );
-      }
-
-      return bytes;
+      return await readBoundedResponse(response, url, expectedBytes, expectedSha256);
     } catch (error) {
       const err = error instanceof Error ? error : new Error(String(error));
       if (err instanceof NonRetryableDownloadError || attempt === MAX_ATTEMPTS) {
@@ -175,9 +232,10 @@ async function defaultVerifyVersion(
       `${toolName} --version exited with code ${result.exitCode}: ${result.stderr.trim()}`,
     );
   }
-  if (!result.stdout.includes(expectedVersion)) {
+  const actualVersion = parseToolVersion(toolName, result.stdout);
+  if (actualVersion !== expectedVersion) {
     throw new Error(
-      `${toolName} --version output "${result.stdout.trim()}" does not contain expected version ${expectedVersion}`,
+      `${toolName} --version reported "${result.stdout.trim()}", expected exact version ${expectedVersion}`,
     );
   }
 }
@@ -221,9 +279,8 @@ export async function installManagedToolsForHost(
   await mkdir(binDir, { recursive: true });
 
   const installed = {} as Record<ManagedToolName, string>;
-  const toolNames: readonly ManagedToolName[] = ["fd", "rg"];
 
-  for (const toolName of toolNames) {
+  for (const toolName of MANAGED_TOOL_NAMES) {
     const tool = manifest.tools[toolName];
     const assetEntry = tool.assets[hostKey];
     const url = `${downloadBaseUrl}/${tool.repo}/releases/download/${tool.tagPrefix}${tool.version}/${assetEntry.asset}`;

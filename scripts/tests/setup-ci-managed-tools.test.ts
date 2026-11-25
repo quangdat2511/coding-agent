@@ -3,7 +3,11 @@ import { createHash } from "node:crypto";
 import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { installManagedToolsForHost, resolveHostTargetKey } from "../setup-ci-managed-tools.ts";
+import {
+  installManagedToolsForHost,
+  parseToolVersion,
+  resolveHostTargetKey,
+} from "../setup-ci-managed-tools.ts";
 import type { ManagedToolsManifest, PlatformArchKey } from "../update-managed-tools.ts";
 
 async function createFixtureArchive(
@@ -227,5 +231,116 @@ describe("installManagedToolsForHost", () => {
     } finally {
       await rm(workDir, { recursive: true, force: true });
     }
+  });
+
+  it("aborts streaming early when response chunks exceed manifest bytes", async () => {
+    const workDir = await mkdtemp(join(tmpdir(), "setup-ci-tools-stream-cap-"));
+    const hostKey = resolveHostTargetKey(process.platform, process.arch);
+
+    const manifest = makeManifestForHost(
+      hostKey,
+      { asset: "fd.tar.gz", bytes: 10, sha256: "f".repeat(64) },
+      { asset: "rg.tar.gz", bytes: 10, sha256: "f".repeat(64) },
+    );
+
+    let chunksPulled = 0;
+    let cancelCalled = false;
+
+    const fetchImpl = async () => {
+      const stream = new ReadableStream<Uint8Array>(
+        {
+          pull(controller) {
+            chunksPulled++;
+            controller.enqueue(new Uint8Array(8));
+          },
+          cancel() {
+            cancelCalled = true;
+          },
+        },
+        { highWaterMark: 0 },
+      );
+      return new Response(stream, { status: 200 });
+    };
+
+    try {
+      await expect(
+        installManagedToolsForHost({
+          manifest,
+          binDir: join(workDir, "bin"),
+          fetchImpl,
+          retryDelayMs: 1,
+        }),
+      ).rejects.toThrow(/exceeded expected 10 bytes/i);
+
+      expect(cancelCalled).toBe(true);
+      // 3 attempts * 2 chunks (8 + 8 = 16 > 10) = 6 pulls; never drains unboundedly.
+      expect(chunksPulled).toBeLessThanOrEqual(6);
+    } finally {
+      await rm(workDir, { recursive: true, force: true });
+    }
+  });
+
+  it.skipIf(process.platform === "win32")(
+    "rejects a binary whose --version output has a prefix match like 10.5.20 for pinned 10.5.2",
+    async () => {
+      const workDir = await mkdtemp(join(tmpdir(), "setup-ci-tools-version-mismatch-"));
+      const hostKey = resolveHostTargetKey(process.platform, process.arch);
+
+      const fdArchive = await createFixtureArchive(
+        workDir,
+        "fd-v10.5.2-fixture",
+        "fd",
+        "#!/bin/sh\necho 'fd 10.5.20'\n",
+        "tar.gz",
+      );
+      const rgArchive = await createFixtureArchive(
+        workDir,
+        "ripgrep-16.0.0-fixture",
+        "rg",
+        "#!/bin/sh\necho 'ripgrep 16.0.0'\n",
+        "tar.gz",
+      );
+
+      const manifest = makeManifestForHost(
+        hostKey,
+        {
+          asset: "fd-v10.5.2-fixture.tar.gz",
+          bytes: fdArchive.bytes,
+          sha256: fdArchive.sha256,
+        },
+        {
+          asset: "ripgrep-16.0.0-fixture.tar.gz",
+          bytes: rgArchive.bytes,
+          sha256: rgArchive.sha256,
+        },
+      );
+
+      const fetchImpl = async (url: string) =>
+        new Response(url.includes("sharkdp/fd") ? fdArchive.archiveBytes : rgArchive.archiveBytes, {
+          status: 200,
+        });
+
+      try {
+        await expect(
+          installManagedToolsForHost({
+            manifest,
+            binDir: join(workDir, "bin"),
+            fetchImpl,
+            retryDelayMs: 1,
+          }),
+        ).rejects.toThrow(/expected exact version 10\.5\.2/i);
+      } finally {
+        await rm(workDir, { recursive: true, force: true });
+      }
+    },
+  );
+});
+
+describe("parseToolVersion", () => {
+  it("extracts exact semver from fd and ripgrep --version output", () => {
+    expect(parseToolVersion("fd", "fd 10.5.2\n")).toBe("10.5.2");
+    expect(parseToolVersion("fd", "fd 10.5.20\n")).toBe("10.5.20");
+    expect(parseToolVersion("rg", "ripgrep 16.0.0\n-SIMD -AVX (compiled)\n")).toBe("16.0.0");
+    expect(parseToolVersion("rg", "fd 16.0.0\n")).toBeUndefined();
   });
 });

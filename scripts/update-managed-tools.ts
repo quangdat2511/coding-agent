@@ -3,7 +3,8 @@
 import { writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 
-export type ManagedToolName = "fd" | "rg";
+export const MANAGED_TOOL_NAMES = ["fd", "rg"] as const;
+export type ManagedToolName = (typeof MANAGED_TOOL_NAMES)[number];
 
 export type PlatformArchKey =
   | "darwin-arm64"
