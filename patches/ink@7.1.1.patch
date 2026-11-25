@@ -1,0 +1,15 @@
+diff --git a/build/log-update.js b/build/log-update.js
+index cdb5fc41f158304c4c4f230a765065ab1fe0a2f7..4495b2a347e6a04112baa2fab56787d05de26b65 100644
+--- a/build/log-update.js
++++ b/build/log-update.js
+@@ -134,7 +134,9 @@ const createIncremental = (stream, { showCursor = false } = {}) => {
+         if (str === previousOutput && cursorChanged) {
+             stream.write(buildCursorOnlySequence({
+                 cursorWasShown,
+-                previousLineCount: previousLines.length,
++                // Full-screen frames omit the trailing newline. The cursor-only helper
++                // assumes it is present when calculating how far down to move.
++                previousLineCount: previousLines.length + (previousOutput.endsWith('\n') ? 0 : 1),
+                 previousCursorPosition,
+                 visibleLineCount: visibleCount,
+                 cursorPosition: activeCursor,

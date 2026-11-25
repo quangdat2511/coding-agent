@@ -49,3 +49,13 @@ The person's own ending of the Full-screen TUI, made while no run is active by p
 key twice: Esc or Ctrl+C at the Prompt, Ctrl+C in a mode. The first press asks for confirmation and
 gives the number of waiting Follow-ups it discards. A signal is not a Quit.
 _Avoid_: Exit, close, abort, cancel
+
+## Transcript scrolling
+
+The Full-screen TUI enables SGR mouse reporting so the terminal sends wheel events separately
+from the arrow keys. Each vertical wheel step scrolls the transcript, including under the
+Approval overlay. Page Up and Page Down also scroll the transcript.
+
+Mouse reporting takes over ordinary click and drag. In Windows Terminal, hold `Shift` while
+dragging to select text, then use the terminal's copy shortcut. See the
+[CLI copy instructions](../coding-agent/README.md#running-interactively).

@@ -1,9 +1,10 @@
-import { Box, Text, useCursor, useInput, usePaste, useStdin } from "ink";
+import { Box, Text, useCursor } from "ink";
 import type { EditorView } from "./editor.ts";
 import { ALLOW_KEY, DENY_KEY, type InputMode, type KeyPress } from "./input.ts";
 import { ApprovalOverlay, type OverlayGeometry } from "./overlay.tsx";
 import { type SessionViewRow, TASK_CONTINUATION, TASK_MARKER } from "./rows.ts";
 import { SessionView } from "./session-view.tsx";
+import { useTerminalInput } from "./terminal-input.ts";
 import type { PendingApproval } from "./types.ts";
 
 const HINT_HEIGHT = 1;
@@ -59,7 +60,7 @@ export interface OverlayProps {
 
 // The whole frame: the Session view rows in view with the Approval overlay over them, the Prompt
 // and the key hint. mountTui decides everything on it and renders it again for each frame; this
-// component draws it, places the terminal's cursor and hands every key and paste to mountTui.
+// component draws it, places the terminal's cursor and hands keys, paste and wheel steps to mountTui.
 export function Frame({
   rows,
   layout,
@@ -71,6 +72,7 @@ export function Frame({
   interactive,
   onKey,
   onPaste,
+  onWheel,
 }: {
   rows: readonly SessionViewRow[];
   layout: FrameLayout;
@@ -88,16 +90,9 @@ export function Frame({
   interactive: boolean;
   onKey(input: string, key: KeyPress): void;
   onPaste(text: string): void;
+  onWheel(direction: -1 | 1): void;
 }) {
-  // Ink reads keys only from a stdin it can switch to raw mode, and throws for any other. Without
-  // one, as when input is piped, the TUI still draws and takes no input. When mountTui draws
-  // nothing, as when output is piped, raw mode would leave the person typing at a blank screen
-  // where Ctrl+C no longer stops the process, so it takes no input then either. Ink's flag is
-  // stdin's isTTY, undefined on a plain stream, and the hooks treat only false as inactive.
-  const { isRawModeSupported } = useStdin();
-  const takesInput = interactive && isRawModeSupported === true;
-  useInput(onKey, { isActive: takesInput });
-  usePaste(onPaste, { isActive: takesInput });
+  useTerminalInput({ interactive, onKey, onPaste, onWheel });
 
   // The terminal's own cursor marks where the next character goes. Unlike a cell drawn in inverse
   // video it shows when colors are off, and an input method draws the letter it is composing there.

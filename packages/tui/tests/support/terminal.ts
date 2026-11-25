@@ -19,6 +19,13 @@ export const KEYS = {
   pageDown: "\u001b[6~",
 } as const;
 
+// Headless xterm draws the screen but has no pointer. Feed the reports a terminal sends in SGR
+// mouse mode through the same stdin as the keyboard.
+export const WHEEL = {
+  up: "\u001b[<64;4;2M",
+  down: "\u001b[<65;4;2M",
+} as const;
+
 // On a Windows console Ink clears the screen for every frame that fills it (isWindowsConsole in
 // ink/build/ink.js), and this TUI's frames always fill the screen, so a check that a frame is
 // redrawn in place holds on every other platform only.
@@ -42,6 +49,8 @@ export interface TestTerminal {
   // The row and column of the cursor on the visible screen, or undefined while it is hidden.
   cursorAt(): Promise<readonly [row: number, column: number] | undefined>;
   isCursorVisible(): Promise<boolean>;
+  // Asks xterm whether a DEC private mode is set.
+  isDecModeSet(mode: number): Promise<boolean>;
   // Resizes the screen and emits "resize" on stdout, as a real TTY stream does on SIGWINCH.
   resize(columns: number, rows: number): void;
   // Everything written to stdout since the previous call.
@@ -134,17 +143,19 @@ export function createTestTerminal(columns: number, rows: number): TestTerminal 
       const buffer = terminal.buffer.active;
       return [buffer.cursorY, buffer.cursorX] as const;
     },
-    async isCursorVisible() {
-      // xterm has no getter for cursor visibility, so ask the terminal with DECRQM for DECTCEM
-      // (mode 25). It answers CSI ? 25 ; 1 $ y when the cursor is shown, ; 2 when it is hidden.
+    isCursorVisible() {
+      return this.isDecModeSet(25);
+    },
+    async isDecModeSet(mode) {
+      // xterm answers DECRQM with 1 for set and 2 for reset.
       let reply = "";
       const subscription = terminal.onData((data) => {
         reply += data;
       });
-      await print("\u001b[?25$p");
+      await print(`\u001b[?${mode}$p`);
       subscription.dispose();
-      if (reply === "\u001b[?25;1$y") return true;
-      if (reply === "\u001b[?25;2$y") return false;
+      if (reply === `\u001b[?${mode};1$y`) return true;
+      if (reply === `\u001b[?${mode};2$y`) return false;
       throw new Error(`Unexpected DECRQM reply: ${JSON.stringify(reply)}`);
     },
     resize(columns, rows) {

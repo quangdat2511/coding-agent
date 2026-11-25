@@ -321,18 +321,22 @@ describe("renderTui", () => {
     expect(terminal.terminal.buffer.active.baseY).toBe(0);
   });
 
-  it("restores the main screen and shows the cursor after unmount", async () => {
+  it("restores the main screen, cursor, and mouse mode after unmount", async () => {
     const terminal = createTestTerminal(COLUMNS, ROWS);
     await terminal.print("$ coding-agent\n");
     const { tui } = mount([{ kind: "user", id: "task", text: TASK }], terminal);
     await tui.flush();
     expect(terminal.terminal.buffer.active.type).toBe("alternate");
+    expect(terminal.terminal.modes.mouseTrackingMode).toBe("vt200");
+    expect(await terminal.isDecModeSet(1006)).toBe(true);
     // While the TUI draws, the cursor sits in the empty Prompt, after its marker.
     expect(await terminal.cursorAt()).toEqual([ROWS - FOOTER_HEIGHT, 2]);
 
     await tui.unmount();
 
     expect(terminal.terminal.buffer.active.type).toBe("normal");
+    expect(terminal.terminal.modes.mouseTrackingMode).toBe("none");
+    expect(await terminal.isDecModeSet(1006)).toBe(false);
     expect(await terminal.isCursorVisible()).toBe(true);
     expect(terminal.screen()).toEqual(shellScreen("$ coding-agent"));
     expect(terminal.terminal.buffer.active.cursorY).toBe(1);

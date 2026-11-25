@@ -64,6 +64,11 @@ Agent Run only when none is active. A submission while one runs, or opens, is re
 in the Session view. When an Agent Run has settled, the next submission opens a new one, and the
 Session view keeps the earlier ones.
 
+Use the mouse wheel or `PgUp` and `PgDn` to scroll the transcript. The Full-screen TUI enables
+mouse reporting, so in Windows Terminal hold `Shift` while dragging to select text, then press
+`Ctrl+Shift+C` to copy. Other terminals may use a different selection modifier. See
+[Windows Terminal selection](https://learn.microsoft.com/en-us/windows/terminal/selection).
+
 | Key or signal | While a Coding Task runs | With none |
 | --- | --- | --- |
 | `Esc` or `Ctrl+C` | dispatches `cancel` | a first press shows a notice; a second within one second quits |
