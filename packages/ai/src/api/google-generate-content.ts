@@ -136,6 +136,11 @@ function geminiCallId(toolCallId: string): { id?: string } {
   return toolCallId.startsWith(SYNTHETIC_CALL_ID_PREFIX) ? {} : { id: toolCallId };
 }
 
+// Gemini names `gemini-3-pro-preview` and `models/gemini-3-pro-preview` as the same model.
+function geminiModelName(modelId: string): string {
+  return modelId.replace(/^models\//, "");
+}
+
 // ---------------------------------------------------------------------------
 // Request building
 // ---------------------------------------------------------------------------
@@ -159,7 +164,7 @@ interface GoogleRequestBody {
   };
 }
 
-export function buildRequestBody(context: Context): GoogleRequestBody {
+export function buildRequestBody(model: Model, context: Context): GoogleRequestBody {
   const body: GoogleRequestBody = { contents: [] };
 
   // System prompt → system_instruction
@@ -199,6 +204,11 @@ export function buildRequestBody(context: Context): GoogleRequestBody {
       }
     } else {
       // assistant → model
+      // A Provider Signature is valid only for the model that wrote it, and a resumed Session can
+      // change model (ADR 0009 §4.11). Calls of another model go without one, and without Google's
+      // placeholder signature: Gemini 3 validates signatures only in the current turn, which a
+      // resumed run starts afresh with a new Coding Task.
+      const sameModel = geminiModelName(msg.model) === geminiModelName(model.id);
       const parts: GooglePart[] = [];
       for (const block of msg.content) {
         if (block.type === "text") {
@@ -213,7 +223,9 @@ export function buildRequestBody(context: Context): GoogleRequestBody {
           }
           parts.push({
             functionCall: { ...geminiCallId(block.toolCallId), name: block.name, args },
-            ...(block.signature === undefined ? {} : { thoughtSignature: block.signature }),
+            ...(sameModel && block.signature !== undefined
+              ? { thoughtSignature: block.signature }
+              : {}),
           });
         }
       }
@@ -278,7 +290,7 @@ export function stream(model: Model, context: Context, options?: StreamOptions):
         return;
       }
 
-      const body = buildRequestBody(context);
+      const body = buildRequestBody(model, context);
 
       if (options?.temperature !== undefined || options?.maxTokens !== undefined) {
         body.generationConfig = {};
@@ -292,8 +304,7 @@ export function stream(model: Model, context: Context, options?: StreamOptions):
 
       const rawBaseURL = options?.baseURL ?? "https://generativelanguage.googleapis.com/v1beta/";
       const baseURL = `${rawBaseURL.replace(/\/+$/, "")}/`;
-      const modelId = model.id.replace(/^models\//, "");
-      const url = `${baseURL}models/${modelId}:streamGenerateContent?alt=sse`;
+      const url = `${baseURL}models/${geminiModelName(model.id)}:streamGenerateContent?alt=sse`;
 
       const maxRetries = sanitizeMaxRetries(options?.maxRetries);
       let response: Response | undefined;

@@ -31,7 +31,7 @@ A typed unit of structured content within a message: text, tool_call, or tool_re
 _Avoid_: Content item, message part, chunk
 
 **Provider Signature**:
-An opaque value that a Model Provider attaches to a Content Block and requires back, unchanged, with that block in later requests. Only that Model Provider interprets it.
+An opaque value that a Model Provider attaches to a Content Block and requires back, unchanged, with that block in later requests to the model that wrote it. Only that Model Provider interprets it.
 _Avoid_: Thought signature, encrypted content, replay token
 
 **Finish Reason**:
