@@ -1,4 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { calculateCost } from "../cost.ts";
 import type {
   AssistantMessage,
   Context,
@@ -11,7 +12,6 @@ import type {
   ToolDeclaration,
   Usage,
 } from "../types.ts";
-
 import { createModelEventStream } from "../utils/event-stream.ts";
 import { sanitizeMaxRetries } from "../utils/retry.ts";
 
@@ -50,6 +50,7 @@ export function buildTools(tools?: readonly ToolDeclaration[]): Anthropic.Tool[]
 
 interface UsageMetadataContainer {
   cachedInputTokens?: number;
+  cacheWriteTokens?: number;
   rawUsage?: Record<string, unknown>;
 }
 
@@ -59,6 +60,10 @@ function mergeUsageMetadata(container: UsageMetadataContainer, wireUsage: unknow
   const cacheRead = usageRecord.cache_read_input_tokens;
   if (typeof cacheRead === "number") {
     container.cachedInputTokens = cacheRead;
+  }
+  const cacheWrite = usageRecord.cache_creation_input_tokens;
+  if (typeof cacheWrite === "number") {
+    container.cacheWriteTokens = cacheWrite;
   }
   container.rawUsage = {
     ...container.rawUsage,
@@ -331,14 +336,25 @@ export function stream(model: Model, context: Context, options?: StreamOptions):
         });
       }
 
-      const usage: Usage | undefined = hasUsage
+      const baseUsage: Usage | undefined = hasUsage
         ? {
             inputTokens,
             outputTokens,
             ...(usageMeta.cachedInputTokens !== undefined
               ? { cachedInputTokens: usageMeta.cachedInputTokens }
               : {}),
+            ...(usageMeta.cacheWriteTokens !== undefined
+              ? { cacheWriteTokens: usageMeta.cacheWriteTokens }
+              : {}),
             ...(usageMeta.rawUsage ? { raw: usageMeta.rawUsage } : {}),
+          }
+        : undefined;
+
+      const cost = baseUsage ? calculateCost(model.cost, baseUsage) : undefined;
+      const usage: Usage | undefined = baseUsage
+        ? {
+            ...baseUsage,
+            ...(cost !== undefined ? { cost } : {}),
           }
         : undefined;
 

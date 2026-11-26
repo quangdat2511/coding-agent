@@ -1,4 +1,4 @@
-import type { AssistantMessage } from "@coding-agent/ai";
+import type { AssistantMessage, UsageCost } from "@coding-agent/ai";
 import type { JsonValue } from "./json.ts";
 import type { VerificationSummary } from "./verification.ts";
 
@@ -6,7 +6,9 @@ export interface UsageTotals {
   readonly inputTokens: number;
   readonly outputTokens: number;
   readonly cachedInputTokens?: number;
+  readonly cacheWriteTokens?: number;
   readonly reasoningTokens?: number;
+  readonly cost?: UsageCost;
 }
 
 export type AgentFailureCode =

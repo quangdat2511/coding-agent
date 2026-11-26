@@ -41,12 +41,32 @@ export interface FinishReason {
   rawReason: string;
 }
 
+// Model cost (USD per 1M tokens)
+export interface ModelCost {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+}
+
+// Usage cost
+export interface UsageCost {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+  total: number;
+  totalFromProvider?: number;
+}
+
 // Usage
 export interface Usage {
   inputTokens: number;
   outputTokens: number;
   cachedInputTokens?: number;
+  cacheWriteTokens?: number;
   reasoningTokens?: number;
+  cost?: UsageCost;
   raw?: Record<string, unknown>;
 }
 
@@ -78,6 +98,7 @@ export interface Model {
   name: string;
   provider: string;
   capabilities?: ModelCapabilities;
+  cost?: ModelCost;
 }
 
 // Messages

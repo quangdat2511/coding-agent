@@ -278,4 +278,101 @@ describe("running a Model Turn", () => {
       reasoningTokens: 12,
     });
   });
+
+  it("carries cost and optional usage fields across Model Turns and models in Turn Usage and Usage Totals", async () => {
+    const cost1 = {
+      input: 0.0001,
+      output: 0.0002,
+      cacheRead: 0.00001,
+      cacheWrite: 0.00005,
+      total: 0.00036,
+    };
+    const cost2 = {
+      input: 0.0002,
+      output: 0.0005,
+      cacheRead: 0,
+      cacheWrite: 0,
+      total: 0.0007,
+      totalFromProvider: 0.0007,
+    };
+
+    const { run } = openTestRun({
+      model: {
+        turns: [
+          withFinalMessage(textTurn("Fixed it."), {
+            model: "claude-haiku-4-5",
+            usage: {
+              inputTokens: 100,
+              outputTokens: 20,
+              cachedInputTokens: 50,
+              cacheWriteTokens: 100,
+              cost: cost1,
+            },
+          }),
+          withFinalMessage(textTurn("Continuing fix."), {
+            model: "claude-sonnet-5",
+            usage: {
+              inputTokens: 150,
+              outputTokens: 30,
+            },
+          }),
+          withFinalMessage(textTurn("Fixed it properly."), {
+            model: "claude-sonnet-5",
+            usage: {
+              inputTokens: 200,
+              outputTokens: 40,
+              cost: cost2,
+            },
+          }),
+        ],
+      },
+      verification: [continueWith("[Verification Failed]"), continueWith("[Verification Failed]")],
+    });
+
+    await run.dispatch({ type: "start", task });
+    const result = await run.result();
+    const events = await collect(run.events());
+
+    const turnUsages = events
+      .filter((event) => event.type === "model_turn_completed")
+      .map(({ data }) => data.usage);
+
+    // Turn 1 carries cost and cache tokens
+    expect(turnUsages[0]).toEqual({
+      inputTokens: 100,
+      outputTokens: 20,
+      cachedInputTokens: 50,
+      cacheWriteTokens: 100,
+      cost: cost1,
+    });
+    // Turn 2 leaves optional fields absent until reported
+    const secondTurn = turnUsages[1];
+    expect(secondTurn).toEqual({
+      inputTokens: 150,
+      outputTokens: 30,
+    });
+    if (!secondTurn) throw new Error("second turn usage missing");
+    expect("cost" in secondTurn).toBe(false);
+    expect("cachedInputTokens" in secondTurn).toBe(false);
+    expect("cacheWriteTokens" in secondTurn).toBe(false);
+
+    // Turn 3 carries cost with provider total
+    expect(turnUsages[2]).toEqual({
+      inputTokens: 200,
+      outputTokens: 40,
+      cost: cost2,
+    });
+
+    // Usage Totals on AgentResult carries accumulated cost and token totals across turns & models
+    expect(result.usage.inputTokens).toBe(450);
+    expect(result.usage.outputTokens).toBe(90);
+    expect(result.usage.cachedInputTokens).toBe(50);
+    expect(result.usage.cacheWriteTokens).toBe(100);
+    expect(result.usage.cost?.input).toBeCloseTo(0.0003, 8);
+    expect(result.usage.cost?.output).toBeCloseTo(0.0007, 8);
+    expect(result.usage.cost?.cacheRead).toBeCloseTo(0.00001, 8);
+    expect(result.usage.cost?.cacheWrite).toBeCloseTo(0.00005, 8);
+    expect(result.usage.cost?.total).toBeCloseTo(0.00106, 8);
+    expect(result.usage.cost?.totalFromProvider).toBeCloseTo(0.0007, 8);
+  });
 });

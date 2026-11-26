@@ -24,6 +24,10 @@ One model request and streamed response together with the resolution of every To
 by that response.
 _Avoid_: Message, prompt, loop iteration
 
+**Turn Usage**:
+The tokens and cost incurred by exactly one Model Turn, reported on its completion event.
+_Avoid_: Turn tokens, turn cost, step usage
+
 **Steer**:
 A message the person sends to the running Coding Task. The Agent Run takes it just before a Model
 Turn and appends it to the Transcript.
@@ -47,6 +51,10 @@ _Avoid_: Final answer, successful result
 The single terminal outcome of an Agent Run, including its completion status and supporting
 evidence or failure reason.
 _Avoid_: Exit code, final message, summary
+
+**Usage Totals**:
+The cumulative tokens and cost incurred across all Model Turns of an Agent Run, carried on Agent State and the Agent Result.
+_Avoid_: Session usage, run usage, total tokens
 
 **Outcome Note**:
 The message Agent Core appends to the Transcript when an Agent Run settles without success, telling

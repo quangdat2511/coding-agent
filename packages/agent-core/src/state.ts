@@ -1,4 +1,4 @@
-import type { Message } from "@coding-agent/ai";
+import type { Message, Usage } from "@coding-agent/ai";
 import type { ApprovalPolicy } from "./ports.ts";
 import type { CancelledResult, FailedResult, SucceededResult, UsageTotals } from "./result.ts";
 import type { CodingTask } from "./task.ts";
@@ -41,6 +41,7 @@ export interface DisplayBlock {
 export interface AssistantMessageDraft {
   readonly messageId: string;
   readonly blocks: readonly DisplayBlock[];
+  readonly usage?: Usage;
 }
 
 export interface RunCounters {

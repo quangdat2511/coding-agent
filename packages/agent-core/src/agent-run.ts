@@ -632,6 +632,7 @@ export function createAgentRun(config: OpenRunConfig, initial: ReadyState): Agen
       content: draft.blocks.map(({ text }) => ({ type: "text", text })),
       model: model.id,
       finishReason,
+      ...(draft.usage !== undefined ? { usage: draft.usage } : {}),
     };
   }
 
@@ -946,12 +947,17 @@ export function createAgentRun(config: OpenRunConfig, initial: ReadyState): Agen
           const blocks = draft.blocks.slice();
           const block = blocks[blockIndex];
           blocks[blockIndex] = { kind: "text", text: (block?.text ?? "") + delta };
-          draft = { messageId, blocks };
+          draft = { ...draft, messageId, blocks };
           currentDraft = draft;
           commit(streaming(modelTurn, draft), {
             type: "assistant_content_delta",
             data: { messageId, blockIndex, kind: "text", delta },
           });
+        },
+        (usage) => {
+          if (breachedLimit !== undefined || state.phase !== "streaming_model") return;
+          draft = { ...draft, usage };
+          currentDraft = draft;
         },
       ),
     );

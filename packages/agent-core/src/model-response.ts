@@ -3,6 +3,7 @@ import type {
   ModelStream,
   ModelStreamEvent,
   NormalizedFinishReason,
+  Usage,
 } from "@coding-agent/ai";
 import { type Fields, isNonEmptyString, isRecord, messageOf } from "./guards.ts";
 import type { AgentFailure, ModelFailurePhase } from "./result.ts";
@@ -31,8 +32,29 @@ const isString = (value: unknown): boolean => typeof value === "string";
 const isCount = (value: unknown): boolean =>
   typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
 
+const isCostNumber = (value: unknown): boolean =>
+  typeof value === "number" && Number.isFinite(value) && value >= 0;
+
 const isHttpStatus = (value: unknown): boolean =>
   typeof value === "number" && Number.isInteger(value) && value >= 100 && value <= 599;
+
+const isUsableCost = (cost: unknown): boolean =>
+  isRecord(cost) &&
+  isCostNumber(cost.input) &&
+  isCostNumber(cost.output) &&
+  isCostNumber(cost.cacheRead) &&
+  isCostNumber(cost.cacheWrite) &&
+  isCostNumber(cost.total) &&
+  isOptional(cost.totalFromProvider, isCostNumber);
+
+const isUsableUsage = (usage: unknown): boolean =>
+  isRecord(usage) &&
+  isCount(usage.inputTokens) &&
+  isCount(usage.outputTokens) &&
+  isOptional(usage.cachedInputTokens, isCount) &&
+  isOptional(usage.cacheWriteTokens, isCount) &&
+  isOptional(usage.reasoningTokens, isCount) &&
+  isOptional(usage.cost, isUsableCost);
 
 const eventShapes = {
   stream_start: () => true,
@@ -41,7 +63,7 @@ const eventShapes = {
   content_block_delta: ({ index, delta }) =>
     isCount(index) && isRecord(delta) && isString(delta.text),
   content_block_stop: ({ index }) => isCount(index),
-  turn_delta: () => true,
+  turn_delta: ({ usage }) => isOptional(usage, isUsableUsage),
   turn_end: () => true,
   error: ({ error }) =>
     isRecord(error) &&
@@ -65,13 +87,6 @@ const isUsableBlock = (block: unknown): boolean =>
       isNonEmptyString(block.name) &&
       isString(block.arguments) &&
       isOptional(block.signature, isString)));
-
-const isUsableUsage = (usage: unknown): boolean =>
-  isRecord(usage) &&
-  isCount(usage.inputTokens) &&
-  isCount(usage.outputTokens) &&
-  isOptional(usage.cachedInputTokens, isCount) &&
-  isOptional(usage.reasoningTokens, isCount);
 
 const isUsableMessage = (message: unknown): message is AssistantMessage =>
   isRecord(message) &&
@@ -129,6 +144,7 @@ function finish(message: AssistantMessage): ModelResponse {
 export async function readModelResponse(
   open: () => ModelStream,
   onText: (blockIndex: number, delta: string) => void,
+  onUsage?: (usage: Usage) => void,
 ): Promise<ModelResponse> {
   const startedBlocks = new Set<number>();
   const openBlocks = new Set<number>();
@@ -201,6 +217,11 @@ export async function readModelResponse(
         case "content_block_stop":
           if (!openBlocks.delete(event.index)) {
             return protocolError(`content block ${event.index} stopped without being open`);
+          }
+          break;
+        case "turn_delta":
+          if (event.usage !== undefined) {
+            onUsage?.(event.usage);
           }
           break;
         case "turn_end": {

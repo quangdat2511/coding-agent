@@ -15,6 +15,7 @@ import {
   hangQuiescingAfter,
   inOrder,
   type Respond,
+  replay,
   replayInOrder,
   replayRejection,
   type SentRequest,
@@ -207,7 +208,7 @@ describe("a headless run of the named task on OpenCode Go", () => {
     );
   });
 
-  it("records provider opencode, the model id and the sampling entry in run.json", async () => {
+  it("records provider opencode, the model id and the sampling entry in run.json, omitting pricing and costUsd", async () => {
     await runNamedTask(
       replayInOrder(turns),
       async ({ outputDir }) => {
@@ -217,8 +218,101 @@ describe("a headless run of the named task on OpenCode Go", () => {
           model: "deepseek-v4.1-flash",
           sampling: { maxOutputTokens: null, temperature: null },
         });
+        expect("pricing" in written).toBe(false);
+
+        const resultJson = await Bun.file(join(outputDir, "result.json")).json();
+        expect("costUsd" in resultJson).toBe(false);
       },
       { target, env: { OPENCODE_API_KEY: secret } },
+    );
+  });
+});
+
+describe("a headless run of the named task on Anthropic", () => {
+  const target = { provider: "anthropic", model: "claude-haiku-4-5" } as const;
+
+  it("records pricing in run.json and costUsd in result.json", async () => {
+    await runNamedTask(
+      replay("anthropic/text-turn.txt"),
+      async ({ result, outputDir }) => {
+        expect(result.exitCode).toBe(0);
+        expect(result.result?.outcome).toBe("succeeded");
+
+        const runJson = await Bun.file(join(outputDir, "run.json")).json();
+        expect(runJson.pricing).toEqual({
+          input: 1,
+          output: 5,
+          cacheRead: 0.1,
+          cacheWrite: 1.25,
+        });
+
+        const resultJson = await Bun.file(join(outputDir, "result.json")).json();
+        // 25 input tokens * $1.00/Mtok + 9 output tokens * $5.00/Mtok = $0.00007
+        expect(resultJson.costUsd).toBe(0.00007);
+      },
+      { target, env: { ANTHROPIC_API_KEY: secret } },
+    );
+  });
+
+  it.skipIf(noFullDevice)(
+    "still records costUsd in result.json when events.jsonl fails during the run",
+    async () => {
+      await runNamedTask(
+        replay("anthropic/text-turn.txt"),
+        async ({ result, outputDir }) => {
+          expect(result.exitCode).toBe(70);
+          expect(result.result?.outcome).toBe("succeeded");
+
+          const resultJson = await Bun.file(join(outputDir, "result.json")).json();
+          expect(resultJson.costUsd).toBe(0.00007);
+        },
+        {
+          target,
+          env: { ANTHROPIC_API_KEY: secret },
+          prepare: async (_repoRoot, outputDir) => {
+            await mkdir(outputDir, deep);
+            await symlink("/dev/full", join(outputDir, "events.jsonl"));
+          },
+        },
+      );
+    },
+  );
+
+  it("omits costUsd from result.json when a turn has tokens and no cost (unpriced model)", async () => {
+    const unpricedTarget = { provider: "anthropic", model: "claude-opus-4-1" } as const;
+    await runNamedTask(
+      replay("anthropic/text-turn.txt"),
+      async ({ result, outputDir }) => {
+        expect(result.exitCode).toBe(0);
+        expect(result.result?.outcome).toBe("succeeded");
+
+        const runJson = await Bun.file(join(outputDir, "run.json")).json();
+        expect("pricing" in runJson).toBe(false);
+
+        const resultJson = await Bun.file(join(outputDir, "result.json")).json();
+        expect("costUsd" in resultJson).toBe(false);
+      },
+      { target: unpricedTarget, env: { ANTHROPIC_API_KEY: secret } },
+    );
+  });
+
+  it("keeps costUsd as a known $0 when a turn has zero tokens (noUsage)", async () => {
+    const zeroTokenTurn: Respond = () =>
+      new Response(
+        'event: message_start\ndata: {"type":"message_start","message":{"id":"msg_0","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":0,"output_tokens":0}}}\n\nevent: content_block_start\ndata: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}\n\nevent: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Zero tokens."}}\n\nevent: content_block_stop\ndata: {"type":"content_block_stop","index":0}\n\nevent: message_delta\ndata: {"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"output_tokens":0}}\n\nevent: message_stop\ndata: {"type":"message_stop"}\n\n',
+        { headers: { "content-type": "text/event-stream" } },
+      );
+
+    await runNamedTask(
+      zeroTokenTurn,
+      async ({ result, outputDir }) => {
+        expect(result.exitCode).toBe(0);
+        expect(result.result?.outcome).toBe("succeeded");
+
+        const resultJson = await Bun.file(join(outputDir, "result.json")).json();
+        expect(resultJson.costUsd).toBe(0);
+      },
+      { target, env: { ANTHROPIC_API_KEY: secret } },
     );
   });
 });
