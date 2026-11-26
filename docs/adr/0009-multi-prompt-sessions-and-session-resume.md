@@ -1158,6 +1158,21 @@ ID        ACTIVE   TASKS  MODEL                        STATUS                   
 - Branching a Session, renaming a Session, a takeover flag for a held lock, and a sweep of stale
   locks or Worktrees.
 
+### 12. Amendments
+
+On 2026-11-26, [CDA-130](https://datn-fit-hcmus.atlassian.net/browse/CDA-130) amended this record:
+
+- **Session Usage** (§7.2): `ControllerState.session` gains `usage?: SessionUsage`,
+  `{ inputTokens, outputTokens, cacheReadTokens?, cacheWriteTokens?, costUsd? }`. The Session
+  Controller adds each appended `model_turn_completed` with the shared turn-cost rule
+  (`totalFromProvider ?? total`; a Model Turn with tokens and no cost makes the cost unknown) and
+  sends a `state` update. When a Session opens, it sums the Session file's `model_turn_completed`
+  events into the `opened` state. It never reads `run_settled` usage. `usage` absent means no Model
+  Turn has completed; `costUsd` absent means the cost is unknown, not zero. The naming request
+  (§4.10) is not counted.
+- **TUI** (§8.1): `TuiModel.session` mirrors the field. The adapter maps it with the other
+  `session` fields, and `projectSessionLogEntry` does not sum usage.
+
 ## Considered options
 
 - **A `steer` command that pushes Steers into the Agent Run**, as the proposal named it. A pushed
