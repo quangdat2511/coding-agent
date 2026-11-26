@@ -33,6 +33,11 @@ Opening a saved Session so that the person's next Coding Task runs as a new Agen
 Transcript.
 _Avoid_: Restore, reload, replay
 
+**Session Usage**:
+The tokens and cost of every Model Turn in a Session, summed across its Agent Runs. Its cost is
+unknown, not zero, once a Model Turn used tokens without a known Usage Cost.
+_Avoid_: Run Usage, Usage Totals (one Agent Run's)
+
 **Session lock**:
 The claim one Coding Agent process holds on a Session while it has the Session open. Only the
 holder writes the Session file; every other process sees the Session as open elsewhere and cannot
