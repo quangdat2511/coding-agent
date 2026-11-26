@@ -139,7 +139,7 @@ describe("tool ports", () => {
     expect(pending.summary).toBe("echo hi");
   });
 
-  it("declares the thirteen tool error codes", () => {
+  it("declares the fifteen tool error codes", () => {
     const codes = {
       SCHEMA_VIOLATION: true,
       NOT_FOUND: true,
@@ -148,6 +148,8 @@ describe("tool ports", () => {
       PERMISSION_DENIED: true,
       NO_MATCH: true,
       AMBIGUOUS_MATCH: true,
+      OVERLAPPING_EDITS: true,
+      NO_CHANGE: true,
       PARENT_CREATION_FAILED: true,
       TIMEOUT: true,
       SIGNAL: true,
@@ -156,7 +158,7 @@ describe("tool ports", () => {
       TOOL_INTERNAL_ERROR: true,
     } satisfies Record<ToolErrorCode, true>;
 
-    expect(Object.keys(codes)).toHaveLength(13);
+    expect(Object.keys(codes)).toHaveLength(15);
   });
 
   it("identifies a failed tool outcome by a discriminant, not instanceof (compile-time)", () => {

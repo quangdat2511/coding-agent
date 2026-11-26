@@ -329,6 +329,9 @@ export type ToolOutcome =
 
 export interface ExecutableTool<S extends TSchema = TSchema> extends ToolDeclaration<S> {
   readonly mutation: ToolMutation;
+  normalizeArguments?(input: unknown):
+    | { readonly ok: true; readonly input: unknown }
+    | { readonly ok: false; readonly message: string };
   prepare(input: Static<S>, ctx: PrepareContext): Promise<PrepareOutcome<S>>;
   execute(prepared: PreparedCall<S>, ctx: ExecuteContext): Promise<ToolOutcome>;
 }
@@ -339,6 +342,8 @@ export interface ToolRegistry {
 }
 ```
 
+Agent Core passes parsed JSON to the optional `normalizeArguments` before Schema Validation.
+The hook can convert supported compatibility forms or reject the call with a schema violation.
 `prepare` runs after Schema Validation, has no side effects, and receives no progress callback,
 because ADR 0002 permits progress only between `tool_execution_started` and the Tool Call's
 completion. `execute` re-validates `prepared.paths` through `ctx.workspace`, because waiting for
