@@ -204,7 +204,7 @@ Each Tool Call passes through this zero-side-effect preflight before execution:
 
 1. resolve the registered tool;
 2. assemble and parse complete arguments;
-3. perform Schema Validation;
+3. normalize compatibility arguments when the tool provides a hook, then perform Schema Validation;
 4. perform repository, path, working-directory, and other deterministic policy checks;
 5. classify mutation and evaluate the Approval Policy;
 6. obtain Approval when required;

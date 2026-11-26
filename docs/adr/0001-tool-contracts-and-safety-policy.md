@@ -27,10 +27,33 @@ We establish the following tool contracts and safety guarantees across the archi
 |---|---|---|---|
 | `read` | `{ path: string, offset?: number, limit?: number }` | Numbered text lines (`line \| content`), canonical path, line range metadata | `NOT_FOUND`, `IS_DIRECTORY`, `PATH_OUTSIDE_REPO`, `PERMISSION_DENIED`, `SCHEMA_VIOLATION` (invalid offset/limit) |
 | `write` | `{ path: string, content: string }` | Canonical path, bytes written | `PATH_OUTSIDE_REPO`, `PARENT_CREATION_FAILED`, `PERMISSION_DENIED`, `SCHEMA_VIOLATION` |
-| `edit` | `{ path: string, targetContent: string, replacementContent: string }` | Canonical path, replacement count (1) | `NO_MATCH`, `AMBIGUOUS_MATCH`, `NOT_FOUND`, `IS_DIRECTORY`, `PATH_OUTSIDE_REPO`, `PERMISSION_DENIED`, `SCHEMA_VIOLATION` |
+| `edit` | `{ path: string, edits: { oldText: string, newText: string }[] }` | Canonical absolute path, count of ranges changed | `NO_MATCH`, `AMBIGUOUS_MATCH`, `OVERLAPPING_EDITS`, `NO_CHANGE`, `NOT_FOUND`, `IS_DIRECTORY`, `PATH_OUTSIDE_REPO`, `PERMISSION_DENIED`, `SCHEMA_VIOLATION` |
 | `bash` | `{ command: string, timeoutMs?: number, cwd?: string }` | Combined stdout/stderr, exit code (0), duration | `TIMEOUT`, `SIGNAL`, `NON_ZERO_EXIT`, `PATH_OUTSIDE_REPO` (invalid cwd), `APPROVAL_DENIED`, `SCHEMA_VIOLATION` |
 
 Any tool may also fail with `TOOL_INTERNAL_ERROR` (§6).
+
+#### Edit batches ([CDA-154](https://datn-fit-hcmus.atlassian.net/browse/CDA-154))
+
+- An edit batch contains at least one replacement. Each `oldText` is non-empty and each empty
+  `newText` deletes its matched range. Before Schema Validation, Agent Core lets `edit` normalize
+  the legacy `targetContent` and `replacementContent` pair, the top-level `oldText` and `newText`
+  pair, and a single edit object or a JSON string containing an edit object or array. Mixed forms,
+  incomplete pairs, malformed arguments, and unpaired surrogates are schema violations.
+- Match each edit against the original file. Count all exact matches, including overlapping
+  occurrences. With zero exact matches, try matching after trimming each line's trailing
+  whitespace and folding the quotes, dashes, and spaces specified by the
+  [Pi research](../research/pi-edit-diff.md). A fuzzy target that becomes empty has no match.
+  Every edit needs one match. Map matches to the original file, reject overlapping ranges, and
+  apply disjoint ranges in file order. Adjacent ranges are allowed.
+- Use strict UTF-8 for existing regular files. Preserve a leading BOM and exclude it from
+  matching. Interior U+FEFF is text. Treat LF, CRLF, and CR as equivalent during matching. Use
+  the ending of the line at the start of each range for inserted line breaks. Fall back to the
+  preceding line ending for an unterminated final line, then LF when the file has no endings.
+  Keep bytes outside the ranges and reject splices that merge line breaks or introduce a leading
+  BOM.
+- Allow individual no-ops. Return `NO_CHANGE` when the resulting file is byte-identical. A
+  successful edit reports the canonical absolute path and the count of ranges whose bytes
+  changed, for example `"/workspace/repo/config.ts" (1 replacement applied)`.
 
 ### 2. Repository-bound Path Jailing and Symlink Boundaries
 
@@ -79,7 +102,11 @@ The architecture distinguishes four precise mutation levels:
 1. **Pre-execution Rejections (Schema checking, Path Jailing, Approval Denial)**:
    - Strict **Zero mutation** guarantee. No filesystem or process side-effects occur.
 2. **Single-File Modifications (`write`, `edit`)**:
-   - **Target-File Atomicity**: The target file is never left half-written or corrupted. `write` writes to a temporary file in the destination directory and performs an atomic rename. `edit` strictly requires an exact, unique occurrence of `targetContent`; if missing or matching more than one location, it fails atomically without modifying the file.
+   - **Target-File Atomicity**. Both tools commit with one atomic rename from a temporary file
+     in the destination directory. `edit` validates the entire batch before Approval and shows
+     one summary line, for example `Apply 12 requested edits to "config.ts"`. After Approval,
+     `edit` revalidates through the Path Jail, rereads the file, and recomputes the whole batch.
+     A rejected batch leaves the target untouched.
    - **Parent Directory Side-Effects**: Creation of missing parent directories (`mkdir -p`) is *not* rolled back if the subsequent file write fails. Empty directories may remain in the repository.
 3. **Shell Execution (`bash`)**:
    - **Explicitly Non-Transactional**: Shell execution is unmanaged and cannot be automatically rolled back. A script or command failing mid-execution (e.g., via non-zero exit code, signal, or timeout) may leave partial file changes or side-effects in the repository. Such outcomes are reported with `isError: true` and the corresponding error code (`TIMEOUT` or `NON_ZERO_EXIT`), signaling to the model that partial modifications may exist.
@@ -97,6 +124,8 @@ type ToolErrorCode =
   | "PERMISSION_DENIED"
   | "NO_MATCH"
   | "AMBIGUOUS_MATCH"
+  | "OVERLAPPING_EDITS"
+  | "NO_CHANGE"
   | "PARENT_CREATION_FAILED"
   | "TIMEOUT"
   | "SIGNAL"

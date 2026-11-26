@@ -27,6 +27,8 @@ const toolErrorCodes = {
   PERMISSION_DENIED: true,
   NO_MATCH: true,
   AMBIGUOUS_MATCH: true,
+  OVERLAPPING_EDITS: true,
+  NO_CHANGE: true,
   PARENT_CREATION_FAILED: true,
   TIMEOUT: true,
   SIGNAL: true,
@@ -82,6 +84,26 @@ export async function preflightToolCall(
       "SCHEMA_VIOLATION",
       `the arguments for ${call.name} are not valid JSON: ${messageOf(error)}`,
     );
+  }
+
+  try {
+    const normalize = tool.normalizeArguments;
+    if (normalize !== undefined) {
+      const normalized: unknown = normalize.call(tool, input);
+      if (isRecord(normalized) && normalized.ok === true && Object.hasOwn(normalized, "input")) {
+        input = normalized.input;
+      } else if (
+        isRecord(normalized) &&
+        normalized.ok === false &&
+        typeof normalized.message === "string"
+      ) {
+        return rejected("SCHEMA_VIOLATION", normalized.message);
+      } else {
+        return unexpected(call.name, "normalizeArguments returned an unusable outcome");
+      }
+    }
+  } catch (error) {
+    return unexpected(call.name, messageOf(error));
   }
 
   let problems: readonly string[] | undefined;

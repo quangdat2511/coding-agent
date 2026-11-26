@@ -8,6 +8,8 @@ export type ToolErrorCode =
   | "PERMISSION_DENIED"
   | "NO_MATCH"
   | "AMBIGUOUS_MATCH"
+  | "OVERLAPPING_EDITS"
+  | "NO_CHANGE"
   | "PARENT_CREATION_FAILED"
   | "TIMEOUT"
   | "SIGNAL"

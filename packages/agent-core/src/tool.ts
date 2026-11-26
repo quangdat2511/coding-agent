@@ -41,6 +41,12 @@ export type ToolOutcome =
 
 export interface ExecutableTool<S extends TSchema = TSchema> extends ToolDeclaration<S> {
   readonly mutation: ToolMutation;
+  /** Convert supported argument forms before Agent Core validates them against parameters. */
+  normalizeArguments?(
+    input: unknown,
+  ):
+    | { readonly ok: true; readonly input: unknown }
+    | { readonly ok: false; readonly message: string };
   prepare(input: Static<S>, ctx: PrepareContext): Promise<PrepareOutcome<S>>;
   execute(prepared: PreparedCall<S>, ctx: ExecuteContext): Promise<ToolOutcome>;
 }

@@ -192,6 +192,76 @@ describe("resolving Tool Calls in preflight", () => {
     ]);
   });
 
+  it("uses a tool's normalized arguments for Schema Validation and Approval", async () => {
+    const tool: ExecutableTool = {
+      ...fakeTool({
+        name: "replace",
+        mutation: "mutating",
+        parameters: Type.Object({ text: Type.String() }),
+      }),
+      normalizeArguments: () => ({ ok: true, input: { text: "new" } }),
+    };
+    const { run } = openTestRun({
+      tools: [tool],
+      model: {
+        turns: [
+          toolCallTurn({ toolCallId: "call-1", name: "replace", input: { legacy: "new" } }),
+          textTurn("Fixed it."),
+        ],
+      },
+    });
+
+    await run.dispatch({ type: "start", task });
+    const approval = await waitForEvent(run, "approval_requested");
+    expect(approval.data.summary).toBe('replace {"text":"new"}');
+    await run.dispatch({ type: "resolve_approval", approvalId: "approval-1", decision: "allow" });
+    await run.result();
+  });
+
+  it("treats an argument normalization rejection as a schema violation before prepare", async () => {
+    const tool: ExecutableTool = {
+      ...fakeTool(),
+      normalizeArguments: () => ({ ok: false, message: "Choose one argument form." }),
+    };
+    const { run, portCalls } = openTestRun({
+      tools: [tool],
+      model: {
+        turns: [toolCallTurn({ toolCallId: "call-1", name: "echo", input: {} }), textTurn("Done.")],
+      },
+    });
+
+    await run.dispatch({ type: "start", task });
+    await run.result();
+
+    expect(resultOf(await collect(run.events()), "tool_call-1")).toEqual(
+      errorResult("echo", "SCHEMA_VIOLATION", "Choose one argument form."),
+    );
+    expect(portCalls).not.toContain("tool.prepare(echo)");
+  });
+
+  it("reports an unusable argument normalization outcome as an internal error", async () => {
+    const tool = {
+      ...fakeTool(),
+      normalizeArguments: () => ({ ok: false, message: 42 }),
+    } as unknown as ExecutableTool;
+    const { run, portCalls } = openTestRun({
+      tools: [tool],
+      model: {
+        turns: [toolCallTurn({ toolCallId: "call-1", name: "echo", input: {} }), textTurn("Done.")],
+      },
+    });
+
+    await run.dispatch({ type: "start", task });
+    await run.result();
+
+    expect(resultOf(await collect(run.events()), "tool_call-1")?.error).toEqual({
+      code: "TOOL_INTERNAL_ERROR",
+      message:
+        "echo failed unexpectedly while preparing the call: normalizeArguments returned an unusable outcome",
+    });
+    expect(portCalls).not.toContain("tool.prepare(echo)");
+  });
+
   it("rejects malformed JSON arguments with a SCHEMA_VIOLATION error Tool Result, without preparing the call", async () => {
     const { run, portCalls } = openTestRun({
       model: {
