@@ -13,9 +13,9 @@
 - **AI → Agent Core**: AI supplies provider-neutral model interactions used during an Agent Run.
 - **Tools → Agent Core**: Tools implements the tool and workspace ports that Agent Core defines and
   invokes.
-- **Agent Core ↔ Terminal UI**: Agent Core exposes Agent Run activity; Terminal UI presents it and
-  returns user decisions. Coding Agent carries both directions, so neither package depends on the
-  other.
+- **Agent Core ↔ Terminal UI**: Agent Core exposes Agent Run activity; Terminal UI presents it
+  within a Session and returns the person's Actions. Coding Agent's Session Controller carries both
+  directions, so neither package depends on the other.
 - **Coding Agent → AI, Agent Core, Tools, Terminal UI**: Coding Agent composes the four contexts into
   an executable application.
 

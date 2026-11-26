@@ -2,7 +2,7 @@
 
 Status: accepted
 
-Date: 2026-09-13 (Amended: 2026-09-16, 2026-11-05, 2026-11-15, 2026-11-24)
+Date: 2026-09-13 (Amended: 2026-09-16, 2026-11-05, 2026-11-15, 2026-11-24, 2026-11-26)
 
 ## Context
 
@@ -260,6 +260,37 @@ On 2026-11-24, [CDA-147](https://datn-fit-hcmus.atlassian.net/browse/CDA-147) am
 - **Agent Session is renamed Agent Run** (title, Context, §2 to §5): the memory §4 bounds is that
   of one Agent Run, and Session Limits are Run Limits (`RunLimits`), following ADR 0002 §8.
   Behavior is unchanged. The file name is kept so that links to this record still resolve.
+
+On 2026-11-26, [CDA-138](https://datn-fit-hcmus.atlassian.net/browse/CDA-138),
+[CDA-139](https://datn-fit-hcmus.atlassian.net/browse/CDA-139) and
+[CDA-141](https://datn-fit-hcmus.atlassian.net/browse/CDA-141), recorded in
+[ADR 0009](./0009-multi-prompt-sessions-and-session-resume.md), amended this record:
+
+- **System prompt per Session** (§1, §2): Coding Agent builds the system prompt, Project
+  Instructions and environment metadata included, when a Session is created, keeps it in the
+  Session file, and every Agent Run of that Session reuses it. Resume reuses the stored prompt and
+  rebuilds it only when Coding Agent's version, its commit or its tool names changed (ADR 0009
+  §4.7), so an `AGENTS.md` edit takes effect in the next Session. This keeps the request prefix
+  stable and the model's rules fixed within a conversation. Headless builds the same text once for
+  its one Agent Run.
+- **Role** (§2): the prompt's role sentence becomes "You are Coding Agent, an AI coding agent. You
+  work in one code repository, and the tools listed below are your only way to inspect or change
+  it. The person gives you Coding Tasks one at a time; earlier Coding Tasks and your work on them
+  stay above the current one."
+- **Planning per Coding Task** (§2): the planning requirement ends "in your first response to each
+  Coding Task" instead of "in your initial response turn".
+- **Outcome Notes and Steers** (§2): two paragraphs follow the completion sentence. The first is "A
+  message wrapped in `<task_outcome>` comes from Coding Agent, not from the person: it says how an
+  earlier Coding Task ended. Take it into account and do not answer it." The second is "While you
+  work on a Coding Task, the person may send more messages. They belong to the current Coding Task,
+  not a new one: take them into account and carry on. Where one conflicts with an earlier
+  instruction, the later message wins." ADR 0009 §2 gives the Outcome Notes and Closing Tool
+  Results themselves.
+- **Memory** (§2, §4): memory is the Session's Transcript, carried into each new Agent Run with its
+  Outcome Notes and Closing Tool Results (ADR 0002 §8), so a plan stays visible across the Agent
+  Runs of a Session, not only within one. Compaction stays deferred and is Group 1's next stage.
+  Run Limits still bound each Agent Run, and nothing limits a whole Session.
+- **Consequences**: persistent Sessions are no longer a follow-up; ADR 0009 decides them.
 
 ## Consequences
 

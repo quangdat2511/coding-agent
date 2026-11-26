@@ -527,6 +527,90 @@ On 2026-11-25, [CDA-166](https://datn-fit-hcmus.atlassian.net/browse/CDA-166) am
   `details` when present on success.
   [Tool Details decision](https://datn-fit-hcmus.atlassian.net/browse/CDA-155?focusedCommentId=10375)
 
+On 2026-11-26, [CDA-138](https://datn-fit-hcmus.atlassian.net/browse/CDA-138),
+[CDA-139](https://datn-fit-hcmus.atlassian.net/browse/CDA-139) and
+[CDA-141](https://datn-fit-hcmus.atlassian.net/browse/CDA-141), recorded with the rest of stage 1 in
+[ADR 0009](./0009-multi-prompt-sessions-and-session-resume.md), amended this record. A Session runs
+each of its Coding Tasks as a new Agent Run over one Transcript; ADR 0004 §10 gives the types.
+
+- **The Transcript an Agent Run starts from** (§1, §2): construction takes an optional
+  `transcript`, the Session's Transcript, empty by default and validated with the rest of the
+  configuration before `ready`. A carried Transcript with an unanswered `tool_call`, a
+  `tool_result` that answers no earlier call, or duplicate ids is refused with
+  `INVALID_CONFIGURATION`. Agent State's common data and the `run_started` payload gain
+  `carriedMessages`, the length of the carried Transcript, so the run's own messages are
+  `transcript.slice(carriedMessages)`. `task` stays the prompt that opened the run.
+- **Invariants** (§3): (I1) the carried Transcript is an unchanged prefix of the run's Transcript,
+  since a run only appends; (I2) a settled run's Transcript is closed, every Tool Call having a Tool
+  Result; (I3) construction refuses the carried Transcripts the bullet above names; (I4) every
+  message appended to the Transcript is carried by exactly one Run Event: the Coding Task by
+  `run_started`, a completed Assistant Message by `assistant_message_completed`, a Tool Result or
+  Closing Tool Result by `tool_call_completed`, Verification feedback by `verification_completed`, a
+  Steer by `steer_taken`, and an Outcome Note by `run_settled`.
+- **Closing Tool Results** (§3, §5): each Tool Call that ends without a result of its own gets a
+  Closing Tool Result with `isError: true`, committed to the Transcript and carried on
+  `tool_call_completed`. A skipped call gets one, the call of a pending Approval at cancellation
+  included. A completed Assistant Message whose Tool Calls are not yet queued when the run settles,
+  as when a cancellation lands between `assistant_message_completed` and the first
+  `tool_call_queued`, has each call queued and skipped, so each gets a Closing Tool Result. A call
+  stopped while running keeps the tool's own result when the tool returned within the Cancellation
+  Grace Period (`bash` returns its partial output and a `cancelled` status), and gets a Closing Tool
+  Result otherwise. This supersedes §3's "A skipped call records the run-ending reason and has no
+  Tool Result because no later Model Turn will occur" and §5's "has no Tool Result": a later Agent
+  Run carries the Transcript, and Anthropic and OpenAI reject a request holding a Tool Call without
+  a result. An interrupted Assistant Message is still never carried; no Tool Call in it ran, since
+  calls are queued only after `assistant_message_completed`.
+- **Outcome Notes** (§4, §6): every settlement without success (cancelled, and every failure code,
+  `LIMIT_EXCEEDED` included) appends an Outcome Note, a user message telling the model how that
+  Coding Task ended. A successful run gets none. The `run_settled` payload becomes
+  `{ result, outcomeNote?, wordingFailure? }`, and the terminal Agent State holds the note in the
+  Transcript before the event is published. Without it, a Coding Task cancelled before any reply
+  would stay in the Transcript as an unanswered request that the model may carry out with the next
+  one.
+- **Wording** (§1): Agent Core decides when a Closing Tool Result or an Outcome Note is added; a
+  required, synchronous and pure `TranscriptWording` port, which Coding Agent supplies, decides the
+  words, and a note it returns as `undefined` is not added. If the port throws, the outcome stands,
+  a Closing Tool Result has empty content with `isError: true`, no Outcome Note is added, and
+  `run_settled` records the failure in `wordingFailure`.
+- **Steers** (§1, §3): an Agent Run takes Steers through an optional `SteerSource` port, whose
+  `take()` Coding Agent implements over its Prompt Queue; without the port the run takes none. The
+  command union is unchanged. The run calls `take` just before each Model Turn's request, the first
+  included, after the cancellation check and the Run Limit check, and commits the Steer to the
+  Transcript in the same tick, so a queued Steer is either still editable or already taken. It takes
+  at most one per Model Turn, and none while streaming, between the Tool Calls of a batch, during
+  Verification or while cancelling. After a Verification `continue`, the request carries the
+  feedback, then the Steer. A Steer waiting through an Approval decides nothing and waits until the
+  batch resolves. A taken Steer is appended as a plain user message holding the person's text, so
+  in the Transcript alone it looks like a Coding Task; the boundary lives in the Run Events. It
+  resets no Run Limit counter. A `take` that throws, or returns anything but
+  `{ id: string; text: string }` with non-empty `text`, settles `INTERNAL_ERROR`, since the item may
+  already have left the queue.
+- **A Candidate Completion with a Steer waiting** (§2, §4): when another Model Turn fits within the
+  Run Limits and `take` returns a Steer, the run appends it and starts that Model Turn without
+  entering Verification; `candidate_completion_detected` is still emitted. §2 gains the transition
+  from `streaming_model` to `streaming_model` on a Candidate Completion when a Steer is taken. When
+  another Model Turn would breach a limit, the run enters Verification without calling `take`, so a
+  late Steer never turns a verifiable run into `LIMIT_EXCEEDED`. A decided Verification is final:
+  `succeeded` and `failed` settle, and a waiting Steer stays in the Prompt Queue. §4's "No automatic
+  retry, steering, prompt queue, pause, resume, or recovery exists in this MVP" drops steering and
+  the prompt queue. An Agent Run is still never resumed: a resumed Session opens a new one.
+- **`steer_taken`** (§6): the union gains a twentieth type, `steer_taken`, with payload
+  `{ steerId: string; message: UserMessage }`, where `steerId` is the Prompt Queue item's id; Agent
+  Core issues no id of its own for a Steer. It is a point event with no completion pair and adds no
+  phase. It is committed before the `model_turn_started` of the Model Turn that carries the Steer:
+  after a batch, `tool_call_completed`, `model_turn_completed`, `steer_taken`,
+  `model_turn_started`; at a Candidate Completion, `candidate_completion_detected`,
+  `model_turn_completed`, `steer_taken`, `model_turn_started`, with no `verification_started`; after
+  a `continue`, `verification_completed`, `steer_taken`, `model_turn_started`; on the first Model
+  Turn, `run_started`, `steer_taken`, `model_turn_started`.
+- **Persistence** (§1, §7): Run Events are persistent data in two files, `events.jsonl` (ADR 0005
+  §4) and the Session file (ADR 0009 §4), whose lines each carry a `schemaVersion` numbered per
+  file. Stored Run Events are a durable record from which Coding Agent derives a Session's
+  Transcript and redraws its view. They never restore an Agent Run, and §1's "not an
+  event-sourcing or replay contract" stands.
+- **Consequences**: persistent Sessions and steering are decided by this amendment and ADR 0009.
+  Replay recovery, remote operation, concurrent tools and retries still need later decisions.
+
 ## Consequences
 
 - TUI, headless evaluation, and tests consume the same ordered protocol without knowing provider
