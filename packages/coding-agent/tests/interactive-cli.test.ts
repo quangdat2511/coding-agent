@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { join } from "node:path";
+import { Terminal } from "@xterm/headless";
 import { READ_ONLY_RUN } from "./support/named-task.ts";
 import { noPseudoTerminal, onWindows } from "./support/platform.ts";
 import {
@@ -102,8 +103,7 @@ describe("the coding-agent executable on the interactive path", () => {
     expect(stderr).not.toContain(secret);
   });
 
-  // The one test that gives the TUI a real terminal, so it runs only where Bun can open one. It
-  // needs no provider: the TUI has to take the screen, and two presses of the cancel key quit.
+  // These tests need a real terminal, so they run only where Bun can open a pseudo-terminal.
   it.skipIf(noPseudoTerminal)(
     "takes the screen on a terminal and quits on two cancel keys",
     async () => {
@@ -175,6 +175,83 @@ describe("the coding-agent executable on the interactive path", () => {
       });
     },
     30_000,
+  );
+
+  it.skipIf(noPseudoTerminal)(
+    "does not echo an immediate kitty keyboard answer across the first frame (CDA-119)",
+    async () => {
+      await withTemporaryDirectory(async (cwd) => {
+        const cols = 100;
+        const rows = 30;
+        const query = "\u001b[?u";
+        const answer = "\u001b[?0u";
+        // Synchronized output brackets the frame even if the PTY delivers it in several chunks.
+        const frameStart = "\u001b[?2026h";
+        const frameEnd = "\u001b[?2026l";
+        const decoder = new TextDecoder();
+        let output = "";
+        let answerBytesWritten: number | undefined;
+        const child = Bun.spawn([...command, ...provider], {
+          cwd,
+          env: { PATH: process.env.PATH ?? "", GOOGLE_API_KEY: secret, TERM: "xterm-256color" },
+          terminal: {
+            cols,
+            rows,
+            data(terminal, data) {
+              output += decoder.decode(data, { stream: true });
+              if (answerBytesWritten === undefined && output.includes(query)) {
+                answerBytesWritten = terminal.write(answer);
+              }
+            },
+          },
+        });
+        const screen = new Terminal({ cols, rows, allowProposedApi: true });
+        const replay = (chunk: string) =>
+          new Promise<void>((resolve) => screen.write(chunk, resolve));
+        const visibleRows = () => {
+          const buffer = screen.buffer.active;
+          return Array.from(
+            { length: rows },
+            (_, row) => buffer.getLine(buffer.viewportY + row)?.translateToString(true) ?? "",
+          );
+        };
+        const waitForOutput = async (marker: string, description: string) => {
+          const deadline = Date.now() + 5_000;
+          while (!output.includes(marker)) {
+            if (child.exitCode !== null || Date.now() > deadline) {
+              throw new Error(`No ${description} (TUI exit code ${child.exitCode})`);
+            }
+            await Bun.sleep(5);
+          }
+        };
+
+        try {
+          await waitForOutput(frameEnd, "first frame");
+          expect(answerBytesWritten).toBe(answer.length);
+          const firstFrameStart = output.indexOf(frameStart);
+          const firstFrameEnd = output.indexOf(frameEnd) + frameEnd.length;
+          expect(firstFrameStart).toBeGreaterThanOrEqual(0);
+
+          await replay(output.slice(0, firstFrameStart));
+          const before = visibleRows();
+          await replay(output.slice(firstFrameStart, firstFrameEnd));
+          const after = visibleRows();
+          expect(after.join("\n")).toContain("Esc/Ctrl+C cancel");
+
+          expect({
+            beforeFirstFrame: before.filter((row) => row.includes("^[[?")),
+            afterFirstFrame: after.filter((row) => row.includes("^[[?")),
+          }).toEqual({ beforeFirstFrame: [], afterFirstFrame: [] });
+          // A fast reply must still enable the protocol that distinguishes Shift+Enter.
+          await waitForOutput("\u001b[>1u", "kitty keyboard enable sequence");
+        } finally {
+          screen.dispose();
+          child.kill("SIGKILL");
+          await child.exited;
+        }
+      });
+    },
+    10_000,
   );
 
   it("keeps the headless command line as it was", async () => {

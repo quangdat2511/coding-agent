@@ -41,6 +41,9 @@
         "@coding-agent/tools": "workspace:*",
         "@coding-agent/tui": "workspace:*",
       },
+      "devDependencies": {
+        "@xterm/headless": "6.0.0",
+      },
     },
     "packages/tools": {
       "name": "@coding-agent/tools",
