@@ -29,11 +29,13 @@ export type StopReason = "timeout" | "cancelled";
 
 export interface SupervisedRun {
   readonly argv: readonly string[];
-  readonly cwd: RepoPath;
+  readonly cwd?: RepoPath;
   readonly timeoutMs: number;
   readonly signal: AbortSignal;
   /** Each chunk of output as it arrives, with its text decoded by that pipe's own decoder. */
   onOutput(chunk: Uint8Array, text: string): void;
+  /** Optional separate handler for stderr; defaults to onOutput when omitted. */
+  onStderr?: (chunk: Uint8Array, text: string) => void;
 }
 
 export interface SupervisedExit {
@@ -62,8 +64,13 @@ export async function runSupervised(
     detached: posix,
   });
 
-  const readers = [child.stdout.getReader(), child.stderr.getReader()];
-  const reading = Promise.all(readers.map((reader) => readAll(reader, run.onOutput)));
+  const stdoutReader = child.stdout.getReader();
+  const stderrReader = child.stderr.getReader();
+  const readers = [stdoutReader, stderrReader];
+  const reading = Promise.all([
+    readAll(stdoutReader, run.onOutput),
+    readAll(stderrReader, run.onStderr ?? run.onOutput),
+  ]);
 
   let stopReason: StopReason | undefined;
   let killTimer: ReturnType<typeof setTimeout> | undefined;
@@ -155,11 +162,22 @@ function signalTree(
     } catch {
       // The tree is already gone or taskkill is missing; the drain limit still ends the call.
     }
+    try {
+      child.kill();
+    } catch {
+      // Already exited.
+    }
     return;
   }
   try {
     process.kill(-child.pid, signal);
   } catch {
-    // The group has already exited.
+    // Either the group has already exited or the child is not a process group leader (e.g. a
+    // non-detached or fake child in tests); fall back to signalling the child handle directly.
+    try {
+      child.kill(signal);
+    } catch {
+      // Already exited.
+    }
   }
 }

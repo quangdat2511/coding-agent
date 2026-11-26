@@ -894,7 +894,7 @@ describe("createToolAcquirer", () => {
       expect(hashResult.ok).toBe(false);
       if (!hashResult.ok) {
         expect(hashResult.reason).toBe("integrity-failed");
-        expect(hashResult.message).toContain("SHA-256 mismatch");
+        expect(hashResult.message).toContain("SHA256 mismatch");
       }
     });
   });
@@ -1282,6 +1282,159 @@ describe("createToolAcquirer", () => {
       const second = await acquirer.acquire("rg");
       expect(second.ok).toBe(true);
       expect(tarCalls).toBe(2);
+    });
+
+    it("does not delete destPath in a shared cache when post-rename probe is cancelled", async () => {
+      const { fs, state } = createFakeFs();
+      const controller = new AbortController();
+      const destPath = "/cache/bin/rg/16.0.0/rg";
+      const { launcher } = createFakeLauncher((argv) => {
+        if (argv[0] === "tar") {
+          state.files.set(`${argv[4]}/rg`, new Uint8Array([1]));
+          return { exitCode: 0 };
+        }
+        if (argv[0] === destPath && argv[1] === "--version") {
+          setTimeout(() => controller.abort(), 10);
+          return { exitCode: 0, stdout: "ripgrep 16.0.0\n", delayMs: 2_000 };
+        }
+        return { exitCode: 1 };
+      });
+
+      const acquirer = createToolAcquirer({
+        launcher,
+        env: {},
+        platform: "linux",
+        arch: "x64",
+        cacheDir: "/cache",
+        manifest: testManifest,
+        fs,
+        fetchImpl: async () => new Response(fakeArchive),
+        sleep: instantSleep,
+      });
+
+      const result = await acquirer.acquire("rg", { signal: controller.signal });
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.reason).toBe("cancelled");
+      expect(state.rmCalls).toContain("/cache/tmp/rg-1");
+      expect(state.rmCalls).not.toContain(destPath);
+      expect(fs.isExecutable(destPath)).toBe(true);
+    });
+
+    it("returns install-failed without falling back to PATH when explicit cache override is unusable", async () => {
+      const pathRg = "/usr/bin/rg";
+      const { fs, state } = createFakeFs([pathRg]);
+      state.failMkdirForPrefix = "/blocked-cache";
+      const { launcher } = createFakeLauncher((argv) => {
+        if (argv[0] === pathRg) return { exitCode: 0, stdout: "ripgrep 14.1.0\n" };
+        return { exitCode: 1 };
+      });
+
+      const acquirer = createToolAcquirer({
+        launcher,
+        env: { PATH: "/usr/bin", CODING_AGENT_CACHE_DIR: "/blocked-cache" },
+        platform: "linux",
+        arch: "x64",
+        manifest: testManifest,
+        fs,
+        fetchImpl: async () => new Response(fakeArchive),
+        sleep: instantSleep,
+      });
+
+      const result = await acquirer.acquire("rg");
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.reason).toBe("install-failed");
+    });
+
+    it("falls back to tmpDir when default cache bin dir is unusable and still reads default cache for other tools", async () => {
+      const existingFd = "/home/dev/.cache/coding-agent/bin/fd/10.5.2/fd";
+      const { fs, state } = createFakeFs([existingFd]);
+      state.failMkdirForPrefix = "/home/dev/.cache/coding-agent/bin";
+      const { launcher } = createFakeLauncher((argv) => {
+        if (argv[0] === existingFd) return { exitCode: 0, stdout: "fd 10.5.2\n" };
+        if (argv[0] === "tar") {
+          state.files.set(`${argv[4]}/rg`, new Uint8Array([1]));
+          return { exitCode: 0 };
+        }
+        return { exitCode: 0, stdout: "ripgrep 16.0.0\n" };
+      });
+
+      const acquirer = createToolAcquirer({
+        launcher,
+        env: {},
+        platform: "linux",
+        arch: "x64",
+        homeDir: "/home/dev",
+        tmpDir: "/tmp",
+        manifest: testManifest,
+        fs,
+        fetchImpl: async () => new Response(fakeArchive),
+        sleep: instantSleep,
+      });
+
+      const rgRes = await acquirer.acquire("rg");
+      expect(rgRes.ok).toBe(true);
+      if (rgRes.ok) {
+        expect(rgRes.path).toBe("/tmp/coding-agent-cache-2/bin/rg/16.0.0/rg");
+      }
+      // Temp dir created under default cache before bin mkdir failed was cleaned up.
+      expect(state.rmCalls).toContain("/home/dev/.cache/coding-agent/tmp/rg-1");
+
+      // After falling back to tmpDir for rg, fd in the default cache is still found.
+      const fdRes = await acquirer.acquire("fd");
+      expect(fdRes).toEqual({ ok: true, path: existingFd, version: "10.5.2" });
+    });
+
+    it("resolves relative XDG_CACHE_HOME and LOCALAPPDATA to absolute paths", () => {
+      expect(
+        resolveConfiguredCacheRoot({
+          platform: "linux",
+          env: { XDG_CACHE_HOME: "relative-cache" },
+          cwd: "/work/repo",
+          homeDir: "/home/dev",
+        }),
+      ).toEqual({ path: "/work/repo/relative-cache/coding-agent", explicit: false });
+
+      expect(
+        resolveConfiguredCacheRoot({
+          platform: "win32",
+          env: { LOCALAPPDATA: "relative-local" },
+          cwd: "D:\\work\\repo",
+          homeDir: "C:\\Users\\dev",
+        }),
+      ).toEqual({ path: "D:\\work\\repo\\relative-local\\coding-agent", explicit: false });
+    });
+
+    it("normalizes Windows shell drive paths in CODING_AGENT_CACHE_DIR and PATH when simulating win32", async () => {
+      expect(
+        resolveConfiguredCacheRoot({
+          platform: "win32",
+          env: { CODING_AGENT_CACHE_DIR: "/mnt/c/cache" },
+          cwd: "D:\\work",
+          homeDir: "C:\\Users\\dev",
+        }),
+      ).toEqual({ path: "C:\\cache", explicit: true });
+
+      const winRg = "C:\\tools\\rg.exe";
+      const { fs } = createFakeFs([winRg]);
+      const { launcher } = createFakeLauncher((argv) => {
+        if (argv[0] === winRg) return { exitCode: 0, stdout: "ripgrep 16.0.0\n" };
+        return { exitCode: 1 };
+      });
+
+      const acquirer = createToolAcquirer({
+        launcher,
+        env: { PATH: "/mnt/c/tools", CODING_AGENT_OFFLINE: "1" },
+        platform: "win32",
+        arch: "x64",
+        cwd: "D:\\work",
+        cacheDir: "/mnt/c/cache",
+        manifest: testManifest,
+        fs,
+        sleep: instantSleep,
+      });
+
+      const result = await acquirer.acquire("rg");
+      expect(result).toEqual({ ok: true, path: winRg, version: "16.0.0" });
     });
   });
 });

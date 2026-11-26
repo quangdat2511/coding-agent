@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { accessSync, constants, existsSync, statSync } from "node:fs";
 import { chmod, mkdir, mkdtemp, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
@@ -7,7 +6,9 @@ import { environmentKeyOf } from "./child-environment.ts";
 import type { ChildProcessLauncher } from "./child-process.ts";
 import { errnoOf } from "./errno.ts";
 import defaultManifestJson from "./managed-tools.json";
+import { ArchiveIntegrityError, readVerifiedArchive } from "./managed-tools-archive.ts";
 import { normalizeWindowsShellPath } from "./paths.ts";
+import { runSupervised } from "./process-run.ts";
 
 export type ManagedToolName = "rg" | "fd";
 
@@ -57,6 +58,11 @@ export type AcquireResult =
       readonly ok: true;
       readonly path: string;
       readonly version: string;
+      /**
+       * Optional user-facing notice for interactive prefetch (e.g. `info` after installing a
+       * downloaded binary, or `warning` when falling back to a floor-satisfying PATH binary).
+       * Intentionally omitted for silent cache hits and exact pinned PATH hits.
+       */
       readonly status?: AcquireStatus;
     }
   | {
@@ -135,7 +141,6 @@ const DEFAULT_ATTEMPT_TIMEOUT_MS = 60_000;
 const DEFAULT_RETRY_BACKOFF_MS: readonly number[] = [250, 500];
 const DEFAULT_PROBE_TIMEOUT_MS = 5_000;
 const DEFAULT_EXTRACT_TIMEOUT_MS = 60_000;
-const DRAIN_MS = 200;
 const MAX_CAUSE_DEPTH = 5;
 
 const OFFLINE_VALUES = new Set(["1", "true", "yes"]);
@@ -239,16 +244,19 @@ export function resolveConfiguredCacheRoot(options: {
   readonly homeDir?: string;
 }): ResolvedCacheRoot {
   const pathImpl = options.platform === "win32" ? win32 : posix;
+  const resolveAbsolute = (raw: string, ...segments: string[]): string => {
+    const normalized = normalizeWindowsShellPath(raw, options.platform);
+    return pathImpl.resolve(options.cwd, normalized, ...segments);
+  };
+
   const rawOverride =
     options.cacheDir !== undefined && options.cacheDir.trim() !== ""
       ? options.cacheDir.trim()
       : getEnvVar(options.env, "CODING_AGENT_CACHE_DIR", options.platform)?.trim();
 
   if (rawOverride !== undefined && rawOverride !== "") {
-    const normalized =
-      options.platform === "win32" ? normalizeWindowsShellPath(rawOverride) : rawOverride;
     return {
-      path: pathImpl.resolve(options.cwd, normalized),
+      path: resolveAbsolute(rawOverride),
       explicit: true,
     };
   }
@@ -256,11 +264,11 @@ export function resolveConfiguredCacheRoot(options: {
   if (options.platform === "win32") {
     const localAppData = getEnvVar(options.env, "LOCALAPPDATA", options.platform)?.trim();
     if (localAppData) {
-      return { path: win32.join(localAppData, "coding-agent"), explicit: false };
+      return { path: resolveAbsolute(localAppData, "coding-agent"), explicit: false };
     }
     if (options.homeDir) {
       return {
-        path: win32.join(options.homeDir, "AppData", "Local", "coding-agent"),
+        path: resolveAbsolute(options.homeDir, "AppData", "Local", "coding-agent"),
         explicit: false,
       };
     }
@@ -270,7 +278,7 @@ export function resolveConfiguredCacheRoot(options: {
   if (options.platform === "darwin") {
     if (options.homeDir) {
       return {
-        path: posix.join(options.homeDir, "Library", "Caches", "coding-agent"),
+        path: resolveAbsolute(options.homeDir, "Library", "Caches", "coding-agent"),
         explicit: false,
       };
     }
@@ -279,10 +287,10 @@ export function resolveConfiguredCacheRoot(options: {
 
   const xdgCacheHome = getEnvVar(options.env, "XDG_CACHE_HOME", options.platform)?.trim();
   if (xdgCacheHome) {
-    return { path: posix.join(xdgCacheHome, "coding-agent"), explicit: false };
+    return { path: resolveAbsolute(xdgCacheHome, "coding-agent"), explicit: false };
   }
   if (options.homeDir) {
-    return { path: posix.join(options.homeDir, ".cache", "coding-agent"), explicit: false };
+    return { path: resolveAbsolute(options.homeDir, ".cache", "coding-agent"), explicit: false };
   }
   return { path: undefined, explicit: false };
 }
@@ -417,28 +425,6 @@ interface ChildCommandResult {
   readonly launchError?: unknown;
 }
 
-async function readStreamText(reader: {
-  read(): Promise<{ done: boolean; value?: Uint8Array }>;
-}): Promise<string> {
-  const decoder = new TextDecoder();
-  let output = "";
-  for (;;) {
-    let next: { done: boolean; value?: Uint8Array };
-    try {
-      next = await reader.read();
-    } catch {
-      return output;
-    }
-    if (next.done || next.value === undefined) {
-      output += decoder.decode();
-      return output;
-    }
-    if (next.value.byteLength > 0) {
-      output += decoder.decode(next.value, { stream: true });
-    }
-  }
-}
-
 async function runChildCommand(
   launcher: ChildProcessLauncher,
   argv: readonly string[],
@@ -449,69 +435,37 @@ async function runChildCommand(
     return { exitCode: null, stdout: "", stderr: "", timedOut: false, cancelled: true };
   }
 
-  let child: ReturnType<ChildProcessLauncher["launch"]>;
+  let stdout = "";
+  let stderr = "";
   try {
-    child = launcher.launch(argv);
+    const exit = await runSupervised(launcher, {
+      argv,
+      timeoutMs,
+      signal: signal ?? new AbortController().signal,
+      onOutput: (_chunk, text) => {
+        stdout += text;
+      },
+      onStderr: (_chunk, text) => {
+        stderr += text;
+      },
+    });
+    return {
+      exitCode: exit.exitCode,
+      stdout,
+      stderr,
+      timedOut: exit.stopReason === "timeout",
+      cancelled: exit.stopReason === "cancelled",
+    };
   } catch (error) {
     return {
       exitCode: null,
-      stdout: "",
-      stderr: "",
+      stdout,
+      stderr,
       timedOut: false,
       cancelled: false,
       launchError: error,
     };
   }
-
-  const stdoutReader = child.stdout.getReader();
-  const stderrReader = child.stderr.getReader();
-  const stdoutPromise = readStreamText(stdoutReader);
-  const stderrPromise = readStreamText(stderrReader);
-
-  let timedOut = false;
-  let cancelled = false;
-  const stop = (reason: "timeout" | "cancelled") => {
-    if (timedOut || cancelled) return;
-    if (reason === "timeout") timedOut = true;
-    else cancelled = true;
-    try {
-      child.kill();
-    } catch {
-      // Child already exited.
-    }
-  };
-
-  const timer = setTimeout(() => stop("timeout"), timeoutMs);
-  const onAbort = () => stop("cancelled");
-  signal?.addEventListener("abort", onAbort, { once: true });
-  if (signal?.aborted) stop("cancelled");
-
-  try {
-    await child.exited;
-  } finally {
-    clearTimeout(timer);
-    signal?.removeEventListener("abort", onAbort);
-  }
-
-  let drainTimer: ReturnType<typeof setTimeout> | undefined;
-  const reading = Promise.all([stdoutPromise, stderrPromise]);
-  const drained = await Promise.race([
-    reading,
-    new Promise<readonly [string, string]>((resolve) => {
-      drainTimer = setTimeout(() => resolve(["", ""]), DRAIN_MS);
-    }),
-  ]);
-  clearTimeout(drainTimer);
-  stdoutReader.cancel().catch(() => undefined);
-  stderrReader.cancel().catch(() => undefined);
-
-  return {
-    exitCode: child.exitCode,
-    stdout: drained[0],
-    stderr: drained[1],
-    timedOut,
-    cancelled,
-  };
 }
 
 function isRetryableStatus(status: number): boolean {
@@ -582,21 +536,49 @@ export function createToolAcquirer(options: CreateToolAcquirerOptions): ToolAcqu
     });
   }
 
-  function currentReadCacheRoot(): string | undefined {
+  function currentReadCacheRoots(): string[] {
     const configured = currentConfiguredCache();
-    if (configured.explicit) return configured.path;
-    return fallbackCacheRoot ?? configured.path;
+    if (configured.explicit) {
+      return configured.path !== undefined ? [configured.path] : [];
+    }
+    const roots: string[] = [];
+    if (configured.path !== undefined) roots.push(configured.path);
+    if (fallbackCacheRoot !== undefined && fallbackCacheRoot !== configured.path) {
+      roots.push(fallbackCacheRoot);
+    }
+    return roots;
   }
 
-  async function createTempUnder(root: string, name: ManagedToolName): Promise<string> {
+  async function prepareRootForInstall(
+    root: string,
+    name: ManagedToolName,
+    version: string,
+  ): Promise<{
+    readonly cacheRoot: string;
+    readonly tempDir: string;
+    readonly versionDir: string;
+  }> {
     const tmpParent = pathImpl.join(root, "tmp");
     await fs.mkdir(tmpParent, { recursive: true, mode: dirMode });
-    return fs.mkdtemp(pathImpl.join(tmpParent, `${name}-`));
+    const tempDir = await fs.mkdtemp(pathImpl.join(tmpParent, `${name}-`));
+    const versionDir = pathImpl.join(root, "bin", name, version);
+    try {
+      await fs.mkdir(versionDir, { recursive: true, mode: dirMode });
+    } catch (error) {
+      await fs.rm(tempDir, { recursive: true, force: true }).catch(() => undefined);
+      throw error;
+    }
+    return { cacheRoot: root, tempDir, versionDir };
   }
 
-  async function prepareInstallTempDir(
+  async function prepareInstallDirs(
     name: ManagedToolName,
-  ): Promise<{ readonly cacheRoot: string; readonly tempDir: string }> {
+    version: string,
+  ): Promise<{
+    readonly cacheRoot: string;
+    readonly tempDir: string;
+    readonly versionDir: string;
+  }> {
     const configured = currentConfiguredCache();
     if (configured.explicit) {
       const explicitRoot = configured.path;
@@ -604,8 +586,7 @@ export function createToolAcquirer(options: CreateToolAcquirerOptions): ToolAcqu
         throw new InstallError("explicit cache directory could not be resolved");
       }
       try {
-        const tempDir = await createTempUnder(explicitRoot, name);
-        return { cacheRoot: explicitRoot, tempDir };
+        return await prepareRootForInstall(explicitRoot, name, version);
       } catch (error) {
         throw new InstallError(`cache directory ${explicitRoot} is not writable`, error);
       }
@@ -613,8 +594,7 @@ export function createToolAcquirer(options: CreateToolAcquirerOptions): ToolAcqu
 
     if (fallbackCacheRoot !== undefined) {
       try {
-        const tempDir = await createTempUnder(fallbackCacheRoot, name);
-        return { cacheRoot: fallbackCacheRoot, tempDir };
+        return await prepareRootForInstall(fallbackCacheRoot, name, version);
       } catch {
         fallbackCacheRoot = undefined;
       }
@@ -622,10 +602,9 @@ export function createToolAcquirer(options: CreateToolAcquirerOptions): ToolAcqu
 
     if (configured.path !== undefined) {
       try {
-        const tempDir = await createTempUnder(configured.path, name);
-        return { cacheRoot: configured.path, tempDir };
+        return await prepareRootForInstall(configured.path, name, version);
       } catch {
-        // Default cache root is unusable (or its tmp dir is read-only); fall back to tmpdir.
+        // Default cache root (tmp or bin) is unusable; fall back to tmpdir.
       }
     }
 
@@ -634,9 +613,9 @@ export function createToolAcquirer(options: CreateToolAcquirerOptions): ToolAcqu
       if (platform !== "win32") {
         await fs.chmod(created, 0o700).catch(() => undefined);
       }
-      const tempDir = await createTempUnder(created, name);
+      const prepared = await prepareRootForInstall(created, name, version);
       fallbackCacheRoot = created;
-      return { cacheRoot: created, tempDir };
+      return prepared;
     } catch (error) {
       throw new InstallError("unable to create temporary fallback cache directory", error);
     }
@@ -669,7 +648,8 @@ export function createToolAcquirer(options: CreateToolAcquirerOptions): ToolAcqu
 
     for (const candidateName of suffixes) {
       for (const dir of dirs) {
-        const candidate = pathImpl.resolve(cwd, pathImpl.join(dir, candidateName));
+        const normalizedDir = normalizeWindowsShellPath(dir, platform);
+        const candidate = pathImpl.resolve(cwd, pathImpl.join(normalizedDir, candidateName));
         if (seen.has(candidate)) continue;
         seen.add(candidate);
         if (fs.isExecutable(candidate)) {
@@ -679,85 +659,6 @@ export function createToolAcquirer(options: CreateToolAcquirerOptions): ToolAcqu
     }
 
     return results;
-  }
-
-  async function readBoundedResponse(
-    response: Response,
-    url: string,
-    asset: ManagedToolAsset,
-    signal: AbortSignal,
-  ): Promise<Uint8Array> {
-    const contentEncoding = response.headers.get("content-encoding")?.trim().toLowerCase();
-    const isUnencoded = !contentEncoding || contentEncoding === "identity";
-    const contentLengthHeader = isUnencoded ? response.headers.get("content-length") : null;
-    if (contentLengthHeader !== null) {
-      const declaredLength = Number(contentLengthHeader);
-      if (Number.isFinite(declaredLength) && declaredLength > asset.bytes) {
-        await response.body?.cancel().catch(() => undefined);
-        throw new DownloadError(
-          `size mismatch for ${url}: Content-Length ${declaredLength} exceeds expected ${asset.bytes} bytes`,
-          { retryable: true, reason: "integrity-failed" },
-        );
-      }
-    }
-
-    const hash = createHash("sha256");
-    const buffer = new Uint8Array(asset.bytes);
-    let totalBytes = 0;
-
-    if (response.body) {
-      const reader = response.body.getReader();
-      const onAbort = () => {
-        reader.cancel().catch(() => undefined);
-      };
-      signal.addEventListener("abort", onAbort, { once: true });
-      try {
-        while (true) {
-          if (signal.aborted) {
-            throw signal.reason ?? new Error("download aborted");
-          }
-          const { done, value } = await reader.read();
-          if (done) break;
-          if (!value || value.byteLength === 0) continue;
-
-          if (totalBytes + value.byteLength > asset.bytes) {
-            await reader.cancel().catch(() => undefined);
-            throw new DownloadError(
-              `size mismatch for ${url}: response exceeded expected ${asset.bytes} bytes`,
-              { retryable: true, reason: "integrity-failed" },
-            );
-          }
-
-          buffer.set(value, totalBytes);
-          totalBytes += value.byteLength;
-          hash.update(value);
-        }
-      } finally {
-        signal.removeEventListener("abort", onAbort);
-        reader.releaseLock();
-      }
-    }
-
-    if (signal.aborted) {
-      throw signal.reason ?? new Error("download aborted");
-    }
-
-    if (totalBytes !== asset.bytes) {
-      throw new DownloadError(
-        `size mismatch for ${url}: expected ${asset.bytes} bytes, got ${totalBytes}`,
-        { retryable: true, reason: "integrity-failed" },
-      );
-    }
-
-    const actualSha256 = hash.digest("hex");
-    if (actualSha256 !== asset.sha256) {
-      throw new DownloadError(
-        `SHA-256 mismatch for ${url}: expected ${asset.sha256}, got ${actualSha256}`,
-        { retryable: true, reason: "integrity-failed" },
-      );
-    }
-
-    return buffer;
   }
 
   async function downloadVerifiedArchive(
@@ -811,7 +712,17 @@ export function createToolAcquirer(options: CreateToolAcquirerOptions): ToolAcqu
           });
         }
 
-        return await readBoundedResponse(response, url, asset, attemptController.signal);
+        try {
+          return await readVerifiedArchive(response, url, asset, attemptController.signal);
+        } catch (verifyErr) {
+          if (verifyErr instanceof ArchiveIntegrityError) {
+            throw new DownloadError(verifyErr.message, {
+              retryable: true,
+              reason: "integrity-failed",
+            });
+          }
+          throw verifyErr;
+        }
       } catch (error) {
         if (signal?.aborted || error instanceof CancelledError) {
           throw new CancelledError();
@@ -938,7 +849,7 @@ export function createToolAcquirer(options: CreateToolAcquirerOptions): ToolAcqu
   ): Promise<string> {
     if (signal?.aborted) throw new CancelledError();
 
-    const { cacheRoot, tempDir } = await prepareInstallTempDir(name);
+    const { tempDir, versionDir } = await prepareInstallDirs(name, tool.version);
 
     try {
       if (signal?.aborted) throw new CancelledError();
@@ -962,8 +873,6 @@ export function createToolAcquirer(options: CreateToolAcquirerOptions): ToolAcqu
         await fs.chmod(extractedBinary, 0o755);
       }
 
-      const versionDir = pathImpl.join(cacheRoot, "bin", name, tool.version);
-      await fs.mkdir(versionDir, { recursive: true, mode: dirMode });
       const destPath = pathImpl.join(versionDir, binaryName);
 
       try {
@@ -983,7 +892,8 @@ export function createToolAcquirer(options: CreateToolAcquirerOptions): ToolAcqu
 
       const probed = await probeVersion(destPath, name, signal);
       if (probed.cancelled) {
-        await fs.rm(destPath, { force: true }).catch(() => undefined);
+        // Do not delete destPath on cancellation: another acquirer sharing this cache may already
+        // have resolved and be using it. Only this attempt's tempDir is cleaned up in finally.
         throw new CancelledError();
       }
       if (probed.version !== tool.version) {
@@ -1016,9 +926,8 @@ export function createToolAcquirer(options: CreateToolAcquirerOptions): ToolAcqu
         return fail("cancelled", "operation cancelled");
       }
 
-      // 1. Versioned cache lookup
-      const readCacheRoot = currentReadCacheRoot();
-      if (readCacheRoot !== undefined) {
+      // 1. Versioned cache lookup (check configured default root and any temp fallback root)
+      for (const readCacheRoot of currentReadCacheRoots()) {
         const cachedPath = pathImpl.join(
           readCacheRoot,
           "bin",
@@ -1120,13 +1029,13 @@ export function createToolAcquirer(options: CreateToolAcquirerOptions): ToolAcqu
           return fail("cancelled", "operation cancelled");
         }
 
-        const reason: AcquireFailureReason =
-          error instanceof DownloadError ? error.reason : "install-failed";
+        if (error instanceof DownloadError) {
+          const fallback = fallbackResult(formatCauseChain(error));
+          if (fallback !== undefined) return fallback;
+          return fail(error.reason, error);
+        }
 
-        const fallback = fallbackResult(formatCauseChain(error));
-        if (fallback !== undefined) return fallback;
-
-        return fail(reason, error);
+        return fail("install-failed", error);
       }
     } catch (error) {
       if (error instanceof CancelledError || signal?.aborted) {

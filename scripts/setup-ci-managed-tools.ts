@@ -1,7 +1,6 @@
 // Installs the pinned managed binaries (fd, rg) from packages/tools/src/managed-tools.json
 // into a temporary directory for CI jobs, verifies byte size (bounded while streaming) and
 // SHA-256 before extraction, checks `--version`, and adds the directory to GITHUB_PATH.
-import { createHash } from "node:crypto";
 import {
   appendFile,
   chmod,
@@ -15,6 +14,7 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { readVerifiedArchive } from "../packages/tools/src/managed-tools-archive.ts";
 import {
   DEFAULT_MANIFEST_PATH,
   type FetchFn,
@@ -60,66 +60,6 @@ function isRetryableStatus(status: number): boolean {
   return RETRYABLE_STATUSES.has(status) || (status >= 500 && status <= 599);
 }
 
-async function readBoundedResponse(
-  response: Response,
-  url: string,
-  asset: ManagedToolAsset,
-): Promise<Uint8Array> {
-  // Content-Length reflects the wire payload before decoding Content-Encoding, so only compare it
-  // against the decoded archive size when no transfer/content encoding is applied.
-  const contentEncoding = response.headers.get("content-encoding")?.trim().toLowerCase();
-  const isUnencoded = !contentEncoding || contentEncoding === "identity";
-  const contentLengthHeader = isUnencoded ? response.headers.get("content-length") : null;
-  if (contentLengthHeader !== null) {
-    const declaredLength = Number(contentLengthHeader);
-    if (Number.isFinite(declaredLength) && declaredLength > asset.bytes) {
-      await response.body?.cancel();
-      throw new Error(
-        `Size mismatch for ${url}: Content-Length ${declaredLength} exceeds expected ${asset.bytes} bytes`,
-      );
-    }
-  }
-
-  const hash = createHash("sha256");
-  const buffer = new Uint8Array(asset.bytes);
-  let totalBytes = 0;
-
-  if (response.body) {
-    const reader = response.body.getReader();
-    try {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        if (!value || value.byteLength === 0) continue;
-
-        if (totalBytes + value.byteLength > asset.bytes) {
-          await reader.cancel();
-          throw new Error(
-            `Size mismatch for ${url}: response exceeded expected ${asset.bytes} bytes`,
-          );
-        }
-
-        buffer.set(value, totalBytes);
-        totalBytes += value.byteLength;
-        hash.update(value);
-      }
-    } finally {
-      reader.releaseLock();
-    }
-  }
-
-  if (totalBytes !== asset.bytes) {
-    throw new Error(`Size mismatch for ${url}: expected ${asset.bytes} bytes, got ${totalBytes}`);
-  }
-
-  const actualSha256 = hash.digest("hex");
-  if (actualSha256 !== asset.sha256) {
-    throw new Error(`SHA256 mismatch for ${url}: expected ${asset.sha256}, got ${actualSha256}`);
-  }
-
-  return buffer;
-}
-
 async function downloadAndVerify(
   url: string,
   asset: ManagedToolAsset,
@@ -142,7 +82,7 @@ async function downloadAndVerify(
           : new NonRetryableDownloadError(message);
       }
 
-      return await readBoundedResponse(response, url, asset);
+      return await readVerifiedArchive(response, url, asset);
     } catch (error) {
       const err = error instanceof Error ? error : new Error(String(error));
       if (err instanceof NonRetryableDownloadError || attempt === MAX_ATTEMPTS) {
