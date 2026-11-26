@@ -23,6 +23,7 @@ const toolErrorCodes = {
   SCHEMA_VIOLATION: true,
   NOT_FOUND: true,
   IS_DIRECTORY: true,
+  NOT_A_DIRECTORY: true,
   PATH_OUTSIDE_REPO: true,
   PERMISSION_DENIED: true,
   NO_MATCH: true,
