@@ -9,7 +9,7 @@ import {
 import { diagnostic, messageOf, redactorOf } from "./diagnostics.ts";
 import type { ExitCode } from "./exit-codes.ts";
 import type { InteractiveArgs } from "./interactive-args.ts";
-import { projectRunEvent } from "./projection.ts";
+import { projectSessionLogEntry } from "./projection.ts";
 import { RUN_LIMITS_BY_PROFILE, resolveAgentRunSettings } from "./run-config.ts";
 
 // The interactive path (ADR 0004 §6): the Full-screen TUI wired to Agent Runs, one at a time.
@@ -22,7 +22,8 @@ export interface InteractiveOptions {
   readonly args: InteractiveArgs;
   readonly cwd: string;
   readonly env: Readonly<Record<string, string | undefined>>;
-  // Diagnostics before the TUI starts. Once it owns the screen, everything goes to the transcript.
+  // Diagnostics before the TUI starts. Once it owns the screen, everything goes to the Session
+  // view.
   readonly stderr: (text: string) => void;
   // Aborting it cancels the running Agent Run, waits for it to settle, and ends the run with
   // exit code 130.
@@ -106,7 +107,7 @@ export async function runInteractive(options: InteractiveOptions): Promise<ExitC
   const settings = resolved.value;
   const redact = redactorOf(settings.credential);
 
-  let model: TuiModel = { transcript: [] };
+  let model: TuiModel = { sessionView: [] };
   let notices = 0;
   let busy = false;
   // Set once the run is ending, by a Quit or by a signal. Only the first is the person's own Quit.
@@ -121,7 +122,7 @@ export async function runInteractive(options: InteractiveOptions): Promise<ExitC
   const { promise: exit, resolve: requestExit } = Promise.withResolvers<ExitCode>();
 
   // `model` is the whole state, so a draw that failed is repaired by the next one. It gets no
-  // notice of its own: a terminal that cannot draw the transcript cannot draw a notice either.
+  // notice of its own: a terminal that cannot draw the Session view cannot draw a notice either.
   function draw(): void {
     try {
       handle.update(model);
@@ -131,8 +132,8 @@ export async function runInteractive(options: InteractiveOptions): Promise<ExitC
   function notify(text: string): void {
     model = {
       ...model,
-      transcript: [
-        ...model.transcript,
+      sessionView: [
+        ...model.sessionView,
         { kind: "notice", id: `coding-agent/notice-${++notices}`, text: redact(text) },
       ],
     };
@@ -142,7 +143,7 @@ export async function runInteractive(options: InteractiveOptions): Promise<ExitC
   // A failure here loses one event from the display and never reaches the Agent Run.
   function consume(event: RunEvent): void {
     try {
-      model = projectRunEvent(redactStrings(event, redact), model);
+      model = projectSessionLogEntry(redactStrings(event, redact), model);
     } catch (error) {
       notify(`Event ${event.sequence} (${event.type}) could not be shown: ${messageOf(error)}`);
       return;
@@ -299,7 +300,7 @@ export async function runInteractive(options: InteractiveOptions): Promise<ExitC
 
   const code = await exit;
   signal.removeEventListener("abort", onAbort);
-  // The Agent Run settles, and its outcome reaches the transcript, before the TUI goes. An
+  // The Agent Run settles, and its outcome reaches the Session view, before the TUI goes. An
   // Agent Run that is still opening cannot be cancelled, so the wait for it is bounded: the run
   // ends once the grace has passed, and an Agent Run that opens after that is cancelled in place of
   // started.

@@ -2,25 +2,25 @@ import { Box, Text, useCursor, useInput, usePaste, useStdin } from "ink";
 import type { EditorView } from "./editor.ts";
 import { ALLOW_KEY, DENY_KEY, type InputMode, type KeyPress } from "./input.ts";
 import { ApprovalOverlay, type OverlayGeometry } from "./overlay.tsx";
-import { TASK_CONTINUATION, TASK_MARKER, type TranscriptRow } from "./rows.ts";
-import { Transcript } from "./transcript.tsx";
+import { type SessionViewRow, TASK_CONTINUATION, TASK_MARKER } from "./rows.ts";
+import { SessionView } from "./session-view.tsx";
 import type { PendingApproval } from "./types.ts";
 
 const HINT_HEIGHT = 1;
-// The rows under the transcript while the Prompt has one row: the Prompt, then the key hint.
+// The rows under the Session view while the Prompt has one row: the Prompt, then the key hint.
 export const FOOTER_HEIGHT = 1 + HINT_HEIGHT;
 // The share of the terminal's rows the Prompt grows to before it scrolls.
 const PROMPT_SHARE = 0.3;
 
 // How the frame shares out the rows of the terminal.
 export interface FrameLayout {
-  // The rows the transcript gets.
-  readonly transcript: number;
+  // The rows the Session view gets.
+  readonly sessionView: number;
   // The rows the Prompt shows.
   readonly prompt: number;
   // Whether the key hint fits under the Prompt.
   readonly showHint: boolean;
-  // The rows of the whole frame: the transcript, the Prompt and, when it shows, the key hint.
+  // The rows of the whole frame: the Session view, the Prompt and, when it shows, the key hint.
   readonly height: number;
 }
 
@@ -30,14 +30,15 @@ export function maxPromptRows(screenRows: number): number {
 }
 
 // How a terminal `screenRows` tall is shared out when the Prompt shows `promptRows` rows. The
-// Prompt always shows; the key hint needs a row after it and the transcript one more, so a shorter
-// terminal drops the hint, then the transcript, and the frame is never taller than the screen.
+// Prompt always shows; the key hint needs a row after it and the Session view one more, so a
+// shorter terminal drops the hint, then the Session view, and the frame is never taller than the
+// screen.
 export function frameLayout(screenRows: number, promptRows = 1): FrameLayout {
   const prompt = Math.max(1, Math.min(promptRows, screenRows));
   const showHint = screenRows > prompt + HINT_HEIGHT;
   const footer = prompt + (showHint ? HINT_HEIGHT : 0);
-  const transcript = Math.max(0, screenRows - footer);
-  return { transcript, prompt, showHint, height: transcript + footer };
+  const sessionView = Math.max(0, screenRows - footer);
+  return { sessionView, prompt, showHint, height: sessionView + footer };
 }
 
 // What each step's keys do, cancel keys first, so a narrow terminal cuts the hint after them.
@@ -56,8 +57,8 @@ export interface OverlayProps {
   readonly reason: EditorView | undefined;
 }
 
-// The whole frame: the transcript rows in view with the Approval overlay over them, the Prompt and
-// the key hint. mountTui decides everything on it and renders it again for each frame; this
+// The whole frame: the Session view rows in view with the Approval overlay over them, the Prompt
+// and the key hint. mountTui decides everything on it and renders it again for each frame; this
 // component draws it, places the terminal's cursor and hands every key and paste to mountTui.
 export function Frame({
   rows,
@@ -71,7 +72,7 @@ export function Frame({
   onKey,
   onPaste,
 }: {
-  rows: readonly TranscriptRow[];
+  rows: readonly SessionViewRow[];
   layout: FrameLayout;
   // The width of the terminal.
   columns: number;
@@ -109,8 +110,8 @@ export function Frame({
       : KEY_HINTS[mode];
   return (
     <Box flexDirection="column" height={layout.height}>
-      <Box height={layout.transcript}>
-        <Transcript rows={rows} height={layout.transcript} />
+      <Box height={layout.sessionView}>
+        <SessionView rows={rows} height={layout.sessionView} />
         {overlay === undefined ? null : (
           <ApprovalOverlay
             approval={overlay.approval}

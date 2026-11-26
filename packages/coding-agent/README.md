@@ -61,8 +61,8 @@ the three of `run` that make sense without a task file, and nothing else is acce
 
 An Agent Run is scoped to one Coding Task and has no prompt queue, so a submission opens an
 Agent Run only when none is active. A submission while one runs, or opens, is refused with a notice
-in the transcript. When an Agent Run has settled, the next submission opens a new one, and the
-transcript keeps the earlier ones.
+in the Session view. When an Agent Run has settled, the next submission opens a new one, and the
+Session view keeps the earlier ones.
 
 | Key or signal | While a Coding Task runs | With none |
 | --- | --- | --- |
@@ -80,7 +80,7 @@ A signal that comes while an Agent Run is still opening does not wait for it pas
 Cancellation Grace Period, because an open cannot be cancelled: the run ends with 130, and an Agent
 Run that opens after that is cancelled in place of started. A submission while the run waits for an
 Agent Run to settle is refused with a notice, and the signal's name is the cancellation reason in
-the transcript.
+the Session view.
 
 The TUI shows the outcome of every Agent Run, a failed one included, and none of them changes
 the exit code: it describes how the run ended, not what the Coding Task achieved.
@@ -88,11 +88,11 @@ the exit code: it describes how the run ended, not what the Coding Task achieved
 The host reads a snapshot of the Agent Run and follows its Run Events from the snapshot's
 last sequence, before it dispatches `start`, so no event is lost in between (ADR 0002 §7). A failure
 while showing one event never reaches the Agent Run: that event is lost from the display, with
-a notice. A draw that fails gets no notice, because a terminal that cannot draw the transcript
+a notice. A draw that fails gets no notice, because a terminal that cannot draw the Session view
 cannot draw a notice either, and the next draw shows the whole model again. An event stream that
 fails ends the display's following of that Agent Run with a notice, but the Agent Run still counts
-as running until it settles. The credential is replaced by `[redacted]` in everything the transcript
-shows.
+as running until it settles. The credential is replaced by `[redacted]` in everything the Session
+view shows.
 
 The interactive path registers the same four tools and the same Verification Policy as
 `coding-agent run`. Under `ask`, every `write`, `edit` and `bash` Tool Call waits for an Approval in

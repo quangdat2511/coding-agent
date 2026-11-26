@@ -78,7 +78,7 @@ describe("checking a recording of the interactive path", () => {
       output.replace("run [cancelled]", "run [failed, CANCELLATION_TIMEOUT]"),
     );
     const problems = checkRecording(recordingOf(run));
-    expect(problems).toContain('the transcript shows "CANCELLATION_TIMEOUT"');
+    expect(problems).toContain('the Session view shows "CANCELLATION_TIMEOUT"');
   });
 
   it("does not take a cancelled Tool Call whose command ends in run for the outcome", () => {
@@ -89,9 +89,9 @@ describe("checking a recording of the interactive path", () => {
     expect(problems.some((message) => /cancelled Agent Run settling/.test(message))).toBe(true);
   });
 
-  it("rejects a transcript that shows a defect of the run", () => {
+  it("rejects a Session view that shows a defect of the run", () => {
     const run = [...GOOD_RUN, "notice Internal error: boom\r\n"];
-    expect(checkRecording(recordingOf(run))).toContain('the transcript shows "Internal error:"');
+    expect(checkRecording(recordingOf(run))).toContain('the Session view shows "Internal error:"');
   });
 
   it("rejects keyboard input", () => {
@@ -117,7 +117,7 @@ describe("checking a recording of the interactive path", () => {
   it("rejects a run in which an Approval was denied", () => {
     const run = [...GOOD_RUN, "bash git log [denied, APPROVAL_DENIED]\r\n"];
     expect(checkRecording(recordingOf(run))).toContain(
-      "the transcript shows a denied Approval; the demo allows one and cancels",
+      "the Session view shows a denied Approval; the demo allows one and cancels",
     );
   });
 

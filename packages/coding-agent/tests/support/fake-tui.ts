@@ -16,7 +16,7 @@ export interface FakeTui {
 export function fakeTui(onUpdate?: (model: TuiModel, count: number) => void): FakeTui {
   let registered: TuiHandlers | undefined;
   let mounted = false;
-  let latest: TuiModel = { transcript: [] };
+  let latest: TuiModel = { sessionView: [] };
   let atUnmount: TuiModel | undefined;
   let count = 0;
   return {

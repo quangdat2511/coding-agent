@@ -2,12 +2,12 @@ import { afterEach, describe, expect, it } from "bun:test";
 import { PassThrough, Writable } from "node:stream";
 import { KEY_HINTS } from "../src/frame.tsx";
 import type { TuiStreams } from "../src/render.tsx";
-import type { TranscriptEntry, TuiHandlers } from "../src/types.ts";
+import type { SessionViewEntry, TuiHandlers } from "../src/types.ts";
 import { createTestTerminal, KEYS, REDRAWS_IN_PLACE } from "./support/terminal.ts";
 import { mountOn, prompt, unexpectedHandlerCall, unmountTui, viewport } from "./support/tui.ts";
 
 const COLUMNS = 40;
-// The height of the whole terminal: the transcript, the Prompt and the key hint.
+// The height of the whole terminal: the Session view, the Prompt and the key hint.
 const SCREEN_ROWS = 6;
 
 // Bracketed paste markers, which a terminal puts around pasted text once Ink asks for them.
@@ -25,7 +25,7 @@ const PROMPT_ROW = SCREEN_ROWS - 2;
 // `screenRows` is the height of the whole terminal. `streams` stands in for its stdin or stdout, as
 // when input or output is piped.
 function mount(
-  transcript: readonly TranscriptEntry[] = [],
+  sessionView: readonly SessionViewEntry[] = [],
   columns = COLUMNS,
   screenRows = SCREEN_ROWS,
   streams: Partial<TuiStreams> = {},
@@ -42,7 +42,7 @@ function mount(
     },
     onApproval: unexpectedHandlerCall,
   };
-  const tui = mountOn(terminal, { transcript }, handlers, streams);
+  const tui = mountOn(terminal, { sessionView }, handlers, streams);
   return { tui, terminal, submitted, cancelled };
 }
 
@@ -226,7 +226,7 @@ describe("Prompt", () => {
     expect(terminal.screen()).toEqual(["> Sửa test", "> abc"]);
   });
 
-  it("drops the transcript too on a terminal of one row", async () => {
+  it("drops the Session view too on a terminal of one row", async () => {
     const { tui, terminal } = mount([{ kind: "user", id: "task", text: "Sửa test" }], COLUMNS, 1);
     await terminal.press("abc");
     await tui.flush();
@@ -237,10 +237,10 @@ describe("Prompt", () => {
     }
   });
 
-  it("keeps the typed text while the transcript updates", async () => {
+  it("keeps the typed text while the Session view updates", async () => {
     const { tui, terminal } = mount();
     await terminal.press("Sửa");
-    tui.update({ transcript: [{ kind: "user", id: "task", text: "Đang chạy" }] });
+    tui.update({ sessionView: [{ kind: "user", id: "task", text: "Đang chạy" }] });
     await tui.flush();
     expect(terminal.screen()[0]).toBe("> Đang chạy");
     expect(prompt(terminal)).toBe("> Sửa");
@@ -249,8 +249,8 @@ describe("Prompt", () => {
   it("draws without taking input when stdin is not a terminal", async () => {
     // A plain stream, as when input is piped: it cannot be switched to raw mode.
     const stdin = new PassThrough() as unknown as NodeJS.ReadStream;
-    const transcript = [{ kind: "user", id: "task", text: "Sửa test" }] as const;
-    const { tui, terminal } = mount(transcript, COLUMNS, SCREEN_ROWS, { stdin });
+    const sessionView = [{ kind: "user", id: "task", text: "Sửa test" }] as const;
+    const { tui, terminal } = mount(sessionView, COLUMNS, SCREEN_ROWS, { stdin });
     await tui.flush();
     expect(terminal.screen()[0]).toBe("> Sửa test");
     expect(prompt(terminal)).toBe(">");
@@ -315,7 +315,7 @@ describe("Prompt of several lines", () => {
     expect(prompt(terminal)).toBe(">");
   });
 
-  it("takes rows from the transcript as it grows and gives them back once submitted", async () => {
+  it("takes rows from the Session view as it grows and gives them back once submitted", async () => {
     const text = Array.from({ length: 20 }, (_, index) => `line ${index + 1}`).join("\n");
     const { tui, terminal } = mount(
       [{ kind: "assistant", id: "m-1", text, status: "completed" }],
@@ -327,7 +327,7 @@ describe("Prompt of several lines", () => {
     expect(terminal.screen().slice(0, 8).at(-1)).toBe("line 20");
     await terminal.press("a", CTRL_J, "b");
     await tui.flush();
-    // The transcript keeps following its last row, now on the row above the Prompt.
+    // The Session view keeps following its last row, now on the row above the Prompt.
     expect(terminal.screen().slice(0, 8)).toEqual([
       "line 14",
       "line 15",
@@ -369,9 +369,9 @@ describe("Prompt of several lines", () => {
     ]);
   });
 
-  it("shows a submitted task of several lines in the transcript", async () => {
+  it("shows a submitted task of several lines in the Session view", async () => {
     const { tui, terminal } = mount([], COLUMNS, TALL);
-    tui.update({ transcript: [{ kind: "user", id: "task", text: "dong 1\ndong 2" }] });
+    tui.update({ sessionView: [{ kind: "user", id: "task", text: "dong 1\ndong 2" }] });
     await tui.flush();
     expect(terminal.screen().slice(0, 2)).toEqual(["> dong 1", "  dong 2"]);
   });
@@ -380,7 +380,7 @@ describe("Prompt of several lines", () => {
 describe("kitty keyboard protocol", () => {
   it("is asked for when asked to, and turned off again on exit", async () => {
     const terminal = createTestTerminal(COLUMNS, SCREEN_ROWS);
-    const tui = mountOn(terminal, { transcript: [] }, undefined, {}, { kittyKeyboard: true });
+    const tui = mountOn(terminal, { sessionView: [] }, undefined, {}, { kittyKeyboard: true });
     await tui.flush();
     expect(terminal.takeOutput()).toContain("\u001b[?u");
     // The terminal answers with the flags it has on, and Ink turns the protocol on.

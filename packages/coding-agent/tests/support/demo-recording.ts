@@ -44,7 +44,7 @@ const CREDENTIAL_SHAPES: readonly { readonly name: string; readonly pattern: Reg
   })),
 ];
 
-// Transcript lines that mean the run exposed a defect. The ticket allows a defect to be fixed or
+// Session view lines that mean the run exposed a defect. The ticket allows a defect to be fixed or
 // filed, never to be left in the committed recording unremarked.
 const DEFECT_SIGNS = [
   "Internal error:",
@@ -136,12 +136,12 @@ export function checkRecording(recording: string): string[] {
   }
 
   for (const sign of DEFECT_SIGNS) {
-    if (screen.includes(sign)) problems.push(`the transcript shows "${sign}"`);
+    if (screen.includes(sign)) problems.push(`the Session view shows "${sign}"`);
   }
   // The demo allows one Approval and cancels at the next. A denial means the person pressed the
   // wrong key, and the run is not the one the demo script describes.
   if (/\[denied\b|APPROVAL_DENIED/.test(screen)) {
-    problems.push("the transcript shows a denied Approval; the demo allows one and cancels");
+    problems.push("the Session view shows a denied Approval; the demo allows one and cancels");
   }
 
   // Each step has to come after the one before it, so a recording that only cuts together the

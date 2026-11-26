@@ -11,11 +11,11 @@ const MARGIN = " ";
 const CHOICES = `${ALLOW_KEY} allow · ${DENY_KEY} deny`;
 const REASON_LABEL = "Reason: ";
 
-// Where each part of the Approval overlay goes over a transcript `height` rows tall on a terminal
+// Where each part of the Approval overlay goes over a Session view `height` rows tall on a terminal
 // `columns` wide. Drawing, the width the reason is typed in and the cursor all read it from here,
 // so they agree on whether the overlay has a border.
 export interface OverlayGeometry {
-  // The transcript rows the overlay is drawn over: none, when the terminal has no row for it.
+  // The Session view rows the overlay is drawn over: none, when the terminal has no row for it.
   readonly height: number;
   readonly bordered: boolean;
   // The columns inside the border, and those inside the margins.
@@ -30,9 +30,9 @@ export interface OverlayGeometry {
   readonly reasonOrigin: { readonly x: number; readonly y: number };
 }
 
-// The summary takes at most half the transcript's rows, so the choices always show and some of the
-// transcript stays in view. The border takes two rows, so it is drawn only when a summary row and
-// the choices fit inside it.
+// The summary takes at most half the Session view's rows, so the choices always show and some of
+// the Session view stays in view. The border takes two rows, so it is drawn only when a summary row
+// and the choices fit inside it.
 export function overlayGeometry(columns: number, height: number): OverlayGeometry {
   const bordered = height >= 2 * BORDER + 2;
   const border = bordered ? BORDER : 0;
@@ -54,13 +54,13 @@ export function canAllow(geometry: OverlayGeometry): boolean {
   return geometry.summaryRows > 0;
 }
 
-// The Approval overlay, drawn over the bottom of the transcript so that the rows above it and the
+// The Approval overlay, drawn over the bottom of the Session view so that the rows above it and the
 // scroll position underneath stay as they were. It shows the tool and its mutation summary, then
 // either the choices or, after n, the reason being typed.
 //
-// Ink writes only the cells a <Text> covers and leaves the rest of the box showing the transcript
+// Ink writes only the cells a <Text> covers and leaves the rest of the box showing the Session view
 // through it, so every row inside the border is padded to the full width, the margin on each side
-// included. A transcript with no rows gets no overlay, though its keys still work.
+// included. A Session view with no rows gets no overlay, though its keys still work.
 export function ApprovalOverlay({
   approval,
   geometry,

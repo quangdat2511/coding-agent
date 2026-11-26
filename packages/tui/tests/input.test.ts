@@ -117,7 +117,7 @@ describe("routeKey in the Approval overlay", () => {
     expect(routeKey("approval", "y", { ctrl: true })).toEqual([]);
   });
 
-  it("still cancels and scrolls the transcript underneath", () => {
+  it("still cancels and scrolls the Session view underneath", () => {
     expect(routeKey("approval", "", { escape: true })).toEqual([{ kind: "cancel" }]);
     expect(routeKey("approval", "", { pageUp: true })).toEqual([{ kind: "scroll", direction: -1 }]);
     expect(routeKey("approval", "", { pageDown: true })).toEqual([
