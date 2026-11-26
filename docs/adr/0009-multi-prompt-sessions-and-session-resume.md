@@ -155,9 +155,11 @@ may still be changing the repository, and the Outcome Note tells the model.
   turns a Steer back into a Follow-up.
 - Edit is in place: the item keeps its id, kind and place, and nothing takes it while it is being
   edited. A head Steer being edited makes `take` return nothing, so Steers keep their order; a head
-  Follow-up being edited makes the queue wait. Saving replaces the text, abandoning keeps it, and
-  saving empty text is refused. A Steer being edited when its run settles becomes a Follow-up and
-  stays in edit.
+  Follow-up being edited makes the queue wait. If the last run succeeded and no run is active when
+  that edit ends (`queue.editEnd`, or `queue.delete` of that item), the head Follow-up opens its run
+  at once, as after `run_settled` (§3.3). Saving replaces the text, abandoning keeps it, and saving
+  empty text is refused. A Steer being edited when its run settles becomes a Follow-up and stays in
+  edit.
 - Delete removes the item by id. Deleting the item being edited ends the edit.
 
 #### 3.7 Losing the race
@@ -212,7 +214,7 @@ Every line is a JSON object with `schemaVersion: 1` and `record`:
 | `event` | ADR 0002's envelope: `runId`, `sequence`, `occurredAt`, `type`, `data` | for each Run Event of §4.1 |
 | `system_prompt` | `occurredAt`, `text`, `codingAgent` (`version`, `commit`), `tools` (the sorted registered tool names) | at creation, and when rebuilt (§4.7) |
 | `name` | `occurredAt`, `name`, `usage` (the naming request's) | when the model names the Session (§4.10) |
-| `interrupted` | `occurredAt`, `runId`, `toolResults` (one `{ toolCallId, message }` per call it closes), `outcomeNote` | once for each run a crash cut off (§4.8) |
+| `interrupted` | `occurredAt`, `runId`, `toolResults` (one `{ providerToolCallId, message }` per call it closes), `outcomeNote` | once for each run a crash cut off (§4.8) |
 | `reasoning` | `occurredAt`, `assistantMessageId`, `text` | just before the `assistant_message_completed` of a message whose reasoning streamed (§4.9) |
 
 - Times are ISO-8601 strings, as `occurredAt` is, so every line has a time.
@@ -284,11 +286,14 @@ Note.
 #### 4.8 After a crash
 
 - On load, a run with `run_started` but neither `run_settled` nor an `interrupted` record was cut
-  off, by a crash or by a failed write. Coding Agent appends one `interrupted` record for it,
-  holding a Closing Tool Result in §2's wording for each Tool Call queued without
-  `tool_call_completed`, and the Outcome Note with `status="interrupted"`. It writes the record
-  before the first new Agent Run, because `openAgentRun` refuses a Transcript with an unanswered
-  Tool Call (ADR 0002 §8), and adds a Session notice.
+  off, by a crash or by a failed write. Coding Agent appends one `interrupted` record for it. The
+  record holds a Closing Tool Result in §2's wording for each `tool_call` block of the run's
+  derived Transcript (§4.6) that has no `tool_result`, keyed by the block's provider Tool Call id,
+  and the Outcome Note with `status="interrupted"`. A crash can fall between
+  `assistant_message_completed` and its `tool_call_queued` lines, so queued calls alone are not
+  enough, and a call that was never queued has no Agent Core id.
+- Coding Agent writes the record before the first new Agent Run, because `openAgentRun` refuses a
+  Transcript with an unanswered Tool Call (ADR 0002 §8), and adds a Session notice.
 - Coding Agent never writes Agent Core's events itself: their `sequence` and payloads belong to
   Agent Core.
 - A run still going in another terminal looks the same, so only the holder of the Session lock
@@ -303,7 +308,9 @@ Note.
 - An `interrupted` record ends what its run left unfinished: a streaming Assistant Message, a
   queued, awaiting or executing Tool Call (shown with its Closing Tool Result) and a running
   Verification become `cancelled`, the run's outcome becomes `interrupted`, and no pending Approval
-  survives.
+  survives. Each Closing Tool Result finds its row by the provider Tool Call id that
+  `tool_call_queued` carries; a call that was never queued has no row, so its result reaches only
+  the Transcript.
 - Coding Agent writes one `reasoning` record per Assistant Message whose reasoning streamed, so the
   redraw can put that reasoning back on its entry. No adapter streams displayable reasoning today,
   so none is written until one does.
@@ -779,6 +786,7 @@ Only the crash and rebuild notices come back after a resume (§4.9).
 - Saving empty text is refused with `empty_text`, and the lock stays. One item is locked at a time:
   another `queue.edit` is refused with `editing`, and so are `queue.sendNow` and `queue.dequeue`
   while an item is locked. `queue.delete` on the locked item ends the edit.
+- Ending the edit of the head Follow-up after a success opens its run (§3.6).
 
 #### 7.6 Session list
 
@@ -1099,7 +1107,8 @@ ID        ACTIVE   TASKS  MODEL                        STATUS                   
 
 - Agent Core, with fake ports: I1 to I4, Closing Tool Results, Outcome Notes, a throwing
   `TranscriptWording` and `SteerSource`, `steer_taken`'s place in each of its four orders, and a
-  Candidate Completion with a Steer waiting, below and at a Run Limit (ADR 0002 §8). For every run
+  Candidate Completion with a Steer waiting, below and at a Run Limit (ADR 0002 §8), and a
+  cancellation between `assistant_message_completed` and the first `tool_call_queued`. For every run
   in the suite, `transcriptFromRunEvents` equals `snapshot().transcript.slice(carriedMessages)`.
 - Unit tests of the pure decisions: the held-or-stale rule (§5.3) with injected probes; the Worktree
   name rule and generated names; §6.5's case and §6.8's keep-or-remove decision over injected git
@@ -1119,7 +1128,9 @@ ID        ACTIVE   TASKS  MODEL                        STATUS                   
     keep reason, and a removal that loses nothing; the guard against an opener racing a removal; and
     a `post-checkout` hook that sees no provider credential;
   - `--session` across two roots, the `--continue` refusals, and `sessions` on a damaged and a newer
-    file.
+    file;
+  - a Session file cut right after an `assistant_message_completed` with Tool Calls, which resumes
+    with each call closed (§4.8).
 - Mode checks skip with `noModeBits` on Windows. Symbolic-link cases run on all three OSes, as the
   Tools tests do.
 - A type-level test in `coding-agent` checks that the controller's Actions are assignable to

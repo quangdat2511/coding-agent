@@ -550,13 +550,16 @@ each of its Coding Tasks as a new Agent Run over one Transcript; ADR 0004 §10 g
 - **Closing Tool Results** (§3, §5): each Tool Call that ends without a result of its own gets a
   Closing Tool Result with `isError: true`, committed to the Transcript and carried on
   `tool_call_completed`. A skipped call gets one, the call of a pending Approval at cancellation
-  included. A call stopped while running keeps the tool's own result when the tool returned within
-  the Cancellation Grace Period (`bash` returns its partial output and a `cancelled` status), and
-  gets a Closing Tool Result otherwise. This supersedes §3's "A skipped call records the run-ending
-  reason and has no Tool Result because no later Model Turn will occur" and §5's "has no Tool
-  Result": a later Agent Run carries the Transcript, and Anthropic and OpenAI reject a request
-  holding a Tool Call without a result. An interrupted Assistant Message is still never carried; no
-  Tool Call in it ran, since calls are queued only after `assistant_message_completed`.
+  included. A completed Assistant Message whose Tool Calls are not yet queued when the run settles,
+  as when a cancellation lands between `assistant_message_completed` and the first
+  `tool_call_queued`, has each call queued and skipped, so each gets a Closing Tool Result. A call
+  stopped while running keeps the tool's own result when the tool returned within the Cancellation
+  Grace Period (`bash` returns its partial output and a `cancelled` status), and gets a Closing Tool
+  Result otherwise. This supersedes §3's "A skipped call records the run-ending reason and has no
+  Tool Result because no later Model Turn will occur" and §5's "has no Tool Result": a later Agent
+  Run carries the Transcript, and Anthropic and OpenAI reject a request holding a Tool Call without
+  a result. An interrupted Assistant Message is still never carried; no Tool Call in it ran, since
+  calls are queued only after `assistant_message_completed`.
 - **Outcome Notes** (§4, §6): every settlement without success (cancelled, and every failure code,
   `LIMIT_EXCEEDED` included) appends an Outcome Note, a user message telling the model how that
   Coding Task ended. A successful run gets none. The `run_settled` payload becomes
