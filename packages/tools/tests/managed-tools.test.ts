@@ -108,6 +108,7 @@ interface FakeFsState {
   failMkdirForPrefix?: string;
   failMkdtempForPrefix?: string;
   failRenameWithCode?: string;
+  failRenameForPrefix?: string;
 }
 
 function createFakeFs(initialExecutables: readonly string[] = []): {
@@ -188,7 +189,10 @@ function createFakeFs(initialExecutables: readonly string[] = []): {
     },
     async rename(oldPath, newPath) {
       state.renameCalls.push({ from: oldPath, to: newPath });
-      if (state.failRenameWithCode) {
+      if (
+        state.failRenameWithCode &&
+        (state.failRenameForPrefix === undefined || newPath.startsWith(state.failRenameForPrefix))
+      ) {
         const err = new Error(`${state.failRenameWithCode}: rename failed`) as Error & {
           code: string;
         };
@@ -470,6 +474,10 @@ describe("createToolAcquirer", () => {
   const fakeArchive = new TextEncoder().encode("fake-archive-content");
   const testManifest = makeTestManifest(fakeArchive);
   const instantSleep = async () => undefined;
+  // Never call real process.kill on fake child PIDs during unit tests.
+  const fakeKillProcess = () => {
+    throw new Error("ESRCH");
+  };
 
   describe("lookup order, versions, and memoization", () => {
     it("returns a valid cached binary without probing PATH or fetching", async () => {
@@ -1027,6 +1035,7 @@ describe("createToolAcquirer", () => {
         fs,
         fetchImpl: async () => new Response(fakeArchive),
         sleep: instantSleep,
+        killProcess: fakeKillProcess,
       });
 
       const result = await acquirer.acquire("rg", { signal: controller.signal });
@@ -1310,6 +1319,7 @@ describe("createToolAcquirer", () => {
         fs,
         fetchImpl: async () => new Response(fakeArchive),
         sleep: instantSleep,
+        killProcess: fakeKillProcess,
       });
 
       const result = await acquirer.acquire("rg", { signal: controller.signal });
@@ -1384,7 +1394,44 @@ describe("createToolAcquirer", () => {
       expect(fdRes).toEqual({ ok: true, path: existingFd, version: "10.5.2" });
     });
 
-    it("resolves relative XDG_CACHE_HOME and LOCALAPPDATA to absolute paths", () => {
+    it("falls back to tmpDir when default cache versionDir exists read-only (mkdir succeeds but rename fails with EACCES)", async () => {
+      const { fs, state } = createFakeFs();
+      state.failRenameWithCode = "EACCES";
+      state.failRenameForPrefix = "/home/dev/.cache/coding-agent/";
+      const { launcher } = createFakeLauncher((argv) => {
+        if (argv[0] === "tar") {
+          state.files.set(`${argv[4]}/rg`, new Uint8Array([1]));
+          return { exitCode: 0 };
+        }
+        if (argv[0]?.startsWith("/tmp/coding-agent-cache-") && argv[1] === "--version") {
+          return { exitCode: 0, stdout: "ripgrep 16.0.0\n" };
+        }
+        return { exitCode: 1 };
+      });
+
+      const acquirer = createToolAcquirer({
+        launcher,
+        env: {},
+        platform: "linux",
+        arch: "x64",
+        homeDir: "/home/dev",
+        tmpDir: "/tmp",
+        manifest: testManifest,
+        fs,
+        fetchImpl: async () => new Response(fakeArchive),
+        sleep: instantSleep,
+        killProcess: fakeKillProcess,
+      });
+
+      const result = await acquirer.acquire("rg");
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.path).toBe("/tmp/coding-agent-cache-2/bin/rg/16.0.0/rg");
+      }
+      expect(state.rmCalls).toContain("/home/dev/.cache/coding-agent/tmp/rg-1");
+    });
+
+    it("ignores relative XDG_CACHE_HOME and LOCALAPPDATA and falls back to home directory", () => {
       expect(
         resolveConfiguredCacheRoot({
           platform: "linux",
@@ -1392,7 +1439,7 @@ describe("createToolAcquirer", () => {
           cwd: "/work/repo",
           homeDir: "/home/dev",
         }),
-      ).toEqual({ path: "/work/repo/relative-cache/coding-agent", explicit: false });
+      ).toEqual({ path: "/home/dev/.cache/coding-agent", explicit: false });
 
       expect(
         resolveConfiguredCacheRoot({
@@ -1401,7 +1448,7 @@ describe("createToolAcquirer", () => {
           cwd: "D:\\work\\repo",
           homeDir: "C:\\Users\\dev",
         }),
-      ).toEqual({ path: "D:\\work\\repo\\relative-local\\coding-agent", explicit: false });
+      ).toEqual({ path: "C:\\Users\\dev\\AppData\\Local\\coding-agent", explicit: false });
     });
 
     it("normalizes Windows shell drive paths in CODING_AGENT_CACHE_DIR and PATH when simulating win32", async () => {

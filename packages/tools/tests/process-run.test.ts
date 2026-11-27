@@ -113,6 +113,40 @@ describe("supervising a command", () => {
       expect(exit).toEqual({ exitCode: null, signalCode: "SIGKILL" });
     },
   );
+
+  it.skipIf(noPosixSignals)(
+    "waits for the process group to exit when waitForTreeExit is enabled",
+    async () => {
+      const controller = new AbortController();
+      const signals: Array<readonly [number, "SIGTERM" | "SIGKILL" | 0]> = [];
+      let aliveChecks = 0;
+
+      setTimeout(() => controller.abort(), 50);
+      const exit = await runSupervised(launcher, {
+        argv: combinedOutputArgv(shell, "sleep 10"),
+        cwd: repoRoot,
+        timeoutMs: 10_000,
+        signal: controller.signal,
+        waitForTreeExit: true,
+        killProcess: (pid, sig) => {
+          signals.push([pid, sig]);
+          if (sig === 0) {
+            aliveChecks++;
+            // Simulate a child process group that stays alive briefly after SIGTERM and exits
+            // once checked twice.
+            if (aliveChecks <= 2) return;
+            throw new Error("ESRCH");
+          }
+          process.kill(pid, sig);
+        },
+        onOutput: () => undefined,
+      });
+
+      expect(exit.stopReason).toBe("cancelled");
+      expect(aliveChecks).toBeGreaterThanOrEqual(3);
+      expect(signals.some(([, sig]) => sig === "SIGTERM")).toBe(true);
+    },
+  );
 });
 
 describe("the shared timeout bounds", () => {

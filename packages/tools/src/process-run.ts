@@ -27,6 +27,8 @@ export function timeoutProblem(timeoutMs: number): string | undefined {
 // Why the supervisor itself stopped the command, when it did.
 export type StopReason = "timeout" | "cancelled";
 
+export type ProcessKillFn = (pid: number, signal: "SIGTERM" | "SIGKILL" | 0) => void;
+
 export interface SupervisedRun {
   readonly argv: readonly string[];
   readonly cwd?: RepoPath;
@@ -36,6 +38,13 @@ export interface SupervisedRun {
   onOutput(chunk: Uint8Array, text: string): void;
   /** Optional separate handler for stderr; defaults to onOutput when omitted. */
   onStderr?: (chunk: Uint8Array, text: string) => void;
+  /**
+   * When true, wait for the whole process tree to exit after a timeout or cancellation before
+   * returning, so callers cleaning up temporary directories cannot race with lingering children.
+   */
+  readonly waitForTreeExit?: boolean;
+  /** Injectable process-group signaler (defaults to process.kill) so tests never signal real PIDs. */
+  readonly killProcess?: ProcessKillFn;
 }
 
 export interface SupervisedExit {
@@ -72,15 +81,23 @@ export async function runSupervised(
     readAll(stderrReader, run.onStderr ?? run.onOutput),
   ]);
 
+  const killProcess: ProcessKillFn = run.killProcess ?? ((pid, sig) => process.kill(pid, sig));
   let stopReason: StopReason | undefined;
+  let terminatedAt = 0;
   let killTimer: ReturnType<typeof setTimeout> | undefined;
+  let pendingTreeSignal: Promise<void> | undefined;
   const terminate = (reason: StopReason) => {
     if (stopReason !== undefined) return;
     stopReason = reason;
-    signalTree(launcher, child, "SIGTERM");
-    killTimer = setTimeout(() => {
-      if (groupAlive(child)) signalTree(launcher, child, "SIGKILL");
-    }, KILL_GRACE_MS);
+    terminatedAt = Date.now();
+    pendingTreeSignal = signalTree(launcher, child, "SIGTERM", killProcess);
+    if (!run.waitForTreeExit) {
+      killTimer = setTimeout(() => {
+        if (groupAlive(child, killProcess)) {
+          void signalTree(launcher, child, "SIGKILL", killProcess);
+        }
+      }, KILL_GRACE_MS);
+    }
   };
   const timeoutTimer = setTimeout(() => terminate("timeout"), run.timeoutMs);
   const onAbort = () => terminate("cancelled");
@@ -107,15 +124,49 @@ export async function runSupervised(
   ]);
   clearTimeout(drainTimer);
   for (const reader of readers) reader.cancel().catch(() => undefined);
-  // A group that has already exited needs no SIGKILL; skipping it also avoids signalling a group
-  // that later reuses the id.
-  if (!groupAlive(child)) clearTimeout(killTimer);
+
+  if (run.waitForTreeExit && stopReason !== undefined) {
+    clearTimeout(killTimer);
+    await waitForProcessTreeExit(launcher, child, killProcess, terminatedAt, pendingTreeSignal);
+  } else if (!groupAlive(child, killProcess)) {
+    // A group that has already exited needs no SIGKILL; skipping it also avoids signalling a group
+    // that later reuses the id.
+    clearTimeout(killTimer);
+  }
 
   return {
     ...(stopReason === undefined ? {} : { stopReason }),
     exitCode: child.exitCode,
     signalCode: child.signalCode,
   };
+}
+
+const TREE_POLL_MS = 25;
+const SIGKILL_WAIT_MS = 500;
+
+async function waitForProcessTreeExit(
+  launcher: ChildProcessLauncher,
+  child: ChildProcess,
+  killProcess: ProcessKillFn,
+  terminatedAt: number,
+  pendingTreeSignal: Promise<void> | undefined,
+): Promise<void> {
+  if (pendingTreeSignal !== undefined) {
+    await pendingTreeSignal;
+  }
+  if (process.platform === "win32") return;
+
+  const graceDeadline = terminatedAt + KILL_GRACE_MS;
+  while (groupAlive(child, killProcess) && Date.now() < graceDeadline) {
+    await new Promise((resolve) => setTimeout(resolve, TREE_POLL_MS));
+  }
+  if (!groupAlive(child, killProcess)) return;
+
+  await signalTree(launcher, child, "SIGKILL", killProcess);
+  const killDeadline = Date.now() + SIGKILL_WAIT_MS;
+  while (groupAlive(child, killProcess) && Date.now() < killDeadline) {
+    await new Promise((resolve) => setTimeout(resolve, TREE_POLL_MS));
+  }
 }
 
 // Reads one pipe until it closes or is cancelled, decoding with its own stream decoder so a
@@ -139,10 +190,10 @@ async function readAll(
 
 // Whether any process is left in the command's group. Windows has no process groups, and
 // taskkill /T already ended the tree, so there is nothing left to kill.
-function groupAlive(child: ChildProcess): boolean {
+function groupAlive(child: ChildProcess, killProcess: ProcessKillFn): boolean {
   if (process.platform === "win32") return false;
   try {
-    process.kill(-child.pid, 0);
+    killProcess(-child.pid, 0);
     return true;
   } catch {
     return false;
@@ -151,26 +202,32 @@ function groupAlive(child: ChildProcess): boolean {
 
 // POSIX signals the whole process group the command leads. Windows has no signals, so both steps
 // end the process tree with taskkill, started through the same launcher as every other child.
-function signalTree(
+async function signalTree(
   launcher: ChildProcessLauncher,
   child: ChildProcess,
   signal: "SIGTERM" | "SIGKILL",
-): void {
+  killProcess: ProcessKillFn,
+): Promise<void> {
   if (process.platform === "win32") {
+    let taskkillSucceeded = false;
     try {
-      launcher.launch(["taskkill", "/T", "/F", "/PID", String(child.pid)]);
+      const killer = launcher.launch(["taskkill", "/T", "/F", "/PID", String(child.pid)]);
+      const code = await killer.exited;
+      taskkillSucceeded = code === 0;
     } catch {
-      // The tree is already gone or taskkill is missing; the drain limit still ends the call.
+      // taskkill failed to launch or wait; fall back to ending the direct child handle below.
     }
-    try {
-      child.kill();
-    } catch {
-      // Already exited.
+    if (!taskkillSucceeded) {
+      try {
+        child.kill();
+      } catch {
+        // Already exited.
+      }
     }
     return;
   }
   try {
-    process.kill(-child.pid, signal);
+    killProcess(-child.pid, signal);
   } catch {
     // Either the group has already exited or the child is not a process group leader (e.g. a
     // non-detached or fake child in tests); fall back to signalling the child handle directly.

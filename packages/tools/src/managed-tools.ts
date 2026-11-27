@@ -8,7 +8,7 @@ import { errnoOf } from "./errno.ts";
 import defaultManifestJson from "./managed-tools.json";
 import { ArchiveIntegrityError, readVerifiedArchive } from "./managed-tools-archive.ts";
 import { normalizeWindowsShellPath } from "./paths.ts";
-import { runSupervised } from "./process-run.ts";
+import { type ProcessKillFn, runSupervised } from "./process-run.ts";
 
 export type ManagedToolName = "rg" | "fd";
 
@@ -121,6 +121,7 @@ export interface CreateToolAcquirerOptions {
   readonly retryBackoffMs?: readonly number[];
   readonly probeTimeoutMs?: number;
   readonly extractTimeoutMs?: number;
+  readonly killProcess?: ProcessKillFn;
 }
 
 const DEFAULT_MANIFEST: ManagedToolsManifest = defaultManifestJson;
@@ -264,33 +265,41 @@ export function resolveConfiguredCacheRoot(options: {
   if (options.platform === "win32") {
     const localAppData = getEnvVar(options.env, "LOCALAPPDATA", options.platform)?.trim();
     if (localAppData) {
-      return { path: resolveAbsolute(localAppData, "coding-agent"), explicit: false };
+      const normalized = normalizeWindowsShellPath(localAppData, "win32");
+      if (win32.isAbsolute(normalized)) {
+        return { path: win32.join(normalized, "coding-agent"), explicit: false };
+      }
     }
     if (options.homeDir) {
-      return {
-        path: resolveAbsolute(options.homeDir, "AppData", "Local", "coding-agent"),
-        explicit: false,
-      };
+      const normalizedHome = normalizeWindowsShellPath(options.homeDir, "win32");
+      if (win32.isAbsolute(normalizedHome)) {
+        return {
+          path: win32.join(normalizedHome, "AppData", "Local", "coding-agent"),
+          explicit: false,
+        };
+      }
     }
     return { path: undefined, explicit: false };
   }
 
   if (options.platform === "darwin") {
-    if (options.homeDir) {
+    if (options.homeDir && posix.isAbsolute(options.homeDir)) {
       return {
-        path: resolveAbsolute(options.homeDir, "Library", "Caches", "coding-agent"),
+        path: posix.join(options.homeDir, "Library", "Caches", "coding-agent"),
         explicit: false,
       };
     }
     return { path: undefined, explicit: false };
   }
 
+  // Per the XDG Base Directory Specification, relative XDG_CACHE_HOME values are invalid and must
+  // be ignored so we never place managed binaries inside the repository working directory.
   const xdgCacheHome = getEnvVar(options.env, "XDG_CACHE_HOME", options.platform)?.trim();
-  if (xdgCacheHome) {
-    return { path: resolveAbsolute(xdgCacheHome, "coding-agent"), explicit: false };
+  if (xdgCacheHome && posix.isAbsolute(xdgCacheHome)) {
+    return { path: posix.join(xdgCacheHome, "coding-agent"), explicit: false };
   }
-  if (options.homeDir) {
-    return { path: resolveAbsolute(options.homeDir, ".cache", "coding-agent"), explicit: false };
+  if (options.homeDir && posix.isAbsolute(options.homeDir)) {
+    return { path: posix.join(options.homeDir, ".cache", "coding-agent"), explicit: false };
   }
   return { path: undefined, explicit: false };
 }
@@ -430,6 +439,7 @@ async function runChildCommand(
   argv: readonly string[],
   timeoutMs: number,
   signal?: AbortSignal,
+  killProcess?: ProcessKillFn,
 ): Promise<ChildCommandResult> {
   if (signal?.aborted) {
     return { exitCode: null, stdout: "", stderr: "", timedOut: false, cancelled: true };
@@ -442,6 +452,8 @@ async function runChildCommand(
       argv,
       timeoutMs,
       signal: signal ?? new AbortController().signal,
+      waitForTreeExit: true,
+      killProcess,
       onOutput: (_chunk, text) => {
         stdout += text;
       },
@@ -553,11 +565,7 @@ export function createToolAcquirer(options: CreateToolAcquirerOptions): ToolAcqu
     root: string,
     name: ManagedToolName,
     version: string,
-  ): Promise<{
-    readonly cacheRoot: string;
-    readonly tempDir: string;
-    readonly versionDir: string;
-  }> {
+  ): Promise<{ readonly tempDir: string; readonly versionDir: string }> {
     const tmpParent = pathImpl.join(root, "tmp");
     await fs.mkdir(tmpParent, { recursive: true, mode: dirMode });
     const tempDir = await fs.mkdtemp(pathImpl.join(tmpParent, `${name}-`));
@@ -568,46 +576,13 @@ export function createToolAcquirer(options: CreateToolAcquirerOptions): ToolAcqu
       await fs.rm(tempDir, { recursive: true, force: true }).catch(() => undefined);
       throw error;
     }
-    return { cacheRoot: root, tempDir, versionDir };
+    return { tempDir, versionDir };
   }
 
-  async function prepareInstallDirs(
+  async function createFallbackInstallDirs(
     name: ManagedToolName,
     version: string,
-  ): Promise<{
-    readonly cacheRoot: string;
-    readonly tempDir: string;
-    readonly versionDir: string;
-  }> {
-    const configured = currentConfiguredCache();
-    if (configured.explicit) {
-      const explicitRoot = configured.path;
-      if (explicitRoot === undefined) {
-        throw new InstallError("explicit cache directory could not be resolved");
-      }
-      try {
-        return await prepareRootForInstall(explicitRoot, name, version);
-      } catch (error) {
-        throw new InstallError(`cache directory ${explicitRoot} is not writable`, error);
-      }
-    }
-
-    if (fallbackCacheRoot !== undefined) {
-      try {
-        return await prepareRootForInstall(fallbackCacheRoot, name, version);
-      } catch {
-        fallbackCacheRoot = undefined;
-      }
-    }
-
-    if (configured.path !== undefined) {
-      try {
-        return await prepareRootForInstall(configured.path, name, version);
-      } catch {
-        // Default cache root (tmp or bin) is unusable; fall back to tmpdir.
-      }
-    }
-
+  ): Promise<{ readonly tempDir: string; readonly versionDir: string }> {
     try {
       const created = await fs.mkdtemp(pathImpl.join(tmpDir, "coding-agent-cache-"));
       if (platform !== "win32") {
@@ -621,6 +596,50 @@ export function createToolAcquirer(options: CreateToolAcquirerOptions): ToolAcqu
     }
   }
 
+  async function prepareInstallDirs(
+    name: ManagedToolName,
+    version: string,
+  ): Promise<{
+    readonly tempDir: string;
+    readonly versionDir: string;
+    readonly usingDefaultCache: boolean;
+  }> {
+    const configured = currentConfiguredCache();
+    if (configured.explicit) {
+      const explicitRoot = configured.path;
+      if (explicitRoot === undefined) {
+        throw new InstallError("explicit cache directory could not be resolved");
+      }
+      try {
+        const dirs = await prepareRootForInstall(explicitRoot, name, version);
+        return { ...dirs, usingDefaultCache: false };
+      } catch (error) {
+        throw new InstallError(`cache directory ${explicitRoot} is not writable`, error);
+      }
+    }
+
+    if (fallbackCacheRoot !== undefined) {
+      try {
+        const dirs = await prepareRootForInstall(fallbackCacheRoot, name, version);
+        return { ...dirs, usingDefaultCache: false };
+      } catch {
+        fallbackCacheRoot = undefined;
+      }
+    }
+
+    if (configured.path !== undefined) {
+      try {
+        const dirs = await prepareRootForInstall(configured.path, name, version);
+        return { ...dirs, usingDefaultCache: true };
+      } catch {
+        // Default cache root (tmp or bin) is unusable; fall back to tmpdir.
+      }
+    }
+
+    const dirs = await createFallbackInstallDirs(name, version);
+    return { ...dirs, usingDefaultCache: false };
+  }
+
   async function probeVersion(
     binaryPath: string,
     name: ManagedToolName,
@@ -631,6 +650,7 @@ export function createToolAcquirer(options: CreateToolAcquirerOptions): ToolAcqu
       [binaryPath, "--version"],
       probeTimeoutMs,
       signal,
+      options.killProcess,
     );
     if (result.cancelled) return { cancelled: true };
     if (result.launchError !== undefined || result.timedOut || result.exitCode !== 0) {
@@ -773,6 +793,7 @@ export function createToolAcquirer(options: CreateToolAcquirerOptions): ToolAcqu
         ["tar", "-xzf", archivePath, "-C", extractDir],
         extractTimeoutMs,
         signal,
+        options.killProcess,
       );
       if (result.cancelled) throw new CancelledError();
       if (result.launchError !== undefined) {
@@ -796,6 +817,7 @@ export function createToolAcquirer(options: CreateToolAcquirerOptions): ToolAcqu
       [tarExe, "-xf", archivePath, "-C", extractDir],
       extractTimeoutMs,
       signal,
+      options.killProcess,
     );
     if (tarResult.cancelled) throw new CancelledError();
     if (tarResult.launchError === undefined && !tarResult.timedOut && tarResult.exitCode === 0) {
@@ -820,6 +842,7 @@ export function createToolAcquirer(options: CreateToolAcquirerOptions): ToolAcqu
       ],
       extractTimeoutMs,
       signal,
+      options.killProcess,
     );
     if (psResult.cancelled) throw new CancelledError();
     if (psResult.launchError !== undefined) {
@@ -840,17 +863,16 @@ export function createToolAcquirer(options: CreateToolAcquirerOptions): ToolAcqu
     }
   }
 
-  async function installArchive(
+  async function installIntoPreparedDirs(
     name: ManagedToolName,
     tool: ManagedToolEntry,
     asset: ManagedToolAsset,
     archiveBytes: Uint8Array,
+    dirs: { readonly tempDir: string; readonly versionDir: string },
+    allowRenameFallback: boolean,
     signal?: AbortSignal,
-  ): Promise<string> {
-    if (signal?.aborted) throw new CancelledError();
-
-    const { tempDir, versionDir } = await prepareInstallDirs(name, tool.version);
-
+  ): Promise<string | "fallback-needed"> {
+    const { tempDir, versionDir } = dirs;
     try {
       if (signal?.aborted) throw new CancelledError();
 
@@ -887,6 +909,11 @@ export function createToolAcquirer(options: CreateToolAcquirerOptions): ToolAcqu
             return destPath;
           }
         }
+        // If an existing versionDir in the default cache is read-only, mkdir succeeded earlier
+        // and only rename fails; fall back to a temporary cache directory under tmpDir.
+        if (allowRenameFallback && (code === "EACCES" || code === "EPERM" || code === "EROFS")) {
+          return "fallback-needed";
+        }
         throw new InstallError(`failed to move ${binaryName} into ${destPath}`, renameErr);
       }
 
@@ -907,6 +934,43 @@ export function createToolAcquirer(options: CreateToolAcquirerOptions): ToolAcqu
     } finally {
       await fs.rm(tempDir, { recursive: true, force: true }).catch(() => undefined);
     }
+  }
+
+  async function installArchive(
+    name: ManagedToolName,
+    tool: ManagedToolEntry,
+    asset: ManagedToolAsset,
+    archiveBytes: Uint8Array,
+    signal?: AbortSignal,
+  ): Promise<string> {
+    if (signal?.aborted) throw new CancelledError();
+
+    const prepared = await prepareInstallDirs(name, tool.version);
+    const first = await installIntoPreparedDirs(
+      name,
+      tool,
+      asset,
+      archiveBytes,
+      prepared,
+      prepared.usingDefaultCache,
+      signal,
+    );
+    if (first !== "fallback-needed") return first;
+
+    const fallbackDirs = await createFallbackInstallDirs(name, tool.version);
+    const second = await installIntoPreparedDirs(
+      name,
+      tool,
+      asset,
+      archiveBytes,
+      fallbackDirs,
+      false,
+      signal,
+    );
+    if (second === "fallback-needed") {
+      throw new InstallError(`failed to move ${binaryNameOf(name)} into fallback cache`);
+    }
+    return second;
   }
 
   async function acquireUncached(
