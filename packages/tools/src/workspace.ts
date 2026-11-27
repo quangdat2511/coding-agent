@@ -228,12 +228,22 @@ function quote(text: string): string {
   return `${JSON.stringify(text.slice(0, QUOTED_LIMIT))}... (${omitted} more characters)`;
 }
 
+const NOT_A_DIRECTORY = Symbol("notADirectory");
+
+// Distinguishes a path blocked by a non-directory component (e.g. "file.ts/" or "file.ts/child")
+// from a genuinely missing path, without widening PathResolution's error-code union for other tools.
+export function isNotDirectoryResolution(resolution: PathResolution): boolean {
+  return !resolution.ok && NOT_A_DIRECTORY in resolution;
+}
+
 function notFound(input: string, reason: string): PathResolution {
   return { ok: false, code: "NOT_FOUND", message: `${quote(input)} ${reason}` };
 }
 
 function notDirectory(input: string, component: string): PathResolution {
-  return notFound(input, `cannot be reached: ${quote(component)} is not a directory`);
+  const result = notFound(input, `cannot be reached: ${quote(component)} is not a directory`);
+  Object.defineProperty(result, NOT_A_DIRECTORY, { value: true });
+  return result;
 }
 
 function linked(input: string, link: string): PathResolution {

@@ -14,7 +14,8 @@ import { errnoOf } from "./errno.ts";
 import { displayPath, quote } from "./messages.ts";
 import { MAX_TOOL_OUTPUT_BYTES, TOOL_OUTPUT_TRUNCATION_MARKER } from "./output-budget.ts";
 import { revalidatePreparedPath } from "./prepared-path.ts";
-import { prepareFailure, success, toolError } from "./tool-outcome.ts";
+import { prepareFailure, toolError } from "./tool-outcome.ts";
+import { isNotDirectoryResolution } from "./workspace.ts";
 
 const DEFAULT_LIMIT = 500;
 const LINE_TRUNCATION_MARKER = TOOL_OUTPUT_TRUNCATION_MARKER.trim();
@@ -42,19 +43,22 @@ export interface LsToolDetails {
   readonly truncation?: LsTruncationDetails;
 }
 
-export const LsParams = Type.Object({
-  path: Type.Optional(
-    Type.String({
-      description: 'Path of the directory to list, relative to the repository root (default ".")',
-    }),
-  ),
-  limit: Type.Optional(
-    Type.Integer({
-      minimum: 1,
-      description: `Maximum number of entries to return (default ${DEFAULT_LIMIT})`,
-    }),
-  ),
-});
+export const LsParams = Type.Object(
+  {
+    path: Type.Optional(
+      Type.String({
+        description: 'Path of the directory to list, relative to the repository root (default ".")',
+      }),
+    ),
+    limit: Type.Optional(
+      Type.Integer({
+        minimum: 1,
+        description: `Maximum number of entries to return (default ${DEFAULT_LIMIT})`,
+      }),
+    ),
+  },
+  { additionalProperties: false },
+);
 
 type LsInput = Static<typeof LsParams>;
 
@@ -78,7 +82,12 @@ export function lsToolWith(fs: LsFileSystem): ExecutableTool<typeof LsParams> {
         return prepareFailure<typeof LsParams>({ code: "SCHEMA_VIOLATION", message: invalid });
       }
       const resolved = await workspace.resolveExisting(input.path ?? ".");
-      if (!resolved.ok) return resolved;
+      if (!resolved.ok) {
+        return prepareFailure<typeof LsParams>({
+          code: isNotDirectoryResolution(resolved) ? "NOT_A_DIRECTORY" : resolved.code,
+          message: resolved.message,
+        });
+      }
       const shown = displayPath(workspace.repoRoot, resolved.path);
       return {
         ok: true,
@@ -90,21 +99,33 @@ export function lsToolWith(fs: LsFileSystem): ExecutableTool<typeof LsParams> {
       };
     },
 
-    async execute(prepared, { workspace }): Promise<ToolOutcome> {
+    async execute(prepared, { workspace, signal }): Promise<ToolOutcome> {
+      signal.throwIfAborted();
       const validated = await revalidatePreparedPath(prepared.paths, (path) =>
         workspace.resolveExisting(path),
       );
-      if (!validated.ok) return toolError({ code: validated.code, message: validated.message });
+      if (!validated.ok) {
+        return toolError({
+          code: isNotDirectoryResolution(validated) ? "NOT_A_DIRECTORY" : validated.code,
+          message: validated.message,
+        });
+      }
 
       const shown = displayPath(workspace.repoRoot, validated.path);
+      signal.throwIfAborted();
       let names: string[];
       try {
         names = await fs.readdir(validated.path);
       } catch (error) {
+        signal.throwIfAborted();
         return toolError(readdirFailure(validated.path, error));
       }
       if (names.length === 0) {
-        return success(`${quote(shown)} (empty directory)`);
+        return formatOutcome(
+          boundListingLines([`${quote(shown)} (empty directory)`], undefined, 0),
+          undefined,
+          0,
+        );
       }
 
       const sorted = [...names].sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
@@ -115,10 +136,12 @@ export function lsToolWith(fs: LsFileSystem): ExecutableTool<typeof LsParams> {
       const lines: string[] = [];
       let skippedEntries = 0;
       for (const name of selected) {
+        signal.throwIfAborted();
         let stats: LsStats;
         try {
           stats = await fs.lstat(join(validated.path, name));
         } catch {
+          signal.throwIfAborted();
           skippedEntries += 1;
           continue;
         }
@@ -131,35 +154,36 @@ export function lsToolWith(fs: LsFileSystem): ExecutableTool<typeof LsParams> {
           ? `[${entryLimitReached} entries limit reached. Use limit=${entryLimitReached * 2} for more]`
           : undefined;
 
-      if (lines.length === 0) {
-        const content =
-          limitNotice !== undefined
-            ? `${quote(shown)} (no readable entries)\n${limitNotice}`
-            : `${quote(shown)} (no readable entries)`;
-        const details = buildDetails({
-          entryLimitReached,
-          skippedEntries: skippedEntries > 0 ? skippedEntries : undefined,
-        });
-        return {
-          isError: false,
-          content,
-          ...(details !== undefined ? { details } : {}),
-        };
-      }
+      const bounded =
+        lines.length === 0
+          ? boundListingLines([`${quote(shown)} (no readable entries)`], limitNotice, 0)
+          : boundListingLines(lines, limitNotice, lines.length);
 
-      const bounded = boundListingLines(lines, limitNotice);
-      const details = buildDetails({
-        entryLimitReached,
-        skippedEntries: skippedEntries > 0 ? skippedEntries : undefined,
-        truncation: bounded.truncation,
-      });
-      return {
-        isError: false,
-        content: bounded.content,
-        ...(bounded.truncation !== undefined ? { truncated: true } : {}),
-        ...(details !== undefined ? { details } : {}),
-      };
+      return formatOutcome(bounded, entryLimitReached, skippedEntries);
     },
+  };
+}
+
+interface BoundedListing {
+  readonly content: string;
+  readonly truncation?: LsTruncationDetails;
+}
+
+function formatOutcome(
+  bounded: BoundedListing,
+  entryLimitReached: number | undefined,
+  skippedEntries: number,
+): ToolOutcome {
+  const details = buildDetails({
+    entryLimitReached,
+    skippedEntries: skippedEntries > 0 ? skippedEntries : undefined,
+    truncation: bounded.truncation,
+  });
+  return {
+    isError: false,
+    content: bounded.content,
+    ...(bounded.truncation !== undefined ? { truncated: true } : {}),
+    ...(details !== undefined ? { details } : {}),
   };
 }
 
@@ -170,7 +194,8 @@ function utf8Bytes(text: string): number {
 function boundListingLines(
   lines: readonly string[],
   limitNotice: string | undefined,
-): { readonly content: string; readonly truncation?: LsTruncationDetails } {
+  collectedEntries: number,
+): BoundedListing {
   const joined = lines.join("\n");
   const collectedBytes = utf8Bytes(joined);
   const full = limitNotice !== undefined ? `${joined}\n${limitNotice}` : joined;
@@ -196,7 +221,7 @@ function boundListingLines(
   return {
     content: kept.length === 0 ? footer : `${kept.join("\n")}\n${footer}`,
     truncation: {
-      collectedEntries: lines.length,
+      collectedEntries,
       outputEntries: kept.length,
       collectedBytes,
       outputBytes,
@@ -214,7 +239,15 @@ function buildDetails(raw: LsToolDetails): Readonly<Record<string, JsonValue>> |
   return Object.keys(details).length > 0 ? details : undefined;
 }
 
-function checkInput({ limit }: LsInput): string | undefined {
+const ALLOWED_KEYS = new Set(["path", "limit"]);
+
+function checkInput(input: LsInput): string | undefined {
+  for (const key of Object.keys(input)) {
+    if (!ALLOWED_KEYS.has(key)) {
+      return `unexpected parameter ${quote(key)}`;
+    }
+  }
+  const { limit } = input;
   if (limit !== undefined && !(Number.isInteger(limit) && limit >= 1)) {
     return `limit must be an integer of at least 1, got ${limit}`;
   }
@@ -237,12 +270,10 @@ function readdirFailure(path: RepoPath, error: unknown): ToolError {
         code: "PERMISSION_DENIED",
         message: `${quote(path)} cannot be read: permission denied`,
       };
-    default: {
-      const detail = error instanceof Error ? error.message : String(error);
+    default:
       return {
         code: "TOOL_INTERNAL_ERROR",
-        message: `${quote(path)} could not be listed: ${detail}`,
+        message: `Could not list directory ${quote(path)}`,
       };
-    }
   }
 }

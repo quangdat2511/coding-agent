@@ -138,6 +138,7 @@ describe("the ls tool's declaration", () => {
     expect(Value.Check(LsParams, { limit: 0 })).toBe(false);
     expect(Value.Check(LsParams, { limit: -1 })).toBe(false);
     expect(Value.Check(LsParams, { limit: 1.5 })).toBe(false);
+    expect(Value.Check(LsParams, { limti: 2 })).toBe(false);
   });
 });
 
@@ -168,6 +169,7 @@ describe("preparing ls", () => {
     ["a limit of 0", { limit: 0 }],
     ["a negative limit", { limit: -5 }],
     ["a fractional limit", { limit: 2.5 }],
+    ["an unknown parameter key", { limti: 2 } as unknown as LsInput],
   ])("refuses %s as SCHEMA_VIOLATION without clamping", async (_, input) => {
     const tool = lsToolWith(fakeFs({ ".": { entries: {} } }));
 
@@ -439,6 +441,97 @@ describe("entry limit and byte cap", () => {
       },
     });
   });
+
+  it("caps long Unicode fallback messages for empty and unreadable directories at 40 KiB", async () => {
+    const longRel = "é".repeat(20_500);
+    const longAbs = join(REPO, longRel) as RepoPath;
+    const workspace = fakeWorkspace(() => ({ ok: true, path: longAbs }));
+
+    const emptyTool = lsToolWith({
+      readdir: async () => [],
+      lstat: async () => makeStats("file"),
+    });
+    const emptyOutcome = await runLs({ path: longRel }, emptyTool, workspace);
+    expect(emptyOutcome.isError).toBe(false);
+    if (!emptyOutcome.isError) {
+      expect(emptyOutcome.content).toBe("[...output truncated...]");
+      expect(emptyOutcome.truncated).toBe(true);
+      expect(Buffer.from(emptyOutcome.content, "utf8").byteLength).toBeLessThanOrEqual(
+        MAX_TOOL_OUTPUT_BYTES,
+      );
+      expect(emptyOutcome.details).toMatchObject({
+        truncation: { collectedEntries: 0, outputEntries: 0, outputBytes: 0 },
+      });
+    }
+
+    const unreadableTool = lsToolWith({
+      readdir: async () => ["a.ts"],
+      lstat: async () => {
+        throw makeErrno("EACCES");
+      },
+    });
+    const unreadableOutcome = await runLs({ path: longRel }, unreadableTool, workspace);
+    expect(unreadableOutcome.isError).toBe(false);
+    if (!unreadableOutcome.isError) {
+      expect(unreadableOutcome.content).toBe("[...output truncated...]");
+      expect(unreadableOutcome.truncated).toBe(true);
+      expect(Buffer.from(unreadableOutcome.content, "utf8").byteLength).toBeLessThanOrEqual(
+        MAX_TOOL_OUTPUT_BYTES,
+      );
+      expect(unreadableOutcome.details).toMatchObject({
+        skippedEntries: 1,
+        truncation: { collectedEntries: 0, outputEntries: 0, outputBytes: 0 },
+      });
+    }
+  });
+});
+
+describe("cancellation", () => {
+  it("stops calling lstat once the abort signal fires", async () => {
+    const controller = new AbortController();
+    let lstatCalls = 0;
+    const tool = lsToolWith({
+      readdir: async () => ["a.ts", "b.ts", "c.ts"],
+      lstat: async () => {
+        lstatCalls += 1;
+        controller.abort(new Error("cancelled"));
+        return makeStats("file");
+      },
+    });
+    const ctx: ExecuteContext = {
+      workspace: fakeWorkspace(),
+      signal: controller.signal,
+      onProgress: () => undefined,
+    };
+    const prepared = await tool.prepare({}, ctx);
+    if (!prepared.ok) throw new Error(`expected prepared call, got: ${prepared.message}`);
+
+    await expect(tool.execute(prepared.prepared, ctx)).rejects.toThrow("cancelled");
+    expect(lstatCalls).toBe(1);
+  });
+
+  it("does not call readdir when the signal is already aborted", async () => {
+    const controller = new AbortController();
+    controller.abort(new Error("already aborted"));
+    let readdirCalls = 0;
+    const tool = lsToolWith({
+      readdir: async () => {
+        readdirCalls += 1;
+        return [];
+      },
+      lstat: async () => makeStats("file"),
+    });
+    const ctx: ExecuteContext = {
+      workspace: fakeWorkspace(),
+      signal: controller.signal,
+      onProgress: () => undefined,
+    };
+    const prepared = await tool.prepare({}, ctx);
+    if (!prepared.ok) throw new Error(`expected prepared call, got: ${prepared.message}`);
+
+    await expect(tool.execute(prepared.prepared, ctx)).rejects.toThrow("already aborted");
+    expect(readdirCalls).toBe(0);
+  });
 });
 
 describe("readdir error mapping", () => {
@@ -451,14 +544,21 @@ describe("readdir error mapping", () => {
   ] as const)("maps readdir %s to %s", async (errno, expectedCode) => {
     const tool = lsToolWith(
       fakeFs({
-        target: { readdirError: { code: errno } },
+        target: { readdirError: { code: errno, message: `${errno}: raw kernel detail` } },
       }),
     );
 
-    expect(await runLs({ path: "target" }, tool)).toMatchObject({
+    const outcome = await runLs({ path: "target" }, tool);
+    expect(outcome).toMatchObject({
       isError: true,
       error: { code: expectedCode },
     });
+    if (expectedCode === "TOOL_INTERNAL_ERROR" && outcome.isError) {
+      expect(outcome.error.message).toBe(
+        `Could not list directory ${JSON.stringify(join(REPO, "target"))}`,
+      );
+      expect(outcome.error.message).not.toContain("raw kernel detail");
+    }
   });
 });
 
@@ -495,7 +595,7 @@ describe("real filesystem integration", () => {
     });
   });
 
-  it("reports a missing path as NOT_FOUND and a file path as NOT_A_DIRECTORY", async () => {
+  it("reports a missing path as NOT_FOUND and file-blocked paths as NOT_A_DIRECTORY", async () => {
     await writeFile(join(repo, "plain.ts"), "x\n");
 
     expect(await runLs({ path: "missing" }, lsTool(), workspace)).toMatchObject({
@@ -503,10 +603,12 @@ describe("real filesystem integration", () => {
       error: { code: "NOT_FOUND" },
     });
 
-    expect(await runLs({ path: "plain.ts" }, lsTool(), workspace)).toMatchObject({
-      isError: true,
-      error: { code: "NOT_A_DIRECTORY" },
-    });
+    for (const filePath of ["plain.ts", "plain.ts/", "plain.ts/child"]) {
+      expect(await runLs({ path: filePath }, lsTool(), workspace)).toMatchObject({
+        isError: true,
+        error: { code: "NOT_A_DIRECTORY" },
+      });
+    }
   });
 
   it.each([
