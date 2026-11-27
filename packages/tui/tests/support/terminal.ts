@@ -31,9 +31,9 @@ export const WHEEL = {
 // redrawn in place holds on every other platform only.
 export const REDRAWS_IN_PLACE = process.platform !== "win32";
 
-// Ink holds a lone ESC for 20 ms in case the rest of an escape sequence follows, and only then
+// Our Ink patch holds a lone ESC for 100 ms in case the rest of an escape sequence follows, then
 // reports the escape key.
-const ESCAPE_DELAY_MS = 30;
+const ESCAPE_DELAY_MS = 120;
 // How long press() waits for Ink to read a key before deciding nothing is listening.
 const READ_TIMEOUT_MS = 1000;
 
@@ -57,6 +57,8 @@ export interface TestTerminal {
   takeOutput(): string;
   // Types each key in turn, either text or one of KEYS, and resolves once Ink has read them all.
   press(...keys: string[]): Promise<void>;
+  // Sends one read without waiting for Ink to decide whether an escape sequence is complete.
+  sendChunk(chunk: string): Promise<void>;
   // Whether stdin is in raw mode, in which the terminal sends Ctrl+C as a key instead of a signal.
   isRawMode(): boolean;
   dispose(): void;
@@ -172,18 +174,21 @@ export function createTestTerminal(columns: number, rows: number): TestTerminal 
     isRawMode: () => stdin.isRaw,
     async press(...keys) {
       for (const key of keys) {
-        stdin.write(key);
-        // Ink reads stdin when it emits "readable", which happens after write() returns.
-        const deadline = Date.now() + READ_TIMEOUT_MS;
-        while (stdin.readableLength > 0) {
-          if (Date.now() > deadline) {
-            throw new Error(`Ink did not read ${JSON.stringify(key)}: no component is listening`);
-          }
-          await sleep(1);
-        }
+        await this.sendChunk(key);
         if (key === KEYS.escape) {
           await sleep(ESCAPE_DELAY_MS);
         }
+      }
+    },
+    async sendChunk(chunk) {
+      stdin.write(chunk);
+      // Ink reads stdin when it emits "readable", which happens after write() returns.
+      const deadline = Date.now() + READ_TIMEOUT_MS;
+      while (stdin.readableLength > 0) {
+        if (Date.now() > deadline) {
+          throw new Error(`Ink did not read ${JSON.stringify(chunk)}: no component is listening`);
+        }
+        await sleep(1);
       }
     },
     dispose: () => terminal.dispose(),

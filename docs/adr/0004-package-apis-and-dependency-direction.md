@@ -518,11 +518,19 @@ compose a narrower one.
 Model Providers, tools, or Run Events.
 
 CDA-17 selects Ink 7.1.1 as the internal renderer for reconciliation, layout, terminal diffing, and
-terminal lifecycle. Transcript virtualization and scrolling, Approval presentation, input policy,
-themes, and the interaction model are project-owned: an inline transcript by default, Approval
-overlays composited over the transcript, and the split rail opt-in. Ink does not appear in this
+terminal lifecycle. Session view virtualization and scrolling, Approval presentation, input policy,
+themes, and the interaction model are project-owned: an inline Session view by default, Approval
+overlays composited over it, and the split rail opt-in. Ink does not appear in this
 package's public types, and the prototype's three-renderer switch does not become a production
 abstraction.
+
+CDA-120 enables SGR mouse reporting for scrolling the Session view. The TUI reads Ink 7.1.1's
+internal input emitter to distinguish mouse reports from keyboard text before `useInput` strips
+their escape prefix. A local Ink patch emits a teardown event before leaving raw mode, so the TUI
+can turn reporting off while Windows ConPTY still forwards the reset sequences. The TUI also
+resets on Bun's uncaught exception monitor for crashes that bypass Ink's exit handler. The patch
+allows up to 100 ms between reads of an incomplete escape sequence and corrects cursor-only
+updates in full-screen frames. Recheck these behaviors when upgrading Ink.
 
 ```typescript
 export function renderTui(props: { model: TuiModel; handlers: TuiHandlers }): TuiHandle;

@@ -111,7 +111,7 @@ describe("Prompt", () => {
     expect(await terminal.cursorAt()).toEqual([PROMPT_ROW, 2]);
   });
 
-  it("scrolls the transcript with the wheel while the arrows still move the Prompt cursor", async () => {
+  it("scrolls the Session view with the wheel while the arrows still move the Prompt cursor", async () => {
     const text = Array.from({ length: 20 }, (_, index) => `line ${index + 1}`).join("\n");
     const { tui, terminal } = mount(
       [{ kind: "assistant", id: "m-1", text, status: "completed" }],
@@ -153,6 +153,22 @@ describe("Prompt", () => {
     await terminal.press("\u001b[<0;4;2M\u001b[<0;4;2m[<64;4;2M");
     await tui.flush();
     expect(prompt(terminal)).toBe("> [<64;4;2M");
+  });
+
+  it.each([1, 7])("keeps a wheel report split after %i bytes out of the Prompt", async (split) => {
+    const text = Array.from({ length: 20 }, (_, index) => `line ${index + 1}`).join("\n");
+    const { tui, terminal, cancelled } = mount([
+      { kind: "assistant", id: "m-1", text, status: "completed" },
+    ]);
+    await terminal.press("draft");
+    await terminal.sendChunk(WHEEL.up.slice(0, split));
+    // Longer than Ink's original 20 ms wait for an incomplete escape sequence.
+    await Bun.sleep(40);
+    await terminal.sendChunk(WHEEL.up.slice(split));
+    await tui.flush();
+    expect(cancelled.count).toBe(0);
+    expect(prompt(terminal)).toBe("> draft");
+    expect(viewport(terminal)[0]).toBe("line 14");
   });
 
   it("submits the typed task and clears the Prompt", async () => {

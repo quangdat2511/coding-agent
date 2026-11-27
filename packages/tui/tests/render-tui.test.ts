@@ -324,6 +324,18 @@ describe("renderTui", () => {
   it("restores the main screen, cursor, and mouse mode after unmount", async () => {
     const terminal = createTestTerminal(COLUMNS, ROWS);
     await terminal.print("$ coding-agent\n");
+    const crashMonitors = process.listenerCount("uncaughtExceptionMonitor");
+    const { stdout } = terminal.streams;
+    const write = stdout.write;
+    const mouseResetsWhileRaw: boolean[] = [];
+    stdout.write = (chunk: unknown, ...options: unknown[]) => {
+      for (const mode of [1000, 1006]) {
+        if (String(chunk).includes(`\u001b[?${mode}l`)) {
+          mouseResetsWhileRaw.push(terminal.isRawMode());
+        }
+      }
+      return Reflect.apply(write, stdout, [chunk, ...options]);
+    };
     const { tui } = mount([{ kind: "user", id: "task", text: TASK }], terminal);
     await tui.flush();
     expect(terminal.terminal.buffer.active.type).toBe("alternate");
@@ -337,9 +349,47 @@ describe("renderTui", () => {
     expect(terminal.terminal.buffer.active.type).toBe("normal");
     expect(terminal.terminal.modes.mouseTrackingMode).toBe("none");
     expect(await terminal.isDecModeSet(1006)).toBe(false);
+    expect(mouseResetsWhileRaw).toEqual([true, true]);
+    expect(terminal.isRawMode()).toBe(false);
+    expect(process.listenerCount("uncaughtExceptionMonitor")).toBe(crashMonitors);
     expect(await terminal.isCursorVisible()).toBe(true);
     expect(terminal.screen()).toEqual(shellScreen("$ coding-agent"));
     expect(terminal.terminal.buffer.active.cursorY).toBe(1);
+  });
+
+  it.each(["exit", "crash"])("resets mouse modes before raw mode on process %s", async (ending) => {
+    const script = String.raw`
+      import { writeSync } from "node:fs";
+      import { mountTui } from ${JSON.stringify(import.meta.resolve("../src/render.tsx"))};
+      import { createTestTerminal } from ${JSON.stringify(import.meta.resolve("./support/terminal.ts"))};
+      const terminal = createTestTerminal(40, 10);
+      const { stdout } = terminal.streams;
+      const write = stdout.write;
+      stdout.write = (chunk, ...options) => {
+        for (const mode of [1000, 1006]) {
+          if (String(chunk).includes("\u001b[?" + mode + "l")) {
+            writeSync(1, mode + ":" + terminal.isRawMode() + "\n");
+          }
+        }
+        return Reflect.apply(write, stdout, [chunk, ...options]);
+      };
+      const tui = mountTui({
+        model: { sessionView: [] },
+        handlers: { onSubmit() {}, onCancel() {}, onApproval() {} },
+      }, terminal.streams);
+      await tui.flush();
+      if (${JSON.stringify(ending)} === "exit") process.exit(0);
+      setTimeout(() => { throw new Error("synthetic terminal crash"); }, 0);
+    `;
+    const child = Bun.spawn([process.execPath, "-e", script], { stdout: "pipe", stderr: "pipe" });
+    const [output, diagnostic, code] = await Promise.all([
+      new Response(child.stdout).text(),
+      new Response(child.stderr).text(),
+      child.exited,
+    ]);
+    expect(code).toBe(ending === "exit" ? 0 : 1);
+    if (ending === "crash") expect(diagnostic).toContain("error: synthetic terminal crash");
+    expect(output.match(/100[06]:(?:true|false)/g)).toEqual(["1000:true", "1006:true"]);
   });
 
   it("starts the Session view on the first row when the shell left the cursor lower", async () => {

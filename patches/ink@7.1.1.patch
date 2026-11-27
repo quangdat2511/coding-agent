@@ -1,3 +1,24 @@
+diff --git a/build/components/App.js b/build/components/App.js
+--- a/build/components/App.js
++++ b/build/components/App.js
+@@ -42,7 +42,7 @@
+     const inputParserRef = useRef(createInputParser());
+     const pendingInputFlushRef = useRef(undefined);
+     // Small delay to let chunked escape sequences complete before flushing as literal input.
+-    const pendingInputFlushDelayMilliseconds = 20;
++    const pendingInputFlushDelayMilliseconds = 100;
+     const clearPendingInputFlush = useCallback(() => {
+         if (!pendingInputFlushRef.current) {
+             return;
+@@ -133,6 +133,8 @@
+     }, [clearPendingInputFlush, detachReadableListener]);
+     const disableRawMode = useCallback(() => {
+         pendingDisableRawModeRef.current = false;
++        // Let the TUI restore terminal modes while Windows ConPTY still forwards them.
++        internal_eventEmitter.current.emit('beforeRawModeDisable');
+         stdin.setRawMode(false);
+         stdin.unref();
+         rawModeEnabledCount.current = 0;
 diff --git a/build/log-update.js b/build/log-update.js
 index cdb5fc41f158304c4c4f230a765065ab1fe0a2f7..4495b2a347e6a04112baa2fab56787d05de26b65 100644
 --- a/build/log-update.js

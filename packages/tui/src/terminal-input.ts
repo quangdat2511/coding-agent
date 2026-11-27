@@ -12,6 +12,8 @@ const MOUSE_MODIFIERS = 0b11100;
 const WHEEL_UP = 64;
 const WHEEL_DOWN = 65;
 
+export type WheelDirection = -1 | 1;
+
 // Capture input only when both streams are terminals. In particular, a TUI with piped output
 // leaves Ctrl+C to the terminal instead of enabling raw mode on a blank screen.
 export function useTerminalInput({
@@ -23,7 +25,7 @@ export function useTerminalInput({
   interactive: boolean;
   onKey(text: string, key: KeyPress): void;
   onPaste(text: string): void;
-  onWheel(direction: -1 | 1): void;
+  onWheel(direction: WheelDirection): void;
 }): void {
   const stdin = useStdin();
   const { stdout } = useStdout();
@@ -44,11 +46,11 @@ export function useTerminalInput({
         onKey(text, key);
         return;
       }
-      const [, leadingEscape, encodedButton, kind] = report;
+      const [, leadingEscape, encodedButton, pressOrRelease] = report;
       // Ink can group a bare Escape with the following CSI when they arrive together.
       if (leadingEscape !== undefined) onKey("", { escape: true });
       const button = Number(encodedButton) & ~MOUSE_MODIFIERS;
-      if (kind === "M" && (button === WHEEL_UP || button === WHEEL_DOWN)) {
+      if (pressOrRelease === "M" && (button === WHEEL_UP || button === WHEEL_DOWN)) {
         onWheel(button === WHEEL_UP ? -1 : 1);
       }
     },
@@ -60,11 +62,27 @@ export function useTerminalInput({
     const rememberInput = (input: string) => {
       rawInput.current = input;
     };
+    let reporting = true;
+    const stopReporting = () => {
+      if (!reporting) return;
+      reporting = false;
+      try {
+        if (stdout.writable) stdout.write(DISABLE_MOUSE);
+      } catch {
+        // The stream may close during process shutdown. Ink still needs to restore raw mode.
+      }
+    };
     inputEvents.prependListener("input", rememberInput);
+    inputEvents.on("beforeRawModeDisable", stopReporting);
+    // Bun can skip Ink's exit handler on an uncaught exception. A monitor leaves the default
+    // error reporting and exit status in place while giving the terminal its mouse modes back.
+    process.on("uncaughtExceptionMonitor", stopReporting);
     stdout.write(ENABLE_MOUSE);
     return () => {
-      if (stdout.writable) stdout.write(DISABLE_MOUSE);
+      process.off("uncaughtExceptionMonitor", stopReporting);
+      inputEvents.off("beforeRawModeDisable", stopReporting);
       inputEvents.off("input", rememberInput);
+      stopReporting();
     };
   }, [takesInput, inputEvents, stdout]);
 }

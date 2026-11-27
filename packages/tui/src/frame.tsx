@@ -4,7 +4,7 @@ import { ALLOW_KEY, DENY_KEY, type InputMode, type KeyPress } from "./input.ts";
 import { ApprovalOverlay, type OverlayGeometry } from "./overlay.tsx";
 import { type SessionViewRow, TASK_CONTINUATION, TASK_MARKER } from "./rows.ts";
 import { SessionView } from "./session-view.tsx";
-import { useTerminalInput } from "./terminal-input.ts";
+import { useTerminalInput, type WheelDirection } from "./terminal-input.ts";
 import type { PendingApproval } from "./types.ts";
 
 const HINT_HEIGHT = 1;
@@ -90,7 +90,7 @@ export function Frame({
   interactive: boolean;
   onKey(input: string, key: KeyPress): void;
   onPaste(text: string): void;
-  onWheel(direction: -1 | 1): void;
+  onWheel(direction: WheelDirection): void;
 }) {
   useTerminalInput({ interactive, onKey, onPaste, onWheel });
 
