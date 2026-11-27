@@ -15,7 +15,7 @@ const PROMPT_SHARE = 0.3;
 // How the frame shares out the rows of the terminal.
 export interface FrameLayout {
   // The rows the Session view gets.
-  readonly sessionView: number;
+  readonly sessionViewHeight: number;
   // The rows the Prompt shows.
   readonly prompt: number;
   // Whether the key hint fits under the Prompt.
@@ -37,8 +37,8 @@ export function frameLayout(screenRows: number, promptRows = 1): FrameLayout {
   const prompt = Math.max(1, Math.min(promptRows, screenRows));
   const showHint = screenRows > prompt + HINT_HEIGHT;
   const footer = prompt + (showHint ? HINT_HEIGHT : 0);
-  const sessionView = Math.max(0, screenRows - footer);
-  return { sessionView, prompt, showHint, height: sessionView + footer };
+  const sessionViewHeight = Math.max(0, screenRows - footer);
+  return { sessionViewHeight, prompt, showHint, height: sessionViewHeight + footer };
 }
 
 // What each step's keys do, cancel keys first, so a narrow terminal cuts the hint after them.
@@ -110,8 +110,8 @@ export function Frame({
       : KEY_HINTS[mode];
   return (
     <Box flexDirection="column" height={layout.height}>
-      <Box height={layout.sessionView}>
-        <SessionView rows={rows} height={layout.sessionView} />
+      <Box height={layout.sessionViewHeight}>
+        <SessionView rows={rows} height={layout.sessionViewHeight} />
         {overlay === undefined ? null : (
           <ApprovalOverlay
             approval={overlay.approval}

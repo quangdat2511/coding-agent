@@ -83,7 +83,7 @@ export function mountTui(
     };
     const prompt = editorView(input.prompt, promptLayout);
     const frame = frameLayout(screenRows, prompt.rows.length);
-    const overlay = overlayGeometry(columns, frame.sessionView);
+    const overlay = overlayGeometry(columns, frame.sessionViewHeight);
     const reasonLayout: EditorLayout = { kind: "row", columns: overlay.reasonColumns };
     return { columns, promptLayout, prompt, frame, overlay, reasonLayout };
   }
@@ -97,7 +97,7 @@ export function mountTui(
       return;
     }
     const { columns, prompt, frame, overlay, reasonLayout } = measure();
-    const viewportHeight = frame.sessionView;
+    const viewportHeight = frame.sessionViewHeight;
     const rows = sessionViewRows(model.sessionView, columns);
     // With no Session view row in view there is nothing to scroll. Moving would anchor the viewport
     // out of sight, and once the terminal grew it would not follow new rows.
@@ -119,7 +119,7 @@ export function mountTui(
     if (mode === "prompt") {
       cursor = {
         x: TASK_MARKER.length + prompt.cursor.column,
-        y: frame.sessionView + prompt.cursor.row,
+        y: frame.sessionViewHeight + prompt.cursor.row,
       };
     } else if (reason !== undefined && overlay.height > 0) {
       cursor = { x: overlay.reasonOrigin.x + reason.cursor.column, y: overlay.reasonOrigin.y };
@@ -174,7 +174,7 @@ export function mountTui(
           }
           break;
         case "scroll":
-          scroll += action.direction * pageRows(frame.sessionView);
+          scroll += action.direction * pageRows(frame.sessionViewHeight);
           break;
         // Whether a task is running is the host's to know: it ignores a cancel with none. The
         // Prompt keeps its text, which may be the next task.

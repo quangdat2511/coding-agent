@@ -7,7 +7,7 @@ import type {
 import type { AssistantMessage } from "@coding-agent/ai";
 import type { TuiModel } from "@coding-agent/tui";
 
-// The projection of a SessionLogEntry onto TuiModel's Session view (ADR 0004 §6 and §10). It is
+// The projection of a Run Event onto TuiModel's Session view (ADR 0004 §6 and §10). It is
 // pure: it performs no I/O, never mutates prev, and returns prev itself when an event changes
 // nothing the TUI shows. Only the entry an event changes is replaced, so the TUI keeps the layout
 // of every other entry. It still takes one Run Event: the Session Controller (CDA-184) widens it
