@@ -1544,7 +1544,7 @@ describe("createToolAcquirer", () => {
         }),
       ).toEqual({ path: undefined, explicit: false });
 
-      // UNC paths are fully qualified and accepted.
+      // UNC paths with either "\" or "/" and valid server + share components are accepted.
       expect(
         resolveConfiguredCacheRoot({
           platform: "win32",
@@ -1553,6 +1553,25 @@ describe("createToolAcquirer", () => {
           homeDir: "C:\\Users\\dev",
         }),
       ).toEqual({ path: "\\\\fileserver\\share\\Cache\\coding-agent", explicit: false });
+
+      expect(
+        resolveConfiguredCacheRoot({
+          platform: "win32",
+          env: { LOCALAPPDATA: "//fileserver/share/Cache" },
+          cwd: "D:\\work",
+          homeDir: "C:\\Users\\dev",
+        }),
+      ).toEqual({ path: "\\\\fileserver\\share\\Cache\\coding-agent", explicit: false });
+
+      // Malformed UNC paths missing a share name must be rejected.
+      expect(
+        resolveConfiguredCacheRoot({
+          platform: "win32",
+          env: { LOCALAPPDATA: "\\\\fileserver//" },
+          cwd: "D:\\work",
+          homeDir: "C:\\Users\\dev",
+        }),
+      ).toEqual({ path: "C:\\Users\\dev\\AppData\\Local\\coding-agent", explicit: false });
     });
 
     it("normalizes Windows shell drive paths in CODING_AGENT_CACHE_DIR and PATH when simulating win32", async () => {
