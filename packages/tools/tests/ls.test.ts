@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { Buffer } from "node:buffer";
+import * as nodeFs from "node:fs/promises";
 import { chmod, mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve, sep } from "node:path";
@@ -16,6 +17,7 @@ import { Value } from "typebox/value";
 import { createWorkspaceResolver } from "../src/index.ts";
 import { type LsFileSystem, LsParams, type LsStats, lsTool, lsToolWith } from "../src/ls.ts";
 import { MAX_TOOL_OUTPUT_BYTES } from "../src/output-budget.ts";
+import { createWorkspaceResolverWith } from "../src/workspace.ts";
 import { permissionsIgnored } from "./platform.ts";
 
 const REPO = resolve("/fake/repo") as RepoPath;
@@ -532,6 +534,51 @@ describe("cancellation", () => {
     await expect(tool.execute(prepared.prepared, ctx)).rejects.toThrow("already aborted");
     expect(readdirCalls).toBe(0);
   });
+
+  it("stops immediately after readdir resolves when the signal aborts during readdir", async () => {
+    const controller = new AbortController();
+    let lstatCalls = 0;
+    const tool = lsToolWith({
+      readdir: async () => {
+        controller.abort(new Error("aborted during readdir"));
+        return ["b.ts", "a.ts"];
+      },
+      lstat: async () => {
+        lstatCalls += 1;
+        return makeStats("file");
+      },
+    });
+    const ctx: ExecuteContext = {
+      workspace: fakeWorkspace(),
+      signal: controller.signal,
+      onProgress: () => undefined,
+    };
+    const prepared = await tool.prepare({}, ctx);
+    if (!prepared.ok) throw new Error(`expected prepared call, got: ${prepared.message}`);
+
+    await expect(tool.execute(prepared.prepared, ctx)).rejects.toThrow("aborted during readdir");
+    expect(lstatCalls).toBe(0);
+  });
+
+  it("rejects with abort when the signal aborts during the final lstat call", async () => {
+    const controller = new AbortController();
+    const tool = lsToolWith({
+      readdir: async () => ["only.ts"],
+      lstat: async () => {
+        controller.abort(new Error("aborted on last entry"));
+        return makeStats("file");
+      },
+    });
+    const ctx: ExecuteContext = {
+      workspace: fakeWorkspace(),
+      signal: controller.signal,
+      onProgress: () => undefined,
+    };
+    const prepared = await tool.prepare({}, ctx);
+    if (!prepared.ok) throw new Error(`expected prepared call, got: ${prepared.message}`);
+
+    await expect(tool.execute(prepared.prepared, ctx)).rejects.toThrow("aborted on last entry");
+  });
 });
 
 describe("readdir error mapping", () => {
@@ -609,6 +656,41 @@ describe("real filesystem integration", () => {
         error: { code: "NOT_A_DIRECTORY" },
       });
     }
+
+    const clonedResolver: WorkspaceResolver = {
+      repoRoot: workspace.repoRoot,
+      resolveExisting: async (input) => ({ ...(await workspace.resolveExisting(input)) }),
+      resolveForCreate: async (input) => ({ ...(await workspace.resolveForCreate(input)) }),
+    };
+    expect(await runLs({ path: "plain.ts/" }, lsTool(), clonedResolver)).toMatchObject({
+      isError: true,
+      error: { code: "NOT_A_DIRECTORY" },
+    });
+  });
+
+  it("reports NOT_A_DIRECTORY when re-validation during execute hits ENOTDIR", async () => {
+    await mkdir(join(repo, "sub"));
+    let failWithEnotdir = false;
+    const created = await createWorkspaceResolverWith(repo, {
+      ...nodeFs,
+      lstat: async (path) => {
+        if (failWithEnotdir && path === join(repo, "sub")) {
+          throw makeErrno("ENOTDIR");
+        }
+        return nodeFs.lstat(path);
+      },
+    });
+    if (!created.ok) throw new Error(`expected a resolver, got: ${created.message}`);
+    const tool = lsTool();
+    const ctx = makeContext(created.workspace);
+    const prepared = await tool.prepare({ path: "sub" }, ctx);
+    if (!prepared.ok) throw new Error(`expected prepared call, got: ${prepared.message}`);
+
+    failWithEnotdir = true;
+    expect(await tool.execute(prepared.prepared, ctx)).toMatchObject({
+      isError: true,
+      error: { code: "NOT_A_DIRECTORY" },
+    });
   });
 
   it.each([

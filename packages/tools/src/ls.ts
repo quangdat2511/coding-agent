@@ -15,7 +15,6 @@ import { displayPath, quote } from "./messages.ts";
 import { MAX_TOOL_OUTPUT_BYTES, TOOL_OUTPUT_TRUNCATION_MARKER } from "./output-budget.ts";
 import { revalidatePreparedPath } from "./prepared-path.ts";
 import { prepareFailure, toolError } from "./tool-outcome.ts";
-import { isNotDirectoryResolution } from "./workspace.ts";
 
 const DEFAULT_LIMIT = 500;
 const LINE_TRUNCATION_MARKER = TOOL_OUTPUT_TRUNCATION_MARKER.trim();
@@ -84,7 +83,7 @@ export function lsToolWith(fs: LsFileSystem): ExecutableTool<typeof LsParams> {
       const resolved = await workspace.resolveExisting(input.path ?? ".");
       if (!resolved.ok) {
         return prepareFailure<typeof LsParams>({
-          code: isNotDirectoryResolution(resolved) ? "NOT_A_DIRECTORY" : resolved.code,
+          code: resolved.reason === "not_a_directory" ? "NOT_A_DIRECTORY" : resolved.code,
           message: resolved.message,
         });
       }
@@ -106,7 +105,7 @@ export function lsToolWith(fs: LsFileSystem): ExecutableTool<typeof LsParams> {
       );
       if (!validated.ok) {
         return toolError({
-          code: isNotDirectoryResolution(validated) ? "NOT_A_DIRECTORY" : validated.code,
+          code: validated.reason === "not_a_directory" ? "NOT_A_DIRECTORY" : validated.code,
           message: validated.message,
         });
       }
@@ -120,6 +119,7 @@ export function lsToolWith(fs: LsFileSystem): ExecutableTool<typeof LsParams> {
         signal.throwIfAborted();
         return toolError(readdirFailure(validated.path, error));
       }
+      signal.throwIfAborted();
       if (names.length === 0) {
         return formatOutcome(
           boundListingLines([`${quote(shown)} (empty directory)`], undefined, 0),
@@ -145,6 +145,7 @@ export function lsToolWith(fs: LsFileSystem): ExecutableTool<typeof LsParams> {
           skippedEntries += 1;
           continue;
         }
+        signal.throwIfAborted();
         const suffix = stats.isSymbolicLink() ? "@" : stats.isDirectory() ? "/" : "";
         lines.push(`${escapeEntryName(name)}${suffix}`);
       }

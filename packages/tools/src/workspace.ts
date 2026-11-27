@@ -198,8 +198,14 @@ async function walk(jail: Jail, path: string): Promise<Walk> {
 function unreachable(input: string, error: unknown): PathResolution {
   switch (errnoOf(error)) {
     case "ENOENT":
-    case "ENOTDIR":
       return notFound(input, "changed while being resolved");
+    case "ENOTDIR":
+      return {
+        ok: false,
+        code: "NOT_FOUND",
+        message: `${quote(input)} changed while being resolved`,
+        reason: "not_a_directory",
+      };
     case "ENAMETOOLONG":
       return notFound(input, "is longer than the filesystem allows");
     case "EINVAL":
@@ -228,22 +234,17 @@ function quote(text: string): string {
   return `${JSON.stringify(text.slice(0, QUOTED_LIMIT))}... (${omitted} more characters)`;
 }
 
-const NOT_A_DIRECTORY = Symbol("notADirectory");
-
-// Distinguishes a path blocked by a non-directory component (e.g. "file.ts/" or "file.ts/child")
-// from a genuinely missing path, without widening PathResolution's error-code union for other tools.
-export function isNotDirectoryResolution(resolution: PathResolution): boolean {
-  return !resolution.ok && NOT_A_DIRECTORY in resolution;
-}
-
 function notFound(input: string, reason: string): PathResolution {
   return { ok: false, code: "NOT_FOUND", message: `${quote(input)} ${reason}` };
 }
 
 function notDirectory(input: string, component: string): PathResolution {
-  const result = notFound(input, `cannot be reached: ${quote(component)} is not a directory`);
-  Object.defineProperty(result, NOT_A_DIRECTORY, { value: true });
-  return result;
+  return {
+    ok: false,
+    code: "NOT_FOUND",
+    message: `${quote(input)} cannot be reached: ${quote(component)} is not a directory`,
+    reason: "not_a_directory",
+  };
 }
 
 function linked(input: string, link: string): PathResolution {

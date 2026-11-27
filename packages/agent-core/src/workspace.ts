@@ -11,6 +11,7 @@ export type PathResolution =
         "PATH_OUTSIDE_REPO" | "NOT_FOUND" | "PERMISSION_DENIED"
       >;
       readonly message: string;
+      readonly reason?: "not_a_directory";
     };
 
 export interface WorkspaceResolver {
