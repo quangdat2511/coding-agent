@@ -83,7 +83,10 @@ export function lsToolWith(fs: LsFileSystem): ExecutableTool<typeof LsParams> {
       const resolved = await workspace.resolveExisting(input.path ?? ".");
       if (!resolved.ok) {
         return prepareFailure<typeof LsParams>({
-          code: resolved.reason === "not_a_directory" ? "NOT_A_DIRECTORY" : resolved.code,
+          code:
+            resolved.code === "NOT_FOUND" && resolved.reason === "not_a_directory"
+              ? "NOT_A_DIRECTORY"
+              : resolved.code,
           message: resolved.message,
         });
       }
@@ -105,7 +108,10 @@ export function lsToolWith(fs: LsFileSystem): ExecutableTool<typeof LsParams> {
       );
       if (!validated.ok) {
         return toolError({
-          code: validated.reason === "not_a_directory" ? "NOT_A_DIRECTORY" : validated.code,
+          code:
+            validated.code === "NOT_FOUND" && validated.reason === "not_a_directory"
+              ? "NOT_A_DIRECTORY"
+              : validated.code,
           message: validated.message,
         });
       }

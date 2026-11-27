@@ -560,6 +560,28 @@ describe("cancellation", () => {
     expect(lstatCalls).toBe(0);
   });
 
+  it("rejects with abort when the signal aborts during readdir of an empty directory", async () => {
+    const controller = new AbortController();
+    const tool = lsToolWith({
+      readdir: async () => {
+        controller.abort(new Error("aborted during empty readdir"));
+        return [];
+      },
+      lstat: async () => makeStats("file"),
+    });
+    const ctx: ExecuteContext = {
+      workspace: fakeWorkspace(),
+      signal: controller.signal,
+      onProgress: () => undefined,
+    };
+    const prepared = await tool.prepare({}, ctx);
+    if (!prepared.ok) throw new Error(`expected prepared call, got: ${prepared.message}`);
+
+    await expect(tool.execute(prepared.prepared, ctx)).rejects.toThrow(
+      "aborted during empty readdir",
+    );
+  });
+
   it("rejects with abort when the signal aborts during the final lstat call", async () => {
     const controller = new AbortController();
     const tool = lsToolWith({

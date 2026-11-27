@@ -271,7 +271,13 @@ export type PathResolution =
   | { ok: true; path: RepoPath }
   | {
       ok: false;
-      code: Extract<ToolErrorCode, "PATH_OUTSIDE_REPO" | "NOT_FOUND" | "PERMISSION_DENIED">;
+      code: Extract<ToolErrorCode, "NOT_FOUND">;
+      message: string;
+      reason?: "not_a_directory";
+    }
+  | {
+      ok: false;
+      code: Extract<ToolErrorCode, "PATH_OUTSIDE_REPO" | "PERMISSION_DENIED">;
       message: string;
     };
 
@@ -285,6 +291,9 @@ export interface WorkspaceResolver {
 `resolveExisting` canonicalizes with `fs.realpath` and rejects symbolic links and paths outside the
 repository root. `resolveForCreate` verifies the deepest existing parent as ADR 0001 §2 requires and
 creates nothing. Whether a resolved path must be a file or a directory remains each tool's check.
+When a non-directory component blocks traversal (or `ENOTDIR` occurs while resolving), the
+`NOT_FOUND` branch may carry `reason: "not_a_directory"`, so directory-oriented tools such as `ls`
+can report `NOT_A_DIRECTORY` while existing tools keep `NOT_FOUND`.
 
 The tool port has two phases. ADR 0002 performs repository, path, and working-directory checks in
 step 4, before Approval in steps 5 and 6. With a single `execute`, a person would be asked to
@@ -953,6 +962,14 @@ On 2026-11-26, [CDA-138](https://datn-fit-hcmus.atlassian.net/browse/CDA-138),
   `ControllerUpdate`, `SessionLogEntry`, `SessionListEntry` and `projectSessionLogEntry` were
   checked on 2026-11-25 against Pi commit `9841914c71a74d81abe07f751aefd271fd924e63`; none occurs in
   its packages.
+
+On 2026-11-27, [CDA-174](https://datn-fit-hcmus.atlassian.net/browse/CDA-174) amended this record:
+
+- **PathResolution `not_a_directory` reason** (§3): split the failure branch of `PathResolution` so
+  that only `code: "NOT_FOUND"` carries an optional `reason?: "not_a_directory"` when a
+  non-directory component blocks resolution or `ENOTDIR` is returned. Directory-oriented tools such
+  as `ls` map that reason to `NOT_A_DIRECTORY`, while `PATH_OUTSIDE_REPO`, `PERMISSION_DENIED`, and
+  existing tools keep their unchanged error codes.
 
 ## Consequences
 
