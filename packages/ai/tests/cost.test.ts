@@ -45,6 +45,21 @@ describe("calculateCost", () => {
     expect(cost?.total).toBe(12.0);
   });
 
+  it("treats missing token counts as 0 without producing NaN", () => {
+    const partialUsage = {
+      inputTokens: 1_000_000,
+    } as unknown as Usage;
+
+    const cost = calculateCost(modelCost, partialUsage);
+
+    expect(cost).toBeDefined();
+    expect(cost?.input).toBe(2.0);
+    expect(cost?.output).toBe(0);
+    expect(cost?.cacheRead).toBe(0);
+    expect(cost?.cacheWrite).toBe(0);
+    expect(cost?.total).toBe(2.0);
+  });
+
   it("returns undefined when modelCost is undefined and no totalFromProvider exists", () => {
     const usage: Usage = {
       inputTokens: 100,
@@ -125,10 +140,10 @@ describe("calculateCost", () => {
     const cost = calculateCost(modelCost, usage);
 
     expect(cost).toBeDefined();
-    expect(cost?.input).toBe(2.0 / 1_000_000);
-    expect(cost?.output).toBe(10.0 / 1_000_000);
-    expect(cost?.cacheRead).toBe(0.2 / 1_000_000);
-    expect(cost?.cacheWrite).toBe(2.5 / 1_000_000);
-    expect(cost?.total).toBe((2.0 + 10.0 + 0.2 + 2.5) / 1_000_000);
+    expect(cost?.input).toBe(0.000002);
+    expect(cost?.output).toBe(0.00001);
+    expect(cost?.cacheRead).toBe(2.0000000000000002e-7);
+    expect(cost?.cacheWrite).toBe(0.0000025);
+    expect(cost?.total).toBe(0.0000147);
   });
 });

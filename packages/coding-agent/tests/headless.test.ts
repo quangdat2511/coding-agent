@@ -278,7 +278,7 @@ describe("a headless run of the named task on Anthropic", () => {
     },
   );
 
-  it("omits costUsd from result.json when a turn has tokens and no cost (unpriced model)", async () => {
+  it("omits pricing from run.json and costUsd from result.json when running an unpriced model", async () => {
     const unpricedTarget = { provider: "anthropic", model: "claude-opus-4-1" } as const;
     await runNamedTask(
       replay("anthropic/text-turn.txt"),
@@ -297,14 +297,14 @@ describe("a headless run of the named task on Anthropic", () => {
   });
 
   it("keeps costUsd as a known $0 when a turn has zero tokens (noUsage)", async () => {
-    const zeroTokenTurn: Respond = () =>
+    const noUsageTurn: Respond = () =>
       new Response(
-        'event: message_start\ndata: {"type":"message_start","message":{"id":"msg_0","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":0,"output_tokens":0}}}\n\nevent: content_block_start\ndata: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}\n\nevent: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Zero tokens."}}\n\nevent: content_block_stop\ndata: {"type":"content_block_stop","index":0}\n\nevent: message_delta\ndata: {"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"output_tokens":0}}\n\nevent: message_stop\ndata: {"type":"message_stop"}\n\n',
+        'event: message_start\ndata: {"type":"message_start","message":{"id":"msg_0","type":"message","role":"assistant","content":[],"model":"claude-haiku-4-5","stop_reason":null,"stop_sequence":null}}\n\nevent: content_block_start\ndata: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}\n\nevent: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"No usage reported."}}\n\nevent: content_block_stop\ndata: {"type":"content_block_stop","index":0}\n\nevent: message_delta\ndata: {"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null}}\n\nevent: message_stop\ndata: {"type":"message_stop"}\n\n',
         { headers: { "content-type": "text/event-stream" } },
       );
 
     await runNamedTask(
-      zeroTokenTurn,
+      noUsageTurn,
       async ({ result, outputDir }) => {
         expect(result.exitCode).toBe(0);
         expect(result.result?.outcome).toBe("succeeded");
@@ -313,6 +313,27 @@ describe("a headless run of the named task on Anthropic", () => {
         expect(resultJson.costUsd).toBe(0);
       },
       { target, env: { ANTHROPIC_API_KEY: secret } },
+    );
+  });
+
+  it("omits pricing and costUsd when an unpriced model run cancels before the first turn (0 turns)", async () => {
+    const unpricedTarget = { provider: "anthropic", model: "claude-opus-4-1" } as const;
+    const cancellation = new AbortController();
+    cancellation.abort("SIGINT");
+
+    await runNamedTask(
+      replay("anthropic/text-turn.txt"),
+      async ({ result, outputDir }) => {
+        expect(result.exitCode).toBe(130);
+        expect(result.result?.outcome).toBe("cancelled");
+
+        const runJson = await Bun.file(join(outputDir, "run.json")).json();
+        expect("pricing" in runJson).toBe(false);
+
+        const resultJson = await Bun.file(join(outputDir, "result.json")).json();
+        expect("costUsd" in resultJson).toBe(false);
+      },
+      { target: unpricedTarget, env: { ANTHROPIC_API_KEY: secret }, signal: cancellation.signal },
     );
   });
 });

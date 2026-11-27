@@ -40,7 +40,7 @@ import { type PreflightOutcome, preflightToolCall } from "./tool-call-preflight.
 import { executeTool } from "./tool-execution.ts";
 import { createProgressGate } from "./tool-progress.ts";
 import type { ApprovalDecider, ToolError, ToolResult } from "./tool-result.ts";
-import { addUsage, usageOf } from "./usage.ts";
+import { addUsage, noUsage, usageOf } from "./usage.ts";
 import type { VerificationCancelled, VerificationDecision } from "./verification.ts";
 
 type Refusal = Extract<CommandResult, { accepted: false }>;
@@ -476,7 +476,7 @@ export function createAgentRun(config: OpenRunConfig, initial: ReadyState): Agen
         (msgStarted !== undefined ? e.data.messageId === msgStarted.data.messageId : false),
     );
 
-    let messageUsage: UsageTotals = { inputTokens: 0, outputTokens: 0 };
+    let messageUsage: UsageTotals = noUsage;
 
     if (msgStarted !== undefined && msgCompleted === undefined) {
       const message =

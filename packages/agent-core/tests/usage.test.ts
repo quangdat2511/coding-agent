@@ -112,6 +112,11 @@ describe("addUsage", () => {
     expect(JSON.stringify(a)).toBe(snapA);
     expect(JSON.stringify(b)).toBe(snapB);
   });
+
+  it("stays unexported from the agent-core package entry point", async () => {
+    const core = await import("../src/index.ts");
+    expect("addUsage" in core).toBe(false);
+  });
 });
 
 describe("usageOf", () => {

@@ -60,6 +60,7 @@ type AnthropicStreamChunk =
 
 let mockEvents: AnthropicStreamChunk[] = [];
 let mockCreateError: Error | null = null;
+let mockStreamError: Error | null = null;
 let lastClientOptions: { maxRetries?: number } | undefined;
 let lastCreateOptions: { signal?: AbortSignal } | undefined;
 let lastCreateBody: unknown | undefined;
@@ -519,7 +520,14 @@ describe("Anthropic stream finishReason handling", () => {
       lastCreateBody = body;
       return (async function* () {
         for (const event of mockEvents) {
+          options?.signal?.throwIfAborted?.();
           yield event;
+          if (mockStreamError && (event as { _throwAfter?: boolean })._throwAfter) {
+            throw mockStreamError;
+          }
+        }
+        if (mockStreamError) {
+          throw mockStreamError;
         }
       })();
     });
@@ -1046,5 +1054,99 @@ describe("Anthropic stream finishReason handling", () => {
     } finally {
       mockCreateError = null;
     }
+  });
+
+  it("emits turn_delta with reported usage before error when stream fails mid-stream", async () => {
+    const pricedModel: Model = {
+      ...model,
+      cost: { input: 1, output: 5, cacheRead: 0.1, cacheWrite: 1.25 },
+    };
+    mockEvents = [
+      {
+        type: "message_start",
+        message: { usage: { input_tokens: 1000 } },
+        _throwAfter: true,
+      } as unknown as AnthropicStreamChunk,
+    ];
+    mockStreamError = new Error("Connection reset by peer");
+    try {
+      const streamObj = stream(pricedModel, context, { apiKey: "test-key" });
+      const events = [];
+      for await (const ev of streamObj) {
+        events.push(ev);
+      }
+      const turnDeltas = events.filter((e) => e.type === "turn_delta");
+      const errors = events.filter((e) => e.type === "error");
+
+      expect(turnDeltas.length).toBeGreaterThanOrEqual(1);
+      const lastTurnDelta = turnDeltas.at(-1);
+      expect(lastTurnDelta?.type).toBe("turn_delta");
+      if (lastTurnDelta?.type === "turn_delta") {
+        expect(lastTurnDelta.usage?.inputTokens).toBe(1000);
+        expect(lastTurnDelta.usage?.outputTokens).toBe(0);
+        expect(lastTurnDelta.usage?.cost).toEqual({
+          input: 0.001,
+          output: 0,
+          cacheRead: 0,
+          cacheWrite: 0,
+          total: 0.001,
+        });
+      }
+
+      expect(errors).toHaveLength(1);
+      expect(errors[0]?.type).toBe("error");
+      if (errors[0]?.type === "error") {
+        expect(errors[0].error.message).toBe("Connection reset by peer");
+      }
+      // Error event must appear after turn_delta
+      const lastTurnDeltaIdx = events.findLastIndex((e) => e.type === "turn_delta");
+      const errorIdx = events.findIndex((e) => e.type === "error");
+      expect(errorIdx).toBeGreaterThan(lastTurnDeltaIdx);
+    } finally {
+      mockStreamError = null;
+    }
+  });
+
+  it("emits turn_delta with reported usage before error when stream is aborted mid-stream", async () => {
+    const pricedModel: Model = {
+      ...model,
+      cost: { input: 1, output: 5, cacheRead: 0.1, cacheWrite: 1.25 },
+    };
+    const abortController = new AbortController();
+    mockEvents = [
+      {
+        type: "message_start",
+        message: { usage: { input_tokens: 50, output_tokens: 10 } },
+      },
+      {
+        type: "content_block_start",
+        index: 0,
+        content_block: { type: "text" },
+      },
+    ];
+    // Abort once stream starts
+    const streamObj = stream(pricedModel, context, {
+      apiKey: "test-key",
+      signal: abortController.signal,
+    });
+    const events = [];
+    for await (const ev of streamObj) {
+      events.push(ev);
+      if (ev.type === "stream_start") {
+        abortController.abort("User cancelled mid-stream");
+      }
+    }
+    const turnDeltas = events.filter((e) => e.type === "turn_delta");
+    const errors = events.filter((e) => e.type === "error");
+
+    expect(turnDeltas.length).toBeGreaterThanOrEqual(1);
+    const lastTurnDelta = turnDeltas.at(-1);
+    expect(lastTurnDelta?.type).toBe("turn_delta");
+    if (lastTurnDelta?.type === "turn_delta") {
+      expect(lastTurnDelta.usage?.inputTokens).toBe(50);
+      expect(lastTurnDelta.usage?.outputTokens).toBe(10);
+      expect(lastTurnDelta.usage?.cost).toBeDefined();
+    }
+    expect(errors).toHaveLength(1);
   });
 });

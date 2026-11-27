@@ -26,7 +26,7 @@ _Avoid_: Message, prompt, loop iteration
 
 **Turn Usage**:
 The tokens and cost incurred by exactly one Model Turn, reported on its completion event.
-_Avoid_: Turn tokens, turn cost, step usage
+_Avoid_: Turn tokens, step usage
 
 **Steer**:
 A message the person sends to the running Coding Task. The Agent Run takes it just before a Model

@@ -128,9 +128,7 @@ export async function runHeadless(options: HeadlessOptions): Promise<HeadlessRes
     files = await openRunFiles(config.outputDir, runRecord(config, opened), redact);
     // Never awaited by the Agent Run, so a failed write surfaces only once it has settled.
     const logged = failureOf(files.logEvents(agentRun.events()));
-    const turnCost = config.model.cost
-      ? collectTurnCost(agentRun.events())
-      : Promise.resolve(undefined);
+    const turnCost = collectTurnCost(agentRun.events(), config.model.cost !== undefined);
 
     const cancel = () => {
       const { reason } = options.signal;

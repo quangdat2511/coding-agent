@@ -48,11 +48,14 @@ export function accumulateTurnCost(
 
 /**
  * Consumes an AsyncIterable of RunEvents, accumulating cost over model_turn_completed.
+ * For priced models (priced: true, default), starts at $0.
+ * For unpriced models (priced: false), accumulated cost stays undefined.
  */
 export async function collectTurnCost(
   events: AsyncIterable<RunEvent>,
+  priced: boolean = true,
 ): Promise<number | undefined> {
-  let accumulated: number | undefined = 0;
+  let accumulated: number | undefined = priced ? 0 : undefined;
   for await (const event of events) {
     if (event.type === "model_turn_completed") {
       accumulated = accumulateTurnCost(accumulated, event.data.usage);

@@ -180,4 +180,14 @@ describe("collectTurnCost", () => {
     const total = await collectTurnCost(events());
     expect(total).toBeUndefined();
   });
+
+  it("returns undefined when unpriced (priced: false) even on 0 turns or noUsage turns", async () => {
+    async function* emptyEvents(): AsyncIterable<RunEvent> {}
+    expect(await collectTurnCost(emptyEvents(), false)).toBeUndefined();
+
+    async function* noUsageEvents(): AsyncIterable<RunEvent> {
+      yield turnCompletedEvent(1, { inputTokens: 0, outputTokens: 0 });
+    }
+    expect(await collectTurnCost(noUsageEvents(), false)).toBeUndefined();
+  });
 });

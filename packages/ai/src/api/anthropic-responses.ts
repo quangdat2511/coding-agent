@@ -173,6 +173,31 @@ export function stream(model: Model, context: Context, options?: StreamOptions):
   const eventStream = createModelEventStream();
 
   (async () => {
+    let inputTokens = 0;
+    let outputTokens = 0;
+    const usageMeta: UsageMetadataContainer = {};
+    let hasUsage = false;
+
+    const buildCurrentUsage = (): Usage | undefined => {
+      if (!hasUsage) return undefined;
+      const baseUsage: Usage = {
+        inputTokens,
+        outputTokens,
+        ...(usageMeta.cachedInputTokens !== undefined
+          ? { cachedInputTokens: usageMeta.cachedInputTokens }
+          : {}),
+        ...(usageMeta.cacheWriteTokens !== undefined
+          ? { cacheWriteTokens: usageMeta.cacheWriteTokens }
+          : {}),
+        ...(usageMeta.rawUsage ? { raw: usageMeta.rawUsage } : {}),
+      };
+      const cost = calculateCost(model.cost, baseUsage);
+      return {
+        ...baseUsage,
+        ...(cost !== undefined ? { cost } : {}),
+      };
+    };
+
     try {
       const apiKey = await options?.apiKey;
       if (!apiKey) {
@@ -217,10 +242,6 @@ export function stream(model: Model, context: Context, options?: StreamOptions):
       eventStream.push({ type: "stream_start" });
 
       let finishReason: FinishReason | undefined;
-      let inputTokens = 0;
-      let outputTokens = 0;
-      const usageMeta: UsageMetadataContainer = {};
-      let hasUsage = false;
 
       // Track active text blocks and pending tool blocks by their wire chunk.index
       const activeTextBlocks = new Map<number, string>();
@@ -235,6 +256,10 @@ export function stream(model: Model, context: Context, options?: StreamOptions):
             inputTokens = chunk.message.usage.input_tokens ?? 0;
             outputTokens = chunk.message.usage.output_tokens ?? 0;
             mergeUsageMetadata(usageMeta, chunk.message.usage);
+            eventStream.push({
+              type: "turn_delta",
+              usage: buildCurrentUsage(),
+            });
           }
         } else if (chunk.type === "content_block_start") {
           if (chunk.content_block.type === "text") {
@@ -336,27 +361,7 @@ export function stream(model: Model, context: Context, options?: StreamOptions):
         });
       }
 
-      const baseUsage: Usage | undefined = hasUsage
-        ? {
-            inputTokens,
-            outputTokens,
-            ...(usageMeta.cachedInputTokens !== undefined
-              ? { cachedInputTokens: usageMeta.cachedInputTokens }
-              : {}),
-            ...(usageMeta.cacheWriteTokens !== undefined
-              ? { cacheWriteTokens: usageMeta.cacheWriteTokens }
-              : {}),
-            ...(usageMeta.rawUsage ? { raw: usageMeta.rawUsage } : {}),
-          }
-        : undefined;
-
-      const cost = baseUsage ? calculateCost(model.cost, baseUsage) : undefined;
-      const usage: Usage | undefined = baseUsage
-        ? {
-            ...baseUsage,
-            ...(cost !== undefined ? { cost } : {}),
-          }
-        : undefined;
+      const usage = buildCurrentUsage();
 
       eventStream.push({
         type: "turn_delta",
@@ -384,6 +389,12 @@ export function stream(model: Model, context: Context, options?: StreamOptions):
 
       eventStream.end();
     } catch (error: unknown) {
+      if (hasUsage) {
+        eventStream.push({
+          type: "turn_delta",
+          usage: buildCurrentUsage(),
+        });
+      }
       const errorMessage = error instanceof Error ? error.message : String(error);
       eventStream.push({
         type: "error",

@@ -1,5 +1,7 @@
 import type { ModelCost, Usage, UsageCost } from "./types.ts";
 
+const TOKENS_PER_MILLION = 1_000_000;
+
 /**
  * Calculates the UsageCost of a model response's Usage based on ModelCost rates.
  *
@@ -7,10 +9,13 @@ import type { ModelCost, Usage, UsageCost } from "./types.ts";
  * Keeps full IEEE 754 precision without intermediate rounding.
  * Pure function: never mutates the input usage.
  */
-export function calculateCost(cost: ModelCost | undefined, usage: Usage): UsageCost | undefined {
+export function calculateCost(
+  modelCost: ModelCost | undefined,
+  usage: Usage,
+): UsageCost | undefined {
   const totalFromProvider = usage.cost?.totalFromProvider;
 
-  if (cost === undefined) {
+  if (modelCost === undefined) {
     if (totalFromProvider !== undefined) {
       return {
         input: 0,
@@ -24,10 +29,10 @@ export function calculateCost(cost: ModelCost | undefined, usage: Usage): UsageC
     return undefined;
   }
 
-  const input = (cost.input / 1_000_000) * (usage.inputTokens ?? 0);
-  const output = (cost.output / 1_000_000) * (usage.outputTokens ?? 0);
-  const cacheRead = (cost.cacheRead / 1_000_000) * (usage.cachedInputTokens ?? 0);
-  const cacheWrite = (cost.cacheWrite / 1_000_000) * (usage.cacheWriteTokens ?? 0);
+  const input = (modelCost.input / TOKENS_PER_MILLION) * (usage.inputTokens ?? 0);
+  const output = (modelCost.output / TOKENS_PER_MILLION) * (usage.outputTokens ?? 0);
+  const cacheRead = (modelCost.cacheRead / TOKENS_PER_MILLION) * (usage.cachedInputTokens ?? 0);
+  const cacheWrite = (modelCost.cacheWrite / TOKENS_PER_MILLION) * (usage.cacheWriteTokens ?? 0);
   const total = input + output + cacheRead + cacheWrite;
 
   return {

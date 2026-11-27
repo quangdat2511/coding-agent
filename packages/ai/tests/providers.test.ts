@@ -464,5 +464,27 @@ describe("Built-in Providers & Registry", () => {
       const xaiModel = models.getModel("xai", "grok-4.3");
       expect(xaiModel).toBeDefined();
     });
+
+    it("returns models with their Model Cost", () => {
+      const directory = createProviderDirectory();
+      const haiku = directory.getModel("anthropic", "claude-haiku-4-5");
+      expect(haiku?.cost).toEqual({
+        input: 1.0,
+        output: 5.0,
+        cacheRead: 0.1,
+        cacheWrite: 1.25,
+      });
+
+      const sonnet = directory.getModel("anthropic", "claude-sonnet-5");
+      expect(sonnet?.cost).toEqual({
+        input: 2.0,
+        output: 10.0,
+        cacheRead: 0.2,
+        cacheWrite: 2.5,
+      });
+
+      const unpriced = directory.getModel("anthropic", "claude-opus-4-1");
+      expect(unpriced?.cost).toBeUndefined();
+    });
   });
 });
