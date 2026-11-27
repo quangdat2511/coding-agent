@@ -147,6 +147,34 @@ describe("supervising a command", () => {
       expect(signals.some(([, sig]) => sig === "SIGTERM")).toBe(true);
     },
   );
+
+  it.skipIf(noPosixSignals)(
+    "escalates to SIGKILL when the main process ignores SIGTERM under waitForTreeExit",
+    async () => {
+      const controller = new AbortController();
+      const started = performance.now();
+      let ready = false;
+
+      const exit = await runSupervised(launcher, {
+        argv: combinedOutputArgv(shell, "trap '' TERM; echo ready; while true; do sleep 1; done"),
+        cwd: repoRoot,
+        timeoutMs: 10_000,
+        signal: controller.signal,
+        waitForTreeExit: true,
+        onOutput: (_chunk, text) => {
+          if (!ready && text.includes("ready")) {
+            ready = true;
+            controller.abort();
+          }
+        },
+      });
+
+      const elapsedMs = performance.now() - started;
+      expect(exit.stopReason).toBe("cancelled");
+      expect(exit.signalCode).toBe("SIGKILL");
+      expect(elapsedMs).toBeLessThan(3_500);
+    },
+  );
 });
 
 describe("the shared timeout bounds", () => {

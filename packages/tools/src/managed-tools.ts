@@ -232,6 +232,24 @@ export function compareSemver(a: string, b: string): number {
   return 0;
 }
 
+// Drive-rooted ("C:\...") or UNC ("\\server\share...") Windows path. Drive-relative paths such
+// as "\Cache" pass win32.isAbsolute() but still depend on the current drive, so default OS cache
+// roots must reject them.
+function isFullyQualifiedWindowsPath(input: string): boolean {
+  return /^[a-zA-Z]:[\\/]/.test(input) || /^\\\\[^\\]+[\\/][^\\]+/.test(input);
+}
+
+const UNUSABLE_CACHE_ERRNOS = new Set(["EACCES", "EPERM", "EROFS", "ENOSPC", "EDQUOT", "ENOTDIR"]);
+
+function isUnusableCacheWriteError(error: unknown): boolean {
+  const code = errnoOf(error);
+  return code !== undefined && UNUSABLE_CACHE_ERRNOS.has(code);
+}
+
+type InstallAttemptResult =
+  | { readonly kind: "installed"; readonly path: string }
+  | { readonly kind: "use-temp-cache" };
+
 export interface ResolvedCacheRoot {
   readonly path: string | undefined;
   readonly explicit: boolean;
@@ -266,13 +284,13 @@ export function resolveConfiguredCacheRoot(options: {
     const localAppData = getEnvVar(options.env, "LOCALAPPDATA", options.platform)?.trim();
     if (localAppData) {
       const normalized = normalizeWindowsShellPath(localAppData, "win32");
-      if (win32.isAbsolute(normalized)) {
+      if (isFullyQualifiedWindowsPath(normalized)) {
         return { path: win32.join(normalized, "coding-agent"), explicit: false };
       }
     }
     if (options.homeDir) {
       const normalizedHome = normalizeWindowsShellPath(options.homeDir, "win32");
-      if (win32.isAbsolute(normalizedHome)) {
+      if (isFullyQualifiedWindowsPath(normalizedHome)) {
         return {
           path: win32.join(normalizedHome, "AppData", "Local", "coding-agent"),
           explicit: false,
@@ -869,17 +887,24 @@ export function createToolAcquirer(options: CreateToolAcquirerOptions): ToolAcqu
     asset: ManagedToolAsset,
     archiveBytes: Uint8Array,
     dirs: { readonly tempDir: string; readonly versionDir: string },
-    allowRenameFallback: boolean,
+    allowTempFallback: boolean,
     signal?: AbortSignal,
-  ): Promise<string | "fallback-needed"> {
+  ): Promise<InstallAttemptResult> {
     const { tempDir, versionDir } = dirs;
     try {
       if (signal?.aborted) throw new CancelledError();
 
       const archivePath = pathImpl.join(tempDir, asset.asset);
       const extractDir = pathImpl.join(tempDir, "extracted");
-      await fs.mkdir(extractDir, { recursive: true, mode: dirMode });
-      await fs.writeFile(archivePath, archiveBytes);
+      try {
+        await fs.mkdir(extractDir, { recursive: true, mode: dirMode });
+        await fs.writeFile(archivePath, archiveBytes);
+      } catch (writeErr) {
+        if (allowTempFallback && isUnusableCacheWriteError(writeErr)) {
+          return { kind: "use-temp-cache" };
+        }
+        throw new InstallError(`failed to stage archive ${asset.asset}`, writeErr);
+      }
 
       await extractArchive(archivePath, extractDir, signal);
 
@@ -906,13 +931,13 @@ export function createToolAcquirer(options: CreateToolAcquirerOptions): ToolAcqu
           const existingProbe = await probeVersion(destPath, name, signal);
           if (existingProbe.cancelled) throw new CancelledError();
           if (existingProbe.version === tool.version) {
-            return destPath;
+            return { kind: "installed", path: destPath };
           }
         }
-        // If an existing versionDir in the default cache is read-only, mkdir succeeded earlier
-        // and only rename fails; fall back to a temporary cache directory under tmpDir.
-        if (allowRenameFallback && (code === "EACCES" || code === "EPERM" || code === "EROFS")) {
-          return "fallback-needed";
+        // If an existing versionDir in the default cache cannot be written to, mkdir succeeded
+        // earlier and only rename fails; fall back to a temporary cache directory under tmpDir.
+        if (allowTempFallback && isUnusableCacheWriteError(renameErr)) {
+          return { kind: "use-temp-cache" };
         }
         throw new InstallError(`failed to move ${binaryName} into ${destPath}`, renameErr);
       }
@@ -930,7 +955,7 @@ export function createToolAcquirer(options: CreateToolAcquirerOptions): ToolAcqu
         );
       }
 
-      return destPath;
+      return { kind: "installed", path: destPath };
     } finally {
       await fs.rm(tempDir, { recursive: true, force: true }).catch(() => undefined);
     }
@@ -955,7 +980,7 @@ export function createToolAcquirer(options: CreateToolAcquirerOptions): ToolAcqu
       prepared.usingDefaultCache,
       signal,
     );
-    if (first !== "fallback-needed") return first;
+    if (first.kind === "installed") return first.path;
 
     const fallbackDirs = await createFallbackInstallDirs(name, tool.version);
     const second = await installIntoPreparedDirs(
@@ -967,10 +992,8 @@ export function createToolAcquirer(options: CreateToolAcquirerOptions): ToolAcqu
       false,
       signal,
     );
-    if (second === "fallback-needed") {
-      throw new InstallError(`failed to move ${binaryNameOf(name)} into fallback cache`);
-    }
-    return second;
+    if (second.kind === "installed") return second.path;
+    throw new InstallError(`failed to install ${binaryNameOf(name)} into fallback cache`);
   }
 
   async function acquireUncached(

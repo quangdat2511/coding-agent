@@ -107,6 +107,8 @@ interface FakeFsState {
   readonly renameCalls: Array<{ readonly from: string; readonly to: string }>;
   failMkdirForPrefix?: string;
   failMkdtempForPrefix?: string;
+  failWriteFileWithCode?: string;
+  failWriteFileForPrefix?: string;
   failRenameWithCode?: string;
   failRenameForPrefix?: string;
 }
@@ -159,6 +161,17 @@ function createFakeFs(initialExecutables: readonly string[] = []): {
       return created;
     },
     async writeFile(path, data) {
+      if (
+        state.failWriteFileWithCode &&
+        (state.failWriteFileForPrefix === undefined ||
+          path.startsWith(state.failWriteFileForPrefix))
+      ) {
+        const err = new Error(`${state.failWriteFileWithCode}: write failed`) as Error & {
+          code: string;
+        };
+        err.code = state.failWriteFileWithCode;
+        throw err;
+      }
       state.files.set(path, new Uint8Array(data));
     },
     async readdir(path) {
@@ -1431,7 +1444,69 @@ describe("createToolAcquirer", () => {
       expect(state.rmCalls).toContain("/home/dev/.cache/coding-agent/tmp/rg-1");
     });
 
-    it("ignores relative XDG_CACHE_HOME and LOCALAPPDATA and falls back to home directory", () => {
+    it("falls back to tmpDir on writeFile ENOSPC for default cache but fails for explicit CODING_AGENT_CACHE_DIR", async () => {
+      // 1. Default cache hits ENOSPC while staging archive -> falls back to tmpDir and succeeds.
+      const { fs, state } = createFakeFs();
+      state.failWriteFileWithCode = "ENOSPC";
+      state.failWriteFileForPrefix = "/home/dev/.cache/coding-agent/";
+      const { launcher } = createFakeLauncher((argv) => {
+        if (argv[0] === "tar") {
+          state.files.set(`${argv[4]}/rg`, new Uint8Array([1]));
+          return { exitCode: 0 };
+        }
+        return { exitCode: 0, stdout: "ripgrep 16.0.0\n" };
+      });
+
+      const defaultAcquirer = createToolAcquirer({
+        launcher,
+        env: {},
+        platform: "linux",
+        arch: "x64",
+        homeDir: "/home/dev",
+        tmpDir: "/tmp",
+        manifest: testManifest,
+        fs,
+        fetchImpl: async () => new Response(fakeArchive),
+        sleep: instantSleep,
+        killProcess: fakeKillProcess,
+      });
+
+      const defaultRes = await defaultAcquirer.acquire("rg");
+      expect(defaultRes.ok).toBe(true);
+      if (defaultRes.ok) {
+        expect(defaultRes.path).toBe("/tmp/coding-agent-cache-2/bin/rg/16.0.0/rg");
+      }
+      expect(state.rmCalls).toContain("/home/dev/.cache/coding-agent/tmp/rg-1");
+
+      // 2. Explicit CODING_AGENT_CACHE_DIR hits ENOSPC -> returns install-failed without fallback.
+      const { fs: explicitFs, state: explicitState } = createFakeFs();
+      explicitState.failWriteFileWithCode = "ENOSPC";
+      explicitState.failWriteFileForPrefix = "/explicit-cache/";
+      const explicitAcquirer = createToolAcquirer({
+        launcher,
+        env: { CODING_AGENT_CACHE_DIR: "/explicit-cache" },
+        platform: "linux",
+        arch: "x64",
+        tmpDir: "/tmp",
+        manifest: testManifest,
+        fs: explicitFs,
+        fetchImpl: async () => new Response(fakeArchive),
+        sleep: instantSleep,
+        killProcess: fakeKillProcess,
+      });
+
+      const explicitRes = await explicitAcquirer.acquire("rg");
+      expect(explicitRes.ok).toBe(false);
+      if (!explicitRes.ok) {
+        expect(explicitRes.reason).toBe("install-failed");
+        expect(explicitRes.message).toContain("ENOSPC");
+      }
+      expect(explicitState.mkdtempCalls.some((p) => p.startsWith("/tmp/coding-agent-cache-"))).toBe(
+        false,
+      );
+    });
+
+    it("ignores relative XDG_CACHE_HOME, relative LOCALAPPDATA, and drive-relative Windows paths", () => {
       expect(
         resolveConfiguredCacheRoot({
           platform: "linux",
@@ -1449,6 +1524,35 @@ describe("createToolAcquirer", () => {
           homeDir: "C:\\Users\\dev",
         }),
       ).toEqual({ path: "C:\\Users\\dev\\AppData\\Local\\coding-agent", explicit: false });
+
+      // Drive-relative "\Cache" (no drive letter) must not be accepted as a default Windows root.
+      expect(
+        resolveConfiguredCacheRoot({
+          platform: "win32",
+          env: { LOCALAPPDATA: "\\Cache" },
+          cwd: "D:\\work",
+          homeDir: "C:\\Users\\dev",
+        }),
+      ).toEqual({ path: "C:\\Users\\dev\\AppData\\Local\\coding-agent", explicit: false });
+
+      expect(
+        resolveConfiguredCacheRoot({
+          platform: "win32",
+          env: { LOCALAPPDATA: "\\Cache" },
+          cwd: "D:\\work",
+          homeDir: "\\Users\\dev",
+        }),
+      ).toEqual({ path: undefined, explicit: false });
+
+      // UNC paths are fully qualified and accepted.
+      expect(
+        resolveConfiguredCacheRoot({
+          platform: "win32",
+          env: { LOCALAPPDATA: "\\\\fileserver\\share\\Cache" },
+          cwd: "D:\\work",
+          homeDir: "C:\\Users\\dev",
+        }),
+      ).toEqual({ path: "\\\\fileserver\\share\\Cache\\coding-agent", explicit: false });
     });
 
     it("normalizes Windows shell drive paths in CODING_AGENT_CACHE_DIR and PATH when simulating win32", async () => {

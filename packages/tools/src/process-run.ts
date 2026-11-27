@@ -84,6 +84,7 @@ export async function runSupervised(
   const killProcess: ProcessKillFn = run.killProcess ?? ((pid, sig) => process.kill(pid, sig));
   let stopReason: StopReason | undefined;
   let terminatedAt = 0;
+  let sigkillSent = false;
   let killTimer: ReturnType<typeof setTimeout> | undefined;
   let pendingTreeSignal: Promise<void> | undefined;
   const terminate = (reason: StopReason) => {
@@ -91,13 +92,14 @@ export async function runSupervised(
     stopReason = reason;
     terminatedAt = Date.now();
     pendingTreeSignal = signalTree(launcher, child, "SIGTERM", killProcess);
-    if (!run.waitForTreeExit) {
-      killTimer = setTimeout(() => {
-        if (groupAlive(child, killProcess)) {
-          void signalTree(launcher, child, "SIGKILL", killProcess);
-        }
-      }, KILL_GRACE_MS);
-    }
+    // Always schedule SIGKILL even when waitForTreeExit is true: if the main child ignores
+    // SIGTERM, `await child.exited` below would otherwise wait forever.
+    killTimer = setTimeout(() => {
+      if (groupAlive(child, killProcess)) {
+        sigkillSent = true;
+        pendingTreeSignal = signalTree(launcher, child, "SIGKILL", killProcess);
+      }
+    }, KILL_GRACE_MS);
   };
   const timeoutTimer = setTimeout(() => terminate("timeout"), run.timeoutMs);
   const onAbort = () => terminate("cancelled");
@@ -127,7 +129,14 @@ export async function runSupervised(
 
   if (run.waitForTreeExit && stopReason !== undefined) {
     clearTimeout(killTimer);
-    await waitForProcessTreeExit(launcher, child, killProcess, terminatedAt, pendingTreeSignal);
+    await waitForProcessTreeExit(
+      launcher,
+      child,
+      killProcess,
+      terminatedAt,
+      sigkillSent,
+      pendingTreeSignal,
+    );
   } else if (!groupAlive(child, killProcess)) {
     // A group that has already exited needs no SIGKILL; skipping it also avoids signalling a group
     // that later reuses the id.
@@ -149,6 +158,7 @@ async function waitForProcessTreeExit(
   child: ChildProcess,
   killProcess: ProcessKillFn,
   terminatedAt: number,
+  sigkillSent: boolean,
   pendingTreeSignal: Promise<void> | undefined,
 ): Promise<void> {
   if (pendingTreeSignal !== undefined) {
@@ -156,13 +166,16 @@ async function waitForProcessTreeExit(
   }
   if (process.platform === "win32") return;
 
-  const graceDeadline = terminatedAt + KILL_GRACE_MS;
-  while (groupAlive(child, killProcess) && Date.now() < graceDeadline) {
-    await new Promise((resolve) => setTimeout(resolve, TREE_POLL_MS));
-  }
-  if (!groupAlive(child, killProcess)) return;
+  if (!sigkillSent) {
+    const graceDeadline = terminatedAt + KILL_GRACE_MS;
+    while (groupAlive(child, killProcess) && Date.now() < graceDeadline) {
+      await new Promise((resolve) => setTimeout(resolve, TREE_POLL_MS));
+    }
+    if (!groupAlive(child, killProcess)) return;
 
-  await signalTree(launcher, child, "SIGKILL", killProcess);
+    await signalTree(launcher, child, "SIGKILL", killProcess);
+  }
+
   const killDeadline = Date.now() + SIGKILL_WAIT_MS;
   while (groupAlive(child, killProcess) && Date.now() < killDeadline) {
     await new Promise((resolve) => setTimeout(resolve, TREE_POLL_MS));
