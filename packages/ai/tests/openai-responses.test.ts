@@ -212,6 +212,42 @@ describe("buildParams", () => {
     ]);
   });
 
+  it("sends a Gemini tool_call without its Provider Signature", () => {
+    // A resumed Session that ran on Gemini and now runs through a Chat Completions provider:
+    // only provider google writes signatures, so this adapter never sends one.
+    const context: Context = {
+      messages: [
+        {
+          role: "assistant",
+          content: [
+            {
+              type: "tool_call",
+              toolCallId: "fc_1",
+              name: "read",
+              arguments: '{"path":"a.ts"}',
+              signature: "c2lnbmVk",
+            },
+          ],
+          model: "gemini-3-flash-preview",
+          finishReason: { reason: "tool_call", rawReason: "STOP" },
+        },
+      ],
+    };
+    expect(buildParams(context)).toEqual([
+      {
+        role: "assistant",
+        content: null,
+        tool_calls: [
+          {
+            id: "fc_1",
+            type: "function",
+            function: { name: "read", arguments: '{"path":"a.ts"}' },
+          },
+        ],
+      },
+    ]);
+  });
+
   it("maps assistant message containing only tool_call with content null", () => {
     const context: Context = {
       messages: [

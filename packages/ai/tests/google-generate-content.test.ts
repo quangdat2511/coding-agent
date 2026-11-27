@@ -73,7 +73,7 @@ describe("buildRequestBody", () => {
       systemPrompt: "You are a helpful coding assistant.",
       messages: [],
     };
-    const body = buildRequestBody(context);
+    const body = buildRequestBody(TEST_MODEL, context);
     expect(body.system_instruction).toEqual({
       parts: [{ text: "You are a helpful coding assistant." }],
     });
@@ -100,7 +100,7 @@ describe("buildRequestBody", () => {
       ],
     };
 
-    const body = buildRequestBody(context);
+    const body = buildRequestBody(TEST_MODEL, context);
     expect(body.contents).toHaveLength(2);
 
     // User turn 1
@@ -153,7 +153,7 @@ describe("buildRequestBody", () => {
       ],
     };
 
-    expect(buildRequestBody(context).contents[1]).toEqual({
+    expect(buildRequestBody(TEST_MODEL, context).contents[1]).toEqual({
       role: "user",
       parts: [
         {
@@ -183,7 +183,7 @@ describe("buildRequestBody", () => {
       ],
     };
 
-    const body = buildRequestBody(context);
+    const body = buildRequestBody(TEST_MODEL, context);
     expect(body.contents).toHaveLength(2);
     expect(body.contents[1]).toEqual({
       role: "user",
@@ -204,7 +204,7 @@ describe("buildRequestBody", () => {
       ],
     };
 
-    expect(() => buildRequestBody(context)).toThrow(
+    expect(() => buildRequestBody(TEST_MODEL, context)).toThrow(
       'tool_result "call_9" answers no earlier tool_call',
     );
   });
@@ -228,7 +228,7 @@ describe("buildRequestBody", () => {
       ],
     };
 
-    const body = buildRequestBody(context);
+    const body = buildRequestBody(TEST_MODEL, context);
     expect(body.contents[0]?.parts[0]?.functionCall?.args).toEqual({});
   });
 
@@ -248,7 +248,7 @@ describe("buildRequestBody", () => {
       ],
     };
 
-    const body = buildRequestBody(context);
+    const body = buildRequestBody(TEST_MODEL, context);
     expect(body.tools).toEqual([
       {
         function_declarations: [
@@ -563,13 +563,102 @@ describe("Gemini 3 thought signatures and call ids", () => {
       ],
     };
 
-    expect(buildRequestBody(context).contents[0]?.parts).toEqual([
+    expect(buildRequestBody(GEMINI_3, context).contents[0]?.parts).toEqual([
       {
         functionCall: { id: "fc_1", name: "read", args: { path: "a.ts" } },
         thoughtSignature: "c2lnbmVk",
       },
       { functionCall: { id: "fc_2", name: "read", args: { path: "b.ts" } } },
     ]);
+  });
+
+  describe("after a resumed Session changes model", () => {
+    const GEMINI_3_PRO: Model = {
+      id: "gemini-3-pro-preview",
+      name: "Gemini 3 Pro Preview",
+      provider: "google",
+    };
+
+    function signedTurn(model: string, toolCallId: string, signature: string): AssistantMessage {
+      return {
+        role: "assistant",
+        model,
+        finishReason: { reason: "tool_call", rawReason: "STOP" },
+        content: [{ type: "tool_call", toolCallId, name: "read", arguments: "{}", signature }],
+      };
+    }
+
+    function toolResult(toolCallId: string): Context["messages"][number] {
+      return {
+        role: "user",
+        content: [{ type: "tool_result", toolCallId, content: "ok", isError: false }],
+      };
+    }
+
+    // A Session whose first Coding Task ran on Gemini 3 Flash and whose second ran on Gemini 3 Pro.
+    const mixed: Context = {
+      messages: [
+        { role: "user", content: "Read a.ts" },
+        signedTurn(GEMINI_3.id, "fc_flash", "Zmxhc2g="),
+        toolResult("fc_flash"),
+        { role: "user", content: "Now read b.ts" },
+        signedTurn(GEMINI_3_PRO.id, "fc_pro", "cHJv"),
+        toolResult("fc_pro"),
+      ],
+    };
+
+    const sentCallParts = (model: Model) =>
+      buildRequestBody(model, mixed).contents.flatMap((content) =>
+        content.parts.filter((part) => part.functionCall !== undefined),
+      );
+
+    it("keeps the signatures of the calls the requested model wrote", () => {
+      expect(sentCallParts(GEMINI_3_PRO)).toContainEqual({
+        functionCall: { id: "fc_pro", name: "read", args: {} },
+        thoughtSignature: "cHJv",
+      });
+      expect(sentCallParts(GEMINI_3)).toContainEqual({
+        functionCall: { id: "fc_flash", name: "read", args: {} },
+        thoughtSignature: "Zmxhc2g=",
+      });
+    });
+
+    it("treats a model id with the models/ prefix as the same model", () => {
+      const prefixed: Model = { ...GEMINI_3_PRO, id: `models/${GEMINI_3_PRO.id}` };
+      expect(sentCallParts(prefixed)).toContainEqual({
+        functionCall: { id: "fc_pro", name: "read", args: {} },
+        thoughtSignature: "cHJv",
+      });
+    });
+
+    it("sends another model's calls with no signature, and no placeholder signature", () => {
+      expect(sentCallParts(GEMINI_3_PRO)).toEqual([
+        { functionCall: { id: "fc_flash", name: "read", args: {} } },
+        {
+          functionCall: { id: "fc_pro", name: "read", args: {} },
+          thoughtSignature: "cHJv",
+        },
+      ]);
+    });
+
+    it("sends no signature at all to a model that wrote none of the Session's calls", async () => {
+      const sent: string[] = [];
+      await withFixtureFetch(
+        async (request) => {
+          sent.push(await request.text());
+          return sseResponse(loadFixture("google/text-streaming.txt"));
+        },
+        async () => {
+          await stream(TEST_MODEL, mixed, { apiKey: "test-key" }).result();
+        },
+      );
+
+      expect(sent).toHaveLength(1);
+      expect(sent[0]).toContain('"functionCall"');
+      expect(sent[0]).not.toContain("Zmxhc2g=");
+      expect(sent[0]).not.toContain("cHJv");
+      expect(sent[0]).not.toMatch(/thought_?signature/i);
+    });
   });
 
   it("never sends the id it synthesized for a call Gemini issued without one", async () => {

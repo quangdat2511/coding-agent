@@ -259,6 +259,35 @@ describe("buildParams", () => {
     ]);
   });
 
+  it("sends a Gemini tool_call to Claude without its Provider Signature", () => {
+    // A resumed Session that ran on Gemini and now runs on Claude: only provider google
+    // writes signatures, so this adapter never sends one.
+    const context: Context = {
+      messages: [
+        {
+          role: "assistant",
+          content: [
+            {
+              type: "tool_call",
+              toolCallId: "fc_1",
+              name: "read",
+              arguments: '{"path":"a.ts"}',
+              signature: "c2lnbmVk",
+            },
+          ],
+          model: "gemini-3-flash-preview",
+          finishReason: { reason: "tool_call", rawReason: "STOP" },
+        },
+      ],
+    };
+    expect(buildParams(context)).toEqual([
+      {
+        role: "assistant",
+        content: [{ type: "tool_use", id: "fc_1", name: "read", input: { path: "a.ts" } }],
+      },
+    ]);
+  });
+
   it("handles malformed JSON arguments in assistant tool_call gracefully", () => {
     const context: Context = {
       messages: [
