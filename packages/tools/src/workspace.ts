@@ -198,8 +198,14 @@ async function walk(jail: Jail, path: string): Promise<Walk> {
 function unreachable(input: string, error: unknown): PathResolution {
   switch (errnoOf(error)) {
     case "ENOENT":
-    case "ENOTDIR":
       return notFound(input, "changed while being resolved");
+    case "ENOTDIR":
+      return {
+        ok: false,
+        code: "NOT_FOUND",
+        message: `${quote(input)} changed while being resolved`,
+        reason: "not_a_directory",
+      };
     case "ENAMETOOLONG":
       return notFound(input, "is longer than the filesystem allows");
     case "EINVAL":
@@ -233,7 +239,12 @@ function notFound(input: string, reason: string): PathResolution {
 }
 
 function notDirectory(input: string, component: string): PathResolution {
-  return notFound(input, `cannot be reached: ${quote(component)} is not a directory`);
+  return {
+    ok: false,
+    code: "NOT_FOUND",
+    message: `${quote(input)} cannot be reached: ${quote(component)} is not a directory`,
+    reason: "not_a_directory",
+  };
 }
 
 function linked(input: string, link: string): PathResolution {

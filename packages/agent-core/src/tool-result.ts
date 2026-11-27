@@ -4,6 +4,7 @@ export type ToolErrorCode =
   | "SCHEMA_VIOLATION"
   | "NOT_FOUND"
   | "IS_DIRECTORY"
+  | "NOT_A_DIRECTORY"
   | "PATH_OUTSIDE_REPO"
   | "PERMISSION_DENIED"
   | "NO_MATCH"

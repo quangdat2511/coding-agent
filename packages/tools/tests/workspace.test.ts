@@ -201,18 +201,20 @@ describe("a sibling of the Repository Root sharing its name as a prefix", () => 
 
 describe("resolving a path that cannot be reached", () => {
   it.each([
-    ["a missing file", "missing.ts", '"missing.ts" does not exist'],
+    ["a missing file", "missing.ts", '"missing.ts" does not exist', undefined],
     [
       "a path below a regular file",
       "a.ts/b",
       '"a.ts/b" cannot be reached: "a.ts" is not a directory',
+      "not_a_directory" as const,
     ],
     [
       "a regular file named as a directory",
       "a.ts/",
       '"a.ts/" cannot be reached: "a.ts" is not a directory',
+      "not_a_directory" as const,
     ],
-  ])("reports %s as not found", async (_, input, message) => {
+  ])("reports %s as not found", async (_, input, message, reason) => {
     const repo = await makeRepo();
     await writeFile(join(repo, "a.ts"), "");
     const workspace = await resolverFor(repo);
@@ -221,6 +223,7 @@ describe("resolving a path that cannot be reached", () => {
       ok: false,
       code: "NOT_FOUND",
       message,
+      ...(reason !== undefined ? { reason } : {}),
     });
   });
 
@@ -600,6 +603,7 @@ describe("resolving a path to create", () => {
       ok: false,
       code: "NOT_FOUND",
       message,
+      reason: "not_a_directory",
     });
   });
 

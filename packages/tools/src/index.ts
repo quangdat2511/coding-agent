@@ -10,6 +10,8 @@ export type {
 export { createChildProcessLauncher } from "./child-process.ts";
 export { EditParams, editTool } from "./edit.ts";
 export { errnoOf } from "./errno.ts";
+export type { LsToolDetails, LsTruncationDetails } from "./ls.ts";
+export { LsParams, lsTool } from "./ls.ts";
 export { normalizeWindowsShellPath } from "./paths.ts";
 export { ReadParams, readTool } from "./read.ts";
 export { createDefaultTools } from "./registry.ts";

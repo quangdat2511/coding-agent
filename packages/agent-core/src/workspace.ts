@@ -6,10 +6,13 @@ export type PathResolution =
   | { readonly ok: true; readonly path: RepoPath }
   | {
       readonly ok: false;
-      readonly code: Extract<
-        ToolErrorCode,
-        "PATH_OUTSIDE_REPO" | "NOT_FOUND" | "PERMISSION_DENIED"
-      >;
+      readonly code: Extract<ToolErrorCode, "NOT_FOUND">;
+      readonly message: string;
+      readonly reason?: "not_a_directory";
+    }
+  | {
+      readonly ok: false;
+      readonly code: Extract<ToolErrorCode, "PATH_OUTSIDE_REPO" | "PERMISSION_DENIED">;
       readonly message: string;
     };
 
