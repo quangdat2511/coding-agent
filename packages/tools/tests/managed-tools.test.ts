@@ -1563,6 +1563,15 @@ describe("createToolAcquirer", () => {
         }),
       ).toEqual({ path: "\\\\fileserver\\share\\Cache\\coding-agent", explicit: false });
 
+      expect(
+        resolveConfiguredCacheRoot({
+          platform: "win32",
+          env: { LOCALAPPDATA: "\\\\fileserver//share/Cache" },
+          cwd: "D:\\work",
+          homeDir: "C:\\Users\\dev",
+        }),
+      ).toEqual({ path: "\\\\fileserver\\share\\Cache\\coding-agent", explicit: false });
+
       // Malformed UNC paths missing a share name must be rejected.
       expect(
         resolveConfiguredCacheRoot({

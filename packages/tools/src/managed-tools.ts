@@ -232,12 +232,14 @@ export function compareSemver(a: string, b: string): number {
   return 0;
 }
 
-// Drive-rooted ("C:\..." or "C:/...") or UNC ("\\server\share..." or "//server/share...")
-// Windows path, requiring non-empty server and share components free of separators. Drive-relative
-// paths such as "\Cache" pass win32.isAbsolute() but depend on the current drive, so default OS
-// cache roots must reject them.
+// Drive-rooted ("C:\...") or UNC ("\\server\share...") Windows path, normalized with
+// win32.normalize first so repeated or forward separators (e.g. "\\fileserver//share/Cache")
+// collapse before checking for non-empty server and share components. Drive-relative paths such
+// as "\Cache" pass win32.isAbsolute() but depend on the current drive, so default OS cache roots
+// must reject them.
 function isFullyQualifiedWindowsPath(input: string): boolean {
-  return /^[a-zA-Z]:[\\/]/.test(input) || /^[\\/]{2}[^\\/]+[\\/][^\\/]+/.test(input);
+  const normalized = win32.normalize(input);
+  return /^[a-zA-Z]:\\/.test(normalized) || /^\\\\[^\\]+\\[^\\]+/.test(normalized);
 }
 
 const UNUSABLE_CACHE_ERRNOS = new Set(["EACCES", "EPERM", "EROFS", "ENOSPC", "EDQUOT", "ENOTDIR"]);
