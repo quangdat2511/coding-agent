@@ -45,6 +45,7 @@ export interface MountedTui extends TuiHandle {
 // Ink's alternateScreen sends only ESC[?1049h, which leaves the cursor on the row where the shell
 // left it. Moving it to the top-left corner makes the Session view start on the first row.
 const CURSOR_HOME = "\u001b[H";
+const WHEEL_ROWS = 3;
 
 export function renderTui(props: { model: TuiModel; handlers: TuiHandlers }): TuiHandle {
   const streams = { stdout: process.stdout, stdin: process.stdin };
@@ -136,6 +137,7 @@ export function mountTui(
         interactive={interactive}
         onKey={(text: string, key: KeyPress) => perform(routeKey(currentMode(), text, key))}
         onPaste={(text: string) => perform(routePaste(currentMode(), text))}
+        onWheel={(direction) => draw(direction * WHEEL_ROWS)}
       />,
     );
   }

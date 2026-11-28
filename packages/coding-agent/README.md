@@ -64,6 +64,15 @@ Agent Run only when none is active. A submission while one runs, or opens, is re
 in the Session view. When an Agent Run has settled, the next submission opens a new one, and the
 Session view keeps the earlier ones.
 
+Use the mouse wheel or `PgUp` and `PgDn` to scroll the Session view. In Windows Terminal, hold
+`Shift` while dragging to select text. With the default key bindings, `Ctrl+C` and `Ctrl+Shift+C`
+copy the selection. Without a selection, `Ctrl+C` reaches the Full-screen TUI as the cancel key.
+For right-click copying, keep `Shift` held so Windows Terminal handles the click. Its default
+right-click action copies the selection when `copyOnSelect` is off. If `copyOnSelect` is on,
+selecting already copies the text. Other terminals may use a different selection modifier. See
+[Windows Terminal selection](https://learn.microsoft.com/en-us/windows/terminal/selection) and
+[copy bindings](https://learn.microsoft.com/en-us/windows/terminal/customize-settings/actions#copy).
+
 | Key or signal | While a Coding Task runs | With none |
 | --- | --- | --- |
 | `Esc` or `Ctrl+C` | dispatches `cancel` | a first press shows a notice; a second within one second quits |

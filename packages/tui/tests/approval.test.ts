@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "bun:test";
 import { KEY_HINTS } from "../src/frame.tsx";
 import { QUIET_MS } from "../src/input.ts";
 import type { PendingApproval, SessionViewEntry, TuiHandlers, TuiModel } from "../src/types.ts";
-import { createTestTerminal, KEYS } from "./support/terminal.ts";
+import { createTestTerminal, KEYS, WHEEL } from "./support/terminal.ts";
 import {
   manualClock,
   mountOn,
@@ -322,6 +322,27 @@ describe("Approval overlay", () => {
     await terminal.press("y");
     await tui.flush();
     expect(viewport(terminal)).toEqual(inView);
+  });
+
+  it("scrolls under the Approval overlay without deciding or restarting the quiet period", async () => {
+    const { tui, terminal, decisions, pause } = mount({
+      sessionView: LONG_SESSION_VIEW,
+      pendingApproval: WRITE_APPROVAL,
+    });
+    await tui.flush();
+    const initialView = viewport(terminal);
+    expect(initialView[0]).toBe("line 13");
+
+    pause();
+    await terminal.press(WHEEL.up);
+    await tui.flush();
+    const scrolledView = viewport(terminal);
+    expect(scrolledView[0]).toBe("line 10");
+    expect(scrolledView.slice(4)).toEqual(initialView.slice(4));
+    expect(decisions).toEqual([]);
+
+    await terminal.press("y");
+    expect(decisions).toEqual([["approval-1", "allow"]]);
   });
 
   it("shows the keys of each step under the Prompt", async () => {

@@ -49,3 +49,9 @@ The person's own ending of the Full-screen TUI, made while no run is active by p
 key twice: Esc or Ctrl+C at the Prompt, Ctrl+C in a mode. The first press asks for confirmation and
 gives the number of waiting Follow-ups it discards. A signal is not a Quit.
 _Avoid_: Exit, close, abort, cancel
+
+## Session view scrolling
+
+The Full-screen TUI uses mouse reporting to scroll the Session view, including under the
+Approval overlay. Page Up and Page Down also scroll the Session view. See the
+[CLI copy instructions](../coding-agent/README.md#running-interactively) for selecting text.

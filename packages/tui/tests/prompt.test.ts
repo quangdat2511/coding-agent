@@ -3,7 +3,7 @@ import { PassThrough, Writable } from "node:stream";
 import { KEY_HINTS } from "../src/frame.tsx";
 import type { TuiStreams } from "../src/render.tsx";
 import type { SessionViewEntry, TuiHandlers } from "../src/types.ts";
-import { createTestTerminal, KEYS, REDRAWS_IN_PLACE } from "./support/terminal.ts";
+import { createTestTerminal, KEYS, REDRAWS_IN_PLACE, WHEEL } from "./support/terminal.ts";
 import { mountOn, prompt, unexpectedHandlerCall, unmountTui, viewport } from "./support/tui.ts";
 
 const COLUMNS = 40;
@@ -109,6 +109,66 @@ describe("Prompt", () => {
     await terminal.press(KEYS.home, KEYS.pageDown);
     await tui.flush();
     expect(await terminal.cursorAt()).toEqual([PROMPT_ROW, 2]);
+  });
+
+  it("scrolls the Session view with the wheel while the arrows still move the Prompt cursor", async () => {
+    const text = Array.from({ length: 20 }, (_, index) => `line ${index + 1}`).join("\n");
+    const { tui, terminal } = mount(
+      [{ kind: "assistant", id: "m-1", text, status: "completed" }],
+      COLUMNS,
+      10,
+    );
+    await terminal.press("first line", CTRL_J, "last");
+    await tui.flush();
+    const draft = ["> first line", "  last"];
+    expect(terminal.screen().slice(7, 9)).toEqual(draft);
+    expect(await terminal.cursorAt()).toEqual([8, 6]);
+    expect(terminal.screen()[0]).toBe("line 14");
+
+    await terminal.press(WHEEL.up);
+    await tui.flush();
+    expect(terminal.screen()[0]).toBe("line 11");
+    expect(terminal.screen().slice(7, 9)).toEqual(draft);
+    expect(await terminal.cursorAt()).toEqual([8, 6]);
+
+    await terminal.press(KEYS.up);
+    await tui.flush();
+    expect(terminal.screen()[0]).toBe("line 11");
+    expect(await terminal.cursorAt()).toEqual([7, 6]);
+
+    await terminal.press(WHEEL.down);
+    await tui.flush();
+    expect(terminal.screen()[0]).toBe("line 14");
+    expect(terminal.screen().slice(7, 9)).toEqual(draft);
+    expect(await terminal.cursorAt()).toEqual([7, 6]);
+
+    await terminal.press(KEYS.down);
+    await tui.flush();
+    expect(terminal.screen()[0]).toBe("line 14");
+    expect(await terminal.cursorAt()).toEqual([8, 6]);
+  });
+
+  it("ignores mouse clicks and keeps text that resembles a mouse report", async () => {
+    const { tui, terminal } = mount();
+    await terminal.press("\u001b[<0;4;2M\u001b[<0;4;2m[<64;4;2M");
+    await tui.flush();
+    expect(prompt(terminal)).toBe("> [<64;4;2M");
+  });
+
+  it.each([1, 7])("keeps a wheel report split after %i bytes out of the Prompt", async (split) => {
+    const text = Array.from({ length: 20 }, (_, index) => `line ${index + 1}`).join("\n");
+    const { tui, terminal, cancelled } = mount([
+      { kind: "assistant", id: "m-1", text, status: "completed" },
+    ]);
+    await terminal.press("draft");
+    await terminal.sendChunk(WHEEL.up.slice(0, split));
+    // Longer than Ink's original 20 ms wait for an incomplete escape sequence.
+    await Bun.sleep(40);
+    await terminal.sendChunk(WHEEL.up.slice(split));
+    await tui.flush();
+    expect(cancelled.count).toBe(0);
+    expect(prompt(terminal)).toBe("> draft");
+    expect(viewport(terminal)[0]).toBe("line 14");
   });
 
   it("submits the typed task and clears the Prompt", async () => {
@@ -408,6 +468,18 @@ describe("cancel keys", () => {
     await tui.flush();
     expect(cancelled.count).toBe(1);
     expect(prompt(terminal)).toBe("> abc");
+  });
+
+  it("cancels and scrolls when Escape and a wheel report arrive in the same read", async () => {
+    const text = Array.from({ length: 20 }, (_, index) => `line ${index + 1}`).join("\n");
+    const { tui, terminal, cancelled } = mount([
+      { kind: "assistant", id: "m-1", text, status: "streaming" },
+    ]);
+    await terminal.press("draft", KEYS.escape + WHEEL.up);
+    await tui.flush();
+    expect(cancelled.count).toBe(1);
+    expect(viewport(terminal)[0]).toBe("line 14");
+    expect(prompt(terminal)).toBe("> draft");
   });
 
   it("call onCancel on Ctrl+C and keep the TUI running", async () => {
