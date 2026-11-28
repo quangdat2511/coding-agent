@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { Buffer } from "node:buffer";
 import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join, posix } from "node:path";
 import type {
   ExecutableTool,
   ExecuteContext,
@@ -32,7 +32,7 @@ import {
 import type { AcquireResult, ToolAcquirer } from "../src/managed-tools.ts";
 import { MAX_TOOL_OUTPUT_BYTES } from "../src/output-budget.ts";
 
-const REPO = resolve("/fake/repo") as RepoPath;
+const REPO = "/fake/repo" as RepoPath;
 
 function fakeAcquirer(
   result: AcquireResult = { ok: true, path: "/usr/bin/fd", version: "10.5.2" },
@@ -73,7 +73,7 @@ function fakeFs(options: FakeFsOptions = {}): FindFileSystem {
   const root = options.repoRoot ?? REPO;
   const entries = options.entries ?? { ".": "dir" };
   const gitRoots = options.gitRoots ?? [root];
-  const resolveEntry = (rel: string): string => (rel === "." ? root : join(root, rel));
+  const resolveEntry = (rel: string): string => (rel === "." ? root : posix.join(root, rel));
 
   const byPath = new Map<string, "file" | "dir" | "symlink">(
     Object.entries(entries).map(([rel, kind]) => [resolveEntry(rel), kind]),
@@ -84,7 +84,7 @@ function fakeFs(options: FakeFsOptions = {}): FindFileSystem {
   const statErrors = new Map<string, string>(
     Object.entries(options.statErrors ?? {}).map(([rel, code]) => [resolveEntry(rel), code]),
   );
-  const gitPaths = new Set(gitRoots.map((gitRoot) => join(gitRoot, ".git")));
+  const gitPaths = new Set(gitRoots.map((gitRoot) => posix.join(gitRoot, ".git")));
 
   return {
     async stat(path) {
@@ -141,7 +141,7 @@ function fakeWorkspace(
       ? repoRoot
       : input.startsWith(repoRoot)
         ? input
-        : join(repoRoot, input)) as RepoPath,
+        : posix.join(repoRoot, input)) as RepoPath,
   });
   const fn = resolvePath ?? defaultResolve;
   return {
@@ -214,7 +214,7 @@ describe("the find tool's declaration", () => {
 describe("preparing find", () => {
   it('defaults path to "." and formats the summary as find "<pattern>" in "<path>"', async () => {
     const { ops } = fakeOps();
-    const tool = findToolWith({ acquirer: fakeAcquirer(), ops, fs: fakeFs() });
+    const tool = findToolWith({ acquirer: fakeAcquirer(), ops, fs: fakeFs(), platform: "linux" });
 
     expect(await prepare({ pattern: "*.ts" }, tool)).toEqual({
       ok: true,
@@ -229,7 +229,7 @@ describe("preparing find", () => {
       ok: true,
       prepared: {
         input: { pattern: "src/*.ts", path: "packages/tools" },
-        paths: [join(REPO, "packages/tools") as RepoPath],
+        paths: [posix.join(REPO, "packages/tools") as RepoPath],
         summary: 'find "src/*.ts" in "packages/tools"',
       },
     });
@@ -399,7 +399,7 @@ describe("finding paths and formatting output", () => {
       "1001",
       "--",
       "*",
-      join(REPO, "packages/tools"),
+      posix.join(REPO, "packages/tools"),
     ]);
     // Verify no --follow, no .git exclusion, and no --type filter.
     expect(requests[0]?.args).not.toContain("--follow");
