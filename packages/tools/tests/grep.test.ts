@@ -242,11 +242,40 @@ function createFakeLauncher(spec: FakeProcessSpec): {
 } {
   const launches: RecordedLaunch[] = [];
   const killSignals: Array<NodeJS.Signals | undefined> = [];
+  const childrenByPid = new Map<number, { kill(sig?: NodeJS.Signals | number): void }>();
+  let nextPid = 99999;
   const encoder = new TextEncoder();
+
+  const makeClosedStream = (): ReadableStream<Uint8Array> =>
+    new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.close();
+      },
+    });
 
   const launcher: ChildProcessLauncher = {
     launch(command, options) {
+      // On Windows, runSupervised stops the process tree by launching `taskkill /T /F /PID <pid>`
+      // through the same launcher. Handle it here so fake stayOpenUntilKilled children terminate
+      // cleanly on win32 instead of spawning another hanging fake child.
+      if (command[0] === "taskkill") {
+        const pidFlagIndex = command.indexOf("/PID");
+        const targetPid = pidFlagIndex >= 0 ? Number(command[pidFlagIndex + 1]) : Number.NaN;
+        childrenByPid.get(targetPid)?.kill("SIGTERM");
+        const killer = {
+          pid: nextPid++,
+          stdout: makeClosedStream(),
+          stderr: makeClosedStream(),
+          exited: Promise.resolve(0),
+          exitCode: 0,
+          signalCode: null,
+          kill: () => undefined,
+        };
+        return killer as unknown as ChildProcess;
+      }
+
       launches.push({ command: [...command], options });
+      const pid = nextPid++;
       let resolveExit!: (code: number) => void;
       const exited = new Promise<number>((res) => {
         resolveExit = res;
@@ -308,7 +337,7 @@ function createFakeLauncher(spec: FakeProcessSpec): {
       }
 
       const child = {
-        pid: 99999,
+        pid,
         stdout,
         stderr,
         exited,
@@ -325,6 +354,7 @@ function createFakeLauncher(spec: FakeProcessSpec): {
           finish(null, sigName ?? "SIGTERM");
         },
       };
+      childrenByPid.set(pid, child);
       return child as unknown as ChildProcess;
     },
   };
