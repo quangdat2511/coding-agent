@@ -621,6 +621,10 @@ On 2026-11-28, [CDA-182](https://datn-fit-hcmus.atlassian.net/browse/CDA-182) am
   sends no id, so ids repeat across Model Turns and a Session would refuse its own Transcript. A
   model response that names one id twice settles `MODEL_PROTOCOL_ERROR` and its Assistant Message
   is not committed, since a Tool Result could not tell those calls apart.
+- **No Outcome Note before `start`** (§4, §8): an Agent Run that settles before `start`, as when it
+  is cancelled in `ready`, gets no Outcome Note, since it appended no Coding Task for a note to
+  answer. This narrows "every settlement without success" in the 2026-11-26 amendment to runs that
+  started.
 
 ## Consequences
 
