@@ -708,6 +708,7 @@ re-exports:
 | `AgentState` | kept: Agent Core glossary term, fixed by ADR 0002 |
 | `JsonValue` | kept: generic name for ADR 0002's JSON value type; it encodes no design choice |
 | `IdGenerator` | renamed to `IdSource` (§3) |
+| `calculateCost` | kept (CDA-205): pure usage cost calculation; matches Pi's function name but takes decoupled `ModelCost` rather than a `Model` instance |
 
 CDA-68's eight child-environment and launcher exports were checked again on 2026-11-11 against
 the same Pi commit, `9841914c71a74d81abe07f751aefd271fd924e63`, including its package subpaths.
@@ -970,6 +971,12 @@ On 2026-11-26, [CDA-138](https://datn-fit-hcmus.atlassian.net/browse/CDA-138),
   `ControllerUpdate`, `SessionLogEntry`, `SessionListEntry` and `projectSessionLogEntry` were
   checked on 2026-11-25 against Pi commit `9841914c71a74d81abe07f751aefd271fd924e63`; none occurs in
   its packages.
+- **Pi names and Model Cost** (§8, CDA-205): `ModelCost` and `UsageCost` were checked on 2026-11-26
+  against Pi commit `9841914c71a74d81abe07f751aefd271fd924e63`; neither occurs in its packages
+  (`pi-ai` exports `UsageCost` with different field semantics, and has no `ModelCost` type).
+  `calculateCost` matches Pi's function name in `pi-ai`, but is kept because it is the canonical
+  domain term for calculating usage cost from model rates, taking decoupled `ModelCost` and `Usage`
+  rather than Pi's full `Model` object.
 
 On 2026-11-27, [CDA-174](https://datn-fit-hcmus.atlassian.net/browse/CDA-174) amended this record:
 

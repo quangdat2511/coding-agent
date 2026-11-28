@@ -8,6 +8,7 @@ import type { ExitCode } from "./exit-codes.ts";
 import type { RunArgs } from "./run-args.ts";
 import { type RunConfig, removeCreated, resolveRunConfig } from "./run-config.ts";
 import { openRunFiles, type RunFiles, type RunRecord } from "./run-files.ts";
+import { collectTurnCost } from "./turn-cost.ts";
 
 export interface HeadlessOptions {
   readonly args: RunArgs;
@@ -93,6 +94,7 @@ function runRecord(
     verification: config.verification,
     tools: toolNames,
     systemPrompt,
+    ...(config.model.cost !== undefined ? { pricing: config.model.cost } : {}),
   };
 }
 
@@ -126,6 +128,7 @@ export async function runHeadless(options: HeadlessOptions): Promise<HeadlessRes
     files = await openRunFiles(config.outputDir, runRecord(config, opened), redact);
     // Never awaited by the Agent Run, so a failed write surfaces only once it has settled.
     const logged = failureOf(files.logEvents(agentRun.events()));
+    const turnCost = collectTurnCost(agentRun.events(), config.model.cost !== undefined);
 
     const cancel = () => {
       const { reason } = options.signal;
@@ -154,9 +157,17 @@ export async function runHeadless(options: HeadlessOptions): Promise<HeadlessRes
 
     const result = await agentRun.result();
     const finishedAt = systemClock.now();
+    const costUsd = await turnCost;
     const logFailure = await logged;
     const exitCode: ExitCode = logFailure === undefined ? EXIT_CODE_BY_OUTCOME[result.outcome] : 70;
-    const resultFailure = await failureOf(files.writeResult({ exitCode, result, finishedAt }));
+    const resultFailure = await failureOf(
+      files.writeResult({
+        exitCode,
+        result,
+        finishedAt,
+        ...(costUsd !== undefined ? { costUsd } : {}),
+      }),
+    );
 
     const text = finalText(result);
     if (text !== "") stdout(text.endsWith("\n") ? text : `${text}\n`);

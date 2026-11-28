@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it, spyOn } from "bun:test";
+import { join } from "node:path";
 import Anthropic from "@anthropic-ai/sdk";
 import { Type } from "typebox";
 import {
@@ -59,6 +60,7 @@ type AnthropicStreamChunk =
 
 let mockEvents: AnthropicStreamChunk[] = [];
 let mockCreateError: Error | null = null;
+let mockStreamError: Error | null = null;
 let lastClientOptions: { maxRetries?: number } | undefined;
 let lastCreateOptions: { signal?: AbortSignal } | undefined;
 let lastCreateBody: unknown | undefined;
@@ -518,7 +520,14 @@ describe("Anthropic stream finishReason handling", () => {
       lastCreateBody = body;
       return (async function* () {
         for (const event of mockEvents) {
+          options?.signal?.throwIfAborted?.();
           yield event;
+          if (mockStreamError && (event as { _throwAfter?: boolean })._throwAfter) {
+            throw mockStreamError;
+          }
+        }
+        if (mockStreamError) {
+          throw mockStreamError;
         }
       })();
     });
@@ -636,7 +645,7 @@ describe("Anthropic stream finishReason handling", () => {
     });
   });
 
-  it("captures cachedInputTokens from cache_read_input_tokens and preserves raw usage", async () => {
+  it("captures cachedInputTokens from cache_read_input_tokens and cacheWriteTokens from cache_creation_input_tokens", async () => {
     mockEvents = [
       {
         type: "message_start",
@@ -668,7 +677,99 @@ describe("Anthropic stream finishReason handling", () => {
     expect(turnEndEvent.message.usage?.inputTokens).toBe(100);
     expect(turnEndEvent.message.usage?.outputTokens).toBe(15);
     expect(turnEndEvent.message.usage?.cachedInputTokens).toBe(40);
+    expect(turnEndEvent.message.usage?.cacheWriteTokens).toBe(20);
     expect(turnEndEvent.message.usage?.raw?.cache_creation_input_tokens).toBe(20);
+    expect(turnEndEvent.message.usage?.cost).toBeUndefined(); // unpriced model
+  });
+
+  it("captures cache creation and read tokens and calculates cost from cache-creation.txt fixture", async () => {
+    const fixtureText = await Bun.file(
+      join(import.meta.dir, "fixtures/anthropic/cache-creation.txt"),
+    ).text();
+    mockEvents = fixtureText
+      .split("\n")
+      .filter((line) => line.startsWith("data: "))
+      .map((line) => JSON.parse(line.slice(6)));
+
+    const pricedHaiku: Model = {
+      id: "claude-haiku-4-5",
+      name: "Claude Haiku 4.5",
+      provider: "anthropic",
+      cost: {
+        input: 1.0,
+        output: 5.0,
+        cacheRead: 0.1,
+        cacheWrite: 1.25,
+      },
+    };
+
+    const turnEndEvent = await collectTurnEndEvent(
+      stream(pricedHaiku, context, { apiKey: "test-key" }),
+    );
+    const usage = turnEndEvent.message.usage;
+    expect(usage?.inputTokens).toBe(100);
+    expect(usage?.outputTokens).toBe(42);
+    expect(usage?.cachedInputTokens).toBe(50);
+    expect(usage?.cacheWriteTokens).toBe(200);
+
+    expect(usage?.cost).toBeDefined();
+    expect(usage?.cost?.input).toBeCloseTo(0.0001, 8); // (1 / 1M) * 100
+    expect(usage?.cost?.output).toBeCloseTo(0.00021, 8); // (5 / 1M) * 42
+    expect(usage?.cost?.cacheRead).toBeCloseTo(0.000005, 8); // (0.1 / 1M) * 50
+    expect(usage?.cost?.cacheWrite).toBeCloseTo(0.00025, 8); // (1.25 / 1M) * 200
+    expect(usage?.cost?.total).toBeCloseTo(0.000565, 8);
+  });
+
+  it("calculates cost for a priced model matching catalog rates", async () => {
+    const pricedModel: Model = {
+      id: "claude-sonnet-5",
+      name: "Claude Sonnet 5",
+      provider: "anthropic",
+      cost: {
+        input: 2.0,
+        output: 10.0,
+        cacheRead: 0.2,
+        cacheWrite: 2.5,
+      },
+    };
+
+    mockEvents = [
+      {
+        type: "message_start",
+        message: {
+          usage: {
+            input_tokens: 100_000,
+            output_tokens: 0,
+            cache_read_input_tokens: 200_000,
+            cache_creation_input_tokens: 10_000,
+          },
+        },
+      },
+      { type: "content_block_start", index: 0, content_block: { type: "text" } },
+      {
+        type: "content_block_delta",
+        index: 0,
+        delta: { type: "text_delta", text: "Response" },
+      },
+      { type: "content_block_stop", index: 0 },
+      {
+        type: "message_delta",
+        delta: { stop_reason: "end_turn", stop_sequence: null },
+        usage: { output_tokens: 50_000 },
+      },
+      { type: "message_stop" },
+    ];
+
+    const turnEndEvent = await collectTurnEndEvent(
+      stream(pricedModel, context, { apiKey: "test-key" }),
+    );
+    const usage = turnEndEvent.message.usage;
+    expect(usage?.cost).toBeDefined();
+    expect(usage?.cost?.input).toBeCloseTo(0.2, 8); // (2 / 1M) * 100k
+    expect(usage?.cost?.output).toBeCloseTo(0.5, 8); // (10 / 1M) * 50k
+    expect(usage?.cost?.cacheRead).toBeCloseTo(0.04, 8); // (0.2 / 1M) * 200k
+    expect(usage?.cost?.cacheWrite).toBeCloseTo(0.025, 8); // (2.5 / 1M) * 10k
+    expect(usage?.cost?.total).toBeCloseTo(0.765, 8);
   });
 
   it("handles multi-block responses — tool_use block emits start/stop and populates turn_end content", async () => {
@@ -953,5 +1054,99 @@ describe("Anthropic stream finishReason handling", () => {
     } finally {
       mockCreateError = null;
     }
+  });
+
+  it("emits turn_delta with reported usage before error when stream fails mid-stream", async () => {
+    const pricedModel: Model = {
+      ...model,
+      cost: { input: 1, output: 5, cacheRead: 0.1, cacheWrite: 1.25 },
+    };
+    mockEvents = [
+      {
+        type: "message_start",
+        message: { usage: { input_tokens: 1000 } },
+        _throwAfter: true,
+      } as unknown as AnthropicStreamChunk,
+    ];
+    mockStreamError = new Error("Connection reset by peer");
+    try {
+      const streamObj = stream(pricedModel, context, { apiKey: "test-key" });
+      const events = [];
+      for await (const ev of streamObj) {
+        events.push(ev);
+      }
+      const turnDeltas = events.filter((e) => e.type === "turn_delta");
+      const errors = events.filter((e) => e.type === "error");
+
+      expect(turnDeltas.length).toBeGreaterThanOrEqual(1);
+      const lastTurnDelta = turnDeltas.at(-1);
+      expect(lastTurnDelta?.type).toBe("turn_delta");
+      if (lastTurnDelta?.type === "turn_delta") {
+        expect(lastTurnDelta.usage?.inputTokens).toBe(1000);
+        expect(lastTurnDelta.usage?.outputTokens).toBe(0);
+        expect(lastTurnDelta.usage?.cost).toEqual({
+          input: 0.001,
+          output: 0,
+          cacheRead: 0,
+          cacheWrite: 0,
+          total: 0.001,
+        });
+      }
+
+      expect(errors).toHaveLength(1);
+      expect(errors[0]?.type).toBe("error");
+      if (errors[0]?.type === "error") {
+        expect(errors[0].error.message).toBe("Connection reset by peer");
+      }
+      // Error event must appear after turn_delta
+      const lastTurnDeltaIdx = events.findLastIndex((e) => e.type === "turn_delta");
+      const errorIdx = events.findIndex((e) => e.type === "error");
+      expect(errorIdx).toBeGreaterThan(lastTurnDeltaIdx);
+    } finally {
+      mockStreamError = null;
+    }
+  });
+
+  it("emits turn_delta with reported usage before error when stream is aborted mid-stream", async () => {
+    const pricedModel: Model = {
+      ...model,
+      cost: { input: 1, output: 5, cacheRead: 0.1, cacheWrite: 1.25 },
+    };
+    const abortController = new AbortController();
+    mockEvents = [
+      {
+        type: "message_start",
+        message: { usage: { input_tokens: 50, output_tokens: 10 } },
+      },
+      {
+        type: "content_block_start",
+        index: 0,
+        content_block: { type: "text" },
+      },
+    ];
+    // Abort once stream starts
+    const streamObj = stream(pricedModel, context, {
+      apiKey: "test-key",
+      signal: abortController.signal,
+    });
+    const events = [];
+    for await (const ev of streamObj) {
+      events.push(ev);
+      if (ev.type === "stream_start") {
+        abortController.abort("User cancelled mid-stream");
+      }
+    }
+    const turnDeltas = events.filter((e) => e.type === "turn_delta");
+    const errors = events.filter((e) => e.type === "error");
+
+    expect(turnDeltas.length).toBeGreaterThanOrEqual(1);
+    const lastTurnDelta = turnDeltas.at(-1);
+    expect(lastTurnDelta?.type).toBe("turn_delta");
+    if (lastTurnDelta?.type === "turn_delta") {
+      expect(lastTurnDelta.usage?.inputTokens).toBe(50);
+      expect(lastTurnDelta.usage?.outputTokens).toBe(10);
+      expect(lastTurnDelta.usage?.cost).toBeDefined();
+    }
+    expect(errors).toHaveLength(1);
   });
 });

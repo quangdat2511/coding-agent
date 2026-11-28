@@ -319,4 +319,60 @@ describe("settling a failed Model Turn", () => {
     expect(result.usage).toEqual({ inputTokens: 10, outputTokens: 5 });
     expect(run.snapshot().transcript).toHaveLength(1);
   });
+
+  it("preserves partial usage emitted before a mid-stream failure", async () => {
+    const usage = {
+      inputTokens: 120,
+      outputTokens: 15,
+      cachedInputTokens: 50,
+      cacheWriteTokens: 200,
+      cost: {
+        input: 0.24,
+        output: 0.15,
+        cacheRead: 0.01,
+        cacheWrite: 0.5,
+        total: 0.9,
+      },
+    };
+    const turn: ScriptedTurn = rawStream(
+      streamStart,
+      { type: "content_block_start", index: 0, block: { type: "text", text: "" } },
+      { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "Partial" } },
+      { type: "turn_delta", usage },
+      { type: "error", error: { message: "connection interrupted" } },
+    );
+
+    const { run } = openTestRun({ model: { turns: [turn] } });
+    await run.dispatch({ type: "start", task });
+    const result = await run.result();
+    const events = await collect(run.events());
+
+    const turnCompleted = events.find((e) => e.type === "model_turn_completed");
+    expect(turnCompleted?.data.usage).toEqual(usage);
+    expect(result.usage).toEqual(usage);
+  });
+
+  it("settles MODEL_PROTOCOL_ERROR when turn_delta carries malformed cost", async () => {
+    const turn: ScriptedTurn = rawStream(
+      streamStart,
+      {
+        type: "turn_delta",
+        usage: {
+          inputTokens: 10,
+          outputTokens: 5,
+          cost: { input: -1, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+        },
+      },
+      { type: "error", error: { message: "irrelevant" } },
+    );
+
+    const { run } = openTestRun({ model: { turns: [turn] } });
+    await run.dispatch({ type: "start", task });
+    const result = await run.result();
+
+    expect(result.outcome).toBe("failed");
+    if (result.outcome === "failed") {
+      expect(result.failure.code).toBe("MODEL_PROTOCOL_ERROR");
+    }
+  });
 });

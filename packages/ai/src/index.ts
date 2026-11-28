@@ -1,6 +1,7 @@
 export * from "./auth/helpers.ts";
 export * from "./auth/types.ts";
 export * from "./capabilities.ts";
+export * from "./cost.ts";
 export * from "./credentials.ts";
 export * from "./models.ts";
 export * from "./providers/anthropic.ts";

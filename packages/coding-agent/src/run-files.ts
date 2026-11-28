@@ -7,6 +7,7 @@ import type {
   RunEventType,
   RunLimits,
 } from "@coding-agent/agent-core";
+import type { ModelCost } from "@coding-agent/ai";
 import type { BuildInfo } from "./build-info.ts";
 import type { Profile } from "./run-args.ts";
 import type { SamplingSettings, VerificationConfig } from "./run-config.ts";
@@ -26,12 +27,14 @@ export interface RunRecord {
   readonly verification: VerificationConfig;
   readonly tools: readonly string[];
   readonly systemPrompt: string;
+  readonly pricing?: ModelCost;
 }
 
 export interface ResultRecord {
   readonly exitCode: number;
   readonly result: AgentResult;
   readonly finishedAt: string;
+  readonly costUsd?: number;
 }
 
 const OMITTED_EVENTS: ReadonlySet<RunEventType> = new Set<RunEventType>([

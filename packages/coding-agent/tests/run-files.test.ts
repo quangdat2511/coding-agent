@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { join } from "node:path";
-import type { RunEvent } from "@coding-agent/agent-core";
+import type { AgentResult, RunEvent } from "@coding-agent/agent-core";
 import { openRunFiles, type RunRecord } from "../src/run-files.ts";
 import { withTemporaryDirectory } from "./support/process.ts";
 
@@ -28,6 +28,11 @@ const run: RunRecord = {
   tools: ["read"],
   systemPrompt: "You are Coding Agent.",
 };
+
+const agentResult = {
+  outcome: "succeeded",
+  workspaceChanged: false,
+} as unknown as AgentResult;
 
 function event(sequence: number, type: string, data: object): RunEvent {
   return {
@@ -129,5 +134,96 @@ describe("the event log", () => {
         completed.data.outcome === "succeeded" &&
         completed.data.result?.details,
     ).toEqual({ resultLimitReached: 100, incomplete: { exitCode: 2 } });
+  });
+});
+
+describe("run.json and result.json records", () => {
+  it("omits pricing from run.json and costUsd from result.json when unpriced", async () => {
+    await withTemporaryDirectory(async (directory) => {
+      const files = await openRunFiles(directory, run, redact);
+      await files.writeResult({
+        exitCode: 0,
+        result: agentResult,
+        finishedAt: "2026-11-12T00:00:00.000Z",
+      });
+      await files.close();
+
+      const runJson = JSON.parse(await Bun.file(join(directory, "run.json")).text());
+      const resultJson = JSON.parse(await Bun.file(join(directory, "result.json")).text());
+
+      expect(runJson.schemaVersion).toBe(2);
+      expect("pricing" in runJson).toBe(false);
+
+      expect(resultJson.schemaVersion).toBe(2);
+      expect("costUsd" in resultJson).toBe(false);
+    });
+  });
+
+  it("includes pricing in run.json and costUsd in result.json when priced", async () => {
+    await withTemporaryDirectory(async (directory) => {
+      const pricedRun: RunRecord = {
+        ...run,
+        pricing: { input: 1, output: 5, cacheRead: 0.1, cacheWrite: 1.25 },
+      };
+      const files = await openRunFiles(directory, pricedRun, redact);
+      await files.writeResult({
+        exitCode: 0,
+        result: agentResult,
+        finishedAt: "2026-11-12T00:00:00.000Z",
+        costUsd: 0.000075,
+      });
+      await files.close();
+
+      const runJson = JSON.parse(await Bun.file(join(directory, "run.json")).text());
+      const resultJson = JSON.parse(await Bun.file(join(directory, "result.json")).text());
+
+      expect(runJson.schemaVersion).toBe(2);
+      expect(runJson.pricing).toEqual({ input: 1, output: 5, cacheRead: 0.1, cacheWrite: 1.25 });
+
+      expect(resultJson.schemaVersion).toBe(2);
+      expect(resultJson.costUsd).toBe(0.000075);
+    });
+  });
+
+  it("records costUsd: 0 when cost is known zero (noUsage)", async () => {
+    await withTemporaryDirectory(async (directory) => {
+      const files = await openRunFiles(directory, run, redact);
+      await files.writeResult({
+        exitCode: 0,
+        result: agentResult,
+        finishedAt: "2026-11-12T00:00:00.000Z",
+        costUsd: 0,
+      });
+      await files.close();
+
+      const resultJson = JSON.parse(await Bun.file(join(directory, "result.json")).text());
+      expect(resultJson.schemaVersion).toBe(2);
+      expect(resultJson.costUsd).toBe(0);
+    });
+  });
+
+  it("includes pricing in run.json and omits costUsd from result.json when priced but cost is unknown", async () => {
+    await withTemporaryDirectory(async (directory) => {
+      const pricedRun: RunRecord = {
+        ...run,
+        pricing: { input: 1, output: 5, cacheRead: 0.1, cacheWrite: 1.25 },
+      };
+      const files = await openRunFiles(directory, pricedRun, redact);
+      await files.writeResult({
+        exitCode: 0,
+        result: agentResult,
+        finishedAt: "2026-11-12T00:00:00.000Z",
+      });
+      await files.close();
+
+      const runJson = JSON.parse(await Bun.file(join(directory, "run.json")).text());
+      const resultJson = JSON.parse(await Bun.file(join(directory, "result.json")).text());
+
+      expect(runJson.schemaVersion).toBe(2);
+      expect(runJson.pricing).toEqual({ input: 1, output: 5, cacheRead: 0.1, cacheWrite: 1.25 });
+
+      expect(resultJson.schemaVersion).toBe(2);
+      expect("costUsd" in resultJson).toBe(false);
+    });
   });
 });

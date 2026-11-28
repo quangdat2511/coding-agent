@@ -76,7 +76,9 @@ interface UsageTotals {
   inputTokens: number;
   outputTokens: number;
   cachedInputTokens?: number;
+  cacheWriteTokens?: number;
   reasoningTokens?: number;
+  cost?: UsageCost;
 }
 
 interface AgentFailure {

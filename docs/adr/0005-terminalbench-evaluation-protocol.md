@@ -382,7 +382,7 @@ at which ADR 0002 §7 requires a schema version.
   commit, provider and model, the sampling settings bound into the `ModelPort`, the transport
   retry bound (ADR 0004 §2), the resolved `repoRoot`, the profile name and its resolved
   `RunLimits`, the Approval Policy, the Verification configuration, the registered tool names,
-  and the assembled system prompt. It never contains a credential value.
+  the assembled system prompt, and optional catalog `pricing` (`ModelCost`) when priced. It never contains a credential value.
 - **`events.jsonl`** holds one Run Event per line, in ADR 0002's envelope, appended as the
   writer receives them. `assistant_content_delta`, `tool_execution_progress`, and
   `verification_progress` are omitted because deltas would dominate the file. The completion
@@ -392,7 +392,7 @@ at which ADR 0002 §7 requires a schema version.
   consumer that the producer never awaits (ADR 0002 §7), so a killed process can lose the unwritten
   tail. A reader treats a log that does not end with `run_settled` as truncated.
 - **`result.json`** is written after `run_settled`. It records the exit code, the Agent Result,
-  and the finish time.
+  the finish time, and optional `costUsd` when known.
 
 ### 5. Evaluation Profile and task conditions
 
@@ -502,7 +502,7 @@ reads the downloaded `coding-agent/` files and:
 
 - sets `n_input_tokens` (cached tokens included, as Harbor defines it), `n_cache_tokens`, and
   `n_output_tokens` from the Agent Result, or from `model_turn_completed` usage when the event log
-  is truncated. `cost_usd` stays unset, because the provider contract carries no pricing;
+  is truncated. `cost_usd` is set from `costUsd` in `result.json` when present, and stays unset when the run has no known cost;
 - sets `metadata` to the Agent Result outcome and failure code, any runtime limit reached, the
   Model Turn and Tool Call counts, the profile, and the artifact SHA-256;
 - writes `trajectory.json` beside the logs, converted from `events.jsonl` and validated with

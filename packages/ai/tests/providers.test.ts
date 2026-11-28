@@ -142,6 +142,38 @@ describe("Built-in Providers & Registry", () => {
       expect(other?.capabilities).toEqual(ANTHROPIC_MESSAGES_CAPABILITIES);
     });
 
+    it("createAnthropicProvider returns models with ModelCost for priced models and undefined for unpriced", () => {
+      const provider = createAnthropicProvider();
+      const models = provider.getModels();
+
+      const opus5 = models.find((m) => m.id === "claude-opus-5");
+      expect(opus5?.cost).toEqual({
+        input: 5.0,
+        output: 25.0,
+        cacheRead: 0.5,
+        cacheWrite: 6.25,
+      });
+
+      const sonnet5 = models.find((m) => m.id === "claude-sonnet-5");
+      expect(sonnet5?.cost).toEqual({
+        input: 2.0,
+        output: 10.0,
+        cacheRead: 0.2,
+        cacheWrite: 2.5,
+      });
+
+      const haiku45 = models.find((m) => m.id === "claude-haiku-4-5");
+      expect(haiku45?.cost).toEqual({
+        input: 1.0,
+        output: 5.0,
+        cacheRead: 0.1,
+        cacheWrite: 1.25,
+      });
+
+      const unpriced = models.find((m) => m.id === "claude-opus-4-1");
+      expect(unpriced?.cost).toBeUndefined();
+    });
+
     it("createXaiProvider accepts modelOverrides option", () => {
       const provider = createXaiProvider({
         modelOverrides: {
@@ -431,6 +463,28 @@ describe("Built-in Providers & Registry", () => {
 
       const xaiModel = models.getModel("xai", "grok-4.3");
       expect(xaiModel).toBeDefined();
+    });
+
+    it("returns models with their Model Cost", () => {
+      const directory = createProviderDirectory();
+      const haiku = directory.getModel("anthropic", "claude-haiku-4-5");
+      expect(haiku?.cost).toEqual({
+        input: 1.0,
+        output: 5.0,
+        cacheRead: 0.1,
+        cacheWrite: 1.25,
+      });
+
+      const sonnet = directory.getModel("anthropic", "claude-sonnet-5");
+      expect(sonnet?.cost).toEqual({
+        input: 2.0,
+        output: 10.0,
+        cacheRead: 0.2,
+        cacheWrite: 2.5,
+      });
+
+      const unpriced = directory.getModel("anthropic", "claude-opus-4-1");
+      expect(unpriced?.cost).toBeUndefined();
     });
   });
 });
