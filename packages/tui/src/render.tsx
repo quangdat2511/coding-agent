@@ -11,7 +11,7 @@ import {
   routePaste,
 } from "./input.ts";
 import { canAllow, overlayGeometry } from "./overlay.tsx";
-import { TASK_MARKER, transcriptRows } from "./rows.ts";
+import { sessionViewRows, TASK_MARKER } from "./rows.ts";
 import type { TuiHandle, TuiHandlers, TuiModel } from "./types.ts";
 import { FOLLOWING, pageRows, positionAt, type ScrollPosition, topRow } from "./viewport.ts";
 
@@ -43,7 +43,7 @@ export interface MountedTui extends TuiHandle {
 }
 
 // Ink's alternateScreen sends only ESC[?1049h, which leaves the cursor on the row where the shell
-// left it. Moving it to the top-left corner makes the transcript start on the first row.
+// left it. Moving it to the top-left corner makes the Session view start on the first row.
 const CURSOR_HOME = "\u001b[H";
 
 export function renderTui(props: { model: TuiModel; handlers: TuiHandlers }): TuiHandle {
@@ -62,7 +62,7 @@ export function mountTui(
   let model = props.model;
   let position: ScrollPosition = FOLLOWING;
   // The text typed, kept here rather than in a component because the rows the Prompt takes decide
-  // the rows the transcript gets.
+  // the rows the Session view gets.
   let input: InputState = { prompt: EMPTY_EDITOR };
   // When the keyboard was last used or an Approval last appeared. A decision counts only once the
   // keyboard has been quiet for QUIET_MS since then, so a y or n typed for the Prompt as the
@@ -83,22 +83,23 @@ export function mountTui(
     };
     const prompt = editorView(input.prompt, promptLayout);
     const frame = frameLayout(screenRows, prompt.rows.length);
-    const overlay = overlayGeometry(columns, frame.transcript);
+    const overlay = overlayGeometry(columns, frame.sessionViewHeight);
     const reasonLayout: EditorLayout = { kind: "row", columns: overlay.reasonColumns };
     return { columns, promptLayout, prompt, frame, overlay, reasonLayout };
   }
 
-  // Lays the transcript out for the current terminal size, moves the viewport by `scroll` rows and
-  // draws only the rows that fit above the Prompt, so the frame is never taller than the screen.
+  // Lays the Session view out for the current terminal size, moves the viewport by `scroll` rows
+  // and draws only the rows that fit above the Prompt, so the frame is never taller than the
+  // screen.
   function draw(scroll = 0) {
     // Ink would mount the tree again if it rendered after unmount.
     if (unmounted !== undefined || instance === undefined) {
       return;
     }
     const { columns, prompt, frame, overlay, reasonLayout } = measure();
-    const viewportHeight = frame.transcript;
-    const rows = transcriptRows(model.transcript, columns);
-    // With no transcript row in view there is nothing to scroll. Moving would anchor the viewport
+    const viewportHeight = frame.sessionViewHeight;
+    const rows = sessionViewRows(model.sessionView, columns);
+    // With no Session view row in view there is nothing to scroll. Moving would anchor the viewport
     // out of sight, and once the terminal grew it would not follow new rows.
     if (viewportHeight > 0) {
       position = positionAt(rows, viewportHeight, topRow(rows, viewportHeight, position) + scroll);
@@ -118,7 +119,7 @@ export function mountTui(
     if (mode === "prompt") {
       cursor = {
         x: TASK_MARKER.length + prompt.cursor.column,
-        y: frame.transcript + prompt.cursor.row,
+        y: frame.sessionViewHeight + prompt.cursor.row,
       };
     } else if (reason !== undefined && overlay.height > 0) {
       cursor = { x: overlay.reasonOrigin.x + reason.cursor.column, y: overlay.reasonOrigin.y };
@@ -173,7 +174,7 @@ export function mountTui(
           }
           break;
         case "scroll":
-          scroll += action.direction * pageRows(frame.transcript);
+          scroll += action.direction * pageRows(frame.sessionViewHeight);
           break;
         // Whether a task is running is the host's to know: it ignores a cancel with none. The
         // Prompt keeps its text, which may be the next task.

@@ -97,11 +97,11 @@ recording:
 
 | # | You do | You should see |
 | --- | --- | --- |
-| 1 | Paste the content of `packages/coding-agent/tests/fixtures/named-task/task.md` into the Prompt, then press Enter. Open the file in another terminal to copy it, never in the one being recorded | The task appears in the transcript after `> `, and the Agent Run starts |
+| 1 | Paste the content of `packages/coding-agent/tests/fixtures/named-task/task.md` into the Prompt, then press Enter. Open the file in another terminal to copy it, never in the one being recorded | The task appears in the Session view after `> `, and the Agent Run starts |
 | 2 | Wait | `assistant [streaming]`: the answer streams in. The model looks around the repository and asks for a `bash` call: `ls -la src/` in the committed run, after it read `src/slugify.ts`, and `bun test` in the Google responses that the named-task test replays ([fixture README](../tests/fixtures/named-task/README.md#recorded-responses)) |
-| 3 | Wait until the Approval overlay is drawn over the bottom of the transcript, and the footer reads `Esc/Ctrl+C cancel · y allow · n deny`. **Allow it:** press `y` | The overlay closes and the call goes from `[awaiting_approval]` to `[executing]` and `[succeeded]`, with its output under it. A quick command passes `[executing]` too fast to see |
+| 3 | Wait until the Approval overlay is drawn over the bottom of the Session view, and the footer reads `Esc/Ctrl+C cancel · y allow · n deny`. **Allow it:** press `y` | The overlay closes and the call goes from `[awaiting_approval]` to `[executing]` and `[succeeded]`, with its output under it. A quick command passes `[executing]` too fast to see |
 | 4 | Wait | The model states its plan, then asks to `write` `src/slugify.test.ts`: the **second overlay**. It can read files first (a `read` needs no Approval). The committed run reads nothing here, because it read `src/slugify.ts` before the first overlay |
-| 5 | **Cancel it:** press `Esc` while the second overlay is open | The overlay closes, the write never runs (`write src/slugify.test.ts [skipped, CANCELLED]`), `cancellation requested` appears, and the transcript ends with `run [cancelled]` and, under it, `workspace changed, partial changes possible` |
+| 5 | **Cancel it:** press `Esc` while the second overlay is open | The overlay closes, the write never runs (`write src/slugify.test.ts [skipped, CANCELLED]`), `cancellation requested` appears, and the Session view ends with `run [cancelled]` and, under it, `workspace changed, partial changes possible` |
 | 6 | Press `Esc` twice within one second | `Press Esc or Ctrl+C again within 1 second to quit.` after the first, and the Coding Agent exits 0 after the second. `record.sh` then takes over |
 
 If the model takes another path, keep the rule and not the order: allow the first overlay, cancel at
@@ -116,7 +116,7 @@ not queued, so press it again.
 
 ### 4. What the cancelled Agent Run reports
 
-The last lines of the transcript are the Agent Result of the cancelled Agent Run:
+The last lines of the Session view are the Agent Result of the cancelled Agent Run:
 
 ```text
 run [cancelled]
@@ -172,17 +172,18 @@ Approval or a Cancellation:
   `@xterm/headless` shows it. The current recording does not show it: macOS Terminal did not
   answer the query.
 - [CDA-120](https://datn-fit-hcmus.atlassian.net/browse/CDA-120): on Windows Terminal with WSL2
-  the mouse wheel moves the Prompt cursor instead of scrolling the transcript, because the terminal
-  sends each wheel step as an arrow key. PgUp and PgDn scroll. Selecting text and copying it works.
-  This is the check that PR #65 left to the demo, together with copying and Shift+Enter, which
-  both worked on that terminal. Shift+Enter is not shown to work elsewhere: a pseudo-terminal run
-  on macOS suggests that when the terminal answers the query at once, Ink never turns the protocol
-  on and Shift+Enter submits the Prompt. That is a lead for CDA-119, not a finding of this demo.
+  the mouse wheel moves the Prompt cursor instead of scrolling the Session view, because the
+  terminal sends each wheel step as an arrow key. PgUp and PgDn scroll. Selecting text and copying
+  it works. This is the check that PR #65 left to the demo, together with copying and Shift+Enter,
+  which both worked on that terminal. Shift+Enter is not shown to work elsewhere: a pseudo-terminal
+  run on macOS suggests that when the terminal answers the query at once, Ink never turns the
+  protocol on and Shift+Enter submits the Prompt. That is a lead for CDA-119, not a finding of this
+  demo.
 
 ## When the run shows a defect
 
 The ticket asks for each defect that the run exposes to be fixed here, or filed with a link from
-CDA-87. `tests/demo-recording.test.ts` rejects a recording whose transcript shows one of the
+CDA-87. `tests/demo-recording.test.ts` rejects a recording whose Session view shows one of the
 messages in `DEFECT_SIGNS` of `tests/support/demo-recording.ts`, which are the Coding Agent saying
 that something went wrong. Fix the defect or file it, then record again. A recording of a run that
 hid a defect is worse than none.

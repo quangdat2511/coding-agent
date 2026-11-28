@@ -4,14 +4,14 @@
 // tui owns TuiModel. Coding Agent's projection (CDA-82) builds it from Run Events. Later
 // tickets only add to it: new optional fields or new union members.
 export interface TuiModel {
-  // Oldest first. Each id is unique across the transcript and stays the same across updates.
-  readonly transcript: readonly TranscriptEntry[];
+  // Oldest first. Each id is unique across the Session view and stays the same across updates.
+  readonly sessionView: readonly SessionViewEntry[];
   // The Approval awaiting a decision, from approval_requested. The overlay shows it until the
   // person decides, and the decision goes to onApproval with this approvalId.
   readonly pendingApproval?: PendingApproval;
 }
 
-// Not exported from index.ts, like TranscriptEntry. Consumers derive this type with
+// Not exported from index.ts, like SessionViewEntry. Consumers derive this type with
 // NonNullable<TuiModel["pendingApproval"]>.
 export interface PendingApproval {
   readonly approvalId: string;
@@ -21,12 +21,12 @@ export interface PendingApproval {
 }
 
 // Not exported from index.ts: the public surface is exactly the four names of ADR 0004 §5.
-// Consumers derive this type with TuiModel["transcript"][number].
+// Consumers derive this type with TuiModel["sessionView"][number].
 //
 // Statuses mirror ADR 0002 §6 but are declared here, because tui imports no sibling package.
 // What ends an Agent Run (a cancellation, a limit, the settled Agent Result) is an entry too,
-// so the outcome of each Coding Task stays in the transcript after the next one starts.
-export type TranscriptEntry =
+// so the outcome of each Coding Task stays in the Session view after the next one starts.
+export type SessionViewEntry =
   | {
       readonly kind: "user";
       readonly id: string;

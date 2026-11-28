@@ -7,13 +7,15 @@ import type {
 import type { AssistantMessage } from "@coding-agent/ai";
 import type { TuiModel } from "@coding-agent/tui";
 
-// The Run Event to TuiModel projection (ADR 0004 §6). It is pure: it performs no I/O, never
-// mutates prev, and returns prev itself when an event changes nothing the TUI shows. Only the
-// entry an event changes is replaced, so the TUI keeps the layout of every other entry.
+// The projection of a Run Event onto TuiModel's Session view (ADR 0004 §6 and §10). It is
+// pure: it performs no I/O, never mutates prev, and returns prev itself when an event changes
+// nothing the TUI shows. Only the entry an event changes is replaced, so the TUI keeps the layout
+// of every other entry. It still takes one Run Event: the Session Controller (CDA-184) widens it
+// to a SessionLogEntry.
 
-type TranscriptEntry = TuiModel["transcript"][number];
-type EntryKind = TranscriptEntry["kind"];
-type Entry<Kind extends EntryKind> = Extract<TranscriptEntry, { kind: Kind }>;
+type SessionViewEntry = TuiModel["sessionView"][number];
+type EntryKind = SessionViewEntry["kind"];
+type Entry<Kind extends EntryKind> = Extract<SessionViewEntry, { kind: Kind }>;
 
 // The longest Tool Call summary, in characters. A summary is one line under the TUI's width.
 const SUMMARY_LENGTH = 120;
@@ -26,10 +28,10 @@ const SUMMARY_ARGUMENT: Readonly<Record<string, string>> = {
   bash: "command",
 };
 
-export function projectRunEvent(event: RunEvent, prev: TuiModel): TuiModel {
+export function projectSessionLogEntry(event: RunEvent, prev: TuiModel): TuiModel {
   switch (event.type) {
     case "run_started":
-      // A TUI runs one Agent Run after another, so the transcript keeps earlier Agent Runs.
+      // A TUI runs one Agent Run after another, so the Session view keeps earlier Agent Runs.
       return append(withoutPendingApproval(prev), {
         kind: "user",
         id: entryId(event, "task"),
@@ -213,14 +215,14 @@ export function projectRunEvent(event: RunEvent, prev: TuiModel): TuiModel {
   }
 }
 
-// Entry ids carry the run id, because the transcript spans every Agent Run the TUI has shown and
+// Entry ids carry the run id, because the Session view spans every Agent Run the TUI has shown and
 // Agent Core IDs are unique only within one Agent Run.
 function entryId(event: RunEvent, kind: string, id?: string): string {
   return id === undefined ? `${event.runId}/${kind}` : `${event.runId}/${kind}/${id}`;
 }
 
-function append(model: TuiModel, entry: TranscriptEntry): TuiModel {
-  return { ...model, transcript: [...model.transcript, entry] };
+function append(model: TuiModel, entry: SessionViewEntry): TuiModel {
+  return { ...model, sessionView: [...model.sessionView, entry] };
 }
 
 function findEntry<Kind extends EntryKind>(
@@ -228,7 +230,7 @@ function findEntry<Kind extends EntryKind>(
   kind: Kind,
   id: string,
 ): Entry<Kind> | undefined {
-  const entry = model.transcript.findLast((candidate) => candidate.id === id);
+  const entry = model.sessionView.findLast((candidate) => candidate.id === id);
   return entry?.kind === kind ? (entry as Entry<Kind>) : undefined;
 }
 
@@ -240,11 +242,11 @@ function replace<Kind extends EntryKind>(
   id: string,
   change: (entry: Entry<Kind>) => Entry<Kind>,
 ): TuiModel {
-  const index = model.transcript.findLastIndex((candidate) => candidate.id === id);
-  const entry = model.transcript[index];
+  const index = model.sessionView.findLastIndex((candidate) => candidate.id === id);
+  const entry = model.sessionView[index];
   if (entry?.kind !== kind) return model;
   const next = change(entry as Entry<Kind>);
-  return next === entry ? model : { ...model, transcript: model.transcript.with(index, next) };
+  return next === entry ? model : { ...model, sessionView: model.sessionView.with(index, next) };
 }
 
 function withoutPendingApproval(model: TuiModel): TuiModel {

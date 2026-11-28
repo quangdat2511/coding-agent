@@ -5,7 +5,7 @@ import type { PendingApproval } from "./types.ts";
 // decides which actions a key stands for, and mountTui carries them out, so a new mode adds an
 // entry to MODES here instead of key handling in a component.
 
-// Which part of the TUI has the keyboard. The transcript shares every mode: Page Up and Page Down
+// Which part of the TUI has the keyboard. The Session view shares every mode: Page Up and Page Down
 // scroll it in each. "prompt" types a Coding Task, "approval" decides the pending Approval and
 // "reason" types why it is denied.
 export type InputMode = "prompt" | "approval" | "reason";

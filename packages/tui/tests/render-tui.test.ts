@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "bun:test";
 import { FOOTER_HEIGHT, KEY_HINTS } from "../src/frame.tsx";
 import * as publicApi from "../src/index.ts";
 import { PROGRESS_ROWS } from "../src/rows.ts";
-import type { TranscriptEntry } from "../src/types.ts";
+import type { SessionViewEntry } from "../src/types.ts";
 import { createTestTerminal } from "./support/terminal.ts";
 import { mountOn, unmountTui } from "./support/tui.ts";
 
@@ -13,13 +13,13 @@ const TASK = "Sửa test đang lỗi trong src/math.ts";
 
 // These tests press no keys, so the TUI never calls a handler.
 function mount(
-  transcript: readonly TranscriptEntry[],
+  sessionView: readonly SessionViewEntry[],
   terminal = createTestTerminal(COLUMNS, ROWS),
 ) {
-  return { tui: mountOn(terminal, { transcript }), terminal };
+  return { tui: mountOn(terminal, { sessionView }), terminal };
 }
 
-// The whole visible screen while the TUI runs: the given transcript rows, empty rows down to the
+// The whole visible screen while the TUI runs: the given Session view rows, empty rows down to the
 // Prompt, then the empty Prompt and the key hint.
 function screenOf(...rows: string[]): string[] {
   return [...shellScreen(...rows).slice(0, ROWS - FOOTER_HEIGHT), ">", KEY_HINTS.prompt];
@@ -151,7 +151,7 @@ describe("renderTui", () => {
 
   it("shows the last rows of an executing call's progress, and its result once it completes", async () => {
     const progress = `${Array.from({ length: 8 }, (_, line) => `line ${line + 1}`).join("\n")}\n`;
-    const running: TranscriptEntry = {
+    const running: SessionViewEntry = {
       kind: "tool_call",
       id: "t-1",
       toolName: "bash",
@@ -170,7 +170,7 @@ describe("renderTui", () => {
     );
 
     tui.update({
-      transcript: [
+      sessionView: [
         {
           kind: "tool_call",
           id: "t-1",
@@ -234,7 +234,7 @@ describe("renderTui", () => {
   });
 
   it("redraws in place on every update without duplicating content", async () => {
-    const task: TranscriptEntry = { kind: "user", id: "task", text: TASK };
+    const task: SessionViewEntry = { kind: "user", id: "task", text: TASK };
     const { tui, terminal } = mount([task]);
     await tui.flush();
     expect(terminal.screen()).toEqual(screenOf(`> ${TASK}`));
@@ -242,7 +242,7 @@ describe("renderTui", () => {
     // Updates between two frames collapse into one frame showing the latest model.
     for (const text of ["I'll", "I'll read", "I'll read the file first."]) {
       tui.update({
-        transcript: [task, { kind: "assistant", id: "m-1", text, status: "streaming" }],
+        sessionView: [task, { kind: "assistant", id: "m-1", text, status: "streaming" }],
       });
     }
     await tui.flush();
@@ -250,7 +250,7 @@ describe("renderTui", () => {
       screenOf(`> ${TASK}`, "", "assistant [streaming]", "I'll read the file first."),
     );
 
-    const message: Extract<TranscriptEntry, { kind: "assistant" }> = {
+    const message: Extract<SessionViewEntry, { kind: "assistant" }> = {
       kind: "assistant",
       id: "m-1",
       text: "I'll read the file first.",
@@ -262,9 +262,9 @@ describe("renderTui", () => {
       toolName: "read",
       summary: "src/math.ts",
     } as const;
-    const steps: { transcript: TranscriptEntry[]; screen: string[] }[] = [
+    const steps: { sessionView: SessionViewEntry[]; screen: string[] }[] = [
       {
-        transcript: [task, message, { ...read, status: "queued" }],
+        sessionView: [task, message, { ...read, status: "queued" }],
         screen: screenOf(
           `> ${TASK}`,
           "",
@@ -275,7 +275,7 @@ describe("renderTui", () => {
         ),
       },
       {
-        transcript: [task, message, { ...read, status: "executing" }],
+        sessionView: [task, message, { ...read, status: "executing" }],
         screen: screenOf(
           `> ${TASK}`,
           "",
@@ -286,7 +286,7 @@ describe("renderTui", () => {
         ),
       },
       {
-        transcript: [
+        sessionView: [
           task,
           message,
           {
@@ -307,12 +307,12 @@ describe("renderTui", () => {
       },
       {
         // Shorter lines and fewer rows must not leave characters from the previous frame behind.
-        transcript: [task, { ...message, text: "Done.", status: "failed" }],
+        sessionView: [task, { ...message, text: "Done.", status: "failed" }],
         screen: screenOf(`> ${TASK}`, "", "assistant [failed]", "Done."),
       },
     ];
     for (const step of steps) {
-      tui.update({ transcript: step.transcript });
+      tui.update({ sessionView: step.sessionView });
       await tui.flush();
       expect(terminal.screen()).toEqual(step.screen);
     }
@@ -338,7 +338,7 @@ describe("renderTui", () => {
     expect(terminal.terminal.buffer.active.cursorY).toBe(1);
   });
 
-  it("starts the transcript on the first row when the shell left the cursor lower", async () => {
+  it("starts the Session view on the first row when the shell left the cursor lower", async () => {
     const terminal = createTestTerminal(COLUMNS, ROWS);
     const shellOutput = Array.from({ length: 10 }, (_, index) => `shell line ${index + 1}`);
     await terminal.print(`${shellOutput.join("\n")}\n`);
@@ -398,7 +398,7 @@ describe("renderTui", () => {
     const expected = ["bash cat notes.txt [succeeded]", "  name    value", "  bell and backspace"];
     expect(terminal.screen()).toEqual(screenOf(...expected));
 
-    tui.update({ transcript: [call, { kind: "user", id: "next", text: "Thanks" }] });
+    tui.update({ sessionView: [call, { kind: "user", id: "next", text: "Thanks" }] });
     await tui.flush();
     expect(terminal.screen()).toEqual(screenOf(...expected, "", "> Thanks"));
   });
@@ -410,7 +410,7 @@ describe("renderTui", () => {
     const unmounted = tui.unmount();
     expect(tui.unmount()).toBe(unmounted);
     await unmounted;
-    tui.update({ transcript: [{ kind: "user", id: "late", text: "Too late" }] });
+    tui.update({ sessionView: [{ kind: "user", id: "late", text: "Too late" }] });
     await tui.flush();
 
     expect(terminal.terminal.buffer.active.type).toBe("normal");

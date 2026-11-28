@@ -1,15 +1,15 @@
 import wrapAnsi from "wrap-ansi";
-import type { TranscriptEntry } from "./types.ts";
+import type { SessionViewEntry } from "./types.ts";
 
-// One terminal row of the laid-out transcript. offset counts the rows of its entry from 0, so an
+// One terminal row of the laid-out Session view. offset counts the rows of its entry from 0, so an
 // entry ID and an offset name the same text at any terminal width.
-export interface TranscriptRow {
+export interface SessionViewRow {
   readonly entryId: string;
   readonly offset: number;
   readonly text: string;
 }
 
-type Entry<Kind extends TranscriptEntry["kind"]> = Extract<TranscriptEntry, { kind: Kind }>;
+type Entry<Kind extends SessionViewEntry["kind"]> = Extract<SessionViewEntry, { kind: Kind }>;
 
 const TAB = "    ";
 const ESC = "\u001b";
@@ -25,18 +25,18 @@ export const TASK_CONTINUATION = " ".repeat(TASK_MARKER.length);
 
 // TuiModel entries are readonly, so an entry object keeps its rows until the width changes and an
 // update only wraps the entries it replaced.
-const cache = new WeakMap<TranscriptEntry, { columns: number; lines: readonly string[] }>();
+const cache = new WeakMap<SessionViewEntry, { columns: number; lines: readonly string[] }>();
 
-// Lays out the whole transcript at the given width. Consecutive entries are separated by one blank
-// row, which belongs to the entry above it.
-export function transcriptRows(
-  transcript: readonly TranscriptEntry[],
+// Lays out the whole Session view at the given width. Consecutive entries are separated by one
+// blank row, which belongs to the entry above it.
+export function sessionViewRows(
+  sessionView: readonly SessionViewEntry[],
   columns: number,
-): TranscriptRow[] {
-  const rows: TranscriptRow[] = [];
-  for (const [index, entry] of transcript.entries()) {
+): SessionViewRow[] {
+  const rows: SessionViewRow[] = [];
+  for (const [index, entry] of sessionView.entries()) {
     const lines = entryLines(entry, columns);
-    const block = index === transcript.length - 1 ? lines : [...lines, ""];
+    const block = index === sessionView.length - 1 ? lines : [...lines, ""];
     for (const [offset, text] of block.entries()) {
       rows.push({ entryId: entry.id, offset, text });
     }
@@ -44,7 +44,7 @@ export function transcriptRows(
   return rows;
 }
 
-function entryLines(entry: TranscriptEntry, columns: number): readonly string[] {
+function entryLines(entry: SessionViewEntry, columns: number): readonly string[] {
   const cached = cache.get(entry);
   if (cached?.columns === columns) {
     return cached.lines;
@@ -54,7 +54,7 @@ function entryLines(entry: TranscriptEntry, columns: number): readonly string[] 
   return lines;
 }
 
-function layoutEntry(entry: TranscriptEntry, columns: number): string[] {
+function layoutEntry(entry: SessionViewEntry, columns: number): string[] {
   switch (entry.kind) {
     case "user":
       return userLines(entry, columns);
@@ -73,7 +73,7 @@ function layoutEntry(entry: TranscriptEntry, columns: number): string[] {
       return outcomeLines(entry, columns);
     default: {
       const unhandled: never = entry;
-      throw new Error(`Unhandled transcript entry: ${JSON.stringify(unhandled)}`);
+      throw new Error(`Unhandled Session view entry: ${JSON.stringify(unhandled)}`);
     }
   }
 }

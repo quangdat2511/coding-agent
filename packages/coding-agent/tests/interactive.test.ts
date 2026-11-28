@@ -30,13 +30,13 @@ afterEach(async () => {
 });
 
 const notices = (model: TuiModel) =>
-  model.transcript.flatMap((entry) => (entry.kind === "notice" ? [entry.text] : []));
+  model.sessionView.flatMap((entry) => (entry.kind === "notice" ? [entry.text] : []));
 const outcomes = (model: TuiModel) =>
-  model.transcript.flatMap((entry) => (entry.kind === "outcome" ? [entry.status] : []));
+  model.sessionView.flatMap((entry) => (entry.kind === "outcome" ? [entry.status] : []));
 const toolCalls = (model: TuiModel) =>
-  model.transcript.flatMap((entry) => (entry.kind === "tool_call" ? [entry.status] : []));
+  model.sessionView.flatMap((entry) => (entry.kind === "tool_call" ? [entry.status] : []));
 const tasks = (model: TuiModel) =>
-  model.transcript.flatMap((entry) => (entry.kind === "user" ? [entry.text] : []));
+  model.sessionView.flatMap((entry) => (entry.kind === "user" ? [entry.text] : []));
 
 interface Setup {
   readonly tui?: FakeTui;
@@ -101,7 +101,7 @@ async function finish(run: ReturnType<typeof start>): Promise<void> {
 }
 
 describe("starting a Coding Task", () => {
-  it("opens one Agent Run under the ask policy and streams it into the transcript", async () => {
+  it("opens one Agent Run under the ask policy and streams it into the Session view", async () => {
     const configs: AgentRunConfig[] = [];
     const run = start({ openRun: scriptedAgent({ configs }) });
     await waitFor(() => run.tui.mounted(), "the TUI");
@@ -118,7 +118,7 @@ describe("starting a Coding Task", () => {
     const model = run.tui.latest();
     expect(tasks(model)).toEqual(["Make the tests pass"]);
     expect(
-      model.transcript.some(
+      model.sessionView.some(
         (entry) => entry.kind === "assistant" && entry.text === "All tests pass.",
       ),
     ).toBe(true);
@@ -209,7 +209,7 @@ describe("a submission while an Agent Run is active", () => {
 });
 
 describe("deciding an Approval", () => {
-  it("allows the Tool Call, and the transcript shows its outcome", async () => {
+  it("allows the Tool Call, and the Session view shows its outcome", async () => {
     const run = start();
     await waitFor(() => run.tui.mounted(), "the TUI");
     run.tui.handlers().onSubmit("Make the tests pass");
@@ -223,7 +223,7 @@ describe("deciding an Approval", () => {
     await finish(run);
   });
 
-  it("denies the Tool Call with the reason, and the transcript shows it denied", async () => {
+  it("denies the Tool Call with the reason, and the Session view shows it denied", async () => {
     const run = start();
     await waitFor(() => run.tui.mounted(), "the TUI");
     run.tui.handlers().onSubmit("Make the tests pass");
@@ -489,7 +489,7 @@ describe("a consumer error", () => {
 });
 
 describe("the credential", () => {
-  it("is replaced by [redacted] in everything the transcript shows", async () => {
+  it("is replaced by [redacted] in everything the Session view shows", async () => {
     const run = start({ openRun: scriptedAgent({ answer: `The key is ${secret}.` }) });
     await waitFor(() => run.tui.mounted(), "the TUI");
     run.tui.handlers().onSubmit("Make the tests pass");
@@ -589,7 +589,7 @@ describe("with the four tools and the Verification Policy of a real Agent Run", 
       );
 
       const model = run.tui.latest();
-      const tools = model.transcript.flatMap((entry) =>
+      const tools = model.sessionView.flatMap((entry) =>
         entry.kind === "tool_call" ? [entry.toolName] : [],
       );
       expect(outcomes(model)).toEqual(["succeeded"]);

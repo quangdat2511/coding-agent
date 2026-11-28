@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import { KEY_HINTS } from "../src/frame.tsx";
 import { QUIET_MS } from "../src/input.ts";
-import type { PendingApproval, TranscriptEntry, TuiHandlers, TuiModel } from "../src/types.ts";
+import type { PendingApproval, SessionViewEntry, TuiHandlers, TuiModel } from "../src/types.ts";
 import { createTestTerminal, KEYS } from "./support/terminal.ts";
 import {
   manualClock,
@@ -13,10 +13,10 @@ import {
 } from "./support/tui.ts";
 
 const COLUMNS = 40;
-// The transcript gets 8 of these rows, under them the Prompt and the key hint.
+// The Session view gets 8 of these rows, under them the Prompt and the key hint.
 const SCREEN_ROWS = 10;
 const PROMPT_ROW = SCREEN_ROWS - 2;
-// The reason's row in the overlay: above the bottom border, which is the transcript's last row.
+// The reason's row in the overlay: above the bottom border, which is the Session view's last row.
 const REASON_ROW = PROMPT_ROW - 2;
 
 const WRITE_APPROVAL: PendingApproval = {
@@ -25,12 +25,12 @@ const WRITE_APPROVAL: PendingApproval = {
   summary: "src/app.ts (12 lines)",
 };
 
-// Eight transcript rows: the header, then line 1 to line 7, filling the viewport.
-const TRANSCRIPT_ROWS = [
+// Eight Session view rows: the header, then line 1 to line 7, filling the viewport.
+const SESSION_VIEW_ROWS = [
   "assistant [completed]",
   ...Array.from({ length: 7 }, (_, index) => `line ${index + 1}`),
 ];
-const TRANSCRIPT: readonly TranscriptEntry[] = [
+const SESSION_VIEW: readonly SessionViewEntry[] = [
   {
     kind: "assistant",
     id: "m-1",
@@ -39,7 +39,7 @@ const TRANSCRIPT: readonly TranscriptEntry[] = [
   },
 ];
 // 21 rows: the header, then line 1 to line 20.
-const LONG_TRANSCRIPT: readonly TranscriptEntry[] = [
+const LONG_SESSION_VIEW: readonly SessionViewEntry[] = [
   {
     kind: "assistant",
     id: "m-1",
@@ -71,11 +71,11 @@ function mount(model: TuiModel, columns = COLUMNS, screenRows = SCREEN_ROWS) {
 afterEach(unmountTui);
 
 describe("Approval overlay", () => {
-  it("shows the tool and its mutation summary over the bottom of the transcript", async () => {
-    const { tui, terminal } = mount({ transcript: TRANSCRIPT, pendingApproval: WRITE_APPROVAL });
+  it("shows the tool and its mutation summary over the bottom of the Session view", async () => {
+    const { tui, terminal } = mount({ sessionView: SESSION_VIEW, pendingApproval: WRITE_APPROVAL });
     await tui.flush();
     const rows = viewport(terminal);
-    // The rows above the overlay still show the transcript.
+    // The rows above the overlay still show the Session view.
     expect(rows.slice(0, 4)).toEqual(["assistant [completed]", "line 1", "line 2", "line 3"]);
     expect(rows.slice(4)).toEqual([
       "╭──────────────────────────────────────╮",
@@ -87,7 +87,7 @@ describe("Approval overlay", () => {
 
   it("allows on y, then hands the keys back to the Prompt", async () => {
     const { tui, terminal, decisions, pause } = mount({
-      transcript: TRANSCRIPT,
+      sessionView: SESSION_VIEW,
       pendingApproval: WRITE_APPROVAL,
     });
     // Enter decides nothing, so an Enter meant for the Prompt cannot allow the call.
@@ -97,7 +97,7 @@ describe("Approval overlay", () => {
     await tui.flush();
     expect(decisions).toEqual([["approval-1", "allow"]]);
     // The overlay closes at once, before the host takes the Approval out of the model.
-    expect(viewport(terminal)).toEqual(TRANSCRIPT_ROWS);
+    expect(viewport(terminal)).toEqual(SESSION_VIEW_ROWS);
 
     await terminal.press("abc");
     await tui.flush();
@@ -106,9 +106,9 @@ describe("Approval overlay", () => {
   });
 
   it("decides nothing while the person is still typing", async () => {
-    const { tui, terminal, decisions, clock, pause } = mount({ transcript: TRANSCRIPT });
+    const { tui, terminal, decisions, clock, pause } = mount({ sessionView: SESSION_VIEW });
     await terminal.press("bu");
-    tui.update({ transcript: TRANSCRIPT, pendingApproval: WRITE_APPROVAL });
+    tui.update({ sessionView: SESSION_VIEW, pendingApproval: WRITE_APPROVAL });
     await tui.flush();
     // "yarn" typed for the Prompt at a few keys a second, as the overlay opens.
     for (const key of "yarn") {
@@ -128,10 +128,10 @@ describe("Approval overlay", () => {
   });
 
   it("decides nothing on a key that comes right after the overlay opens", async () => {
-    const { tui, terminal, decisions, clock } = mount({ transcript: TRANSCRIPT });
+    const { tui, terminal, decisions, clock } = mount({ sessionView: SESSION_VIEW });
     // The keyboard has been quiet for a minute when the Approval arrives.
     clock.advance(60_000);
-    tui.update({ transcript: TRANSCRIPT, pendingApproval: WRITE_APPROVAL });
+    tui.update({ sessionView: SESSION_VIEW, pendingApproval: WRITE_APPROVAL });
     clock.advance(QUIET_MS - 1);
     await terminal.press("y");
     expect(decisions).toEqual([]);
@@ -141,11 +141,11 @@ describe("Approval overlay", () => {
     expect(decisions).toEqual([["approval-1", "allow"]]);
   });
 
-  it("covers the transcript rows it is drawn over", async () => {
+  it("covers the Session view rows it is drawn over", async () => {
     // Rows as wide as the terminal, which would show through any cell the overlay left unwritten.
     const text = Array.from({ length: 7 }, () => "x".repeat(COLUMNS)).join("\n");
     const { tui, terminal, pause } = mount({
-      transcript: [{ kind: "assistant", id: "m-1", text, status: "completed" }],
+      sessionView: [{ kind: "assistant", id: "m-1", text, status: "completed" }],
       pendingApproval: WRITE_APPROVAL,
     });
     pause();
@@ -160,14 +160,14 @@ describe("Approval overlay", () => {
   });
 
   it("hides the cursor while allow or deny is chosen", async () => {
-    const { tui, terminal } = mount({ transcript: TRANSCRIPT, pendingApproval: WRITE_APPROVAL });
+    const { tui, terminal } = mount({ sessionView: SESSION_VIEW, pendingApproval: WRITE_APPROVAL });
     await tui.flush();
     expect(await terminal.cursorAt()).toBeUndefined();
   });
 
   it("asks for a reason on n and denies with it on Enter", async () => {
     const { tui, terminal, decisions, pause } = mount({
-      transcript: TRANSCRIPT,
+      sessionView: SESSION_VIEW,
       pendingApproval: WRITE_APPROVAL,
     });
     pause();
@@ -185,7 +185,7 @@ describe("Approval overlay", () => {
     await terminal.press(KEYS.enter);
     await tui.flush();
     expect(decisions).toEqual([["approval-1", "deny", "quá rủi ro"]]);
-    expect(viewport(terminal)).toEqual(TRANSCRIPT_ROWS);
+    expect(viewport(terminal)).toEqual(SESSION_VIEW_ROWS);
 
     await terminal.press("abc");
     await tui.flush();
@@ -194,7 +194,7 @@ describe("Approval overlay", () => {
 
   it("denies without a reason when none is typed", async () => {
     const { tui, terminal, decisions, pause } = mount({
-      transcript: TRANSCRIPT,
+      sessionView: SESSION_VIEW,
       pendingApproval: WRITE_APPROVAL,
     });
     pause();
@@ -205,7 +205,7 @@ describe("Approval overlay", () => {
 
   it("keeps the cursor of a reason wider than its row in view", async () => {
     const { tui, terminal, pause } = mount({
-      transcript: TRANSCRIPT,
+      sessionView: SESSION_VIEW,
       pendingApproval: WRITE_APPROVAL,
     });
     pause();
@@ -223,7 +223,7 @@ describe("Approval overlay", () => {
 
   it("never moves the reason's cursor on scroll keys, nor the viewport on its editing keys", async () => {
     const { tui, terminal, pause } = mount({
-      transcript: LONG_TRANSCRIPT,
+      sessionView: LONG_SESSION_VIEW,
       pendingApproval: WRITE_APPROVAL,
     });
     pause();
@@ -243,9 +243,9 @@ describe("Approval overlay", () => {
   });
 
   it("keeps the text typed in the Prompt and gives it back the keys and the cursor", async () => {
-    const { tui, terminal, decisions, pause } = mount({ transcript: TRANSCRIPT });
+    const { tui, terminal, decisions, pause } = mount({ sessionView: SESSION_VIEW });
     await terminal.press("Sửa");
-    tui.update({ transcript: TRANSCRIPT, pendingApproval: WRITE_APPROVAL });
+    tui.update({ sessionView: SESSION_VIEW, pendingApproval: WRITE_APPROVAL });
     await tui.flush();
     expect(prompt(terminal)).toBe("> Sửa");
     // Keys go to the overlay, not to the Prompt.
@@ -264,7 +264,7 @@ describe("Approval overlay", () => {
 
   it("opens each Approval afresh, never with the previous one's state", async () => {
     const { tui, terminal, decisions, pause } = mount({
-      transcript: TRANSCRIPT,
+      sessionView: SESSION_VIEW,
       pendingApproval: WRITE_APPROVAL,
     });
     // A reason half typed for the first Approval when a second one replaces it.
@@ -275,7 +275,7 @@ describe("Approval overlay", () => {
       toolName: "bash",
       summary: "rm -rf dist",
     };
-    tui.update({ transcript: TRANSCRIPT, pendingApproval: second });
+    tui.update({ sessionView: SESSION_VIEW, pendingApproval: second });
     await tui.flush();
     expect(viewport(terminal).slice(-3, -1)).toEqual([
       boxed("bash rm -rf dist"),
@@ -288,7 +288,7 @@ describe("Approval overlay", () => {
 
     // A third Approval after a decision opens the overlay again.
     const third: PendingApproval = { approvalId: "approval-3", toolName: "edit", summary: "x.md" };
-    tui.update({ transcript: TRANSCRIPT, pendingApproval: third });
+    tui.update({ sessionView: SESSION_VIEW, pendingApproval: third });
     pause();
     await terminal.press("y");
     await tui.flush();
@@ -298,19 +298,19 @@ describe("Approval overlay", () => {
     ]);
   });
 
-  it("leaves the transcript's scroll position and content as they were", async () => {
+  it("leaves the Session view's scroll position and content as they were", async () => {
     // 21 rows in a viewport of 8 rows.
-    const transcript = LONG_TRANSCRIPT;
-    const { tui, terminal, pause } = mount({ transcript });
+    const sessionView = LONG_SESSION_VIEW;
+    const { tui, terminal, pause } = mount({ sessionView });
     await terminal.press(KEYS.pageUp);
     await tui.flush();
     const inView = viewport(terminal);
     expect(inView[0]).toBe("line 6");
 
-    tui.update({ transcript, pendingApproval: WRITE_APPROVAL });
+    tui.update({ sessionView, pendingApproval: WRITE_APPROVAL });
     await tui.flush();
     expect(viewport(terminal).slice(0, 4)).toEqual(inView.slice(0, 4));
-    // Page Up and Page Down still scroll the transcript under the overlay.
+    // Page Up and Page Down still scroll the Session view under the overlay.
     await terminal.press(KEYS.pageDown);
     await tui.flush();
     expect(viewport(terminal)[0]).toBe("line 13");
@@ -326,7 +326,7 @@ describe("Approval overlay", () => {
 
   it("shows the keys of each step under the Prompt", async () => {
     const { tui, terminal, pause } = mount(
-      { transcript: TRANSCRIPT, pendingApproval: WRITE_APPROVAL },
+      { sessionView: SESSION_VIEW, pendingApproval: WRITE_APPROVAL },
       80,
     );
     await tui.flush();
@@ -338,10 +338,10 @@ describe("Approval overlay", () => {
     expect(terminal.screen().at(-1)).toBe("Esc/Ctrl+C cancel · Enter deny · PgUp/PgDn scroll");
   });
 
-  it("cuts a long summary at half the transcript so the choices always show", async () => {
+  it("cuts a long summary at half the Session view so the choices always show", async () => {
     const summary = Array.from({ length: 30 }, (_, index) => `file${index}.ts`).join(" ");
     const { tui, terminal } = mount({
-      transcript: TRANSCRIPT,
+      sessionView: SESSION_VIEW,
       pendingApproval: { ...WRITE_APPROVAL, summary },
     });
     await tui.flush();
@@ -354,10 +354,10 @@ describe("Approval overlay", () => {
     expect(rows[6]).toBe(boxed("y allow · n deny"));
   });
 
-  it("drops the border but keeps the summary on a transcript of three rows", async () => {
-    // Three transcript rows, the Prompt and the key hint.
+  it("drops the border but keeps the summary on a Session view of three rows", async () => {
+    // Three Session view rows, the Prompt and the key hint.
     const { tui, terminal, decisions, pause } = mount(
-      { transcript: TRANSCRIPT, pendingApproval: WRITE_APPROVAL },
+      { sessionView: SESSION_VIEW, pendingApproval: WRITE_APPROVAL },
       COLUMNS,
       5,
     );
@@ -372,12 +372,12 @@ describe("Approval overlay", () => {
     expect(decisions).toEqual([["approval-1", "allow"]]);
   });
 
-  it("covers the transcript under the reason when it has no border", async () => {
+  it("covers the Session view under the reason when it has no border", async () => {
     // Rows as wide as the terminal, which would show through any cell the overlay left unwritten.
     const text = Array.from({ length: 7 }, () => "x".repeat(20)).join("\n");
     const { tui, terminal, pause } = mount(
       {
-        transcript: [{ kind: "assistant", id: "m-1", text, status: "completed" }],
+        sessionView: [{ kind: "assistant", id: "m-1", text, status: "completed" }],
         pendingApproval: WRITE_APPROVAL,
       },
       20,
@@ -389,10 +389,10 @@ describe("Approval overlay", () => {
     expect(viewport(terminal)).toEqual([" write src/app.ts…", " Reason:"]);
   });
 
-  it("allows nothing on a transcript with no room for the summary, but still denies", async () => {
-    // One transcript row, the Prompt and the key hint.
+  it("allows nothing on a Session view with no room for the summary, but still denies", async () => {
+    // One Session view row, the Prompt and the key hint.
     const { tui, terminal, decisions, pause } = mount(
-      { transcript: TRANSCRIPT, pendingApproval: WRITE_APPROVAL },
+      { sessionView: SESSION_VIEW, pendingApproval: WRITE_APPROVAL },
       80,
       3,
     );
@@ -412,7 +412,7 @@ describe("Approval overlay", () => {
 
   it("allows nothing when the terminal has no row for the overlay", async () => {
     const { tui, terminal, decisions, pause } = mount(
-      { transcript: TRANSCRIPT, pendingApproval: WRITE_APPROVAL },
+      { sessionView: SESSION_VIEW, pendingApproval: WRITE_APPROVAL },
       COLUMNS,
       1,
     );

@@ -55,7 +55,7 @@ export function manualClock(): { now(): number; advance(ms: number): void } {
   };
 }
 
-// The Prompt's row, the first of the rows under the transcript, while the Prompt has one row.
+// The Prompt's row, the first of the rows under the Session view, while the Prompt has one row.
 export function prompt(terminal: TestTerminal): string | undefined {
   return terminal.screen().at(-FOOTER_HEIGHT);
 }

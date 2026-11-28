@@ -16,12 +16,12 @@ import type {
 } from "@coding-agent/ai";
 import { BashParams } from "@coding-agent/tools";
 import type { TuiModel } from "@coding-agent/tui";
-import { projectRunEvent } from "../src/index.ts";
+import { projectSessionLogEntry } from "../src/index.ts";
 
 type EventType = RunEvent["type"];
 type DataOf<Type extends EventType> = Extract<RunEvent, { type: Type }>["data"];
 
-const EMPTY: TuiModel = { transcript: [] };
+const EMPTY: TuiModel = { sessionView: [] };
 const usage = { inputTokens: 1, outputTokens: 1 };
 
 // Builds Run Events of one Agent Run with consecutive sequence numbers.
@@ -38,7 +38,7 @@ function runEvents(runId = "s1") {
 }
 
 function project(events: readonly RunEvent[], initial: TuiModel = EMPTY): TuiModel {
-  return events.reduce((model, event) => projectRunEvent(event, model), initial);
+  return events.reduce((model, event) => projectSessionLogEntry(event, model), initial);
 }
 
 function deepFreeze<T>(value: T): T {
@@ -83,7 +83,7 @@ function progress(output: string, toolCallId = "c1"): RunEvent {
   return event("tool_execution_progress", { toolCallId, update: { output } });
 }
 
-describe("projectRunEvent", () => {
+describe("projectSessionLogEntry", () => {
   it("is pure: it never mutates the previous model and returns a new one for a change", () => {
     const prev = deepFreeze(project([started, messageStarted, bashQueued, bashStarted]));
     const snapshot = structuredClone(prev);
@@ -103,7 +103,7 @@ describe("projectRunEvent", () => {
 
     expect(prev).toEqual(snapshot);
     expect(next).not.toBe(prev);
-    expect(next.transcript).toHaveLength(prev.transcript.length + 1);
+    expect(next.sessionView).toHaveLength(prev.sessionView.length + 1);
   });
 
   it("adds the Coding Task when an Agent Run starts and keeps the Agent Runs before it", () => {
@@ -114,12 +114,12 @@ describe("projectRunEvent", () => {
       second("run_started", { task: { objective: "Now add a test" } }),
     ]);
 
-    expect(model.transcript.map(({ kind, id }) => ({ kind, id }))).toEqual([
+    expect(model.sessionView.map(({ kind, id }) => ({ kind, id }))).toEqual([
       { kind: "user", id: "s1/task" },
       { kind: "outcome", id: "s1/outcome" },
       { kind: "user", id: "s2/task" },
     ]);
-    expect(model.transcript[2]).toEqual({ kind: "user", id: "s2/task", text: "Now add a test" });
+    expect(model.sessionView[2]).toEqual({ kind: "user", id: "s2/task", text: "Now add a test" });
   });
 
   describe("Assistant Messages", () => {
@@ -153,7 +153,7 @@ describe("projectRunEvent", () => {
         }),
       ]);
 
-      expect(model.transcript.at(-1)).toEqual({
+      expect(model.sessionView.at(-1)).toEqual({
         kind: "assistant",
         id: "s1/message/m1",
         text: "I'll fix add.",
@@ -179,7 +179,7 @@ describe("projectRunEvent", () => {
         }),
       ]);
 
-      expect(model.transcript.at(-1)).toEqual({
+      expect(model.sessionView.at(-1)).toEqual({
         kind: "assistant",
         id: "s1/message/m1",
         text: "Done.",
@@ -200,7 +200,7 @@ describe("projectRunEvent", () => {
         event("assistant_message_completed", { messageId: "m1", outcome, message: message("") }),
       ]);
 
-      expect(model.transcript.at(-1)).toEqual({
+      expect(model.sessionView.at(-1)).toEqual({
         kind: "assistant",
         id: "s1/message/m1",
         text: "Partial",
@@ -212,8 +212,8 @@ describe("projectRunEvent", () => {
   describe("Tool Calls", () => {
     it("appear queued, then running, then completed with their result", () => {
       const queued = project([started, bashQueued]);
-      const running = projectRunEvent(bashStarted, queued);
-      const completed = projectRunEvent(
+      const running = projectSessionLogEntry(bashStarted, queued);
+      const completed = projectSessionLogEntry(
         event("tool_call_completed", {
           toolCallId: "c1",
           outcome: "failed",
@@ -229,15 +229,15 @@ describe("projectRunEvent", () => {
         running,
       );
 
-      expect(queued.transcript.at(-1)).toEqual({
+      expect(queued.sessionView.at(-1)).toEqual({
         kind: "tool_call",
         id: "s1/tool_call/c1",
         toolName: "bash",
         summary: "bun test",
         status: "queued",
       });
-      expect(running.transcript.at(-1)).toMatchObject({ status: "executing" });
-      expect(completed.transcript.at(-1)).toEqual({
+      expect(running.sessionView.at(-1)).toMatchObject({ status: "executing" });
+      expect(completed.sessionView.at(-1)).toEqual({
         kind: "tool_call",
         id: "s1/tool_call/c1",
         toolName: "bash",
@@ -266,7 +266,7 @@ describe("projectRunEvent", () => {
         }),
       ]);
 
-      expect(completed.transcript.at(-1)).toEqual({
+      expect(completed.sessionView.at(-1)).toEqual({
         kind: "tool_call",
         id: "s1/tool_call/c1",
         toolName: "bash",
@@ -283,7 +283,7 @@ describe("projectRunEvent", () => {
         event("tool_call_completed", { toolCallId: "c1", outcome: "skipped", reason: "CANCELLED" }),
       ]);
 
-      expect(model.transcript.at(-1)).toEqual({
+      expect(model.sessionView.at(-1)).toEqual({
         kind: "tool_call",
         id: "s1/tool_call/c1",
         toolName: "bash",
@@ -307,7 +307,7 @@ describe("projectRunEvent", () => {
         }),
       ]);
 
-      expect(model.transcript.at(-1)).toMatchObject({ summary });
+      expect(model.sessionView.at(-1)).toMatchObject({ summary });
     });
 
     it("show malformed arguments as they came, cut to one short line", () => {
@@ -320,7 +320,7 @@ describe("projectRunEvent", () => {
           toolCall: { id: "c2", name: "read", arguments: long },
         }),
       ]);
-      const entry = model.transcript.at(-1);
+      const entry = model.sessionView.at(-1);
       const summary = entry?.kind === "tool_call" ? entry.summary : "";
 
       expect(Array.from(summary)).toHaveLength(120);
@@ -333,11 +333,11 @@ describe("projectRunEvent", () => {
     const running = project([started, bashQueued, bashStarted]);
 
     it("shows the latest output of an executing Tool Call, each update replacing the last", () => {
-      const first = projectRunEvent(progress("line 1\n"), running);
-      const second = projectRunEvent(progress("line 1\nline 2\n"), first);
+      const first = projectSessionLogEntry(progress("line 1\n"), running);
+      const second = projectSessionLogEntry(progress("line 1\nline 2\n"), first);
 
-      expect(first.transcript.at(-1)).toMatchObject({ status: "executing", progress: "line 1\n" });
-      expect(second.transcript.at(-1)).toMatchObject({ progress: "line 1\nline 2\n" });
+      expect(first.sessionView.at(-1)).toMatchObject({ status: "executing", progress: "line 1\n" });
+      expect(second.sessionView.at(-1)).toMatchObject({ progress: "line 1\nline 2\n" });
     });
 
     it("is cleared when the Tool Call completes", () => {
@@ -353,8 +353,8 @@ describe("projectRunEvent", () => {
         running,
       );
 
-      expect(model.transcript.at(-1)).not.toHaveProperty("progress");
-      expect(model.transcript.at(-1)).toMatchObject({ status: "succeeded" });
+      expect(model.sessionView.at(-1)).not.toHaveProperty("progress");
+      expect(model.sessionView.at(-1)).toMatchObject({ status: "succeeded" });
     });
 
     it("leaves the model unchanged for a call that is not executing", () => {
@@ -363,12 +363,12 @@ describe("projectRunEvent", () => {
         [event("tool_call_completed", { toolCallId: "c1", outcome: "cancelled" })],
         running,
       );
-      const withOutput = projectRunEvent(progress("same\n"), running);
+      const withOutput = projectSessionLogEntry(progress("same\n"), running);
 
-      expect(projectRunEvent(progress("early\n"), queued)).toBe(queued);
-      expect(projectRunEvent(progress("late\n"), completed)).toBe(completed);
-      expect(projectRunEvent(progress("other\n", "unknown"), running)).toBe(running);
-      expect(projectRunEvent(progress("same\n"), withOutput)).toBe(withOutput);
+      expect(projectSessionLogEntry(progress("early\n"), queued)).toBe(queued);
+      expect(projectSessionLogEntry(progress("late\n"), completed)).toBe(completed);
+      expect(projectSessionLogEntry(progress("other\n", "unknown"), running)).toBe(running);
+      expect(projectSessionLogEntry(progress("same\n"), withOutput)).toBe(withOutput);
     });
   });
 
@@ -396,11 +396,11 @@ describe("projectRunEvent", () => {
         toolName: "write",
         summary: "Write 1 line to a.ts",
       });
-      expect(pending.transcript.at(-1)).toMatchObject({ status: "awaiting_approval" });
+      expect(pending.sessionView.at(-1)).toMatchObject({ status: "awaiting_approval" });
     });
 
     it("close when allowed, and the call waits to execute", () => {
-      const model = projectRunEvent(
+      const model = projectSessionLogEntry(
         event("approval_resolved", {
           approvalId: "ap1",
           toolCallId: "c3",
@@ -411,7 +411,7 @@ describe("projectRunEvent", () => {
       );
 
       expect(model).not.toHaveProperty("pendingApproval");
-      expect(model.transcript.at(-1)).toMatchObject({ status: "queued" });
+      expect(model.sessionView.at(-1)).toMatchObject({ status: "queued" });
     });
 
     it("close when denied, and the call completes as denied with the reason", () => {
@@ -440,7 +440,7 @@ describe("projectRunEvent", () => {
       );
 
       expect(model).not.toHaveProperty("pendingApproval");
-      expect(model.transcript.at(-1)).toMatchObject({
+      expect(model.sessionView.at(-1)).toMatchObject({
         status: "denied",
         result: { content: "Denied: wrong file", isError: true, errorCode: "APPROVAL_DENIED" },
       });
@@ -455,11 +455,11 @@ describe("projectRunEvent", () => {
         policy: "auto-approve",
       });
 
-      expect(projectRunEvent(autoRequested, queued)).toBe(queued);
+      expect(projectSessionLogEntry(autoRequested, queued)).toBe(queued);
     });
 
     it("close when the Agent Run settles while one is pending", () => {
-      const model = projectRunEvent(
+      const model = projectSessionLogEntry(
         event("run_settled", { result: settled({ outcome: "cancelled", cancellation: {} }) }),
         pending,
       );
@@ -478,7 +478,7 @@ describe("projectRunEvent", () => {
     ]);
 
     it("shows its start and its outcome with the evidence", () => {
-      const model = projectRunEvent(
+      const model = projectSessionLogEntry(
         event("verification_completed", {
           verificationId: "v1",
           outcome: "continue",
@@ -504,12 +504,12 @@ describe("projectRunEvent", () => {
         verifying,
       );
 
-      expect(verifying.transcript.at(-1)).toEqual({
+      expect(verifying.sessionView.at(-1)).toEqual({
         kind: "verification",
         id: "s1/verification/v1",
         status: "running",
       });
-      expect(model.transcript.at(-1)).toEqual({
+      expect(model.sessionView.at(-1)).toEqual({
         kind: "verification",
         id: "s1/verification/v1",
         status: "continue",
@@ -523,7 +523,7 @@ describe("projectRunEvent", () => {
 
     it("handles verification_progress, which the MVP never emits, without a change", () => {
       expect(
-        projectRunEvent(
+        projectSessionLogEntry(
           event("verification_progress", { verificationId: "v1", update: { message: "1/3" } }),
           verifying,
         ),
@@ -547,7 +547,7 @@ describe("projectRunEvent", () => {
         }),
       ]);
 
-      expect(model.transcript.slice(1)).toEqual([
+      expect(model.sessionView.slice(1)).toEqual([
         {
           kind: "notice",
           id: "s1/notice/2",
@@ -578,7 +578,7 @@ describe("projectRunEvent", () => {
         }),
       ]);
 
-      expect(model.transcript.slice(1)).toEqual([
+      expect(model.sessionView.slice(1)).toEqual([
         { kind: "notice", id: "s3/notice/2", text: "cancellation requested: user" },
         {
           kind: "outcome",
@@ -602,7 +602,7 @@ describe("projectRunEvent", () => {
         event("candidate_completion_detected", { modelTurnId: "t1", messageId: "m1" }),
         event("model_turn_completed", { modelTurnId: "t1", outcome: "completed", usage }),
       ]) {
-        expect(projectRunEvent(unchanged, model)).toBe(model);
+        expect(projectSessionLogEntry(unchanged, model)).toBe(model);
       }
     });
   });
@@ -756,7 +756,7 @@ describe("a recorded event sequence", () => {
     let model = EMPTY;
     const observed = (async () => {
       for await (const next of run.events()) {
-        model = projectRunEvent(next, model);
+        model = projectSessionLogEntry(next, model);
         models.push(model);
         if (next.type === "approval_requested") {
           void run.dispatch({
@@ -777,13 +777,13 @@ describe("a recorded event sequence", () => {
     // The latest output showed under the call while it executed.
     expect(
       models.some((each) =>
-        each.transcript.some(
+        each.sessionView.some(
           (entry) => entry.kind === "tool_call" && entry.progress === "1 pass\n",
         ),
       ),
     ).toBe(true);
     expect(model).toEqual({
-      transcript: [
+      sessionView: [
         { kind: "user", id: "run-1/task", text: "Make the tests pass" },
         {
           kind: "assistant",

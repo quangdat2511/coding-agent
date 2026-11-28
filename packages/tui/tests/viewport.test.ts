@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import { FOOTER_HEIGHT } from "../src/frame.tsx";
-import type { TranscriptEntry } from "../src/types.ts";
+import type { SessionViewEntry } from "../src/types.ts";
 import {
   createTestTerminal,
   KEYS,
@@ -21,13 +21,13 @@ const CLEAR_SCROLLBACK = "\u001b[3J";
 // `viewportRows` is the height of the viewport: the terminal also has the Prompt and the key hint
 // below it.
 function mount(
-  transcript: readonly TranscriptEntry[],
+  sessionView: readonly SessionViewEntry[],
   columns = COLUMNS,
   viewportRows = VIEWPORT_ROWS,
 ) {
   const terminal = createTestTerminal(columns, viewportRows + FOOTER_HEIGHT);
   // No key these tests press reaches a handler.
-  const tui = mountOn(terminal, { transcript });
+  const tui = mountOn(terminal, { sessionView });
   return { tui, terminal };
 }
 
@@ -47,7 +47,7 @@ function message(id: string, count: number, status: "streaming" | "completed" = 
   return { kind: "assistant", id, text: lines(1, count).join("\n"), status } as const;
 }
 
-describe("transcript viewport", () => {
+describe("Session view viewport", () => {
   it("shows the last screenful and scrolls up and down through the rest", async () => {
     // 31 rows: the header, then line 1 to line 30.
     const { tui, terminal } = mount([message("m-1", 30)]);
@@ -90,18 +90,18 @@ describe("transcript viewport", () => {
 
     // Back at the bottom, the view follows new content again.
     await terminal.press(KEYS.pageDown, KEYS.pageDown, KEYS.pageDown);
-    tui.update({ transcript: [message("m-1", 33)] });
+    tui.update({ sessionView: [message("m-1", 33)] });
     await tui.flush();
     expect(viewport(terminal)).toEqual(lines(24, 33));
   });
 
-  it("does not scroll while the terminal has no row for the transcript", async () => {
+  it("does not scroll while the terminal has no row for the Session view", async () => {
     const { tui, terminal } = mount([message("m-1", 30, "streaming")]);
     // One row holds only the Prompt.
     terminal.resize(COLUMNS, 1);
     await terminal.press(KEYS.pageUp);
     tui.scrollBy(-5);
-    tui.update({ transcript: [message("m-1", 40, "streaming")] });
+    tui.update({ sessionView: [message("m-1", 40, "streaming")] });
 
     // Grown again, the view still follows the newest rows.
     resize(terminal, COLUMNS, VIEWPORT_ROWS);
@@ -133,14 +133,14 @@ describe("transcript viewport", () => {
     await terminal.press(KEYS.pageUp);
     await tui.flush();
 
-    // Up and Down move the cursor between the Prompt's rows, and never scroll the transcript.
+    // Up and Down move the cursor between the Prompt's rows, and never scroll the Session view.
     await terminal.press(KEYS.up, KEYS.down);
     await tui.flush();
     expect(viewport(terminal)).toEqual(lines(12, 21));
     expect(prompt(terminal)).toBe(">");
   });
 
-  it("does not scroll a transcript that fits on the screen", async () => {
+  it("does not scroll a Session view that fits on the screen", async () => {
     const { tui, terminal } = mount([message("m-1", 3)]);
     await tui.flush();
     const screen = ["assistant [completed]", ...lines(1, 3), ...Array(6).fill("")];
@@ -157,7 +157,7 @@ describe("transcript viewport", () => {
     expect(viewport(terminal)).toEqual(lines(21, 30));
 
     // At the bottom, the view follows the message as it streams.
-    tui.update({ transcript: [message("m-1", 33, "streaming")] });
+    tui.update({ sessionView: [message("m-1", 33, "streaming")] });
     await tui.flush();
     expect(viewport(terminal)).toEqual(lines(24, 33));
 
@@ -166,12 +166,12 @@ describe("transcript viewport", () => {
     expect(viewport(terminal)).toEqual(lines(19, 28));
 
     // Scrolled up, neither a longer message nor a new entry moves the view.
-    tui.update({ transcript: [message("m-1", 40)] });
+    tui.update({ sessionView: [message("m-1", 40)] });
     await tui.flush();
     expect(viewport(terminal)).toEqual(lines(19, 28));
 
     const call = { kind: "tool_call", id: "c-1", toolName: "bash", summary: "bun test" } as const;
-    tui.update({ transcript: [message("m-1", 40), { ...call, status: "queued" }] });
+    tui.update({ sessionView: [message("m-1", 40), { ...call, status: "queued" }] });
     await tui.flush();
     expect(viewport(terminal)).toEqual(lines(19, 28));
 
@@ -181,7 +181,7 @@ describe("transcript viewport", () => {
     expect(viewport(terminal)).toEqual([...lines(33, 40), "", "bash bun test [queued]"]);
 
     tui.update({
-      transcript: [
+      sessionView: [
         message("m-1", 40),
         { ...call, status: "succeeded", result: { content: "2 pass", isError: false } },
       ],
@@ -202,13 +202,13 @@ describe("transcript viewport", () => {
 
     const steps: { act: () => void; screen: string[] }[] = [
       ...[31, 32, 33].map((count) => ({
-        act: () => tui.update({ transcript: [message("m-1", count, "streaming")] }),
+        act: () => tui.update({ sessionView: [message("m-1", count, "streaming")] }),
         screen: lines(count - 9, count),
       })),
       { act: () => tui.scrollBy(-20), screen: lines(4, 13) },
-      { act: () => tui.update({ transcript: [message("m-1", 50)] }), screen: lines(4, 13) },
+      { act: () => tui.update({ sessionView: [message("m-1", 50)] }), screen: lines(4, 13) },
       { act: () => tui.scrollBy(100), screen: lines(41, 50) },
-      { act: () => tui.update({ transcript: [message("m-1", 3)] }), screen: shortScreen() },
+      { act: () => tui.update({ sessionView: [message("m-1", 3)] }), screen: shortScreen() },
     ];
     for (const step of steps) {
       step.act();
@@ -240,7 +240,7 @@ describe("transcript viewport", () => {
 
   it("keeps the same entry at the top and the tail in view across a resize", async () => {
     // Six messages of 60 identical digits: two rows each at 40 columns, three at 25.
-    const transcript = [1, 2, 3, 4, 5, 6].map((digit) => ({
+    const sessionView = [1, 2, 3, 4, 5, 6].map((digit) => ({
       kind: "assistant" as const,
       id: `m-${digit}`,
       text: String(digit).repeat(60),
@@ -254,7 +254,7 @@ describe("transcript viewport", () => {
       String(digit).repeat(25),
       String(digit).repeat(10),
     ];
-    const { tui, terminal } = mount(transcript);
+    const { tui, terminal } = mount(sessionView);
     await tui.flush();
     expect(viewport(terminal)).toEqual([...at40(4).slice(1), "", ...at40(5), "", ...at40(6)]);
 

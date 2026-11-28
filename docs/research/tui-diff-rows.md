@@ -109,7 +109,7 @@ That works because the projection replaces only the entry an event changed and r
 `Transcript` puts every row in a fixed-height column and draws one `<Text wrap="truncate-end">` per row;
 a blank row is drawn as a single space because an empty `<Text>` takes no height, and truncation is
 only a guard against a row Ink measures wider than the frame
-([transcript.tsx L4-L18](../../packages/tui/src/transcript.tsx#L4-L18)). The frame's height comes from
+([transcript.tsx L4-L18](../../packages/tui/src/session-view.tsx#L4-L18)). The frame's height comes from
 `frameLayout`: the transcript gets `screenRows - footer`, where the footer is the Prompt plus at most
 one key-hint row, `FOOTER_HEIGHT = 2`
 ([frame.tsx L9-L41](../../packages/tui/src/frame.tsx#L9-L41)). `draw()` slices the laid-out rows to the
@@ -178,7 +178,7 @@ What it costs:
    but the only way to check a diff's colors would be to assert on escape bytes, which depend on the
    environment of the test process.
 4. **String checks break silently.** `row.text === ""` for a blank row
-   ([transcript.tsx L14](../../packages/tui/src/transcript.tsx#L14)) and any future filter on row text
+   ([transcript.tsx L14](../../packages/tui/src/session-view.tsx#L14)) and any future filter on row text
    would see escapes.
 
 The CDA-17 prototype in this repo already does this: `view/theme.ts` holds raw SGR constants and a
@@ -569,7 +569,7 @@ Two cheaper variants are worth naming for CDA-157:
 | Tab expansion | 4 spaces | [rows.ts L14](../../packages/tui/src/rows.ts#L14) |
 | Progress rows | 5 | [rows.ts L18](../../packages/tui/src/rows.ts#L18) |
 | Wrap | `{ trim: false, hard: true }`, at least 1 column | [rows.ts L154](../../packages/tui/src/rows.ts#L154) |
-| Row guard | `wrap="truncate-end"` | [transcript.tsx L13](../../packages/tui/src/transcript.tsx#L13) |
+| Row guard | `wrap="truncate-end"` | [transcript.tsx L13](../../packages/tui/src/session-view.tsx#L13) |
 | Footer height | 2 rows (Prompt plus hint) | [frame.tsx L9-L11](../../packages/tui/src/frame.tsx#L9-L11) |
 | Frame width and height fallback | 80 by 24 | [render.tsx L76-L77](../../packages/tui/src/render.tsx#L76-L77) |
 | Frame cap | `maxFps: 60` | [render.tsx L246](../../packages/tui/src/render.tsx#L246) |
@@ -665,7 +665,7 @@ so no test was executed; every claim below was checked against tagged source or 
 
 - **This repository** at `adb7a73` (`main`), branch `CDA-153-tui-diff-rows`:
   [`packages/tui/src/rows.ts`](../../packages/tui/src/rows.ts),
-  [`transcript.tsx`](../../packages/tui/src/transcript.tsx),
+  [`transcript.tsx`](../../packages/tui/src/session-view.tsx),
   [`frame.tsx`](../../packages/tui/src/frame.tsx),
   [`render.tsx`](../../packages/tui/src/render.tsx),
   [`types.ts`](../../packages/tui/src/types.ts),
