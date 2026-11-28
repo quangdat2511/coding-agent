@@ -17,6 +17,7 @@ import type {
   ToolCallQueuedEvent,
   VerificationStartedEvent,
 } from "./events.ts";
+import { guardWording } from "./guarded-wording.ts";
 import { isRecord, messageOf } from "./guards.ts";
 import { createLimitGuard, type LimitBreach } from "./limit-guard.ts";
 import { readModelResponse } from "./model-response.ts";
@@ -40,6 +41,7 @@ import { type PreflightOutcome, preflightToolCall } from "./tool-call-preflight.
 import { executeTool } from "./tool-execution.ts";
 import { createProgressGate } from "./tool-progress.ts";
 import type { ApprovalDecider, ToolError, ToolResult } from "./tool-result.ts";
+import type { ToolCallClosing } from "./transcript-wording.ts";
 import { addUsage, usageOf } from "./usage.ts";
 import type { VerificationCancelled, VerificationDecision } from "./verification.ts";
 
@@ -54,6 +56,8 @@ const refuse = (code: Refusal["code"], message: string): Refusal => ({
 type EventDraft = {
   [T in RunEventType]: Pick<Extract<RunEvent, { type: T }>, "type" | "data">;
 }[RunEventType];
+
+type CallCompletion = Extract<EventDraft, { type: "tool_call_completed" }>["data"];
 
 type StateWithoutPhase = Omit<ReadyState, "phase">;
 
@@ -130,6 +134,7 @@ function withoutPhase(state: AgentState): StateWithoutPhase {
   return {
     runId: state.runId,
     ...(state.task === undefined ? {} : { task: state.task }),
+    carriedMessages: state.carriedMessages,
     transcript: state.transcript,
     usage: state.usage,
     counters: state.counters,
@@ -161,6 +166,7 @@ export function createAgentRun(config: OpenRunConfig, initial: ReadyState): Agen
     workspace: config.workspace,
     signal: abortEffects.signal,
   };
+  const wording = guardWording(config.wording);
 
   let pendingApproval: PendingApprovalResolver | undefined;
   let currentDraft: AssistantMessageDraft | undefined;
@@ -314,7 +320,7 @@ export function createAgentRun(config: OpenRunConfig, initial: ReadyState): Agen
 
   type DeadlineOutcome<T> =
     | { readonly kind: "completed"; readonly value: T }
-    | { readonly kind: "breached"; readonly breach: LimitBreach };
+    | { readonly kind: "breached"; readonly breach: LimitBreach; readonly value?: T };
 
   async function runUnderDeadline<T>(effect: () => Promise<T>): Promise<DeadlineOutcome<T>> {
     recordDurationBreach();
@@ -331,7 +337,7 @@ export function createAgentRun(config: OpenRunConfig, initial: ReadyState): Agen
       clearDeadlineTimer();
     }
 
-    if (breachedLimit !== undefined) return { kind: "breached", breach: breachedLimit };
+    if (breachedLimit !== undefined) return { kind: "breached", breach: breachedLimit, value };
     return { kind: "completed", value };
   }
 
@@ -353,10 +359,27 @@ export function createAgentRun(config: OpenRunConfig, initial: ReadyState): Agen
       partialChangesPossible,
       lastSequence: log.lastSequence + 1,
     };
+    const outcomeNote =
+      result.outcome === "succeeded" || state.task === undefined
+        ? undefined
+        : wording.outcomeNote(result);
+    const wordingFailure = wording.failure;
     try {
       commit(
-        { ...terminal(result), activeDurationMs, partialChangesPossible },
-        { type: "run_settled", data: { result } },
+        {
+          ...terminal(result),
+          activeDurationMs,
+          partialChangesPossible,
+          ...(outcomeNote === undefined ? {} : { transcript: [...state.transcript, outcomeNote] }),
+        },
+        {
+          type: "run_settled",
+          data: {
+            result,
+            ...(outcomeNote === undefined ? {} : { outcomeNote }),
+            ...(wordingFailure === undefined ? {} : { wordingFailure }),
+          },
+        },
       );
     } finally {
       log.close();
@@ -413,6 +436,59 @@ export function createAgentRun(config: OpenRunConfig, initial: ReadyState): Agen
     }
   }
 
+  function closingResult(
+    call: QueuedToolCall,
+    closing: ToolCallClosing,
+  ): Omit<ToolResult, "details"> {
+    const content = wording.closingContent(call, closing);
+    return { toolCallId: call.id, toolName: call.name, content, isError: true };
+  }
+
+  function completeAsRunEnds(toolCall: QueuedToolCall, data: CallCompletion): void {
+    commit(
+      {
+        ...state,
+        transcript: [...state.transcript, toolResultMessage(toolCall.providerId, data.result)],
+      },
+      { type: "tool_call_completed", data },
+    );
+  }
+
+  // Settling must not fail, so a call queued while closing has a fallback id.
+  function closingToolCallId(modelTurnId: string, queueIndex: number): string {
+    try {
+      return config.ids.next("tool_call");
+    } catch {
+      return `${modelTurnId}/tool_call/${queueIndex}`;
+    }
+  }
+
+  // A run can end between assistant_message_completed and its tool_call_queued events.
+  function queueUnqueuedCalls(
+    modelTurnId: string,
+    turnEvents: readonly RunEvent[],
+    queuedEvents: readonly ToolCallQueuedEvent[],
+  ): QueuedToolCall[] {
+    const completed = turnEvents.find(
+      (e): e is AssistantMessageCompletedEvent =>
+        e.type === "assistant_message_completed" && e.data.outcome === "completed",
+    );
+    if (completed === undefined) return [];
+    const queuedIndexes = new Set(queuedEvents.map((e) => e.data.queueIndex));
+    const blocks = completed.data.message.content.filter((block) => block.type === "tool_call");
+    return blocks.flatMap((block, queueIndex) => {
+      if (queuedIndexes.has(queueIndex)) return [];
+      const toolCall: QueuedToolCall = {
+        id: closingToolCallId(modelTurnId, queueIndex),
+        providerId: block.toolCallId,
+        name: block.name,
+        arguments: block.arguments,
+      };
+      commit(state, { type: "tool_call_queued", data: { modelTurnId, queueIndex, toolCall } });
+      return [toolCall];
+    });
+  }
+
   function closeModelTurn(
     mode: CloseMode,
     outcome: "cancelled" | "failed",
@@ -437,8 +513,12 @@ export function createAgentRun(config: OpenRunConfig, initial: ReadyState): Agen
     const queuedEvents = turnEvents.filter(
       (e): e is ToolCallQueuedEvent => e.type === "tool_call_queued",
     );
-    for (const queued of queuedEvents) {
-      const { toolCall } = queued.data;
+    const queued = [
+      // Every tool_call_queued this run commits carries the provider's id.
+      ...queuedEvents.map((e) => e.data.toolCall as QueuedToolCall),
+      ...queueUnqueuedCalls(turnStarted.data.modelTurnId, turnEvents, queuedEvents),
+    ];
+    for (const toolCall of queued) {
       const completed = events.some(
         (e) => e.type === "tool_call_completed" && e.data.toolCallId === toolCall.id,
       );
@@ -446,24 +526,21 @@ export function createAgentRun(config: OpenRunConfig, initial: ReadyState): Agen
         const started = events.some(
           (e) => e.type === "tool_execution_started" && e.data.toolCallId === toolCall.id,
         );
-        if (started) {
-          commit(state, {
-            type: "tool_call_completed",
-            data: {
-              toolCallId: toolCall.id,
-              outcome,
-            },
-          });
-        } else {
-          commit(state, {
-            type: "tool_call_completed",
-            data: {
-              toolCallId: toolCall.id,
-              outcome: "skipped",
-              reason: skipReason,
-            },
-          });
-        }
+        completeAsRunEnds(
+          toolCall,
+          started
+            ? {
+                toolCallId: toolCall.id,
+                outcome,
+                result: closingResult(toolCall, { outcome: "cancelled" }),
+              }
+            : {
+                toolCallId: toolCall.id,
+                outcome: "skipped",
+                reason: skipReason,
+                result: closingResult(toolCall, { outcome: "skipped", reason: skipReason }),
+              },
+        );
       }
     }
 
@@ -688,6 +765,34 @@ export function createAgentRun(config: OpenRunConfig, initial: ReadyState): Agen
     return resolver.promise;
   }
 
+  async function executeUnlessStopped(
+    modelTurn: ModelTurnRef,
+    draft: AssistantMessageDraft,
+    toolCall: QueuedToolCall,
+    remaining: readonly QueuedToolCall[],
+    preflight: PreflightPassed,
+    approval?: Approval,
+  ): Promise<ToolResult | "settled" | undefined> {
+    const execution = await runUnderDeadline(() =>
+      executeToolCall(modelTurn, draft, toolCall, remaining, preflight, approval),
+    );
+    const keepStoppedResult = (result: ToolResult, outcome: "cancelled" | "failed") =>
+      completeAsRunEnds(toolCall, {
+        toolCallId: toolCall.id,
+        outcome,
+        result: withoutDetails(result),
+      });
+    if (execution.kind === "breached") {
+      if (execution.value !== undefined && !isTerminal()) {
+        keepStoppedResult(execution.value, "failed");
+      }
+      breachLimit(execution.breach);
+      return "settled";
+    }
+    if (phase() === "cancelling") keepStoppedResult(execution.value, "cancelled");
+    return isCancellingOrTerminal() ? undefined : execution.value;
+  }
+
   async function resolveToolCalls(
     modelTurn: ModelTurnRef,
     draft: AssistantMessageDraft,
@@ -753,33 +858,30 @@ export function createAgentRun(config: OpenRunConfig, initial: ReadyState): Agen
             decidedBy: "user",
             ...(decision.reason === undefined ? {} : { reason: decision.reason }),
           };
-          const execution = await runUnderDeadline(() =>
-            executeToolCall(modelTurn, draft, toolCall, remaining, preflight, approval),
+          const executed = await executeUnlessStopped(
+            modelTurn,
+            draft,
+            toolCall,
+            remaining,
+            preflight,
+            approval,
           );
-          if (execution.kind === "breached") {
-            breachLimit(execution.breach);
-            return "settled";
-          }
-          result = execution.value;
+          if (executed === undefined || executed === "settled") return executed;
+          result = executed;
           countedAtExecutionStart = true;
-          if (isCancellingOrTerminal()) {
-            return undefined;
-          }
           outcome = result.isError ? "failed" : "succeeded";
         }
       } else {
-        const execution = await runUnderDeadline(() =>
-          executeToolCall(modelTurn, draft, toolCall, remaining, preflight),
+        const executed = await executeUnlessStopped(
+          modelTurn,
+          draft,
+          toolCall,
+          remaining,
+          preflight,
         );
-        if (execution.kind === "breached") {
-          breachLimit(execution.breach);
-          return "settled";
-        }
-        result = execution.value;
+        if (executed === undefined || executed === "settled") return executed;
+        result = executed;
         countedAtExecutionStart = true;
-        if (isCancellingOrTerminal()) {
-          return undefined;
-        }
         outcome = result.isError ? "failed" : "succeeded";
       }
 
@@ -1145,8 +1247,8 @@ export function createAgentRun(config: OpenRunConfig, initial: ReadyState): Agen
     }
     const task: CodingTask = { objective };
     const sequence = commit(
-      { ...state, task, transcript: [{ role: "user", content: objective }] },
-      { type: "run_started", data: { task } },
+      { ...state, task, transcript: [...state.transcript, { role: "user", content: objective }] },
+      { type: "run_started", data: { task, carriedMessages: state.carriedMessages } },
     );
     try {
       guard.resume();

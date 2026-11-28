@@ -686,9 +686,20 @@ describe("a headless run of the named task on Google", () => {
         });
         const events = await loggedEvents(outputDir);
         expect(events.filter(({ type }) => type === "cancellation_requested")).toHaveLength(1);
+        expect(events[0]).toMatchObject({ type: "run_started", data: { carriedMessages: 0 } });
         expect(events.at(-1)).toMatchObject({
+          schemaVersion: 2,
           type: "run_settled",
-          data: { result: { outcome: "cancelled" } },
+          data: {
+            result: { outcome: "cancelled" },
+            outcomeNote: {
+              role: "user",
+              content:
+                '<task_outcome status="cancelled">The person cancelled this Coding Task before ' +
+                "it finished. Do not continue it unless they ask. Tools that were stopped may " +
+                "have changed the repository partly.</task_outcome>",
+            },
+          },
         });
       },
       { signal: cancellation.signal, onRequest: () => cancellation.abort("SIGINT") },

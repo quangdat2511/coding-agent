@@ -191,8 +191,9 @@ def _arguments(raw: Any) -> dict[str, Any]:
 def _observation_result(call_id: str, data: Mapping[str, Any]) -> ObservationResult:
     """The Tool Call's observation, whether or not a Tool Result arrived.
 
-    `closeModelTurn` records `tool_call_completed` with an outcome and no `result` for a call that
-    failed or was cancelled, so the outcome is kept even when there is no content to show.
+    A call that ends without a result of its own now carries a Closing Tool Result, but older logs
+    record a skipped, failed or cancelled call with an outcome and no `result`, so the outcome is
+    kept even when there is no content to show.
     """
     extra: dict[str, Any] = {"outcome": data.get("outcome")}
     reason = text_of(data.get("reason"))

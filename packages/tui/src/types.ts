@@ -58,7 +58,7 @@ export type SessionViewEntry =
         | "denied"
         | "cancelled"
         | "skipped";
-      // Absent until a Tool Result is recorded. A skipped call never gets one (ADR 0002 §3).
+      // Absent until the call completes.
       readonly result?: {
         readonly content: string;
         readonly isError: boolean;

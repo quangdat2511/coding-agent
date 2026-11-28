@@ -46,7 +46,7 @@ describe("executing auto-approved Tool Calls", () => {
     };
 
     expect(events.map(({ sequence, type, data }) => ({ sequence, type, data }))).toEqual([
-      { sequence: 1, type: "run_started", data: { task } },
+      { sequence: 1, type: "run_started", data: { task, carriedMessages: 0 } },
       {
         sequence: 2,
         type: "model_turn_started",
@@ -636,11 +636,23 @@ describe("executing auto-approved Tool Calls", () => {
     expect(completions[0]?.data).toEqual({
       toolCallId: "tool_call-1",
       outcome: "failed",
+      result: {
+        toolCallId: "tool_call-1",
+        toolName: "first",
+        content: "first stopped without a result",
+        isError: true,
+      },
     });
     expect(completions[1]?.data).toEqual({
       toolCallId: "tool_call-2",
       outcome: "skipped",
       reason: "INTERNAL_ERROR",
+      result: {
+        toolCallId: "tool_call-2",
+        toolName: "second",
+        content: "second not run: INTERNAL_ERROR",
+        isError: true,
+      },
     });
 
     const turnCompleted = events.find((e) => e.type === "model_turn_completed");
@@ -692,10 +704,16 @@ describe("executing auto-approved Tool Calls", () => {
       toolCallId: "tool_call-1",
       outcome: "skipped",
       reason: "INTERNAL_ERROR",
+      result: {
+        toolCallId: "tool_call-1",
+        toolName: "lookup",
+        content: "lookup not run: INTERNAL_ERROR",
+        isError: true,
+      },
     });
   });
 
-  it("skips already queued call when ids throws on a subsequent call in queueToolCalls", async () => {
+  it("skips the queued call and queues the rest to skip when ids throws during queueToolCalls", async () => {
     let idCallCount = 0;
     const { run, config } = openTestRun({
       tools: [fakeTool({ name: "first" }), fakeTool({ name: "second" })],
@@ -730,16 +748,36 @@ describe("executing auto-approved Tool Calls", () => {
 
     const events = await collect(run.events());
     const queuedEvents = events.filter((e) => e.type === "tool_call_queued");
-    expect(queuedEvents).toHaveLength(1);
-    expect(queuedEvents[0]?.data.toolCall.id).toBe("tool_call-1");
+    expect(queuedEvents.map((e) => [e.data.queueIndex, e.data.toolCall.id])).toEqual([
+      [0, "tool_call-1"],
+      [1, "tool_call-2"],
+    ]);
 
     const completed = events.filter((e) => e.type === "tool_call_completed");
-    expect(completed).toHaveLength(1);
-    expect(completed[0]?.data).toEqual({
-      toolCallId: "tool_call-1",
-      outcome: "skipped",
-      reason: "INTERNAL_ERROR",
-    });
+    expect(completed.map((e) => e.data)).toEqual([
+      {
+        toolCallId: "tool_call-1",
+        outcome: "skipped",
+        reason: "INTERNAL_ERROR",
+        result: {
+          toolCallId: "tool_call-1",
+          toolName: "first",
+          content: "first not run: INTERNAL_ERROR",
+          isError: true,
+        },
+      },
+      {
+        toolCallId: "tool_call-2",
+        outcome: "skipped",
+        reason: "INTERNAL_ERROR",
+        result: {
+          toolCallId: "tool_call-2",
+          toolName: "second",
+          content: "second not run: INTERNAL_ERROR",
+          isError: true,
+        },
+      },
+    ]);
 
     const turnCompleted = events.find((e) => e.type === "model_turn_completed");
     expect(turnCompleted?.data.outcome).toBe("failed");

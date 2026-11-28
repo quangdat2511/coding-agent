@@ -309,11 +309,23 @@ describe("cancelling an Agent Run", () => {
         toolCallId: "tool_call-1",
         outcome: "skipped",
         reason: "CANCELLED",
+        result: {
+          toolCallId: "tool_call-1",
+          toolName: "write",
+          content: "write not run: CANCELLED",
+          isError: true,
+        },
       });
       expect(toolCompletions[1]?.data).toEqual({
         toolCallId: "tool_call-2",
         outcome: "skipped",
         reason: "CANCELLED",
+        result: {
+          toolCallId: "tool_call-2",
+          toolName: "write",
+          content: "write not run: CANCELLED",
+          isError: true,
+        },
       });
 
       const turnCompleted = events.find((e) => e.type === "model_turn_completed");
@@ -379,6 +391,12 @@ describe("cancelling an Agent Run", () => {
         toolCallId: "tool_call-2",
         outcome: "skipped",
         reason: "CANCELLED",
+        result: {
+          toolCallId: "tool_call-2",
+          toolName: "long_task",
+          content: "long_task not run: CANCELLED",
+          isError: true,
+        },
       });
 
       const turnCompleted = events.find((e) => e.type === "model_turn_completed");
@@ -428,14 +446,26 @@ describe("cancelling an Agent Run", () => {
       const events = await collect(run.events());
       const toolCompletions = events.filter((e) => e.type === "tool_call_completed");
       expect(toolCompletions).toHaveLength(2);
-      expect(toolCompletions[0]?.data).toEqual({
+      expect(toolCompletions[0]?.data).toMatchObject({
         toolCallId: "tool_call-1",
         outcome: "cancelled",
+        result: {
+          toolCallId: "tool_call-1",
+          content: expect.stringContaining("adapter exploded during cancellation abort"),
+          isError: true,
+          error: { code: "TOOL_INTERNAL_ERROR" },
+        },
       });
       expect(toolCompletions[1]?.data).toEqual({
         toolCallId: "tool_call-2",
         outcome: "skipped",
         reason: "CANCELLED",
+        result: {
+          toolCallId: "tool_call-2",
+          toolName: "exploding_task",
+          content: "exploding_task not run: CANCELLED",
+          isError: true,
+        },
       });
     });
 
@@ -475,6 +505,12 @@ describe("cancelling an Agent Run", () => {
         toolCallId: "tool_call-1",
         outcome: "skipped",
         reason: "CANCELLED",
+        result: {
+          toolCallId: "tool_call-1",
+          toolName: "slow_prepare",
+          content: "slow_prepare not run: CANCELLED",
+          isError: true,
+        },
       });
     });
   });

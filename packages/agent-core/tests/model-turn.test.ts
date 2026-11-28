@@ -113,7 +113,7 @@ describe("running a Model Turn", () => {
     const events = await collect(run.events());
 
     expect(events.map(({ type, data }) => ({ type, data }))).toEqual([
-      { type: "run_started", data: { task } },
+      { type: "run_started", data: { task, carriedMessages: 0 } },
       {
         type: "model_turn_started",
         data: {

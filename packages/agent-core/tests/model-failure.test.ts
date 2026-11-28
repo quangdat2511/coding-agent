@@ -1,5 +1,10 @@
 import { describe, expect, it } from "bun:test";
-import type { AssistantMessage, FinishReason, ModelStreamEvent } from "@coding-agent/ai";
+import type {
+  AssistantMessage,
+  FinishReason,
+  ModelStreamEvent,
+  UserMessage,
+} from "@coding-agent/ai";
 import type { AgentFailure, AgentResult, RunEvent } from "../src/index.ts";
 import {
   collect,
@@ -8,10 +13,13 @@ import {
   type ScriptedTurn,
   textTurn,
   throwingRequest,
+  toolCallTurn,
   withFinalMessage,
 } from "./kit/index.ts";
 
 const task = { objective: "Fix the failing test" };
+
+const outcomeNote: UserMessage = { role: "user", content: "task ended: MODEL_FAILURE" };
 
 const streamStart: ModelStreamEvent = { type: "stream_start" };
 
@@ -258,6 +266,34 @@ describe("settling a failed Model Turn", () => {
     expect(events.slice(-3).map((event) => event.type)).toEqual(closingTypes);
   });
 
+  it("settles MODEL_PROTOCOL_ERROR, running nothing, when a final message calls one id twice", async () => {
+    const { run, portCalls } = openTestRun({
+      model: {
+        turns: [
+          toolCallTurn(
+            { toolCallId: "call-1", name: "echo", input: {} },
+            { toolCallId: "call-1", name: "echo", input: {} },
+          ),
+        ],
+      },
+    });
+
+    await run.dispatch({ type: "start", task });
+    const result = await run.result();
+    const events = await collect(run.events());
+
+    expect(failureOf(result)).toEqual({
+      code: "MODEL_PROTOCOL_ERROR",
+      message: 'the model called the tool_call id "call-1" more than once',
+    });
+    expect(events.some((event) => event.type === "tool_call_queued")).toBe(false);
+    expect(portCalls.filter((call) => call.startsWith("tool."))).toEqual([]);
+    expect(run.snapshot().transcript).toEqual([
+      { role: "user", content: "Fix the failing test" },
+      { role: "user", content: "task ended: MODEL_PROTOCOL_ERROR" },
+    ]);
+  });
+
   it("keeps the partial output of a failed response for diagnostics, outside the transcript", async () => {
     const { run, model } = openTestRun({
       model: { turns: [failingStream(opening, new Error("socket hang up"))] },
@@ -292,9 +328,12 @@ describe("settling a failed Model Turn", () => {
           failure,
         },
       },
-      { type: "run_settled", data: { result } },
+      { type: "run_settled", data: { result, outcomeNote } },
     ]);
-    expect(run.snapshot().transcript).toEqual([{ role: "user", content: "Fix the failing test" }]);
+    expect(run.snapshot().transcript).toEqual([
+      { role: "user", content: "Fix the failing test" },
+      outcomeNote,
+    ]);
     expect(model.requests).toHaveLength(1);
   });
 
@@ -317,6 +356,9 @@ describe("settling a failed Model Turn", () => {
       },
     });
     expect(result.usage).toEqual({ inputTokens: 10, outputTokens: 5 });
-    expect(run.snapshot().transcript).toHaveLength(1);
+    expect(run.snapshot().transcript).toEqual([
+      { role: "user", content: "Fix the failing test" },
+      outcomeNote,
+    ]);
   });
 });

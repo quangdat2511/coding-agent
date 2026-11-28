@@ -17,6 +17,7 @@ import type {
 import { BashParams } from "@coding-agent/tools";
 import type { TuiModel } from "@coding-agent/tui";
 import { projectSessionLogEntry } from "../src/index.ts";
+import { transcriptWording } from "../src/transcript-wording.ts";
 
 type EventType = RunEvent["type"];
 type DataOf<Type extends EventType> = Extract<RunEvent, { type: Type }>["data"];
@@ -70,7 +71,10 @@ function settled(result: Partial<AgentResult> & Pick<AgentResult, "outcome">): A
 }
 
 const event = runEvents();
-const started = event("run_started", { task: { objective: "Fix the failing test" } });
+const started = event("run_started", {
+  task: { objective: "Fix the failing test" },
+  carriedMessages: 0,
+});
 const messageStarted = event("assistant_message_started", { modelTurnId: "t1", messageId: "m1" });
 const bashQueued = event("tool_call_queued", {
   modelTurnId: "t1",
@@ -111,7 +115,7 @@ describe("projectSessionLogEntry", () => {
     const model = project([
       started,
       event("run_settled", { result: settled({ outcome: "succeeded" }) }),
-      second("run_started", { task: { objective: "Now add a test" } }),
+      second("run_started", { task: { objective: "Now add a test" }, carriedMessages: 0 }),
     ]);
 
     expect(model.sessionView.map(({ kind, id }) => ({ kind, id }))).toEqual([
@@ -276,11 +280,17 @@ describe("projectSessionLogEntry", () => {
       });
     });
 
-    it("show a Skipped Tool Call with its reason and without a Tool Result", () => {
+    it("show a Skipped Tool Call with its reason and its Closing Tool Result", () => {
+      const notRun = "Not run: the person cancelled the Coding Task before this call started.";
       const model = project([
         started,
         bashQueued,
-        event("tool_call_completed", { toolCallId: "c1", outcome: "skipped", reason: "CANCELLED" }),
+        event("tool_call_completed", {
+          toolCallId: "c1",
+          outcome: "skipped",
+          reason: "CANCELLED",
+          result: { toolCallId: "c1", toolName: "bash", content: notRun, isError: true },
+        }),
       ]);
 
       expect(model.sessionView.at(-1)).toEqual({
@@ -290,6 +300,32 @@ describe("projectSessionLogEntry", () => {
         summary: "bun test",
         status: "skipped",
         skipReason: "CANCELLED",
+        result: { content: notRun, isError: true },
+      });
+    });
+
+    it("show a call stopped while running with its Closing Tool Result", () => {
+      const stopped =
+        "Stopped: the Coding Task ended while this call was running, and the call returned no " +
+        "result. It may have changed the repository partly.";
+      const model = project([
+        started,
+        bashQueued,
+        bashStarted,
+        event("tool_call_completed", {
+          toolCallId: "c1",
+          outcome: "cancelled",
+          result: { toolCallId: "c1", toolName: "bash", content: stopped, isError: true },
+        }),
+      ]);
+
+      expect(model.sessionView.at(-1)).toEqual({
+        kind: "tool_call",
+        id: "s1/tool_call/c1",
+        toolName: "bash",
+        summary: "bun test",
+        status: "cancelled",
+        result: { content: stopped, isError: true },
       });
     });
 
@@ -360,7 +396,13 @@ describe("projectSessionLogEntry", () => {
     it("leaves the model unchanged for a call that is not executing", () => {
       const queued = project([started, bashQueued]);
       const completed = project(
-        [event("tool_call_completed", { toolCallId: "c1", outcome: "cancelled" })],
+        [
+          event("tool_call_completed", {
+            toolCallId: "c1",
+            outcome: "cancelled",
+            result: { toolCallId: "c1", toolName: "bash", content: "Stopped", isError: true },
+          }),
+        ],
         running,
       );
       const withOutput = projectSessionLogEntry(progress("same\n"), running);
@@ -535,7 +577,7 @@ describe("projectSessionLogEntry", () => {
     it("shows the limit that ended it and the failure it settled with", () => {
       const limited = runEvents();
       const model = project([
-        limited("run_started", { task: { objective: "Fix the failing test" } }),
+        limited("run_started", { task: { objective: "Fix the failing test" }, carriedMessages: 0 }),
         limited("runtime_limit_reached", { kind: "maxToolCalls", limit: 100, observed: 101 }),
         limited("run_settled", {
           result: settled({
@@ -567,7 +609,7 @@ describe("projectSessionLogEntry", () => {
     it("shows a requested cancellation and whether the workspace changed", () => {
       const cancel = runEvents("s3");
       const model = project([
-        cancel("run_started", { task: { objective: "Refactor" } }),
+        cancel("run_started", { task: { objective: "Refactor" }, carriedMessages: 0 }),
         cancel("cancellation_requested", { reason: "user", requestedFrom: "streaming_model" }),
         cancel("run_settled", {
           result: settled({
@@ -748,6 +790,7 @@ describe("a recorded event sequence", () => {
         },
       },
       ids: { next: (kind) => `${kind}-${++id}` },
+      wording: transcriptWording,
     });
     if (!opened.ok) throw new Error(opened.message);
     const { run } = opened;

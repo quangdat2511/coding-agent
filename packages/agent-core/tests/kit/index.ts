@@ -5,4 +5,5 @@ export * from "./run.ts";
 export * from "./test-kit.ts";
 export * from "./tools.ts";
 export * from "./verification.ts";
+export * from "./wording.ts";
 export * from "./workspace.ts";

@@ -1,3 +1,4 @@
+import { findTranscriptProblem } from "./carried-transcript.ts";
 import { type Fields, isNonEmptyString, isOneOf, isRecord, messageOf } from "./guards.ts";
 import type { ApprovalPolicy, IdSource, ModelPort, RunLimits } from "./ports.ts";
 import type { OpenRunConfig, OpenRunResult } from "./run.ts";
@@ -161,6 +162,8 @@ const checks = {
   limits: checkLimits,
   clock: (value) => checkPort("clock", value, ["now", "monotonicMs", "setTimer"]),
   ids: (value) => checkPort("ids", value, ["next"]),
+  transcript: findTranscriptProblem,
+  wording: (value) => checkPort("wording", value, ["closingToolResult", "outcomeNote"]),
 } satisfies Record<keyof OpenRunConfig, Check>;
 
 export function findConfigProblem(config: unknown): ConfigProblem | undefined {

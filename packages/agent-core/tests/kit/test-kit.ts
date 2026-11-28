@@ -1,8 +1,10 @@
+import type { Message } from "@coding-agent/ai";
 import type {
   ApprovalPolicy,
   ExecutableTool,
   OpenRunConfig,
   RunLimits,
+  TranscriptWording,
   WorkspaceResolver,
 } from "../../src/index.ts";
 import { type ManualClock, manualClock } from "./clock.ts";
@@ -10,6 +12,7 @@ import { sequentialIds } from "./ids.ts";
 import { type FakeModel, type FakeModelOptions, fakeModel } from "./model.ts";
 import { fakeTool, toolRegistry } from "./tools.ts";
 import { type FakeVerification, fakeVerification, type ScriptedDecision } from "./verification.ts";
+import { fakeWording } from "./wording.ts";
 import { fakeWorkspace } from "./workspace.ts";
 
 export interface TestKitOptions {
@@ -19,6 +22,8 @@ export interface TestKitOptions {
   readonly approvalPolicy?: ApprovalPolicy;
   readonly verification?: readonly ScriptedDecision[];
   readonly limits?: Partial<RunLimits>;
+  readonly transcript?: readonly Message[];
+  readonly wording?: TranscriptWording;
 }
 
 export interface TestKit {
@@ -49,6 +54,7 @@ export function createTestKit(options: TestKitOptions = {}): TestKit {
   const workspace = options.workspace ?? fakeWorkspace();
   const clock = manualClock();
   const ids = sequentialIds();
+  const wording = options.wording ?? fakeWording();
   const tools = (options.tools ?? [fakeTool()]).map(
     (tool): ExecutableTool => ({
       ...tool,
@@ -92,6 +98,12 @@ export function createTestKit(options: TestKitOptions = {}): TestKit {
           record("clock.setTimer()", () => clock.setTimer(delayMs, callback)),
       },
       ids: { next: (kind) => record(`ids.next(${kind})`, () => ids.next(kind)) },
+      ...(options.transcript === undefined ? {} : { transcript: options.transcript }),
+      wording: {
+        closingToolResult: (call, closing) =>
+          record("wording.closingToolResult()", () => wording.closingToolResult(call, closing)),
+        outcomeNote: (result) => record("wording.outcomeNote()", () => wording.outcomeNote(result)),
+      },
     },
   };
 }

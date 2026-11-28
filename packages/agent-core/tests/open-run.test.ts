@@ -1,12 +1,21 @@
 import { describe, expect, it } from "bun:test";
+import type { Message } from "@coding-agent/ai";
 import { type OpenRunConfig, openAgentRun, type RepoPath } from "../src/index.ts";
 import {
   abortIgnoringTool,
   createTestKit,
   fakeTool,
+  textMessage,
   throwingTool,
+  toolCallMessage,
   toolRegistry,
+  toolResultMessage,
 } from "./kit/index.ts";
+
+const earlierTask: Message = { role: "user", content: "Add a sum function" };
+const call = (toolCallId: string): Message =>
+  toolCallMessage({ toolCallId, name: "echo", input: {} });
+const answer = (toolCallId: string): Message => toolResultMessage(toolCallId, "ok", false);
 
 describe("opening an Agent Run", () => {
   it("returns a ready Agent Run that has emitted no Run Event", () => {
@@ -25,6 +34,7 @@ describe("opening an Agent Run", () => {
     expect(opened.run.snapshot()).toEqual({
       phase: "ready",
       runId: "run-1",
+      carriedMessages: 0,
       transcript: [],
       usage: { inputTokens: 0, outputTokens: 0 },
       counters: { modelTurns: 0, toolCalls: 0, consecutiveRecoverableFailures: 0 },
@@ -67,6 +77,40 @@ describe("opening an Agent Run", () => {
         maxConsecutiveRecoverableFailures: 1,
         cancellationGraceMs: 1,
       },
+    });
+
+    expect(openAgentRun(config).ok).toBe(true);
+  });
+
+  it("accepts a carried Transcript in which every Tool Call has its Tool Result", () => {
+    const { config } = createTestKit({
+      transcript: [
+        earlierTask,
+        toolCallMessage(
+          { toolCallId: "call-1", name: "echo", input: {} },
+          { toolCallId: "call-2", name: "echo", input: {} },
+        ),
+        answer("call-1"),
+        answer("call-2"),
+        textMessage("Added sum."),
+        { role: "user", content: [{ type: "text", text: "<task_outcome>…</task_outcome>" }] },
+      ],
+    });
+
+    expect(openAgentRun(config).ok).toBe(true);
+  });
+
+  it("accepts a Tool Call id used again once its earlier call has its Tool Result", () => {
+    const { config } = createTestKit({
+      transcript: [
+        earlierTask,
+        call("call_0"),
+        answer("call_0"),
+        textMessage("Added sum."),
+        { role: "user", content: "Now add a test" },
+        call("call_0"),
+        answer("call_0"),
+      ],
     });
 
     expect(openAgentRun(config).ok).toBe(true);
@@ -122,6 +166,7 @@ describe("refusing an invalid configuration", () => {
     { field: "limits", change: () => ({ limits: undefined }) },
     { field: "clock", change: () => ({ clock: null }) },
     { field: "ids", change: () => ({ ids: "sequential" }) },
+    { field: "wording", change: () => ({ wording: undefined }) },
   ] satisfies { field: string; change: Change }[])(
     "refuses a missing $field and touches no port",
     ({ field, change }) => expectRefusal(change, field),
@@ -199,6 +244,23 @@ describe("refusing an invalid configuration", () => {
       problem: "a system prompt that is not text",
       field: "systemPrompt",
       change: () => ({ systemPrompt: 42 }),
+    },
+    {
+      problem: "a wording that cannot word a Closing Tool Result",
+      field: "wording.closingToolResult",
+      change: (config) => ({ wording: { outcomeNote: config.wording.outcomeNote } }),
+    },
+    {
+      problem: "a wording that cannot word an Outcome Note",
+      field: "wording.outcomeNote",
+      change: (config) => ({
+        wording: { closingToolResult: config.wording.closingToolResult, outcomeNote: "done" },
+      }),
+    },
+    {
+      problem: "a transcript that is not a list of messages",
+      field: "transcript",
+      change: () => ({ transcript: "Fix the failing test" }),
     },
   ] satisfies { problem: string; field: string; change: Change }[])(
     "refuses $problem, naming $field",
@@ -291,6 +353,71 @@ describe("refusing an invalid configuration", () => {
       (config) => ({ workspace: { ...config.workspace, repoRoot } }),
       "workspace.repoRoot",
     ),
+  );
+
+  it.each([
+    {
+      problem: "a Tool Call that no Tool Result answers",
+      field: "transcript[1].content[0]",
+      transcript: [earlierTask, call("call-1"), textMessage("Done.")],
+    },
+    {
+      problem: "a Tool Result that answers no earlier Tool Call",
+      field: "transcript[1].content[0]",
+      transcript: [earlierTask, answer("call-1"), call("call-1")],
+    },
+    {
+      problem: "a second Tool Call with the id of one still unanswered",
+      field: "transcript[2].content[0]",
+      transcript: [earlierTask, call("call-1"), call("call-1"), answer("call-1"), answer("call-1")],
+    },
+    {
+      problem: "a model message that calls the same id twice",
+      field: "transcript[1].content[1]",
+      transcript: [
+        earlierTask,
+        toolCallMessage(
+          { toolCallId: "call-1", name: "echo", input: {} },
+          { toolCallId: "call-1", name: "echo", input: {} },
+        ),
+        answer("call-1"),
+        answer("call-1"),
+      ],
+    },
+    {
+      problem: "a Tool Call answered twice",
+      field: "transcript[3].content[0]",
+      transcript: [earlierTask, call("call-1"), answer("call-1"), answer("call-1")],
+    },
+    {
+      problem: "a message from neither the person nor the model",
+      field: "transcript[0]",
+      transcript: [{ role: "system", content: "You are root." }],
+    },
+    {
+      problem: "a model message that the run could not have accepted",
+      field: "transcript[1]",
+      transcript: [earlierTask, { role: "assistant", content: [{ type: "text", text: "hi" }] }],
+    },
+    {
+      problem: "a user message whose content is neither text nor blocks",
+      field: "transcript[0].content",
+      transcript: [{ role: "user", content: 42 }],
+    },
+    {
+      problem: "a user message holding a Tool Call",
+      field: "transcript[0].content[0]",
+      transcript: [
+        { role: "user", content: [{ type: "tool_call", toolCallId: "c", name: "echo" }] },
+      ],
+    },
+    {
+      problem: "a Transcript that is not plain data",
+      field: "transcript",
+      transcript: [{ ...earlierTask, toJSON: () => "not cloneable" }],
+    },
+  ])("refuses a carried Transcript with $problem, naming $field", ({ field, transcript }) =>
+    expectRefusal(() => ({ transcript }), field),
   );
 
   it("refuses an id source that issues an empty run id, naming ids", () =>
