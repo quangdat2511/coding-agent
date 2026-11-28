@@ -18,3 +18,6 @@ export const socketRefusal = onWindows ? "permission denied" : "not a regular fi
 // Windows has no process groups or POSIX signals: bash ends a command's tree with taskkill, and a
 // shell cannot kill itself with a signal the way these tests make it.
 export const noPosixSignals = onWindows;
+// Real-binary grep integration tests skip when ripgrep is not installed on PATH; CI installs
+// pinned rg 16.0.0 before running the suite.
+export const noRipgrep = Bun.which("rg") === null;
