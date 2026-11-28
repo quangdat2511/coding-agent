@@ -77,6 +77,59 @@ describe("supervising a command", () => {
     expect(output).toBe("one\ntwo\nthree\n");
   });
 
+  it("delivers stdout and stderr to separate callbacks when onStderr is provided", async () => {
+    let stdout = "";
+    let stderr = "";
+    const exit = await runSupervised(launcher, {
+      argv: [shell, "-c", "echo out-line; echo err-line >&2"],
+      cwd: repoRoot,
+      timeoutMs: 10_000,
+      signal: new AbortController().signal,
+      onOutput: (_chunk, text) => {
+        stdout += text;
+      },
+      onStderr: (_chunk, text) => {
+        stderr += text;
+      },
+    });
+
+    expect(exit).toEqual({ exitCode: 0, signalCode: null });
+    expect(stdout).toBe("out-line\n");
+    expect(stderr).toBe("err-line\n");
+  });
+
+  it("runs without a timeout when timeoutMs is omitted and completes normally", async () => {
+    let stdout = "";
+    const exit = await runSupervised(launcher, {
+      argv: [shell, "-c", "sleep 0.05; echo done"],
+      cwd: repoRoot,
+      signal: new AbortController().signal,
+      onOutput: (_chunk, text) => {
+        stdout += text;
+      },
+    });
+
+    expect(exit).toEqual({ exitCode: 0, signalCode: null });
+    expect(stdout).toBe("done\n");
+  });
+
+  it("runs without a timeout when timeoutMs is omitted and still cancels on abort", async () => {
+    const controller = new AbortController();
+    let stdout = "";
+    const exit = await runSupervised(launcher, {
+      argv: [shell, "-c", "echo ready; sleep 10"],
+      cwd: repoRoot,
+      signal: controller.signal,
+      onOutput: (_chunk, text) => {
+        stdout += text;
+        if (stdout.includes("ready")) controller.abort();
+      },
+    });
+
+    expect(exit.stopReason).toBe("cancelled");
+    expect(stdout).toBe("ready\n");
+  });
+
   it("stops a command at its timeout and says the timeout stopped it", async () => {
     const { exit, output, elapsedMs } = await supervise("echo started; sleep 10", {
       timeoutMs: 300,
