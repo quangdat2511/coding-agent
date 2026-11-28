@@ -32,7 +32,7 @@ export type ProcessKillFn = (pid: number, signal: "SIGTERM" | "SIGKILL" | 0) => 
 export interface SupervisedRun {
   readonly argv: readonly string[];
   readonly cwd?: RepoPath;
-  readonly timeoutMs: number;
+  readonly timeoutMs?: number;
   readonly signal: AbortSignal;
   /** Each chunk of output as it arrives, with its text decoded by that pipe's own decoder. */
   onOutput(chunk: Uint8Array, text: string): void;
@@ -101,7 +101,8 @@ export async function runSupervised(
       }
     }, KILL_GRACE_MS);
   };
-  const timeoutTimer = setTimeout(() => terminate("timeout"), run.timeoutMs);
+  const timeoutTimer =
+    run.timeoutMs === undefined ? undefined : setTimeout(() => terminate("timeout"), run.timeoutMs);
   const onAbort = () => terminate("cancelled");
   run.signal.addEventListener("abort", onAbort, { once: true });
   // A listener added to a signal that has already aborted never runs, so a caller that awaited

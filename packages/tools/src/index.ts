@@ -10,6 +10,12 @@ export type {
 export { createChildProcessLauncher } from "./child-process.ts";
 export { EditParams, editTool } from "./edit.ts";
 export { errnoOf } from "./errno.ts";
+export type {
+  FindIncompleteDetails,
+  FindToolDetails,
+  FindTruncationDetails,
+} from "./find.ts";
+export { FindParams, findTool } from "./find.ts";
 export type { LsToolDetails, LsTruncationDetails } from "./ls.ts";
 export { LsParams, lsTool } from "./ls.ts";
 export type {
