@@ -77,8 +77,28 @@ describe("Run Limits", () => {
       { toolCallId: "tool_call-1", outcome: "succeeded", result: expect.any(Object) },
       { toolCallId: "tool_call-2", outcome: "succeeded", result: expect.any(Object) },
       { toolCallId: "tool_call-3", outcome: "succeeded", result: expect.any(Object) },
-      { toolCallId: "tool_call-4", outcome: "skipped", reason: "LIMIT_EXCEEDED" },
-      { toolCallId: "tool_call-5", outcome: "skipped", reason: "LIMIT_EXCEEDED" },
+      {
+        toolCallId: "tool_call-4",
+        outcome: "skipped",
+        reason: "LIMIT_EXCEEDED",
+        result: {
+          toolCallId: "tool_call-4",
+          toolName: "echo",
+          content: "echo not run: LIMIT_EXCEEDED",
+          isError: true,
+        },
+      },
+      {
+        toolCallId: "tool_call-5",
+        outcome: "skipped",
+        reason: "LIMIT_EXCEEDED",
+        result: {
+          toolCallId: "tool_call-5",
+          toolName: "echo",
+          content: "echo not run: LIMIT_EXCEEDED",
+          isError: true,
+        },
+      },
     ]);
     expect(events.find((event) => event.type === "runtime_limit_reached")).toMatchObject({
       data: { kind: "maxToolCalls", limit: 3, observed: 3 },

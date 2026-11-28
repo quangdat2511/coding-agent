@@ -73,7 +73,7 @@ const isUsableUsage = (usage: unknown): boolean =>
   isOptional(usage.cachedInputTokens, isCount) &&
   isOptional(usage.reasoningTokens, isCount);
 
-const isUsableMessage = (message: unknown): message is AssistantMessage =>
+export const isUsableMessage = (message: unknown): message is AssistantMessage =>
   isRecord(message) &&
   message.role === "assistant" &&
   isString(message.model) &&
@@ -120,7 +120,21 @@ const protocolError = (message: string): ModelResponse => ({
   failure: { code: "MODEL_PROTOCOL_ERROR", message },
 });
 
+function repeatedToolCallId({ content }: AssistantMessage): string | undefined {
+  const ids = new Set<string>();
+  for (const block of content) {
+    if (block.type !== "tool_call") continue;
+    if (ids.has(block.toolCallId)) return block.toolCallId;
+    ids.add(block.toolCallId);
+  }
+  return undefined;
+}
+
 function finish(message: AssistantMessage): ModelResponse {
+  const repeated = repeatedToolCallId(message);
+  if (repeated !== undefined) {
+    return protocolError(`the model called the tool_call id "${repeated}" more than once`);
+  }
   const { reason, rawReason } = message.finishReason;
   if (!failedFinishReasons.has(reason)) return { ok: true, message };
   return { ...modelFailure("finish", `${reason} (${rawReason})`, reason, rawReason), message };

@@ -19,7 +19,7 @@ describe("observing an Agent Run", () => {
       sequence: 1,
       occurredAt: "2026-10-01T00:00:01.500Z",
       type: "run_started",
-      data: { task },
+      data: { task, carriedMessages: 0 },
     });
   });
 
@@ -134,7 +134,7 @@ describe("observing an Agent Run", () => {
     mutable.objective = "Delete the repository";
 
     const [started] = await collect(run.events());
-    expect(started?.data).toEqual({ task });
+    expect(started?.data).toEqual({ task, carriedMessages: 0 });
     expect(run.snapshot().task).toEqual(task);
   });
 

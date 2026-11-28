@@ -156,13 +156,10 @@ export function projectSessionLogEntry(event: RunEvent, prev: TuiModel): TuiMode
       const { data } = event;
       return replace(prev, "tool_call", entryId(event, "tool_call", data.toolCallId), (entry) => {
         const { progress: _cleared, ...call } = entry;
-        if (data.outcome === "skipped") {
-          // A Skipped Tool Call never gets a Tool Result (ADR 0002 §3).
-          return { ...call, status: "skipped", skipReason: data.reason };
-        }
-        return data.result === undefined
-          ? { ...call, status: data.outcome }
-          : { ...call, status: data.outcome, result: toolResultOf(data.result) };
+        const result = toolResultOf(data.result);
+        return data.outcome === "skipped"
+          ? { ...call, status: "skipped", skipReason: data.reason, result }
+          : { ...call, status: data.outcome, result };
       });
     }
 

@@ -52,6 +52,7 @@ export interface RunCounters {
 interface AgentStateCommon {
   readonly runId: string;
   readonly task?: CodingTask;
+  readonly carriedMessages: number;
   readonly transcript: readonly Message[];
   readonly usage: UsageTotals;
   readonly counters: RunCounters;

@@ -386,7 +386,7 @@ const ATTRIBUTE_ENTITIES: Readonly<Record<string, string>> = {
 };
 
 // A link's target can hold any character, so the path attribute is escaped.
-function escapeAttribute(value: string): string {
+export function escapeAttribute(value: string): string {
   return value.replace(/[&<>"\n\r]/g, (character) => ATTRIBUTE_ENTITIES[character] ?? character);
 }
 

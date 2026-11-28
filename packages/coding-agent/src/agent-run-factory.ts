@@ -15,6 +15,7 @@ import { randomIds, systemClock } from "./clock-and-ids.ts";
 import { createModelPort } from "./model-port.ts";
 import type { RunConfig } from "./run-config.ts";
 import { assembleSystemPrompt, type SkippedProjectInstructions } from "./system-prompt.ts";
+import { transcriptWording } from "./transcript-wording.ts";
 
 export type AgentRunConfig = Pick<
   RunConfig,
@@ -65,6 +66,7 @@ export async function openRun(
     limits: config.limits,
     clock: systemClock,
     ids: randomIds,
+    wording: transcriptWording,
   });
   if (!opened.ok) return opened;
   return {

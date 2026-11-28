@@ -17,6 +17,7 @@ import type {
 } from "@coding-agent/ai";
 import { BashParams } from "@coding-agent/tools";
 import type { AgentRunConfig, AgentRunFactoryResult } from "../../src/agent-run-factory.ts";
+import { transcriptWording } from "../../src/transcript-wording.ts";
 
 const usage = { inputTokens: 1, outputTokens: 1 };
 
@@ -145,6 +146,7 @@ export function scriptedAgent({
         },
       },
       ids: { next: (kind) => `${kind}-${++ids}` },
+      wording: transcriptWording,
     });
     if (!opened.ok) return opened;
     const { run } = opened;

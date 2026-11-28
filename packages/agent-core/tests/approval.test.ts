@@ -900,6 +900,12 @@ describe("waiting for Approval under the ask policy", () => {
       toolCallId: "tool_call-1",
       outcome: "skipped",
       reason: "INTERNAL_ERROR",
+      result: {
+        toolCallId: "tool_call-1",
+        toolName: "write",
+        content: "write not run: INTERNAL_ERROR",
+        isError: true,
+      },
     });
   });
 });

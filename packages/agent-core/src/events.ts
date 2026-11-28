@@ -1,4 +1,4 @@
-import type { AssistantMessage, Model } from "@coding-agent/ai";
+import type { AssistantMessage, Model, UserMessage } from "@coding-agent/ai";
 import type { RunLimits } from "./ports.ts";
 import type { AgentFailure, AgentFailureCode, AgentResult, UsageTotals } from "./result.ts";
 import type {
@@ -34,7 +34,10 @@ export type SkipReason = "CANCELLED" | AgentFailureCode;
 
 export type ModelTurnOutcome = "completed" | "failed" | "cancelled";
 
-export type RunStartedEvent = RunEventEnvelope<"run_started", { task: CodingTask }>;
+export type RunStartedEvent = RunEventEnvelope<
+  "run_started",
+  { task: CodingTask; carriedMessages: number }
+>;
 
 export type CancellationRequestedEvent = RunEventEnvelope<
   "cancellation_requested",
@@ -46,7 +49,10 @@ export type RuntimeLimitReachedEvent = RunEventEnvelope<
   { kind: LimitKind; limit: number; observed: number }
 >;
 
-export type RunSettledEvent = RunEventEnvelope<"run_settled", { result: AgentResult }>;
+export type RunSettledEvent = RunEventEnvelope<
+  "run_settled",
+  { result: AgentResult; outcomeNote?: UserMessage; wordingFailure?: string }
+>;
 
 export type ModelTurnStartedEvent = RunEventEnvelope<
   "model_turn_started",
@@ -123,14 +129,14 @@ export type ToolCallCompletedEvent = RunEventEnvelope<
   | {
       toolCallId: string;
       outcome: "succeeded";
-      result?: ToolResult;
+      result: ToolResult;
     }
   | {
       toolCallId: string;
       outcome: "failed" | "denied" | "cancelled";
-      result?: ToolResultWithoutDetails;
+      result: ToolResultWithoutDetails;
     }
-  | { toolCallId: string; outcome: "skipped"; reason: SkipReason }
+  | { toolCallId: string; outcome: "skipped"; reason: SkipReason; result: ToolResultWithoutDetails }
 >;
 
 export type VerificationStartedEvent = RunEventEnvelope<"verification_started", VerificationRun>;

@@ -27,10 +27,12 @@ import type {
   RunCommand,
   RunEvent,
   RunLimits,
+  ToolCallClosing,
   ToolErrorCode,
   ToolOutcome,
   ToolRegistry,
   ToolResult,
+  TranscriptWording,
   UsageTotals,
   VerificationDecision,
   VerificationPolicy,
@@ -515,7 +517,7 @@ describe("agent result", () => {
 });
 
 describe("run construction", () => {
-  it("takes nine injected collaborators", () => {
+  it("takes ten injected collaborators and an optional Transcript to start from", () => {
     const fields = {
       model: true,
       systemPrompt: true,
@@ -526,9 +528,31 @@ describe("run construction", () => {
       limits: true,
       clock: true,
       ids: true,
+      transcript: true,
+      wording: true,
     } satisfies Record<keyof OpenRunConfig, true>;
 
-    expect(Object.keys(fields)).toHaveLength(9);
+    expect(Object.keys(fields)).toHaveLength(11);
+  });
+
+  it("closes a Tool Call as skipped, with a reason, or as stopped while running (compile-time)", () => {
+    const outcomes = { skipped: true, cancelled: true } satisfies Record<
+      ToolCallClosing["outcome"],
+      true
+    >;
+    const skipped: ToolCallClosing = { outcome: "skipped", reason: "LIMIT_EXCEEDED" };
+    // @ts-expect-error a skipped Tool Call names why it never ran
+    const unexplained: ToolCallClosing = { outcome: "skipped" };
+    const wording: TranscriptWording = {
+      closingToolResult: (call, closing) => `${call.name} ${closing.outcome}`,
+      outcomeNote: (result) => (result.outcome === "succeeded" ? undefined : result.outcome),
+    };
+
+    expect(Object.keys(outcomes)).toHaveLength(2);
+    expect(wording.closingToolResult({ id: "t-1", name: "bash", arguments: "{}" }, skipped)).toBe(
+      "bash skipped",
+    );
+    expect(unexplained.outcome).toBe("skipped");
   });
 
   it("refuses with a configuration error that names the field", () => {
@@ -550,6 +574,7 @@ describe("agent state", () => {
   const common = {
     runId: "run-1",
     task: { objective: "fix the failing test" },
+    carriedMessages: 0,
     transcript: [],
     usage: { inputTokens: 0, outputTokens: 0 },
     counters: { modelTurns: 1, toolCalls: 0, consecutiveRecoverableFailures: 0 },
@@ -713,7 +738,7 @@ describe("run events", () => {
   const toolCall: NormalizedToolCall = { id: "tool-1", name: "write", arguments: "{}" };
 
   const payloads = {
-    run_started: { task: { objective: "fix the failing test" } },
+    run_started: { task: { objective: "fix the failing test" }, carriedMessages: 0 },
     cancellation_requested: { reason: "user", requestedFrom: "executing_tool" },
     runtime_limit_reached: { kind: "maxModelTurns", limit: 20, observed: 20 },
     run_settled: {
@@ -836,22 +861,23 @@ describe("run events", () => {
     expect(event.type).toBe("run_started");
   });
 
-  it("records why a skipped tool call was skipped and gives it no tool result (compile-time)", () => {
+  it("closes a skipped tool call with a Closing Tool Result and says why it never ran (compile-time)", () => {
+    const closing = { toolCallId: "tool-2", toolName: "write", content: "Not run", isError: true };
     const skipped: DataOf<"tool_call_completed"> = {
       toolCallId: "tool-2",
       outcome: "skipped",
       reason: "CANCELLED",
+      result: closing,
     };
-    const withResult: DataOf<"tool_call_completed"> = {
+    // @ts-expect-error every completed Tool Call carries a Tool Result
+    const unclosed: DataOf<"tool_call_completed"> = {
       toolCallId: "tool-2",
       outcome: "skipped",
       reason: "CANCELLED",
-      // @ts-expect-error a skipped Tool Call has no Tool Result
-      result: payloads.tool_call_completed.result,
     };
 
     expect(skipped.outcome).toBe("skipped");
-    expect(withResult.outcome).toBe("skipped");
+    expect(unclosed.outcome).toBe("skipped");
   });
 
   it("forbids passing a ToolResult variable carrying details to a non-succeeded completion (compile-time)", () => {
@@ -867,7 +893,10 @@ describe("run events", () => {
       outcome: "succeeded",
       result: resultWithDetails,
     };
-    const failed: DataOf<"tool_call_completed"> = {
+    const failed: Extract<
+      DataOf<"tool_call_completed">,
+      { outcome: "failed" | "denied" | "cancelled" }
+    > = {
       toolCallId: "tool-1",
       outcome: "failed",
       // @ts-expect-error non-succeeded tool_call_completed results cannot carry details

@@ -72,6 +72,48 @@ describe("the event log", () => {
     ]);
   });
 
+  it("writes the carried count, a Closing Tool Result and an Outcome Note as their events carry them", async () => {
+    const closing = {
+      toolCallId: "call-2",
+      toolName: "bash",
+      content: "Not run: the Coding Task ended before this call started.",
+      isError: true,
+    };
+    const outcomeNote = {
+      role: "user",
+      content: '<task_outcome status="internal_error">It ended.</task_outcome>',
+    };
+    const text = await logged([
+      event(1, "run_started", { task: { objective: "Fix it" }, carriedMessages: 0 }),
+      event(2, "tool_call_completed", {
+        toolCallId: "call-2",
+        outcome: "skipped",
+        reason: "INTERNAL_ERROR",
+        result: closing,
+      }),
+      event(3, "run_settled", {
+        result: { outcome: "failed" },
+        outcomeNote,
+        wordingFailure: "TranscriptWording.closingToolResult threw: no words",
+      }),
+    ]);
+
+    expect(
+      text
+        .trimEnd()
+        .split("\n")
+        .map((line) => JSON.parse(line).data),
+    ).toEqual([
+      { task: { objective: "Fix it" }, carriedMessages: 0 },
+      { toolCallId: "call-2", outcome: "skipped", reason: "INTERNAL_ERROR", result: closing },
+      {
+        result: { outcome: "failed" },
+        outcomeNote,
+        wordingFailure: "TranscriptWording.closingToolResult threw: no words",
+      },
+    ]);
+  });
+
   it("writes the credential neither as a value nor as a property name", async () => {
     const text = await logged([
       event(1, "tool_call_completed", {

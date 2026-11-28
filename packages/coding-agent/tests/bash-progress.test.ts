@@ -16,6 +16,7 @@ import type {
 } from "@coding-agent/ai";
 import { bashTool, createWorkspaceResolver } from "@coding-agent/tools";
 import { createConfiguredChildLauncher } from "../src/child-launcher.ts";
+import { transcriptWording } from "../src/transcript-wording.ts";
 
 let repo: string;
 
@@ -140,6 +141,7 @@ describe("bash progress in an Agent Run", () => {
         },
       },
       ids: { next: (kind) => `${kind}-1` },
+      wording: transcriptWording,
     });
     if (!opened.ok) throw new Error(opened.message);
     const { run } = opened;

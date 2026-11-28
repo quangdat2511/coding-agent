@@ -8,5 +8,6 @@ export type * from "./state.ts";
 export type * from "./task.ts";
 export type * from "./tool.ts";
 export type * from "./tool-result.ts";
+export type * from "./transcript-wording.ts";
 export type * from "./verification.ts";
 export type * from "./workspace.ts";

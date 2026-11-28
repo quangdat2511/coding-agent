@@ -611,6 +611,21 @@ each of its Coding Tasks as a new Agent Run over one Transcript; ADR 0004 §10 g
 - **Consequences**: persistent Sessions and steering are decided by this amendment and ADR 0009.
   Replay recovery, remote operation, concurrent tools and retries still need later decisions.
 
+On 2026-11-28, [CDA-182](https://datn-fit-hcmus.atlassian.net/browse/CDA-182) amended this record:
+
+- **Repeated Tool Call ids in a carried Transcript** (§3, §8): construction refuses a `tool_call`
+  whose id repeats while the earlier call with that id has no `tool_result` yet, and a
+  `tool_result` that answers a call a second time. An id may repeat once its earlier call is
+  answered. This replaces "duplicate ids" in the 2026-11-26 amendment's list of refused Transcripts,
+  which I3 names: the OpenAI-compatible adapter names a call `call_<blockIndex>` when the provider
+  sends no id, so ids repeat across Model Turns and a Session would refuse its own Transcript. A
+  model response that names one id twice settles `MODEL_PROTOCOL_ERROR` and its Assistant Message
+  is not committed, since a Tool Result could not tell those calls apart.
+- **No Outcome Note before `start`** (§4, §8): an Agent Run that settles before `start`, as when it
+  is cancelled in `ready`, gets no Outcome Note, since it appended no Coding Task for a note to
+  answer. This narrows "every settlement without success" in the 2026-11-26 amendment to runs that
+  started.
+
 ## Consequences
 
 - TUI, headless evaluation, and tests consume the same ordered protocol without knowing provider

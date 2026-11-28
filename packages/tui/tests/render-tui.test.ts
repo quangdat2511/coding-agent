@@ -132,6 +132,39 @@ describe("renderTui", () => {
     );
   });
 
+  it("shows the Closing Tool Result of a skipped or a stopped call on its row", async () => {
+    const { tui, terminal } = mount([
+      {
+        kind: "tool_call",
+        id: "t-1",
+        toolName: "edit",
+        summary: "src/math.ts",
+        status: "skipped",
+        skipReason: "CANCELLED",
+        result: { content: "Not run: the Coding Task was cancelled first.", isError: true },
+      },
+      {
+        kind: "tool_call",
+        id: "t-2",
+        toolName: "bash",
+        summary: "sleep 60",
+        status: "cancelled",
+        result: { content: "Stopped: the call returned no result.", isError: true },
+      },
+    ]);
+    await tui.flush();
+
+    expect(terminal.screen()).toEqual(
+      screenOf(
+        "edit src/math.ts [skipped, CANCELLED]",
+        "  Not run: the Coding Task was cancelled first.",
+        "",
+        "bash sleep 60 [cancelled]",
+        "  Stopped: the call returned no result.",
+      ),
+    );
+  });
+
   it("shows reasoning before the text, indented under the header", async () => {
     const { tui, terminal } = mount([
       {

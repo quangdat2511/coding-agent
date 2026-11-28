@@ -1,9 +1,11 @@
+import type { Message } from "@coding-agent/ai";
 import type { RunEvent } from "./events.ts";
 import type { ApprovalPolicy, Clock, IdSource, ModelPort, RunLimits } from "./ports.ts";
 import type { AgentResult } from "./result.ts";
 import type { AgentState } from "./state.ts";
 import type { CodingTask } from "./task.ts";
 import type { ToolRegistry } from "./tool.ts";
+import type { TranscriptWording } from "./transcript-wording.ts";
 import type { VerificationPolicy } from "./verification.ts";
 import type { WorkspaceResolver } from "./workspace.ts";
 
@@ -42,6 +44,8 @@ export interface OpenRunConfig {
   readonly limits: RunLimits;
   readonly clock: Clock;
   readonly ids: IdSource;
+  readonly transcript?: readonly Message[];
+  readonly wording: TranscriptWording;
 }
 
 export type OpenRunResult =

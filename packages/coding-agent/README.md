@@ -177,6 +177,14 @@ carries `"schemaVersion": 2`.
 completion events carry the final message, the Tool Result and the evidence. The other events keep
 their `sequence`, so a gap in the numbers marks the events that were left out.
 
+Every `tool_call_completed` carries a Tool Result. A call that was skipped, or stopped while running
+without returning a result, carries a Closing Tool Result with `isError: true`. `run_started`
+carries `carriedMessages`, which is always 0 in a headless run. The `run_settled` of a run that
+started and did not succeed carries its Outcome Note as `outcomeNote`, and any `run_settled` carries
+`wordingFailure` when Coding Agent could not word a Closing Tool Result or the note. Logs written
+before these fields existed have the same `schemaVersion`, so a reader treats each of them as
+optional.
+
 The Agent Run never waits for the log. A killed process can therefore lose the last events. A
 log is complete only if its last line is a `run_settled` event. A reader must treat any other
 log as truncated, and must not take its last event as the outcome of the run. Each line is written
